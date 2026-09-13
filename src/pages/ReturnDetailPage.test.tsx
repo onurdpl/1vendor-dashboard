@@ -8,6 +8,7 @@ import type { KargonomiReturnPreview, ReturnDetail } from '../features/returns/a
 import { clearToken, setCurrentUser, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
 import type { ReturnFinanceRecordsResponse, SupportTicket, SupportTicketStatus } from '../lib/api/contracts';
+import { formatDateTime } from '../services/real/formatting';
 
 const appReadinessOverride = vi.hoisted(() => ({
   value: null as null | {
@@ -408,6 +409,7 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
     expect((await screen.findAllByText('Order #1023')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Review the returned item and take the required action.')).not.toBeInTheDocument();
     expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
     expect(getReturnFinanceRecordsMock).not.toHaveBeenCalled();
     expect(getFinanceDashboardMock).not.toHaveBeenCalled();
@@ -419,10 +421,13 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('White / 42')).toBeInTheDocument();
     expect(screen.getByText('Vendor review')).toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review return');
-    expect(screen.getByText('Mark received')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mark received' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Approve return' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
     expect(screen.getByText('Contact support')).toBeInTheDocument();
     expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Return activity' })).toBeInTheDocument();
+    expect(screen.getByText('Original order and support linked to this return.')).toBeInTheDocument();
 
     expect(screen.queryByText('RET-REQUEST-1023-LONG-SLUG')).not.toBeInTheDocument();
     expect(screen.queryByText(/backend/i)).not.toBeInTheDocument();
@@ -663,6 +668,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
     expect(screen.getByText('SP-RET-1023-ABC123')).toBeInTheDocument();
     expect(screen.getAllByText('Navlungo return pickup created').length).toBeGreaterThan(0);
+    expect(screen.getByText('Provider shipment created · Sürat Kargo')).toBeInTheDocument();
   });
 
   it('renders Return Detail as a main column plus one ordered operational sidebar', async () => {
@@ -773,6 +779,9 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('Shopify return status sync')).toBeInTheDocument();
     expect(screen.getAllByText('not_implemented').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Picked up')).toHaveLength(1);
+    const pickedUpEvent = screen.getByText('Picked up').closest('li');
+    expect(pickedUpEvent).toBeTruthy();
+    expect(pickedUpEvent?.querySelector('p')).toHaveTextContent('Pickup completed');
     expect(screen.getAllByText('In transit').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'Sync Navlungo return status' }));
@@ -1597,8 +1606,10 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Return completed' })).toBeInTheDocument();
-    expect(screen.getByText('Return is closed and refund is complete. No vendor action is required.')).toBeInTheDocument();
+    const completionSummary = await screen.findByLabelText('Return completion summary');
+    expect(within(completionSummary).getByText('Return completed')).toBeInTheDocument();
+    expect(screen.queryByText('Review the returned item and take the required action.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Return is closed and refund is complete. No vendor action is required.')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
       'Refund is complete. No vendor action is required.',
@@ -1609,9 +1620,12 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getAllByText('Refund processed').length).toBeGreaterThan(0);
     expect(screen.queryByText(/Settlement review pending/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Payout accounting pending/i)).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Return completion summary')).toHaveTextContent('Refund completed');
-    expect(screen.getByLabelText('Return completion summary')).toHaveTextContent('Vendor action');
-    expect(screen.getByLabelText('Return completion summary')).toHaveTextContent('No vendor action required.');
+    expect(completionSummary).toHaveTextContent('Refund completed');
+    expect(completionSummary).not.toHaveTextContent('Vendor action');
+    expect(completionSummary).not.toHaveTextContent('No vendor action required.');
+    expect(screen.getAllByText('Return completed')).toHaveLength(1);
+    expect(screen.getAllByText('No action required')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Contact support' })).toBeEnabled();
     expect(screen.queryByText('Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.')).not.toBeInTheDocument();
     expect(screen.queryByText('Refund offset')).not.toBeInTheDocument();
     expect(screen.queryByText('Sale payable impact')).not.toBeInTheDocument();
@@ -1624,6 +1638,19 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(within(returnLifecycle as HTMLElement).getByText('Received by vendor')).toBeInTheDocument();
     expect(within(returnLifecycle as HTMLElement).getByText('Approved by vendor')).toBeInTheDocument();
     expect(within(returnLifecycle as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
+    const lifecycleTimestamps = [
+      ['Return requested', closedRefundedReturnDetail.date],
+      ['Return shipment created', closedRefundedReturnDetail.updatedAt],
+      ['Received by vendor', closedRefundedReturnDetail.vendorReceivedAt],
+      ['Approved by vendor', closedRefundedReturnDetail.vendorReviewedAt],
+      ['Refund processed', closedRefundedReturnDetail.updatedAt],
+    ] as const;
+    lifecycleTimestamps.forEach(([title, at]) => {
+      const event = within(returnLifecycle as HTMLElement).getByText(title).closest('li');
+      expect(event).toBeTruthy();
+      expect(within(event as HTMLElement).getAllByText(formatDateTime(at))).toHaveLength(1);
+      expect(event?.querySelector('p')).toBeNull();
+    });
     expect(screen.queryByRole('heading', { name: 'Finance timeline' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Return ownership snapshot')).not.toBeInTheDocument();
     expect(screen.queryByText('Provider sync diagnostics')).not.toBeInTheDocument();
@@ -1637,13 +1664,82 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Return completed' })).toBeInTheDocument();
-    expect(screen.getByText('Return is closed and refund is complete. No vendor action is required.')).toBeInTheDocument();
+    const completionSummary = await screen.findByLabelText('Return completion summary');
+    expect(within(completionSummary).getByText('Return completed')).toBeInTheDocument();
+    expect(screen.queryByText('Return is closed and refund is complete. No vendor action is required.')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
     expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Refund processed').length).toBeGreaterThan(0);
+  });
+
+  it('keeps terminal finance orientation only in Finance Lifecycle for admins', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue(closedRefundedReturnDetail);
+    getReturnFinanceRecordsMock.mockResolvedValue({
+      records: [
+        {
+          id: 'finance-refund-1098',
+          category: 'refund',
+          amount: -4099,
+          status: 'pending',
+          date: '2026-06-20T10:10:00Z',
+          settlementRefundAdjustments: [],
+        },
+        {
+          id: 'finance-payout-1098',
+          category: 'sale',
+          amount: 4099,
+          status: 'pending',
+          date: '2026-06-20T10:11:00Z',
+          settlementRefundAdjustments: [],
+        },
+      ],
+    });
+
+    renderPage();
+
+    const completionSummary = await screen.findByLabelText('Return completion summary');
+    const linkedRecords = screen.getByRole('heading', { name: 'Related operational records' }).closest('article');
+    const returnLifecycle = screen.getByRole('heading', { name: 'Return Lifecycle' }).closest('article');
+    const financeLifecycle = await screen.findByRole('heading', { name: 'Finance Lifecycle' });
+    const financeLifecycleCard = financeLifecycle.closest('article');
+    const financeOrientation = 'Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.';
+
+    expect(completionSummary).toHaveTextContent('Return completed');
+    expect(completionSummary).toHaveTextContent('Refund completed');
+    expect(completionSummary).not.toHaveTextContent(financeOrientation);
+    expect(linkedRecords).toBeTruthy();
+    expect(within(linkedRecords as HTMLElement).getByText('Order, settlement offsets, payout accounting, and support linked to this return.')).toBeInTheDocument();
+    expect(within(linkedRecords as HTMLElement).queryByText(financeOrientation)).not.toBeInTheDocument();
+    expect(within(linkedRecords as HTMLElement).getByText('Refund offset').closest('a')).toHaveAttribute(
+      'href',
+      '/finance?ledgerId=finance-refund-1098',
+    );
+    expect(within(linkedRecords as HTMLElement).getByText('Sale payable impact').closest('a')).toHaveAttribute(
+      'href',
+      '/finance?ledgerId=finance-payout-1098',
+    );
+    expect(financeLifecycleCard).toBeTruthy();
+    expect(within(financeLifecycleCard as HTMLElement).getByText(financeOrientation)).toBeInTheDocument();
+    expect(screen.getAllByText(financeOrientation)).toHaveLength(1);
+    expect(returnLifecycle).toBeTruthy();
+    expect(within(returnLifecycle as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText('Finance entry created')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Return details' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Return ownership snapshot')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '1 item' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Return reason' })).toBeInTheDocument();
   });
 
     it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {
@@ -1843,6 +1939,12 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Waiting for Sporgym support review');
     expect(screen.getAllByText('Your support request was sent. Sporgym support will review it.').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Support ticket open|Waiting for support/).length).toBeGreaterThan(0);
+    const linkedRecords = screen.getByRole('heading', { name: 'Related operational records' }).closest('article');
+    expect(linkedRecords).toBeTruthy();
+    expect(within(linkedRecords as HTMLElement).getByText('Help with return #1023').closest('a')).toHaveAttribute(
+      'href',
+      '/support/support-open',
+    );
   });
 
   it('shows support-review state for an in-review linked return support ticket', async () => {

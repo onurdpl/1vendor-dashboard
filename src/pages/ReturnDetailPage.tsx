@@ -1379,7 +1379,6 @@ export function ReturnDetailPage() {
       id: `return-${index}-${entry.label}-${entry.at}`,
       title: entry.label,
       at: entry.rawAt ?? returnRequest.timeline[index]?.at ?? returnRequest.date,
-      description: entry.at,
       tone: 'neutral' as const,
     })),
     ...(returnRequest.navlungoReturnCreatedAt
@@ -1538,7 +1537,6 @@ export function ReturnDetailPage() {
             <h2>Return request</h2>
             <span>Order {formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</span>
           </div>
-          <p>Review the returned item and take the required action.</p>
         </div>
         <div className="return-review-header-actions">
           <StatusBadge tone={getStatusTone(returnRequest)}>{getStatusLabel(returnRequest)}</StatusBadge>
@@ -1554,13 +1552,6 @@ export function ReturnDetailPage() {
                 <span>Return completed</span>
                 <strong>Refund completed</strong>
               </div>
-              <div>
-                <span>{isAdmin ? 'Ownership verified' : 'Vendor action'}</span>
-                <strong>No vendor action required.</strong>
-              </div>
-              {isAdmin && relatedFinanceRecords.length ? (
-                <p>Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.</p>
-              ) : null}
             </article>
           ) : null}
 
@@ -1630,8 +1621,6 @@ export function ReturnDetailPage() {
             subtitle={
               !isAdmin
                 ? 'Original order and support linked to this return.'
-                : terminalRefundedReturn && relatedFinanceRecords.length
-                ? 'Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.'
                 : 'Order, settlement offsets, payout accounting, and support linked to this return.'
             }
             links={returnCrossLinks}
@@ -1869,16 +1858,18 @@ export function ReturnDetailPage() {
 
           <article className="return-review-card return-review-action-card">
             <p className="eyebrow">Next action</p>
-            <h3>{terminalRefundedReturn ? 'Return completed' : vendorSupportGuidance?.actionLabel ?? 'Vendor review'}</h3>
-            <p>
-              {terminalRefundedReturn
-                ? 'Return is closed and refund is complete. No vendor action is required.'
-                : vendorSupportGuidance
-                  ? vendorSupportGuidance.description
-                : isAdmin
-                  ? 'Vendor review only. Shopify refund is not issued here.'
-                  : 'Vendor review only. Refund is not issued here.'}
-            </p>
+            {!terminalRefundedReturn ? (
+              <>
+                <h3>{vendorSupportGuidance?.actionLabel ?? 'Vendor review'}</h3>
+                <p>
+                  {vendorSupportGuidance
+                    ? vendorSupportGuidance.description
+                    : isAdmin
+                      ? 'Vendor review only. Shopify refund is not issued here.'
+                      : 'Vendor review only. Refund is not issued here.'}
+                </p>
+              </>
+            ) : null}
             <WorkflowActionGuidance
               actionLabel={vendorSupportGuidance?.actionLabel ?? returnWorkflowGuidance.actionLabel}
               description={
