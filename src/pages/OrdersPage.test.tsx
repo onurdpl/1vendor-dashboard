@@ -1812,17 +1812,18 @@ describe('OrdersPage control center', () => {
     expect(within(card).getByText('Commission VAT')).toBeInTheDocument();
     expect(within(card).getByText('Shipping deduction')).toBeInTheDocument();
     expect(within(card).getByText('Settlement')).toBeInTheDocument();
-    expect(within(card).getByText('Partially Refunded')).toBeInTheDocument();
+    expect(within(card).getByText('Refund recorded')).toBeInTheDocument();
+    expect(within(card).queryByText('Partially Refunded')).not.toBeInTheDocument();
     expect(within(card).getByText('Payout')).toBeInTheDocument();
   });
 
   it.each([
-    ['positive partially-refunded estimate', 'estimated', '571.00', 'partially_refunded', 'Estimated payable', /571\.00/],
-    ['accruing estimate', 'estimated', '1540.00', 'accruing', 'Estimated payable', /1,540\.00/],
-    ['payable estimate', 'estimated', '1540.00', 'payable', 'Estimated payable', /1,540\.00/],
-    ['approved partially-refunded value', 'approved', '1200.00', 'partially_refunded', 'Approved payable', /1,200\.00/],
-    ['paid partially-refunded contribution', 'paid_payout_contribution', '1100.00', 'partially_refunded', 'Paid payout contribution', /1,100\.00/],
-  ] as const)('preserves the %s', async (_caseName, type, amount, settlementStatus, expectedLabel, expectedAmount) => {
+    ['positive partially-refunded estimate', 'estimated', '571.00', 'partially_refunded', 'Estimated payable', /571\.00/, 'Refund recorded'],
+    ['accruing estimate', 'estimated', '1540.00', 'accruing', 'Estimated payable', /1,540\.00/, 'Accruing'],
+    ['payable estimate', 'estimated', '1540.00', 'payable', 'Estimated payable', /1,540\.00/, 'Payable'],
+    ['approved partially-refunded value', 'approved', '1200.00', 'partially_refunded', 'Approved payable', /1,200\.00/, 'Refund recorded'],
+    ['paid partially-refunded contribution', 'paid_payout_contribution', '1100.00', 'partially_refunded', 'Paid payout contribution', /1,100\.00/, 'Refund recorded'],
+  ] as const)('preserves the %s', async (_caseName, type, amount, settlementStatus, expectedLabel, expectedAmount, expectedSettlementLabel) => {
     const detailWithFinance: OrderDetail = {
       ...orderDetail,
       allocationFinanceSummary: {
@@ -1847,6 +1848,99 @@ describe('OrdersPage control center', () => {
     const card = await screen.findByLabelText('Financial summary');
     expect(within(card).getByText(expectedLabel)).toBeInTheDocument();
     expect(within(card).getByText(expectedAmount)).toBeInTheDocument();
+    expect(within(card).getByText(expectedSettlementLabel)).toBeInTheDocument();
+    if (settlementStatus === 'partially_refunded') {
+      expect(within(card).queryByText('Partially Refunded')).not.toBeInTheDocument();
+    }
+  });
+
+  it.each([
+    ['pending', 'Pending'],
+    ['held', 'Held'],
+    ['settled', 'Settled'],
+    ['disputed', 'Disputed'],
+  ] as const)('preserves the %s settlement label', async (settlementStatus, expectedStatusLabel) => {
+    const detailWithFinance: OrderDetail = {
+      ...orderDetail,
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2000.00',
+        commission: '300.00',
+        commissionVat: '60.00',
+        shippingDeduction: '100.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: null,
+        settlementStatus,
+        payoutStatus: settlementStatus === 'settled' ? 'paid' : settlementStatus === 'held' || settlementStatus === 'disputed' ? 'hold' : 'pending',
+        paidAt: settlementStatus === 'settled' ? '2026-06-10T11:00:00.000Z' : null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithFinance)]);
+    getOrderMock.mockResolvedValue(detailWithFinance);
+
+    renderOrdersPage();
+
+    const card = await screen.findByLabelText('Financial summary');
+    expect(within(card).getByText(expectedStatusLabel)).toBeInTheDocument();
+    expect(within(card).queryByText('Refund recorded')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['full-refund child allocation', {
+      id: 'allocation-child-full-refund',
+      sourceShopifyOrderNumber: '#2101',
+      operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+      fulfillmentActionAvailable: false,
+      splitSummary: {
+        sourceAllocationId: 'allocation-source-2101',
+        childAllocationId: 'allocation-child-full-refund',
+        reason: 'OUT_OF_STOCK',
+        note: null,
+        actorName: null,
+        lineageRole: 'child' as const,
+        movedItems: [],
+      },
+    }, 'Refund completed'],
+    ['genuine partial-refund allocation', {
+      id: 'allocation-partial-refund',
+      sourceShopifyOrderNumber: '#2102',
+      refundRecordCount: 1,
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot,
+        financialStatus: 'partially_refunded',
+      },
+    }, 'partially_refunded'],
+  ] as const)('renders Refund recorded for a %s', async (_caseName, overrides, expectedPaymentStatus) => {
+    const detailWithRefundFinance: OrderDetail = {
+      ...orderDetail,
+      ...overrides,
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2000.00',
+        commission: '300.00',
+        commissionVat: '60.00',
+        shippingDeduction: '100.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: { type: 'estimated', amount: '571.00' },
+        settlementStatus: 'partially_refunded',
+        payoutStatus: 'pending',
+        paidAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithRefundFinance)]);
+    getOrderMock.mockResolvedValue(detailWithRefundFinance);
+
+    renderOrdersPage();
+
+    const card = await screen.findByLabelText('Financial summary');
+    expect(within(card).getByText('Refund recorded')).toBeInTheDocument();
+    expect(within(card).queryByText('Partially Refunded')).not.toBeInTheDocument();
+    expect(within(card).getByText('Not prepared')).toBeInTheDocument();
+    const paymentStatusAxis = screen.getByText('Payment Status').closest('.orders-status-axis');
+    expect(paymentStatusAxis).not.toBeNull();
+    expect(within(paymentStatusAxis as HTMLElement).getByText(expectedPaymentStatus)).toBeInTheDocument();
   });
 
   it.each([
@@ -1928,6 +2022,8 @@ describe('OrdersPage control center', () => {
     let card = await screen.findByLabelText('Financial summary');
     expect(within(card).queryByText('Estimated payable')).not.toBeInTheDocument();
     expect(within(card).queryByText(/539\.82/)).not.toBeInTheDocument();
+    expect(within(card).getByText('Refund recorded')).toBeInTheDocument();
+    expect(within(card).queryByText('Partially Refunded')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /#2002/ }));
 
@@ -1938,6 +2034,8 @@ describe('OrdersPage control center', () => {
     card = screen.getByLabelText('Financial summary');
     expect(within(card).getByText('Estimated payable')).toBeInTheDocument();
     expect(within(card).getByText(/1,540\.00/)).toBeInTheDocument();
+    expect(within(card).getByText('Accruing')).toBeInTheDocument();
+    expect(within(card).queryByText('Refund recorded')).not.toBeInTheDocument();
   });
 
   it('renders the fail-closed finance state without monetary zero fallbacks', async () => {

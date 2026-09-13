@@ -1276,7 +1276,11 @@ export function OrdersPage() {
                       ) : null}
                       <div>
                         <span>Settlement</span>
-                        <strong>{safeStatusLabel(allocationFinanceSummary.settlementStatus, 'Not available')}</strong>
+                        <strong>
+                          {allocationFinanceSummary.settlementStatus === 'partially_refunded'
+                            ? 'Refund recorded'
+                            : safeStatusLabel(allocationFinanceSummary.settlementStatus, 'Not available')}
+                        </strong>
                       </div>
                       <div>
                         <span>Payout</span>
