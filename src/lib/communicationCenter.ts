@@ -7,6 +7,7 @@ import type {
   SupportTicket,
 } from './api/contracts';
 import { formatShopifyOrderNumber } from './formatOrderDisplay';
+import { getOperationalStory } from './orderOperationalStory';
 import { getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 export type CommunicationEventType =
@@ -152,8 +153,14 @@ export function buildVendorCommunicationFeed(input: CommunicationFeedInput): Com
   }
 
   for (const order of orders) {
-    const missingTracking = !order.trackingNumber && !order.carrier && order.shippingStatus === 'Awaiting Shipment';
-    if (!missingTracking) {
+    const story = getOperationalStory(order);
+    const trackingRequired =
+      !order.trackingNumber &&
+      !order.carrier &&
+      order.shippingStatus === 'Awaiting Shipment' &&
+      order.fulfillmentActionAvailable &&
+      story.actionVisibility.canCreateShipment;
+    if (!trackingRequired) {
       continue;
     }
     events.push({

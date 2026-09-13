@@ -5,6 +5,33 @@ import {
   getCommunicationSummary,
   type CommunicationFeedInput,
 } from './communicationCenter';
+import type { OrderSummary } from './api/contracts';
+
+function makeOrder(overrides: Partial<OrderSummary> = {}): OrderSummary {
+  return {
+    originalVendorId: 'demo-vendor-a',
+    assignedVendorId: 'demo-vendor-a',
+    id: 'ORD-A-1001',
+    vendorId: 'demo-vendor-a',
+    sourceShopifyOrderId: 'gid://shopify/Order/1001',
+    sourceShopifyOrderNumber: 1001,
+    status: 'Processing',
+    allocationStatus: 'active',
+    operationalActionability: { actionable: true, reason: null },
+    reassignmentRequired: false,
+    assignmentHistory: [],
+    fulfillmentActionState: 'awaiting_shipment',
+    fulfillmentActionAvailable: true,
+    fulfillmentStatus: 'Processing',
+    shippingStatus: 'Awaiting Shipment',
+    lineItemCount: 1,
+    date: '2026-05-17T09:00:00Z',
+    customer: 'Customer',
+    amount: '$100.00',
+    channel: 'Web',
+    ...overrides,
+  };
+}
 
 const baseInput: CommunicationFeedInput = {
   supportTickets: [
@@ -40,28 +67,7 @@ const baseInput: CommunicationFeedInput = {
       replies: [],
     },
   ],
-  orders: [
-    {
-      originalVendorId: 'demo-vendor-a',
-      assignedVendorId: 'demo-vendor-a',
-      id: 'ORD-A-1001',
-      vendorId: 'demo-vendor-a',
-      sourceShopifyOrderId: 'gid://shopify/Order/1001',
-      sourceShopifyOrderNumber: 1001,
-      status: 'Processing',
-      allocationStatus: 'active',
-      reassignmentRequired: false,
-      assignmentHistory: [],
-      fulfillmentActionState: 'awaiting_shipment',
-      fulfillmentActionAvailable: true,
-      fulfillmentStatus: 'Processing',
-      shippingStatus: 'Awaiting Shipment',
-      date: '2026-05-17T09:00:00Z',
-      customer: 'Customer',
-      amount: '$100.00',
-      channel: 'Web',
-    },
-  ],
+  orders: [makeOrder()],
   returns: [
     {
       originalVendorId: 'demo-vendor-a',
@@ -126,6 +132,133 @@ describe('communicationCenter', () => {
       href: '/support/ticket-1',
     });
     expect(feed.find((event) => event.type === 'tracking_required')?.href).toBe('/orders/ORD-A-1001');
+  });
+
+  it('keeps active tracking guidance content and context unchanged', () => {
+    const event = buildVendorCommunicationFeed({
+      supportTickets: [],
+      orders: [makeOrder({ shipmentUpdatedAt: '2026-05-17T09:30:00Z' })],
+      returns: [],
+      finance: null,
+    }).find((candidate) => candidate.type === 'tracking_required');
+
+    expect(event).toEqual({
+      id: 'tracking-ORD-A-1001',
+      type: 'tracking_required',
+      title: 'Tracking information required',
+      summary: '#1001 is awaiting shipment progress.',
+      timestamp: '2026-05-17T09:30:00Z',
+      severity: 'warning',
+      priority: 'requires_action',
+      relatedObjectType: 'order',
+      relatedObjectId: 'ORD-A-1001',
+      relatedLabel: 'Order #1001',
+      href: '/orders/ORD-A-1001',
+      unread: false,
+      requiresAction: true,
+      resolved: false,
+      context: [
+        { label: 'Shipping', value: 'Awaiting Shipment' },
+        { label: 'Fulfillment', value: 'Processing' },
+      ],
+    });
+  });
+
+  it('keeps tracking guidance for active drift without canonical terminal or cancellation authority', () => {
+    const feed = buildVendorCommunicationFeed({
+      supportTickets: [],
+      orders: [makeOrder({ refundRecordCount: 1 })],
+      returns: [],
+      finance: null,
+    });
+
+    expect(feed.map((event) => event.type)).toEqual(['tracking_required']);
+  });
+
+  it.each([
+    {
+      state: 'terminal refund',
+      order: makeOrder({
+        operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+      }),
+    },
+    {
+      state: 'clean cancellation',
+      order: makeOrder({
+        isCancelled: true,
+        cancelledAt: '2026-05-17T08:30:00Z',
+      }),
+    },
+    {
+      state: 'cancellation conflict',
+      order: makeOrder({
+        isCancelled: true,
+        isCancellationConflict: true,
+        cancelledAt: '2026-05-17T08:30:00Z',
+      }),
+    },
+    {
+      state: 'vendor blocked',
+      order: makeOrder({
+        allocationStatus: 'vendor_blocked',
+        operationalActionability: { actionable: false, reason: 'VENDOR_REJECTED' },
+      }),
+    },
+    {
+      state: 'pending reassignment',
+      order: makeOrder({
+        allocationStatus: 'pending_reassignment',
+        operationalActionability: { actionable: false, reason: 'PENDING_REASSIGNMENT' },
+        reassignmentRequired: true,
+        fulfillmentActionAvailable: false,
+      }),
+    },
+    {
+      state: 'fulfilled and non-actionable',
+      order: makeOrder({
+        status: 'Delivered',
+        allocationStatus: 'fulfilled',
+        operationalActionability: { actionable: false, reason: 'ALLOCATION_FULFILLED' },
+        fulfillmentActionState: 'delivered',
+        fulfillmentActionAvailable: false,
+        fulfillmentStatus: 'Fulfilled',
+      }),
+    },
+  ])('suppresses false tracking guidance for $state', ({ order }) => {
+    const feed = buildVendorCommunicationFeed({
+      supportTickets: [],
+      orders: [order],
+      returns: [],
+      finance: null,
+    });
+
+    expect(feed.some((event) => event.type === 'tracking_required')).toBe(false);
+  });
+
+  it('preserves refund information and sibling events when terminal tracking guidance is suppressed', () => {
+    const terminalOrder = makeOrder({
+      operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+      fulfillmentActionAvailable: false,
+    });
+    const feed = buildVendorCommunicationFeed({ ...baseInput, orders: [terminalOrder] });
+
+    expect(feed.map((event) => event.type)).toEqual([
+      'support_reply',
+      'return_update',
+      'refund_processed',
+    ]);
+    expect(feed.some((event) => event.type === 'tracking_required')).toBe(false);
+    expect(feed.find((event) => event.relatedObjectType === 'finance')).toMatchObject({
+      type: 'refund_processed',
+      title: 'Refund update',
+    });
+    expect(getCommunicationSummary(feed)).toEqual({
+      total: 3,
+      unread: 1,
+      requiresAction: 3,
+      support: 1,
+    });
+    expect(filterCommunicationEvents(feed, 'shipments')).toHaveLength(0);
   });
 
   it('filters unread and action-needed communications without exposing admin-only data', () => {
