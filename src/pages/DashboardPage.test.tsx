@@ -64,6 +64,7 @@ function makeOrder(overrides: Partial<OrderSummary>): OrderSummary {
     sourceShopifyOrderNumber: '1081',
     status: 'Open',
     allocationStatus: 'active',
+    operationalActionability: { actionable: true, reason: null },
     reassignmentRequired: false,
     assignmentHistory: [],
     fulfillmentActionState: 'ready',
@@ -123,6 +124,27 @@ const recentOrders: OrderSummary[] = [
     date: '2026-06-09T08:00:00.000Z',
   }),
 ];
+
+const dashboardRoles = ['admin', 'vendor', 'support', 'finance'] as const;
+
+function setDashboardRole(role: (typeof dashboardRoles)[number]) {
+  setCurrentUser({
+    email: `${role}@demo.com`,
+    name: `Demo ${role}`,
+    role,
+    vendorAccess: ['demo-vendor-a'],
+    vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+    canSwitchVendors: false,
+    defaultVendorId: 'demo-vendor-a',
+  });
+}
+
+function getRecentOrderRow(orderNumber: string) {
+  const orderCell = within(screen.getByLabelText('Recent changes')).getByText(`#${orderNumber}`);
+  const row = orderCell.closest('tr');
+  expect(row).not.toBeNull();
+  return row as HTMLTableRowElement;
+}
 
 function renderDashboardPage() {
   const queryClient = new QueryClient({
@@ -287,6 +309,132 @@ describe('DashboardPage vendor launchpad', () => {
     expect(within(rows[1]).getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/orders/order-1088');
     expect(within(recentChangesRegion).getByText('#1084')).toBeInTheDocument();
     expect(within(recentChangesRegion).queryByText('#1083')).not.toBeInTheDocument();
+  });
+
+  it.each(dashboardRoles)('uses canonical non-active recent-order labels for %s', async (role) => {
+    setDashboardRole(role);
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    listOrdersMock.mockResolvedValue([
+      makeOrder({
+        id: 'order-1201',
+        sourceShopifyOrderNumber: '1201',
+        operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+        fulfillmentActionAvailable: false,
+        date: '2026-06-12T12:01:00.000Z',
+      }),
+      makeOrder({
+        id: 'order-1202',
+        sourceShopifyOrderNumber: '1202',
+        status: 'Cancelled',
+        isCancelled: true,
+        cancelledAt: '2026-06-12T11:02:00.000Z',
+        fulfillmentStatus: 'Not Required',
+        shippingStatus: 'Not Required',
+        fulfillmentActionState: 'not_required',
+        fulfillmentActionAvailable: false,
+        date: '2026-06-12T11:02:00.000Z',
+      }),
+      makeOrder({
+        id: 'order-1203',
+        sourceShopifyOrderNumber: '1203',
+        status: 'Cancelled',
+        isCancelled: true,
+        isCancellationConflict: true,
+        cancelledAt: '2026-06-12T10:03:00.000Z',
+        shippingStatus: 'Delivered',
+        fulfillmentActionAvailable: false,
+        date: '2026-06-12T10:03:00.000Z',
+      }),
+      makeOrder({
+        id: 'order-1204',
+        sourceShopifyOrderNumber: '1204',
+        status: 'On Hold',
+        allocationStatus: 'vendor_blocked',
+        reassignmentRequired: true,
+        fulfillmentActionAvailable: false,
+        date: '2026-06-12T09:04:00.000Z',
+      }),
+    ]);
+
+    renderDashboardPage();
+
+    await screen.findByText('#1201');
+    const refundedRow = getRecentOrderRow('1201');
+    const cancelledRow = getRecentOrderRow('1202');
+    const conflictRow = getRecentOrderRow('1203');
+    const blockedRow = getRecentOrderRow('1204');
+
+    expect(within(refundedRow).getByText('Refunded')).toBeInTheDocument();
+    expect(within(refundedRow).queryByText('Awaiting Shipment')).not.toBeInTheDocument();
+    expect(within(refundedRow).getByText('Refunded')).toHaveClass('dashboard-vendor-status-green');
+    expect(within(cancelledRow).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(cancelledRow).queryByText('Not Required')).not.toBeInTheDocument();
+    expect(within(cancelledRow).getByText('Cancelled')).toHaveClass('dashboard-vendor-status-blue');
+    expect(within(conflictRow).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(conflictRow).queryByText('Delivered')).not.toBeInTheDocument();
+    expect(within(conflictRow).queryByText('Review required')).not.toBeInTheDocument();
+    expect(within(conflictRow).getByText('Cancelled')).toHaveClass('dashboard-vendor-status-green');
+    expect(within(blockedRow).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(blockedRow).queryByText('Awaiting Shipment')).not.toBeInTheDocument();
+    expect(within(blockedRow).getByText('Vendor Blocked')).toHaveClass('dashboard-vendor-status-green');
+    expect(within(refundedRow).getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/orders/order-1201');
+    await waitFor(() => expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' })));
+  });
+
+  it.each(dashboardRoles)('preserves active recent-order lifecycle labels for %s', async (role) => {
+    setDashboardRole(role);
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    listOrdersMock.mockResolvedValue([
+      makeOrder({ id: 'order-1211', sourceShopifyOrderNumber: '1211', date: '2026-06-12T12:11:00.000Z' }),
+      makeOrder({ id: 'order-1212', sourceShopifyOrderNumber: '1212', date: '2026-06-12T11:12:00.000Z' }),
+      makeOrder({
+        id: 'order-1213',
+        sourceShopifyOrderNumber: '1213',
+        status: 'Shipped',
+        fulfillmentStatus: 'Fulfilled',
+        shippingStatus: 'In Transit',
+        date: '2026-06-12T10:13:00.000Z',
+      }),
+      makeOrder({
+        id: 'order-1214',
+        sourceShopifyOrderNumber: '1214',
+        status: 'Delivered',
+        fulfillmentStatus: 'Fulfilled',
+        shippingStatus: 'Delivered',
+        date: '2026-06-12T09:14:00.000Z',
+      }),
+    ]);
+
+    renderDashboardPage();
+
+    await screen.findByText('#1211');
+    expect(within(getRecentOrderRow('1211')).getByText('Awaiting Shipment')).toBeInTheDocument();
+    expect(within(getRecentOrderRow('1212')).getByText('Awaiting Shipment')).toBeInTheDocument();
+    expect(within(getRecentOrderRow('1212')).queryByText('Refunded')).not.toBeInTheDocument();
+    expect(within(getRecentOrderRow('1212')).queryByText('Cancelled')).not.toBeInTheDocument();
+    expect(within(getRecentOrderRow('1212')).queryByText('Vendor Blocked')).not.toBeInTheDocument();
+    expect(within(getRecentOrderRow('1213')).getByText('In Transit')).toBeInTheDocument();
+    expect(within(getRecentOrderRow('1214')).getByText('Delivered')).toBeInTheDocument();
+  });
+
+  it.each(dashboardRoles)('uses the canonical recent-order label in fallback recent changes for %s', async (role) => {
+    setDashboardRole(role);
+    getDashboardOverviewMock.mockResolvedValue({ ...dashboardOverview, recentActivity: [] });
+    getDashboardDeferredOverviewMock.mockReturnValue(new Promise<DashboardOverview>(() => undefined));
+    listOrdersMock.mockResolvedValue([
+      makeOrder({
+        id: 'order-1221',
+        sourceShopifyOrderNumber: '1221',
+        operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+        fulfillmentActionAvailable: false,
+        date: '2026-06-12T12:21:00.000Z',
+      }),
+    ]);
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('#1221 is Refunded')).toBeInTheDocument();
+    expect(screen.queryByText('#1221 is Awaiting Shipment')).not.toBeInTheDocument();
   });
 
   it('renders a polished empty recent orders state when no orders are available', async () => {

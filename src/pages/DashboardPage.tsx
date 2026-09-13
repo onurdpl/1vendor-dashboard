@@ -16,6 +16,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
 import { getPageReadinessState } from '../lib/pageReadiness';
+import { getOperationalStory } from '../lib/orderOperationalStory';
 import { formatDateTime } from '../services/real/formatting';
 
 type VendorActionCard = {
@@ -297,13 +298,18 @@ function buildRecentOrderRows(orders: OrderSummary[] | undefined): RecentOrderRo
     ? [...indexedOrders].sort((a, b) => (b.timestamp ?? -Infinity) - (a.timestamp ?? -Infinity) || a.index - b.index)
     : indexedOrders;
 
-  return sortedOrders.slice(0, 5).map(({ order }) => ({
-    orderNumber: formatOrderNumber(order),
-    status: humanizeOrderStatus(order.shippingStatus || order.fulfillmentStatus || order.status),
-    tone: getOrderStatusTone(order),
-    date: formatOrderDate(order.date),
-    detailTo: `/orders/${encodeURIComponent(order.id)}`,
-  }));
+  return sortedOrders.slice(0, 5).map(({ order }) => {
+    const story = getOperationalStory(order);
+    return {
+      orderNumber: formatOrderNumber(order),
+      status: story.state !== 'active_or_unknown'
+        ? story.primaryLabel
+        : humanizeOrderStatus(order.shippingStatus || order.fulfillmentStatus || order.status),
+      tone: getOrderStatusTone(order),
+      date: formatOrderDate(order.date),
+      detailTo: `/orders/${encodeURIComponent(order.id)}`,
+    };
+  });
 }
 
 function extractOrderNumberFromActivity(activity: string) {
