@@ -78,12 +78,11 @@ export function VendorSupportTicketsPage() {
   }
 
   return (
-    <section className="op-page support-ops-page">
+    <section className="op-page support-ops-page support-vendor-page">
       <div className="op-page-heading support-ops-header">
         <div>
           <p className="eyebrow">Support</p>
           <h1>Vendor Support Requests</h1>
-          <p>Track support requests submitted with order, return, and shipment context.</p>
         </div>
       </div>
 
@@ -137,18 +136,17 @@ export function VendorSupportTicketsPage() {
       ) : isLoading ? (
         <SectionSkeleton title="Loading support requests" description="Collecting your vendor support requests in the background." />
       ) : filteredTickets.length ? (
-        <OperationalTable columns={['Ticket', 'Subject', 'Category', 'Status', 'Last reply', 'Updated']} className="support-vendor-table">
+        <OperationalTable columns={['Subject', 'Category', 'Status', 'Last reply', 'Updated']} className="support-vendor-table">
           {filteredTickets.map((ticket: SupportTicket) => (
             <OperationalTableRow key={ticket.id}>
-              <span role="cell" className="support-ticket-cell">
-                <Link to={`/support/${ticket.id}`}>{ticket.id}</Link>
-                {ticket.vendorUnreadCount > 0 ? (
-                  <StatusBadge tone="attention">{ticket.vendorUnreadCount} unread</StatusBadge>
-                ) : null}
-              </span>
-              <span role="cell" className="support-ticket-cell">
-                <strong>{ticket.subject}</strong>
-                <span>{ticket.message}</span>
+              <span role="cell" className="support-ticket-cell support-vendor-subject-cell">
+                <span className="support-vendor-subject-heading">
+                  <Link to={`/support/${ticket.id}`}>{ticket.subject}</Link>
+                  {ticket.vendorUnreadCount > 0 ? (
+                    <StatusBadge tone="attention">{ticket.vendorUnreadCount} unread</StatusBadge>
+                  ) : null}
+                </span>
+                <span className="support-vendor-message-preview">{ticket.message}</span>
               </span>
               <span role="cell">{formatSupportLabel(ticket.category)}</span>
               <span role="cell">

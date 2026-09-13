@@ -1513,12 +1513,11 @@ a:focus-visible {
 .support-vendor-table .op-table-row {
   min-width: 760px;
   grid-template-columns:
-    minmax(118px, 0.7fr)
-    minmax(240px, 1.45fr)
-    minmax(104px, 0.58fr)
-    minmax(112px, 0.64fr)
-    minmax(150px, 0.9fr)
-    minmax(128px, 0.72fr);
+    minmax(250px, 1.7fr)
+    minmax(96px, 0.58fr)
+    minmax(108px, 0.64fr)
+    minmax(142px, 0.9fr)
+    minmax(120px, 0.72fr);
 }
 
 .support-admin-table .op-table-row,
@@ -1583,6 +1582,40 @@ a:focus-visible {
   color: #64748b;
   font-size: 0.7rem;
   font-weight: 700;
+}
+
+.support-vendor-subject-heading {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.support-vendor-subject-heading > a {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.support-vendor-subject-heading .op-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 0.7rem;
+}
+
+.support-vendor-message-preview {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .support-assignment-cell,
@@ -13058,6 +13091,17 @@ summary.provider-response-heading::-webkit-details-marker {
     linear-gradient(180deg, rgba(239, 246, 255, 0.86), rgba(255, 255, 255, 0.95)),
     #ffffff;
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.07);
+}
+
+.support-vendor-page > .op-toolbar {
+  justify-self: start;
+  width: auto;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .support-search-field,

@@ -296,10 +296,25 @@ describe('support ticket table layout', () => {
 
     const table = await screen.findByText('Shipment tracking help');
     const row = table.closest('.op-table-row');
+    const tableShell = row?.closest('.op-table');
+    const header = tableShell?.querySelector('.op-table-head') as HTMLElement | null;
 
     expect(row).toBeTruthy();
-    expect(row?.querySelectorAll(':scope > [role="cell"]')).toHaveLength(6);
+    expect(row?.querySelectorAll(':scope > [role="cell"]')).toHaveLength(5);
     expect(row?.querySelector('td')).toBeNull();
-    expect(within(row as HTMLElement).getByText('ticket-1')).toBeInTheDocument();
+    expect(header).toBeTruthy();
+    expect(within(header as HTMLElement).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      'Subject',
+      'Category',
+      'Status',
+      'Last reply',
+      'Updated',
+    ]);
+    expect(within(row as HTMLElement).queryByText('ticket-1')).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole('link', { name: 'Shipment tracking help' })).toHaveAttribute(
+      'href',
+      '/support/ticket-1',
+    );
+    expect(within(row as HTMLElement).getByText('Please help with this shipment.')).toBeInTheDocument();
   });
 });

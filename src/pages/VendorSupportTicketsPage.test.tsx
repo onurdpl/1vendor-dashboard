@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupportTicket } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
+import { formatDateTime } from '../services/real/formatting';
 import { VendorSupportTicketsPage } from './VendorSupportTicketsPage';
 
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
@@ -144,5 +145,63 @@ describe('VendorSupportTicketsPage workflow filtering', () => {
     expect(await screen.findByText('Select vendor')).toBeInTheDocument();
     expect(screen.queryByText('Loading support requests')).not.toBeInTheDocument();
     expect(listVendorSupportTicketsMock).not.toHaveBeenCalled();
+  });
+
+  it('renders a compact vendor ticket table without exposing the route id', async () => {
+    const user = userEvent.setup();
+    const unreadTicket = supportTicket({
+      id: 'cuid-unread-ticket',
+      vendorUnreadCount: 2,
+    });
+    const waitingTicket = supportTicket({
+      id: 'cuid-waiting-ticket',
+      subject: 'Return details requested',
+      message: 'The requested return photos are attached.',
+      category: 'RETURN',
+      status: 'WAITING_FOR_VENDOR',
+      vendorUnreadCount: 0,
+      lastReplyAt: null,
+      lastReplyByRole: null,
+    });
+    listVendorSupportTicketsMock.mockResolvedValue([unreadTicket, waitingTicket]);
+
+    renderSupportPage();
+
+    const subjectLink = await screen.findByRole('link', { name: unreadTicket.subject });
+    const table = subjectLink.closest('.op-table');
+    const header = table?.querySelector('.op-table-head') as HTMLElement | null;
+    const unreadRow = subjectLink.closest('.op-table-row') as HTMLElement;
+
+    expect(screen.getByRole('heading', { name: 'Vendor Support Requests' })).toBeInTheDocument();
+    expect(screen.queryByText('Track support requests submitted with order, return, and shipment context.')).not.toBeInTheDocument();
+    expect(header).toBeTruthy();
+    expect(within(header as HTMLElement).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      'Subject',
+      'Category',
+      'Status',
+      'Last reply',
+      'Updated',
+    ]);
+    expect(subjectLink).toHaveAttribute('href', `/support/${unreadTicket.id}`);
+    expect(screen.queryByText(unreadTicket.id)).not.toBeInTheDocument();
+    expect(screen.queryByText(waitingTicket.id)).not.toBeInTheDocument();
+    expect(within(unreadRow).getByText(unreadTicket.message)).toBeInTheDocument();
+    expect(within(unreadRow).getByText('Shipment')).toBeInTheDocument();
+    expect(within(unreadRow).getByText('Open')).toHaveClass('op-tone-attention');
+    expect(within(unreadRow).getByText('2 unread')).toBeInTheDocument();
+    expect(screen.getByText('Waiting For Vendor')).toHaveClass('op-tone-warning');
+    expect(screen.getByText('No replies')).toBeInTheDocument();
+    expect(within(unreadRow).getByText(formatDateTime(unreadTicket.updatedAt, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }))).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: 'Unread only' }));
+
+    expect(screen.getByRole('link', { name: unreadTicket.subject })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: waitingTicket.subject })).not.toBeInTheDocument();
   });
 });
