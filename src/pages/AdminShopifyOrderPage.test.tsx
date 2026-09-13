@@ -1048,6 +1048,15 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(productRefundItem).toHaveTextContent('TRY 1,249.00');
       expect(screen.getByText('Latest order refund webhook')).toBeInTheDocument();
       expect(screen.getByText('Processed')).toBeInTheDocument();
+      const reviewPanel = screen.getByLabelText('Cancel refund review summary');
+      expect(within(reviewPanel).getByRole('heading', { name: 'Refund completed', level: 3 })).toBeInTheDocument();
+      expect(reviewPanel.querySelector(':scope > .economic-transfer-summary-header .status-badge')).toHaveTextContent('Resolved');
+      expect(within(reviewPanel).queryByRole('button', { name: 'Preview Shopify refund' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Return to vendor' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add note' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel / Refund Review' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
       expect(screen.queryByText('Refund impact', { exact: false })).not.toBeInTheDocument();
       expect(screen.queryByText('Webhook received', { exact: false })).not.toBeInTheDocument();
       expect(screen.queryByText('vendor_blocked')).not.toBeInTheDocument();
@@ -1213,9 +1222,22 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(within(statusAxes).getByText('Partially refunded')).toBeInTheDocument();
       expect(within(statusAxes).getByText('Fulfillment not required')).toBeInTheDocument();
       expect(within(statusAxes).queryByText('Refund completed')).not.toBeInTheDocument();
-      expect(screen.getByText('Customer refund review required')).toBeInTheDocument();
+      const reviewPanel = screen.getByLabelText('Cancel refund review summary');
+      expect(within(reviewPanel).getByRole('heading', { name: 'Resolved', level: 3 })).toBeInTheDocument();
+      expect(reviewPanel.querySelector(':scope > .economic-transfer-summary-header .status-badge')).toHaveTextContent('Resolved');
+      expect(within(reviewPanel).queryByRole('heading', { name: 'Customer refund review required' })).not.toBeInTheDocument();
+      expect(within(reviewPanel).getByText('This allocation review is resolved.')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText('Customer refund review required')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText(
+        'Shopify refund evidence does not prove that the customer was fully refunded. Monetary review remains required.',
+      )).toBeInTheDocument();
+      expect(within(reviewPanel).queryByText('Refund completed')).not.toBeInTheDocument();
       expect(screen.getByText('Refund attempt resolved')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Preview Shopify refund' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Return to vendor' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add note' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel / Refund Review' })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Preview Shopify refund' }));
       const refundPreview = await screen.findByLabelText('Shopify suggested refund preview');
       expect(within(refundPreview).getByText('Product refund')).toBeInTheDocument();
@@ -1230,6 +1252,219 @@ describe('AdminShopifyOrderPage split visibility', () => {
         { restockType: 'CANCEL', refundShipping: false },
       );
       expect(screen.queryByText('No action required')).not.toBeInTheDocument();
+    });
+
+    it('keeps unresolved order money separate from a resolved allocation review', async () => {
+      const breakdown = buildRefundExecutionBreakdown();
+      breakdown.customerRefundCompletion = {
+        status: 'UNRESOLVED',
+        reasonCode: 'canonical_refund_evidence_unresolved',
+        displayFinancialStatus: 'PARTIALLY_REFUNDED',
+        currency: 'TRY',
+        totalReceivedAmount: '250.00',
+        totalRefundedAmount: null,
+        netPaymentAmount: null,
+        totalOutstandingAmount: null,
+        totalRefundedShippingAmount: null,
+      };
+      breakdown.allocations[0]!.cancelRefundReview = {
+        status: 'RESOLVED',
+        reason: 'OUT_OF_STOCK',
+        note: 'Allocation review complete.',
+        requestedAt: '2026-08-12T09:30:00.000Z',
+        requestedByUserId: 'admin-1',
+      };
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const reviewPanel = await screen.findByLabelText('Cancel refund review summary');
+      expect(within(reviewPanel).getByRole('heading', { name: 'Resolved', level: 3 })).toBeInTheDocument();
+      expect(reviewPanel.querySelector(':scope > .economic-transfer-summary-header .status-badge')).toHaveTextContent('Resolved');
+      expect(within(reviewPanel).getByText('This allocation review is resolved.')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText('Customer refund review required')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText(
+        'Shopify refund evidence does not prove that the customer was fully refunded. Monetary review remains required.',
+      )).toBeInTheDocument();
+      expect(within(reviewPanel).queryByRole('heading', { name: 'Customer refund review required' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Refund completed')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Preview Shopify refund' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Return to vendor' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add note' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel / Refund Review' })).not.toBeInTheDocument();
+    });
+
+    it('renders a resolved allocation review without active-review hold copy when no monetary refund is verified', async () => {
+      const breakdown = buildRefundExecutionBreakdown();
+      breakdown.customerRefundCompletion = {
+        status: 'NO_VERIFIED_MONETARY_REFUND',
+        reasonCode: 'no_verified_monetary_refund',
+        displayFinancialStatus: 'PAID',
+        currency: 'TRY',
+        totalReceivedAmount: '250.00',
+        totalRefundedAmount: '0.00',
+        netPaymentAmount: '250.00',
+        totalOutstandingAmount: '0.00',
+        totalRefundedShippingAmount: '0.00',
+      };
+      breakdown.allocations[0]!.cancelRefundReview = {
+        status: 'RESOLVED',
+        reason: 'OUT_OF_STOCK',
+        note: 'Reviewed without a monetary refund.',
+        requestedAt: '2026-08-12T09:30:00.000Z',
+        requestedByUserId: 'admin-1',
+      };
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const reviewPanel = await screen.findByLabelText('Cancel refund review summary');
+      expect(within(reviewPanel).getByRole('heading', { name: 'Resolved', level: 3 })).toBeInTheDocument();
+      expect(reviewPanel.querySelector(':scope > .economic-transfer-summary-header .status-badge')).toHaveTextContent('Resolved');
+      expect(within(reviewPanel).getByText('This allocation review is resolved.')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText('OUT_OF_STOCK')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText('Reviewed without a monetary refund.')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText(formatDateTime('2026-08-12T09:30:00.000Z'))).toBeInTheDocument();
+      expect(within(reviewPanel).getByText('admin-1')).toBeInTheDocument();
+      expect(within(reviewPanel).queryByText(
+        'This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.',
+      )).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Return to vendor' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add note' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Transfer economics' })).toBeInTheDocument();
+      expect(within(reviewPanel).getByRole('button', { name: 'Preview Shopify refund' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel / Refund Review' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
+    });
+
+    it('preserves pending review presentation and action visibility', async () => {
+      const breakdown = buildRefundExecutionBreakdown();
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const reviewPanel = await screen.findByLabelText('Cancel refund review summary');
+      expect(within(reviewPanel).getByRole('heading', { name: 'Cancel / Refund Review Pending', level: 3 })).toBeInTheDocument();
+      expect(within(reviewPanel).getByText('Pending Review')).toBeInTheDocument();
+      expect(within(reviewPanel).getByText(
+        'This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.',
+      )).toBeInTheDocument();
+      expect(within(reviewPanel).getByRole('button', { name: 'Preview Shopify refund' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Return to vendor' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add note' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Transfer economics' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel / Refund Review' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
+    });
+
+    it('preserves pending outbound refund and blocking post-check presentation', async () => {
+      const pendingAttempt = buildRefundAttemptSummary('attempt-pending', 'SHOPIFY_ACTION_PENDING');
+      pendingAttempt.postRefundFulfillmentCheckStatus = 'warning';
+      pendingAttempt.postRefundFulfillmentCheckMessage = 'Canonical fulfillment post-check remains blocked.';
+      const breakdown = buildRefundExecutionBreakdown(pendingAttempt);
+      breakdown.allocations[0]!.cancelRefundReview = {
+        ...breakdown.allocations[0]!.cancelRefundReview!,
+        status: 'SHOPIFY_ACTION_PENDING',
+      };
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const reviewPanel = await screen.findByLabelText('Cancel refund review summary');
+      expect(within(reviewPanel).getByRole('heading', { name: 'Shopify Action Pending', level: 3 })).toBeInTheDocument();
+      expect(reviewPanel.querySelector(':scope > .economic-transfer-summary-header .status-badge')).toHaveTextContent('Shopify Action Pending');
+      expect(within(reviewPanel).getByText('Canonical fulfillment post-check remains blocked.')).toBeInTheDocument();
+      const pendingButton = within(reviewPanel).getByRole('button', { name: 'Refund pending' });
+      expect(pendingButton).toBeDisabled();
+      expect(within(reviewPanel).queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
+    });
+
+    it('preserves failed outbound attempt evidence and the existing preview path', async () => {
+      const breakdown = buildRefundExecutionBreakdown(
+        buildRefundAttemptSummary('attempt-failed', 'FAILED', 'Webhook reconciliation failed.'),
+      );
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const reviewPanel = await screen.findByLabelText('Cancel refund review summary');
+      expect(within(reviewPanel).getByRole('heading', { name: 'Cancel / Refund Review Pending', level: 3 })).toBeInTheDocument();
+      expect(within(reviewPanel).getByRole('heading', { name: 'Failed', level: 4 })).toBeInTheDocument();
+      expect(within(reviewPanel).getByText('Webhook reconciliation failed.')).toBeInTheDocument();
+      expect(within(reviewPanel).getByRole('button', { name: 'Preview Shopify refund' })).toBeEnabled();
+      expect(within(reviewPanel).queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
+    });
+
+    it('keeps resolved and pending allocation review presentation isolated', async () => {
+      const breakdown = buildRefundExecutionBreakdown();
+      breakdown.customerRefundCompletion = {
+        status: 'NO_VERIFIED_MONETARY_REFUND',
+        reasonCode: 'no_verified_monetary_refund',
+        displayFinancialStatus: 'PAID',
+        currency: 'TRY',
+        totalReceivedAmount: '500.00',
+        totalRefundedAmount: '0.00',
+        netPaymentAmount: '500.00',
+        totalOutstandingAmount: '0.00',
+        totalRefundedShippingAmount: '0.00',
+      };
+      breakdown.allocations = [
+        buildAllocation({
+          allocationOrderId: 'alloc-resolved',
+          vendorId: 'resolved-vendor',
+          assignedVendorId: 'resolved-vendor',
+          vendorName: 'Resolved Vendor',
+          cancelRefundReview: {
+            status: 'RESOLVED',
+            reason: 'OUT_OF_STOCK',
+            note: 'Resolved allocation.',
+            requestedAt: '2026-08-12T09:30:00.000Z',
+            requestedByUserId: 'admin-1',
+          },
+        }),
+        buildAllocation({
+          allocationOrderId: 'alloc-pending',
+          vendorId: 'pending-vendor',
+          assignedVendorId: 'pending-vendor',
+          vendorName: 'Pending Vendor',
+          cancelRefundReview: {
+            status: 'PENDING_REVIEW',
+            reason: 'OUT_OF_STOCK',
+            note: 'Pending allocation.',
+            requestedAt: '2026-08-12T09:35:00.000Z',
+            requestedByUserId: 'admin-2',
+          },
+        }),
+      ];
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const reviewPanels = await screen.findAllByLabelText('Cancel refund review summary');
+      expect(reviewPanels).toHaveLength(2);
+      expect(within(reviewPanels[0]!).getByRole('heading', { name: 'Resolved', level: 3 })).toBeInTheDocument();
+      expect(within(reviewPanels[0]!).getByText('This allocation review is resolved.')).toBeInTheDocument();
+      expect(within(reviewPanels[1]!).getByRole('heading', { name: 'Cancel / Refund Review Pending', level: 3 })).toBeInTheDocument();
+      expect(within(reviewPanels[1]!).getByText(
+        'This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.',
+      )).toBeInTheDocument();
+    });
+
+    it('preserves cancel refund review creation for a blocked allocation without a review', async () => {
+      const breakdown = buildRefundExecutionBreakdown();
+      breakdown.allocations[0]!.cancelRefundReview = null;
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: 'Return to vendor' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add note' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Transfer economics' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cancel / Refund Review' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Preview Shopify refund' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
     });
 
     it('does not infer full completion from positive local refund totals or refunded items alone', async () => {

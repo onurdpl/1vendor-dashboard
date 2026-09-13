@@ -1553,6 +1553,7 @@ export function AdminShopifyOrderPage() {
         const refundCompleted = isCustomerRefundCompleted(breakdown);
         const refundReviewRequired = isCustomerRefundReviewRequired(breakdown);
         const partialCustomerRefund = isCustomerRefundPartial(breakdown);
+        const allocationReviewResolved = normalizeStateToken(allocation.cancelRefundReview?.status) === 'resolved';
         const customerRefundBlocksNewResolution = refundCompleted || refundReviewRequired;
         const showEconomicTransferAction = canShowEconomicTransferAction(allocation, customerRefundBlocksNewResolution);
         const showCancelRefundReviewAction = canShowCancelRefundReviewAction(allocation, customerRefundBlocksNewResolution);
@@ -2106,6 +2107,8 @@ export function AdminShopifyOrderPage() {
                   <h3>
                     {refundCompleted
                       ? 'Refund completed'
+                      : allocationReviewResolved
+                        ? 'Resolved'
                       : refundReviewRequired
                         ? 'Customer refund review required'
                       : allocation.cancelRefundReview.status === 'PENDING_REVIEW'
@@ -2114,16 +2117,30 @@ export function AdminShopifyOrderPage() {
                   </h3>
                 </div>
                 <span className={`status-badge status-${getClassToken(allocation.cancelRefundReview.status)}`}>
-                  {refundCompleted ? 'Resolved' : refundReviewRequired ? 'Review required' : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
+                  {refundCompleted || allocationReviewResolved
+                    ? 'Resolved'
+                    : refundReviewRequired
+                      ? 'Review required'
+                      : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
                 </span>
               </div>
               <p className="page-description">
                 {refundCompleted
                   ? 'Shopify refund processed successfully. This allocation is operationally closed and fulfillment is no longer required.'
+                  : allocationReviewResolved
+                    ? 'This allocation review is resolved.'
                   : refundReviewRequired
                     ? 'Shopify refund evidence does not prove that the customer was fully refunded. Monetary review remains required.'
                   : 'This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.'}
               </p>
+              {allocationReviewResolved && refundReviewRequired ? (
+                <div className="refund-preview-message refund-preview-message-warning">
+                  <strong>Customer refund review required</strong>
+                  <p className="page-description">
+                    Shopify refund evidence does not prove that the customer was fully refunded. Monetary review remains required.
+                  </p>
+                </div>
+              ) : null}
               <div className="compact-meta-grid">
                 {refundCompleted ? (
                   <>
