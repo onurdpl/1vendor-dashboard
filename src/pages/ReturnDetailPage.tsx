@@ -1586,10 +1586,6 @@ export function ReturnDetailPage() {
                       <span>Qty</span>
                       <strong>{item.quantity}</strong>
                     </div>
-                    <div>
-                      <span>Status</span>
-                      <StatusBadge tone={getStatusTone(returnRequest)}>{getStatusLabel(returnRequest)}</StatusBadge>
-                    </div>
                   </article>
                 ))}
               </div>
@@ -1696,27 +1692,15 @@ export function ReturnDetailPage() {
             </div>
             <div className="return-review-summary-list">
               <div>
-                <span>Order number</span>
-                <strong>{formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</strong>
-              </div>
-              <div>
                 <span>Requested</span>
                 <strong>{formatDate(returnRequest.date)}</strong>
-              </div>
-              <div>
-                <span>Return status</span>
-                <strong>{getStatusLabel(returnRequest)}</strong>
               </div>
               <div>
                 <span>Refund status</span>
                 <strong>{getRefundStatus(returnRequest)}</strong>
               </div>
-              <div>
-                <span>Vendor</span>
-                <strong>{currentVendor.vendorName}</strong>
-                </div>
-              </div>
-            </article>
+            </div>
+          </article>
 
             {isAdmin && returnRequest.returnOwnershipSummary ? (
               <article className="return-review-card return-review-summary-card" aria-label="Return ownership snapshot">

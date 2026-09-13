@@ -407,18 +407,37 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
-    expect((await screen.findAllByText('Order #1023')).length).toBeGreaterThan(0);
+    await screen.findByText('Nike Air Force 1 07');
+    const header = screen.getByRole('heading', { name: 'Return request' }).closest('.return-review-header');
+    expect(header).toBeTruthy();
+    expect(within(header as HTMLElement).getByText('Order #1023')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Awaiting review')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Vendor Demo Vendor A')).toBeInTheDocument();
     expect(screen.queryByText('Review the returned item and take the required action.')).not.toBeInTheDocument();
-    expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
+    const returnedItems = screen.getByRole('heading', { name: '1 item' }).closest('article');
+    expect(returnedItems).toBeTruthy();
+    expect(within(returnedItems as HTMLElement).getByText('Nike Air Force 1 07')).toBeInTheDocument();
     expect(getReturnFinanceRecordsMock).not.toHaveBeenCalled();
     expect(getFinanceDashboardMock).not.toHaveBeenCalled();
-    expect(screen.getByRole('img', { name: 'Nike Air Force 1 07 product image' })).toHaveAttribute(
+    expect(within(returnedItems as HTMLElement).getByRole('img', { name: 'Nike Air Force 1 07 product image' })).toHaveAttribute(
       'src',
       'https://cdn.example.com/air-force-1.png',
     );
-    expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
-    expect(screen.getByText('White / 42')).toBeInTheDocument();
+    expect(within(returnedItems as HTMLElement).getByText('DJ1196-002-40,5')).toBeInTheDocument();
+    expect(within(returnedItems as HTMLElement).getByText('White / 42')).toBeInTheDocument();
+    expect(within(returnedItems as HTMLElement).getByText('Qty')).toBeInTheDocument();
+    expect(within(returnedItems as HTMLElement).getByText('1')).toBeInTheDocument();
+    expect(within(returnedItems as HTMLElement).queryByText('Status')).not.toBeInTheDocument();
+
+    const summary = screen.getByRole('heading', { name: 'Return details' }).closest('article');
+    expect(summary).toBeTruthy();
+    expect(within(summary as HTMLElement).getByText('Requested')).toBeInTheDocument();
+    expect(within(summary as HTMLElement).getByText('Refund status')).toBeInTheDocument();
+    expect(within(summary as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    expect(within(summary as HTMLElement).queryByText('Order number')).not.toBeInTheDocument();
+    expect(within(summary as HTMLElement).queryByText('Return status')).not.toBeInTheDocument();
+    expect(within(summary as HTMLElement).queryByText('Vendor')).not.toBeInTheDocument();
+    expect(summary?.querySelectorAll('.return-review-summary-list > div')).toHaveLength(2);
     expect(screen.getByText('Vendor review')).toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review return');
     expect(screen.getByRole('button', { name: 'Mark received' })).toBeEnabled();
@@ -1607,6 +1626,11 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     const completionSummary = await screen.findByLabelText('Return completion summary');
+    const header = screen.getByRole('heading', { name: 'Return request' }).closest('.return-review-header');
+    expect(header).toBeTruthy();
+    expect(within(header as HTMLElement).getByText('Order #1023')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Closed')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Vendor Demo Vendor A')).toBeInTheDocument();
     expect(within(completionSummary).getByText('Return completed')).toBeInTheDocument();
     expect(screen.queryByText('Review the returned item and take the required action.')).not.toBeInTheDocument();
     expect(screen.queryByText('Return is closed and refund is complete. No vendor action is required.')).not.toBeInTheDocument();
