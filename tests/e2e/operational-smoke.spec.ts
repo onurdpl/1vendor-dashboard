@@ -113,8 +113,11 @@ test.describe('operational browser smoke', () => {
     await page.getByRole('button', { name: 'Create ticket' }).click();
     await expect(page.getByText('Support ticket created.').first()).toBeVisible();
 
-    await page.getByRole('link', { name: 'Inbox', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Communication center' })).toBeVisible();
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/support/inbox');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByRole('heading', { name: 'Communication center', exact: true })).toBeVisible();
     await expect(page.getByText('Inbox smoke request').first()).toBeVisible();
     await page.getByText('Inbox smoke request').first().click();
     await page.getByRole('link', { name: 'Open linked record' }).click();

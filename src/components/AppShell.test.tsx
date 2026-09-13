@@ -81,6 +81,8 @@ const restrictedVendorUser: CurrentUser = {
   ],
 };
 
+const sharedWorkspaceRoles: CurrentUser['role'][] = ['admin', 'vendor', 'support', 'finance'];
+
 function seedSession(user: CurrentUser) {
   setSession('test-session', user);
   setCurrentVendorId(user.defaultVendorId);
@@ -110,6 +112,8 @@ function renderShell(initialEntry: string) {
           <Route path="/orders" element={<div>Orders workspace content</div>} />
           <Route path="/returns" element={<div>Returns workspace content</div>} />
           <Route path="/finance" element={<div>Finance workspace content</div>} />
+          <Route path="/support" element={<div>Support workspace content</div>} />
+          <Route path="/support/:ticketId" element={<div>Support ticket content</div>} />
           <Route path="/support/inbox" element={<div>Inbox workspace content</div>} />
           <Route path="/vendor/profile" element={<div>Settings workspace content</div>} />
         </Route>
@@ -146,6 +150,33 @@ afterEach(() => {
 });
 
 describe('AppShell workspace navigation', () => {
+  it.each(sharedWorkspaceRoles)('shows the canonical Support navigation for %s workspace users', (role) => {
+    seedSession({
+      ...vendorUser,
+      email: `${role}@example.com`,
+      name: `${role} User`,
+      role,
+    });
+
+    renderShell('/support');
+
+    const primaryNav = screen.getByRole('navigation', { name: 'Primary' });
+    const supportLink = within(primaryNav).getByRole('link', { name: 'Support' });
+    expect(supportLink).toHaveAttribute('href', '/support');
+    expect(supportLink).toHaveAttribute('aria-current', 'page');
+    expect(within(primaryNav).queryByRole('link', { name: 'Inbox' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Support navigation active on ticket detail routes', () => {
+    seedSession(vendorUser);
+
+    renderShell('/support/ticket-1');
+
+    const primaryNav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(within(primaryNav).getByRole('link', { name: 'Support' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('Support ticket content')).toBeInTheDocument();
+  });
+
   it('keeps vendor users on vendor navigation without a workspace switcher', () => {
     seedSession(vendorUser);
 
@@ -281,7 +312,8 @@ describe('AppShell workspace navigation', () => {
     expect(within(primaryNav).getByRole('link', { name: /Orders/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Returns/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Finance/i })).toBeInTheDocument();
-    expect(within(primaryNav).getByRole('link', { name: /Inbox/i })).toBeInTheDocument();
+    expect(within(primaryNav).getByRole('link', { name: /Support/i })).toHaveAttribute('href', '/support');
+    expect(within(primaryNav).queryByRole('link', { name: /Inbox/i })).not.toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Settings/i })).toBeInTheDocument();
   });
 

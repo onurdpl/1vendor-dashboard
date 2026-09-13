@@ -205,8 +205,10 @@ describe('DashboardPage vendor launchpad', () => {
 
     expect(await screen.findByRole('heading', { name: /today, demo vendor a/i })).toBeInTheDocument();
     expect(screen.getByText('Start with the work that needs attention, then check orders, returns, and payment timing.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open support tickets' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open inbox' })).toBeInTheDocument();
+    const shortcuts = screen.getByLabelText('Dashboard shortcuts');
+    expect(within(shortcuts).getByRole('button', { name: 'Open support tickets' })).toBeInTheDocument();
+    expect(within(shortcuts).queryByRole('button', { name: 'Open inbox' })).not.toBeInTheDocument();
+    expect(within(shortcuts).queryByText('3')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open vendor profile' })).toBeInTheDocument();
   });
 

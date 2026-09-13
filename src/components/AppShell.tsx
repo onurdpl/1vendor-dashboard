@@ -39,7 +39,7 @@ const vendorNavItems = [
   { to: '/orders', label: 'Orders', icon: 'orders' },
   { to: '/returns', label: 'Returns', icon: 'returns' },
   { to: '/finance', label: 'Finance', icon: 'payments' },
-  { to: '/support/inbox', label: 'Inbox', icon: 'inbox' },
+  { to: '/support', label: 'Support', icon: 'support' },
   { to: '/vendor/profile', label: 'Settings', icon: 'settings' },
 ] satisfies Array<{ to: string; label: string; icon: ShellIconName; end?: boolean }>;
 
