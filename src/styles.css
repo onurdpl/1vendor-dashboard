@@ -6963,6 +6963,10 @@ h3 {
   gap: 8px;
 }
 
+.orders-status-axis-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .admin-status-axis-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(120px, 1fr));

@@ -1138,15 +1138,27 @@ export function OrdersPage() {
               return (
             <>
               <div className="orders-detail-rail-header">
-                <div className="orders-status-axis-grid" aria-label="Order status axes">
+                <div
+                  className={`orders-status-axis-grid${isAdmin && !hasCanonicalTerminalStory ? ' orders-status-axis-grid-single' : ''}`}
+                  aria-label="Order status axes"
+                >
                   <div className="orders-status-axis">
                     <span>Operational Status</span>
                     <StatusBadge tone={operationalStatusTone}>{operationalStatusLabel}</StatusBadge>
                   </div>
-                  <div className="orders-status-axis">
-                    <span>Payment Status</span>
-                    <StatusBadge tone={getPaymentStatusTone(paymentStatusLabel)}>{paymentStatusLabel}</StatusBadge>
-                  </div>
+                  {isAdmin ? (
+                    hasCanonicalTerminalStory ? (
+                      <div className="orders-status-axis">
+                        <span>Finance projection</span>
+                        <StatusBadge tone={getPaymentStatusTone(operationalStory.financeLabel)}>{operationalStory.financeLabel}</StatusBadge>
+                      </div>
+                    ) : null
+                  ) : (
+                    <div className="orders-status-axis">
+                      <span>Payment Status</span>
+                      <StatusBadge tone={getPaymentStatusTone(paymentStatusLabel)}>{paymentStatusLabel}</StatusBadge>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1303,6 +1315,10 @@ export function OrdersPage() {
                 <section className="orders-detail-card" aria-label="Shopify order snapshot">
                   <h4>Shopify order snapshot</h4>
                   <div className="orders-rail-summary-list">
+                    <div>
+                      <span>Shopify financial status</span>
+                      <strong>{safeStatusLabel(orderSnapshot?.financialStatus, '—')}</strong>
+                    </div>
                     <div>
                       <span>Vendor integration</span>
                       <strong>{hasCanonicalTerminalStory ? '—' : formatSnapshotValue(orderSnapshot?.vendorIntegrationStatus)}</strong>

@@ -1029,7 +1029,7 @@ describe('OrdersPage control center', () => {
     expect(conflictTrackingCell?.querySelector('small')).toBeNull();
   });
 
-  it('separates active operational and paid payment status in the right rail', async () => {
+  it('keeps an active admin header allocation-scoped and moves paid Shopify status to the snapshot', async () => {
     const activePaidOrder = buildAwaitingRejectableOrder({
       orderSnapshot: {
         ...orderDetail.orderSnapshot!,
@@ -1043,12 +1043,16 @@ describe('OrdersPage control center', () => {
 
     const axes = await screen.findByLabelText('Order status axes');
     expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
-    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
     expect(within(axes).getByText('Active')).toBeInTheDocument();
-    expect(within(axes).getByText('paid')).toBeInTheDocument();
+    expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
+    expect(within(axes).queryByText('Paid')).not.toBeInTheDocument();
+    expect(axes).toHaveClass('orders-status-axis-grid-single');
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Paid')).toBeInTheDocument();
   });
 
-  it('separates active operational and pending payment status in the right rail', async () => {
+  it('keeps an active admin header allocation-scoped and moves pending Shopify status to the snapshot', async () => {
     const activePendingOrder = buildAwaitingRejectableOrder({
       orderSnapshot: {
         ...orderDetail.orderSnapshot!,
@@ -1062,10 +1066,90 @@ describe('OrdersPage control center', () => {
 
     const axes = await screen.findByLabelText('Order status axes');
     expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
-    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
     expect(within(axes).getByText('Active')).toBeInTheDocument();
-    expect(within(axes).getByText('pending')).toBeInTheDocument();
+    expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
+    expect(within(axes).queryByText('Pending')).not.toBeInTheDocument();
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByText('Pending')).toBeInTheDocument();
   });
+
+  it.each([
+    ['partially_refunded', 'Partially Refunded'],
+    ['voided', 'Voided'],
+    ['unexpected_financial_state', 'Unexpected Financial State'],
+  ] as const)('keeps active admin allocation state independent from Shopify %s', async (financialStatus, expectedSnapshotValue) => {
+    const activeOrder = buildAwaitingRejectableOrder({
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot!,
+        financialStatus,
+      },
+    });
+    listOrdersMock.mockResolvedValue([toSummary(activeOrder)]);
+    getOrderMock.mockResolvedValue(activeOrder);
+
+    renderOrdersPage();
+
+    const axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Active')).toBeInTheDocument();
+    expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
+    expect(within(axes).queryByText('Finance projection')).not.toBeInTheDocument();
+    expect(within(axes).queryByText('Cancelled')).not.toBeInTheDocument();
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
+    expect(within(snapshot).getByText(expectedSnapshotValue)).toBeInTheDocument();
+    expect(screen.getByLabelText('Smart label action')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['null', { ...orderDetail.orderSnapshot!, financialStatus: null }],
+    ['undefined snapshot', null],
+    ['empty', { ...orderDetail.orderSnapshot!, financialStatus: '' }],
+    ['whitespace', { ...orderDetail.orderSnapshot!, financialStatus: '   ' }],
+  ] as const)('keeps the Shopify financial status row visible for %s', async (_caseName, orderSnapshot) => {
+    const activeOrder = buildAwaitingRejectableOrder({ orderSnapshot });
+    listOrdersMock.mockResolvedValue([toSummary(activeOrder)]);
+    getOrderMock.mockResolvedValue(activeOrder);
+
+    renderOrdersPage();
+
+    await screen.findByLabelText('Order status axes');
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    const financialStatusRow = within(snapshot).getByText('Shopify financial status').closest('div');
+    expect(financialStatusRow).not.toBeNull();
+    expect(within(financialStatusRow as HTMLElement).getByText('—')).toBeInTheDocument();
+  });
+
+  it.each(['vendor', 'support', 'finance'] as const)(
+    'preserves the active Payment Status header and hidden Shopify snapshot for %s users',
+    async (role) => {
+      setCurrentUser({
+        email: `${role}@demo.com`,
+        name: `Demo ${role}`,
+        role,
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'demo-vendor-a',
+      });
+      const activeOrder = buildAwaitingRejectableOrder({
+        orderSnapshot: {
+          ...orderDetail.orderSnapshot!,
+          financialStatus: 'partially_refunded',
+        },
+      });
+      listOrdersMock.mockResolvedValue([toSummary(activeOrder)]);
+      getOrderMock.mockResolvedValue(activeOrder);
+
+      renderOrdersPage();
+
+      const axes = await screen.findByLabelText('Order status axes');
+      expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+      expect(within(axes).getByText('Active')).toBeInTheDocument();
+      expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+      expect(within(axes).getByText('partially_refunded')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
+    },
+  );
 
   it('renders full Shopify cancellations as terminal and non-actionable', async () => {
     const cancelledOrder = buildAwaitingRejectableOrder({
@@ -1103,6 +1187,12 @@ describe('OrdersPage control center', () => {
 
     const axes = await screen.findByLabelText('Order status axes');
     expect(within(axes).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
+    expect(within(axes).getByText('Sale voided')).toBeInTheDocument();
+    expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Voided')).toBeInTheDocument();
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Shipment not required').length).toBeGreaterThan(0);
     const cancelledRow = screen.getByRole('button', { name: /#1002/ });
@@ -1146,6 +1236,10 @@ describe('OrdersPage control center', () => {
 
     const axes = await screen.findByLabelText('Order status axes');
     expect(within(axes).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
+    expect(within(axes).getByText('Review required')).toBeInTheDocument();
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByText('Voided')).toBeInTheDocument();
     expect(screen.getAllByText('Review existing fulfillment evidence').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(screen.getByText('DHL / TRK-A-1002')).toBeInTheDocument();
@@ -1356,8 +1450,14 @@ describe('OrdersPage control center', () => {
         actionable: false,
         reason: 'ALLOCATION_REFUND_TERMINAL',
       },
+      isCancelled: true,
+      cancelledAt: '2026-09-06T11:00:00.000Z',
       fulfillmentActionAvailable: false,
       refundRecordCount: 0,
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot!,
+        financialStatus: 'partially_refunded',
+      },
       assignmentHistory: [
         {
           action: 'assigned',
@@ -1383,9 +1483,12 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1128')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
-    const paymentStatusAxis = screen.getByText('Payment Status').closest('.orders-status-axis');
-    expect(paymentStatusAxis).not.toBeNull();
-    expect(within(paymentStatusAxis as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
+    const financeProjectionAxis = screen.getByText('Finance projection').closest('.orders-status-axis');
+    expect(financeProjectionAxis).not.toBeNull();
+    expect(within(financeProjectionAxis as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Order status axes')).queryByText('Cancelled')).not.toBeInTheDocument();
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByText('Partially Refunded')).toBeInTheDocument();
     const terminalRow = screen.getByRole('button', { name: /#1128/ });
     const terminalTrackingCell = terminalRow.querySelector('.orders-table-shipping-cell');
     expect(terminalTrackingCell).not.toBeNull();
@@ -1687,8 +1790,9 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
-    expect(screen.getByText('Payment Status')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('Shopify order snapshot')).queryByText('Financial status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Payment Status')).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Shopify order snapshot')).getByText('Shopify financial status')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Shopify order snapshot')).getByText('Paid')).toBeInTheDocument();
     expect(screen.queryByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).not.toBeInTheDocument();
     expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(screen.getByText('processing')).toBeInTheDocument();
@@ -1892,6 +1996,10 @@ describe('OrdersPage control center', () => {
       sourceShopifyOrderNumber: '#2101',
       operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
       fulfillmentActionAvailable: false,
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot,
+        financialStatus: 'partially_refunded',
+      },
       splitSummary: {
         sourceAllocationId: 'allocation-source-2101',
         childAllocationId: 'allocation-child-full-refund',
@@ -1938,9 +2046,90 @@ describe('OrdersPage control center', () => {
     expect(within(card).getByText('Refund recorded')).toBeInTheDocument();
     expect(within(card).queryByText('Partially Refunded')).not.toBeInTheDocument();
     expect(within(card).getByText('Not prepared')).toBeInTheDocument();
-    const paymentStatusAxis = screen.getByText('Payment Status').closest('.orders-status-axis');
-    expect(paymentStatusAxis).not.toBeNull();
-    expect(within(paymentStatusAxis as HTMLElement).getByText(expectedPaymentStatus)).toBeInTheDocument();
+    const axes = screen.getByLabelText('Order status axes');
+    if (overrides.operationalActionability?.reason === 'ALLOCATION_REFUND_TERMINAL') {
+      const financeProjectionAxis = within(axes).getByText('Finance projection').closest('.orders-status-axis');
+      expect(financeProjectionAxis).not.toBeNull();
+      expect(within(financeProjectionAxis as HTMLElement).getByText(expectedPaymentStatus)).toBeInTheDocument();
+      expect(within(axes).queryByText('Partially Refunded')).not.toBeInTheDocument();
+      expect(within(screen.getByLabelText('Shopify order snapshot')).getByText('Partially Refunded')).toBeInTheDocument();
+    } else {
+      expect(within(axes).queryByText('Finance projection')).not.toBeInTheDocument();
+      expect(within(axes).queryByText(expectedPaymentStatus)).not.toBeInTheDocument();
+      expect(within(screen.getByLabelText('Shopify order snapshot')).getByText('Partially Refunded')).toBeInTheDocument();
+    }
+  });
+
+  it('keeps split and multi-vendor-shaped allocation headers isolated from a shared Shopify financial status', async () => {
+    const sharedSnapshot = {
+      ...orderDetail.orderSnapshot!,
+      financialStatus: 'partially_refunded',
+    };
+    const activeSource = buildAwaitingRejectableOrder({
+      id: 'allocation-1132-source',
+      sourceShopifyOrderId: 'gid://shopify/Order/1132',
+      sourceShopifyOrderNumber: '#1132',
+      assignedVendorId: 'demo-vendor-a',
+      vendorId: 'demo-vendor-a',
+      orderSnapshot: sharedSnapshot,
+      splitSummary: {
+        sourceAllocationId: 'allocation-1132-source',
+        childAllocationId: 'allocation-1132-child',
+        reason: 'OUT_OF_STOCK',
+        note: null,
+        actorName: null,
+        lineageRole: 'source',
+        movedItems: [],
+      },
+    });
+    const refundedChild = buildAwaitingRejectableOrder({
+      id: 'allocation-1132-child',
+      sourceShopifyOrderId: 'gid://shopify/Order/1132',
+      sourceShopifyOrderNumber: '#1132',
+      originalVendorId: 'demo-vendor-a',
+      assignedVendorId: 'demo-vendor-b',
+      vendorId: 'demo-vendor-b',
+      operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+      fulfillmentActionAvailable: false,
+      orderSnapshot: sharedSnapshot,
+      splitSummary: {
+        sourceAllocationId: 'allocation-1132-source',
+        childAllocationId: 'allocation-1132-child',
+        reason: 'OUT_OF_STOCK',
+        note: null,
+        actorName: null,
+        lineageRole: 'child',
+        movedItems: [],
+      },
+    });
+    const allocations = [activeSource, refundedChild];
+    listOrdersMock.mockResolvedValue(allocations.map(toSummary));
+    getOrderMock.mockImplementation(async (orderId) => allocations.find((allocation) => allocation.id === orderId) ?? activeSource);
+
+    renderOrdersPage();
+
+    let axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Active')).toBeInTheDocument();
+    expect(within(axes).queryByText('Finance projection')).not.toBeInTheDocument();
+    expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Shopify order snapshot')).getByText('Partially Refunded')).toBeInTheDocument();
+    expect(screen.getByLabelText('Smart label action')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/allocation-1132-source');
+
+    await userEvent.click(screen.getAllByRole('button', { name: /#1132/ })[1]);
+
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(
+      refundedChild.id,
+      expect.objectContaining({ vendorId: 'demo-vendor-a' }),
+    ));
+    axes = screen.getByLabelText('Order status axes');
+    expect(within(axes).getByText('Refunded')).toBeInTheDocument();
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
+    expect(within(axes).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(axes).queryByText('Active')).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Shopify order snapshot')).getByText('Partially Refunded')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Smart label action')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/allocation-1132-child');
   });
 
   it.each([
@@ -2673,7 +2862,14 @@ describe('OrdersPage control center', () => {
         const sidebar = screen.getByRole('heading', { name: '#1002' }).closest('aside');
         expect(sidebar).not.toBeNull();
         const sidebarScope = within(sidebar as HTMLElement);
-        expect(within(sidebarScope.getByLabelText('Order status axes')).getByText('Vendor Blocked')).toBeInTheDocument();
+        const axes = sidebarScope.getByLabelText('Order status axes');
+        expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+        expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
+        expect(within(axes).getByText('Held')).toBeInTheDocument();
+        expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
+        const snapshot = sidebarScope.getByLabelText('Shopify order snapshot');
+        expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
+        expect(within(snapshot).getByText('Paid')).toBeInTheDocument();
         expect(sidebarScope.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
         const fulfillmentCard = screen.getByRole('heading', { name: 'Fulfillment and shipping' }).closest('section');
         expect(fulfillmentCard).not.toBeNull();
@@ -2686,6 +2882,10 @@ describe('OrdersPage control center', () => {
         const guidance = screen.getByLabelText('Workflow action guidance');
         expect(guidance).toHaveTextContent('Review order');
         expect(guidance).toHaveTextContent('Review the blocked order before shipment work continues.');
+        const axes = screen.getByLabelText('Order status axes');
+        expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+        expect(within(axes).getByText('Held')).toBeInTheDocument();
+        expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
       }
       expect(screen.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
     },
