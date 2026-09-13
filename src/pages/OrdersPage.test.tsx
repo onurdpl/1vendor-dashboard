@@ -1782,6 +1782,164 @@ describe('OrdersPage control center', () => {
     expect(within(card).getByText('Payout')).toBeInTheDocument();
   });
 
+  it('hides only a negative estimated payable for a partially refunded allocation', async () => {
+    const detailWithNegativeRefundEstimate: OrderDetail = {
+      ...orderDetail,
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2999.00',
+        commission: '449.85',
+        commissionVat: '89.97',
+        shippingDeduction: '0.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: { type: 'estimated', amount: '-539.82' },
+        settlementStatus: 'partially_refunded',
+        payoutStatus: 'pending',
+        paidAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithNegativeRefundEstimate)]);
+    getOrderMock.mockResolvedValue(detailWithNegativeRefundEstimate);
+
+    renderOrdersPage();
+
+    const card = await screen.findByLabelText('Financial summary');
+    expect(within(card).queryByText('Estimated payable')).not.toBeInTheDocument();
+    expect(within(card).queryByText(/539\.82/)).not.toBeInTheDocument();
+    expect(within(card).getByText('Product value')).toBeInTheDocument();
+    expect(within(card).getByText('Commission')).toBeInTheDocument();
+    expect(within(card).getByText('Commission VAT')).toBeInTheDocument();
+    expect(within(card).getByText('Shipping deduction')).toBeInTheDocument();
+    expect(within(card).getByText('Settlement')).toBeInTheDocument();
+    expect(within(card).getByText('Partially Refunded')).toBeInTheDocument();
+    expect(within(card).getByText('Payout')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['positive partially-refunded estimate', 'estimated', '571.00', 'partially_refunded', 'Estimated payable', /571\.00/],
+    ['accruing estimate', 'estimated', '1540.00', 'accruing', 'Estimated payable', /1,540\.00/],
+    ['payable estimate', 'estimated', '1540.00', 'payable', 'Estimated payable', /1,540\.00/],
+    ['approved partially-refunded value', 'approved', '1200.00', 'partially_refunded', 'Approved payable', /1,200\.00/],
+    ['paid partially-refunded contribution', 'paid_payout_contribution', '1100.00', 'partially_refunded', 'Paid payout contribution', /1,100\.00/],
+  ] as const)('preserves the %s', async (_caseName, type, amount, settlementStatus, expectedLabel, expectedAmount) => {
+    const detailWithFinance: OrderDetail = {
+      ...orderDetail,
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2000.00',
+        commission: '300.00',
+        commissionVat: '60.00',
+        shippingDeduction: '100.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: { type, amount },
+        settlementStatus,
+        payoutStatus: type === 'paid_payout_contribution' ? 'paid' : 'pending',
+        paidAt: type === 'paid_payout_contribution' ? '2026-06-10T11:00:00.000Z' : null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithFinance)]);
+    getOrderMock.mockResolvedValue(detailWithFinance);
+
+    renderOrdersPage();
+
+    const card = await screen.findByLabelText('Financial summary');
+    expect(within(card).getByText(expectedLabel)).toBeInTheDocument();
+    expect(within(card).getByText(expectedAmount)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['held', 'Held'],
+    ['disputed', 'Disputed'],
+  ] as const)('preserves the absent primary payable for %s finance state', async (settlementStatus, expectedStatusLabel) => {
+    const detailWithSuppressedPrimary: OrderDetail = {
+      ...orderDetail,
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2000.00',
+        commission: '300.00',
+        commissionVat: '60.00',
+        shippingDeduction: '100.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: null,
+        settlementStatus,
+        payoutStatus: 'hold',
+        paidAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithSuppressedPrimary)]);
+    getOrderMock.mockResolvedValue(detailWithSuppressedPrimary);
+
+    renderOrdersPage();
+
+    const card = await screen.findByLabelText('Financial summary');
+    expect(within(card).queryByText('Estimated payable')).not.toBeInTheDocument();
+    expect(within(card).queryByText('Approved payable')).not.toBeInTheDocument();
+    expect(within(card).queryByText('Paid payout contribution')).not.toBeInTheDocument();
+    expect(within(card).getByText(expectedStatusLabel)).toBeInTheDocument();
+  });
+
+  it('keeps primary-payable suppression isolated between a refunded split child and its active source', async () => {
+    const refundedChild: OrderDetail = {
+      ...orderDetail,
+      id: 'allocation-child-refunded',
+      sourceShopifyOrderNumber: '#2001',
+      customer: 'Refunded child customer',
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2999.00',
+        commission: '449.85',
+        commissionVat: '89.97',
+        shippingDeduction: '0.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: { type: 'estimated', amount: '-539.82' },
+        settlementStatus: 'partially_refunded',
+        payoutStatus: 'pending',
+        paidAt: null,
+      },
+    };
+    const activeSource: OrderDetail = {
+      ...orderDetail,
+      id: 'allocation-source-active',
+      sourceShopifyOrderNumber: '#2002',
+      customer: 'Active source customer',
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2000.00',
+        commission: '300.00',
+        commissionVat: '60.00',
+        shippingDeduction: '100.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: { type: 'estimated', amount: '1540.00' },
+        settlementStatus: 'accruing',
+        payoutStatus: 'pending',
+        paidAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(refundedChild), toSummary(activeSource)]);
+    getOrderMock.mockImplementation(async (orderId) => orderId === refundedChild.id ? refundedChild : activeSource);
+
+    renderOrdersPage(['/orders?orderId=allocation-child-refunded']);
+
+    let card = await screen.findByLabelText('Financial summary');
+    expect(within(card).queryByText('Estimated payable')).not.toBeInTheDocument();
+    expect(within(card).queryByText(/539\.82/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /#2002/ }));
+
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(
+      activeSource.id,
+      expect.objectContaining({ vendorId: 'demo-vendor-a' }),
+    ));
+    card = screen.getByLabelText('Financial summary');
+    expect(within(card).getByText('Estimated payable')).toBeInTheDocument();
+    expect(within(card).getByText(/1,540\.00/)).toBeInTheDocument();
+  });
+
   it('renders the fail-closed finance state without monetary zero fallbacks', async () => {
     const detailWithUnavailableFinance: OrderDetail = {
       ...orderDetail,

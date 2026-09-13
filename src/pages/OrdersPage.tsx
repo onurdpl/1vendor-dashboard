@@ -1079,6 +1079,10 @@ export function OrdersPage() {
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
               const orderSnapshot = (selectedOrder as OrderDetail).orderSnapshot ?? null;
               const allocationFinanceSummary = (selectedOrder as OrderDetail).allocationFinanceSummary;
+              const shouldHideNegativeRefundEstimate =
+                allocationFinanceSummary?.primaryPayable?.type === 'estimated' &&
+                allocationFinanceSummary.settlementStatus === 'partially_refunded' &&
+                Number(allocationFinanceSummary.primaryPayable.amount) < 0;
               const snapshotCurrency = getSnapshotCurrency(selectedOrder);
               const operationalStatusLabel = hasCanonicalTerminalStory ? operationalStory.primaryLabel : safeStatusLabel(selectedOrder.allocationStatus);
               const operationalStatusTone = hasCanonicalTerminalStory
@@ -1264,7 +1268,7 @@ export function OrdersPage() {
                         <span>Shipping deduction</span>
                         <strong>{formatAllocationFinanceAmount(allocationFinanceSummary.shippingDeduction)}</strong>
                       </div>
-                      {allocationFinanceSummary.primaryPayable ? (
+                      {allocationFinanceSummary.primaryPayable && !shouldHideNegativeRefundEstimate ? (
                         <div className="orders-financial-primary">
                           <span>{getAllocationPrimaryPayableLabel(allocationFinanceSummary.primaryPayable.type)}</span>
                           <strong>{formatAllocationFinanceAmount(allocationFinanceSummary.primaryPayable.amount)}</strong>
