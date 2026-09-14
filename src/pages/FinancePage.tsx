@@ -2038,36 +2038,11 @@ export function FinancePage() {
             </div>
           </section>
 
-          <section className="finance-overview-panel finance-balance-story" aria-label="Balance explanation">
-            <div>
-              <p className="eyebrow">{isVendorUser ? 'Bakiye Hareketleri' : 'How your balance moves'}</p>
-              <h3>{isVendorUser ? 'Ödeme Aşamaları' : 'Payment stages'}</h3>
-            </div>
-            <div className="finance-balance-story-grid">
-              <p>
-                <strong>{isVendorUser ? 'Kullanılabilir' : 'Available'}</strong>
-                <span>{isVendorUser ? 'Ödeme değerlendirmesine hazır.' : 'Ready for payment review.'}</span>
-              </p>
-              <p>
-                <strong>{isVendorUser ? 'Bekleyen' : 'Pending'}</strong>
-                <span>{isVendorUser ? 'Ödemeye hazır hale gelmeyi bekliyor.' : 'Waiting to become payable.'}</span>
-              </p>
-              <p>
-                <strong>{isVendorUser ? 'İncelemede' : 'Waiting for review'}</strong>
-                <span>{isVendorUser ? 'İnceleme tamamlanınca çözülür.' : 'Paused until a review is resolved.'}</span>
-              </p>
-              <p>
-                <strong>{isVendorUser ? 'Son hareketler' : 'Changed recently'}</strong>
-                <span>{isVendorUser ? 'Son satış, iade ve düzeltmeler.' : 'Recent sales, refunds, and adjustments.'}</span>
-              </p>
-            </div>
-          </section>
-
           <section className="finance-overview-panel finance-recent-activity" aria-label={isVendorUser ? 'Son Ödeme Hareketleri' : 'Recent payment activity'}>
             <div className="finance-overview-panel-heading">
               <div>
                 <p className="eyebrow">{isVendorUser ? 'Son Ödeme Hareketleri' : 'Recent payment activity'}</p>
-                <h3>{isVendorUser ? 'Son kontrolünüzden bu yana değişen hareketler.' : 'What changed since your last check'}</h3>
+                <h3>{isVendorUser ? 'Son hareketler' : 'Recent activity'}</h3>
               </div>
             </div>
             {isError && !finance ? (

@@ -2176,6 +2176,58 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('$3,059.10')).not.toBeInTheDocument();
   });
 
+  it('keeps Finance Overview authority and navigation while removing static stage and last-check claims', async () => {
+    const overviewTransactions = Array.from({ length: 6 }, (_, index) => ({
+      ...financeDashboard.transactions[0],
+      id: `ledger-overview-${index + 1}`,
+      shopifyOrderNumber: String(2001 + index),
+      shopifyOrderId: `gid://shopify/Order/${2001 + index}`,
+      amount: `$${index + 1}.00`,
+    }));
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      summary: {
+        ...financeDashboard.summary,
+        payableBalance: '$2,947.50',
+        accruedBalance: '$250.00',
+        heldBalance: '$75.00',
+      },
+      transactions: overviewTransactions,
+    });
+
+    renderFinanceOverviewPage();
+
+    const moneySummary = await screen.findByLabelText('Finance money summary');
+    expect(within(moneySummary).getByText('Available balance')).toBeInTheDocument();
+    expect(within(moneySummary).getByText('Estimated payment')).toBeInTheDocument();
+    expect(within(moneySummary).getByText('Waiting to become payable')).toBeInTheDocument();
+    expect(within(moneySummary).getByText('Waiting for review')).toBeInTheDocument();
+
+    expect(screen.queryByLabelText('Balance explanation')).not.toBeInTheDocument();
+    expect(screen.queryByText('How your balance moves')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Payment stages' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Changed recently')).not.toBeInTheDocument();
+
+    const recentActivity = screen.getByLabelText('Recent payment activity');
+    expect(within(recentActivity).getByRole('heading', { name: 'Recent activity' })).toBeInTheDocument();
+    expect(within(recentActivity).queryByText('What changed since your last check')).not.toBeInTheDocument();
+    await within(recentActivity).findByText('Order #2001 is now ready for payment review.');
+    const recentRows = within(recentActivity).getAllByRole('listitem');
+    expect(recentRows).toHaveLength(5);
+    expect(recentRows[0]).toHaveTextContent('Order #2001');
+    expect(recentRows[0]).toHaveTextContent('$1.00');
+    expect(recentRows[4]).toHaveTextContent('Order #2005');
+    expect(within(recentActivity).queryByText('Order #2006 is now ready for payment review.')).not.toBeInTheDocument();
+
+    expect(screen.getByLabelText('Payment progress')).toHaveTextContent('How sales become money paid out');
+    expect(screen.getByRole('tab', { name: 'Transactions' })).toHaveAttribute('aria-selected', 'false');
+
+    await userEvent.click(within(recentRows[0]).getByRole('button'));
+
+    expect(screen.getByRole('tab', { name: 'Transactions' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('heading', { name: 'Order #2001' })).toBeInTheDocument();
+  });
+
   it('uses real payment evidence for vendor paid row status and paid date', async () => {
     setVendorFinanceUser();
     const paidAt = '2026-07-04T11:30:00Z';

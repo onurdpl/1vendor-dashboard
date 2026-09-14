@@ -4586,7 +4586,6 @@ h3 {
 .finance-available-hero span,
 .finance-next-payment-card span,
 .finance-balance-secondary-grid small,
-.finance-balance-story-grid span,
 .finance-recent-change-timeline span,
 .finance-payment-progress-steps small {
   color: #64748b;
@@ -4658,20 +4657,6 @@ h3 {
   font-size: 1.02rem;
 }
 
-.finance-balance-story-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.finance-balance-story-grid p {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0 12px 0 0;
-}
-
-.finance-balance-story-grid strong,
 .finance-recent-change-timeline strong,
 .finance-payment-progress-steps strong {
   display: block;
@@ -12524,10 +12509,6 @@ summary.provider-response-heading::-webkit-details-marker {
     min-height: 250px;
   }
 
-  .finance-balance-story-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .dashboard-enterprise-grid {
     grid-template-columns: 1fr;
   }
@@ -12648,7 +12629,6 @@ summary.provider-response-heading::-webkit-details-marker {
 @media (max-width: 640px) {
   .dashboard-enterprise-kpi-row,
   .finance-balance-secondary-grid,
-  .finance-balance-story-grid,
   .finance-compact-metrics,
   .dashboard-workspace-status-grid,
   .orders-workflow-tabs {
