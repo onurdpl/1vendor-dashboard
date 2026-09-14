@@ -1539,8 +1539,9 @@ export function ReturnDetailPage() {
           </div>
         </div>
         <div className="return-review-header-actions">
-          <StatusBadge tone={getStatusTone(returnRequest)}>{getStatusLabel(returnRequest)}</StatusBadge>
-          <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
+          {terminalRefundedReturn && getStatusLabel(returnRequest) === 'Refunded' ? null : (
+            <StatusBadge tone={getStatusTone(returnRequest)}>{getStatusLabel(returnRequest)}</StatusBadge>
+          )}
         </div>
       </div>
 
@@ -1710,9 +1711,6 @@ export function ReturnDetailPage() {
                     <h3>Return ownership</h3>
                   </div>
                 </div>
-                <p className="page-description">
-                  Return and refund ownership are resolved from the allocation and active economic owner at the time records are created.
-                </p>
                 {hasOwnerLineageChange(returnRequest.returnOwnershipSummary) && !returnRequest.returnOwnershipSummary.transferSummary ? (
                   <p className="page-description">
                     <strong>
@@ -1812,11 +1810,7 @@ export function ReturnDetailPage() {
           {isAdmin && financeLifecycleEvents.length ? (
             <OperationalTimeline
               title={financeTimelineTitle}
-              subtitle={
-                terminalRefundedReturn
-                  ? 'Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.'
-                  : 'Settlement and payout accounting linked to this return.'
-              }
+              subtitle={terminalRefundedReturn ? undefined : 'Settlement and payout accounting linked to this return.'}
               events={financeLifecycleEvents}
               audience={audience}
             />

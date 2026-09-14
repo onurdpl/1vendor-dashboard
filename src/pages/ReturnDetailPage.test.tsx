@@ -412,7 +412,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(header).toBeTruthy();
     expect(within(header as HTMLElement).getByText('Order #1023')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('Awaiting review')).toBeInTheDocument();
-    expect(within(header as HTMLElement).getByText('Vendor Demo Vendor A')).toBeInTheDocument();
+    expect(within(header as HTMLElement).queryByText('Vendor Demo Vendor A')).not.toBeInTheDocument();
     expect(screen.queryByText('Review the returned item and take the required action.')).not.toBeInTheDocument();
     const returnedItems = screen.getByRole('heading', { name: '1 item' }).closest('article');
     expect(returnedItems).toBeTruthy();
@@ -1630,7 +1630,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(header).toBeTruthy();
     expect(within(header as HTMLElement).getByText('Order #1023')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('Closed')).toBeInTheDocument();
-    expect(within(header as HTMLElement).getByText('Vendor Demo Vendor A')).toBeInTheDocument();
+    expect(within(header as HTMLElement).queryByText('Vendor Demo Vendor A')).not.toBeInTheDocument();
     expect(within(completionSummary).getByText('Return completed')).toBeInTheDocument();
     expect(screen.queryByText('Review the returned item and take the required action.')).not.toBeInTheDocument();
     expect(screen.queryByText('Return is closed and refund is complete. No vendor action is required.')).not.toBeInTheDocument();
@@ -1689,7 +1689,15 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     const completionSummary = await screen.findByLabelText('Return completion summary');
+    const header = screen.getByRole('heading', { name: 'Return request' }).closest('.return-review-header');
+    const summary = screen.getByRole('heading', { name: 'Return details' }).closest('article');
+    expect(header).toBeTruthy();
+    expect(summary).toBeTruthy();
+    expect(within(header as HTMLElement).queryByText('Refunded')).not.toBeInTheDocument();
     expect(within(completionSummary).getByText('Return completed')).toBeInTheDocument();
+    expect(within(completionSummary).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(summary as HTMLElement).getByText('Refund status')).toBeInTheDocument();
+    expect(within(summary as HTMLElement).getByText('Refunded')).toBeInTheDocument();
     expect(screen.queryByText('Return is closed and refund is complete. No vendor action is required.')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
     expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
@@ -1698,7 +1706,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getAllByText('Refund processed').length).toBeGreaterThan(0);
   });
 
-  it('keeps terminal finance orientation only in Finance Lifecycle for admins', async () => {
+  it('keeps terminal finance evidence without secondary lifecycle copy for admins', async () => {
     setCurrentUser({
       email: 'admin@example.com',
       name: 'Admin User',
@@ -1738,6 +1746,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     const financeLifecycle = await screen.findByRole('heading', { name: 'Finance Lifecycle' });
     const financeLifecycleCard = financeLifecycle.closest('article');
     const financeOrientation = 'Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.';
+    const ownershipCard = screen.getByLabelText('Return ownership snapshot');
+    const ownershipCopy = 'Return and refund ownership are resolved from the allocation and active economic owner at the time records are created.';
 
     expect(completionSummary).toHaveTextContent('Return completed');
     expect(completionSummary).toHaveTextContent('Refund completed');
@@ -1754,14 +1764,29 @@ describe('ReturnDetailPage vendor review screen', () => {
       '/finance?ledgerId=finance-payout-1098',
     );
     expect(financeLifecycleCard).toBeTruthy();
-    expect(within(financeLifecycleCard as HTMLElement).getByText(financeOrientation)).toBeInTheDocument();
-    expect(screen.getAllByText(financeOrientation)).toHaveLength(1);
+    expect(within(financeLifecycleCard as HTMLElement).queryByText(financeOrientation)).not.toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText('Settlement review pending')).toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText('Payout accounting pending')).toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText('refund · -4099')).toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText('sale · 4099')).toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText(formatDateTime('2026-06-20T10:10:00Z'))).toBeInTheDocument();
+    expect(within(financeLifecycleCard as HTMLElement).getByText(formatDateTime('2026-06-20T10:11:00Z'))).toBeInTheDocument();
     expect(returnLifecycle).toBeTruthy();
     expect(within(returnLifecycle as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
     expect(within(financeLifecycleCard as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
     expect(within(financeLifecycleCard as HTMLElement).getByText('Finance entry created')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Return details' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Return ownership snapshot')).toBeInTheDocument();
+    expect(within(ownershipCard).getByRole('heading', { name: 'Return ownership' })).toBeInTheDocument();
+    expect(within(ownershipCard).queryByText(ownershipCopy)).not.toBeInTheDocument();
+    expect(within(ownershipCard).getByText('Original vendor')).toBeInTheDocument();
+    expect(within(ownershipCard).getByText('Current assigned vendor')).toBeInTheDocument();
+    expect(within(ownershipCard).getByText('Return owner')).toBeInTheDocument();
+    expect(within(ownershipCard).getByText('Refund / finance owner')).toBeInTheDocument();
+    expect(within(ownershipCard).getByText('Economic owner')).toBeInTheDocument();
+    expect(within(ownershipCard).getByText('Ownership source')).toBeInTheDocument();
+    expect(within(ownershipCard).getByText('Return owner snapshot')).toBeInTheDocument();
+    expect(within(ownershipCard).getAllByText('Yalı Spor (yalispor)').length).toBeGreaterThanOrEqual(2);
+    expect(within(ownershipCard).getAllByText('Sporjinal (sporjinal)').length).toBeGreaterThanOrEqual(4);
     expect(screen.getByRole('heading', { name: '1 item' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Return reason' })).toBeInTheDocument();
   });
