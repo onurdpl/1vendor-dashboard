@@ -2027,7 +2027,6 @@ export function FinancePage() {
     needsReviewBreakdown.shippingReconciliation > 0;
   const showFinancialSummary = !isZeroCurrencyValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds);
   const showDraftStatus = financeView.payoutBatchSummary?.latestBatch?.status === 'draft';
-  const visibleSummaryCardCount = 2 + Number(showNeedsAttention) + Number(showFinancialSummary) + Number(showDraftStatus);
   const vendorBalance = financeValueOrUnknown(financeView.summary.vendorBalance);
   const outstandingAdjustment = financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt;
   const latestDraftDate = getLatestDraftDateLabel(financeView);
@@ -2042,15 +2041,12 @@ export function FinancePage() {
 
   return (
     <section className={`op-page finance-control-center finance-payout-workspace ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
-      <div className="op-page-heading finance-page-header">
+      <div className={`op-page-heading finance-page-header ${isVendorUser ? '' : 'finance-page-header-non-vendor'}`}>
         <div>
-          {isVendorUser ? null : <p className="eyebrow">Finance</p>}
-          <h2>{isVendorUser ? 'Finance' : 'Finance workspace'}</h2>
-          <p className="page-description">
-            {isVendorUser
-              ? 'Track balances, upcoming payments, and recent payment activity.'
-              : 'Track balances, upcoming payments, and recent finance activity for your marketplace sales.'}
-          </p>
+          <h2>Finance</h2>
+          {isVendorUser ? (
+            <p className="page-description">Track balances, upcoming payments, and recent payment activity.</p>
+          ) : null}
         </div>
       </div>
 
@@ -2193,9 +2189,9 @@ export function FinancePage() {
       ) : (
         <>
       {isAdmin ? (
-        <section className={`finance-compact-summary finance-compact-summary-${visibleSummaryCardCount}`} aria-label="Finance workflow summary">
+        <section className="finance-compact-summary" aria-label="Finance workflow summary">
           {showNeedsAttention ? (
-            <div className="finance-compact-group" aria-label="Needs attention">
+            <div className="finance-compact-group finance-compact-card finance-compact-card-attention" aria-label="Needs attention">
               <span className="finance-compact-label">NEEDS ATTENTION</span>
               <div className="finance-compact-metrics">
                 {needsReviewBreakdown.failedRows > 0 ? <span><strong>{needsReviewBreakdown.failedRows}</strong> Failed rows</span> : null}
@@ -2204,34 +2200,34 @@ export function FinancePage() {
               </div>
             </div>
           ) : null}
-          <div className="finance-compact-group" aria-label="Settlement">
+          <div className="finance-compact-group finance-compact-card finance-compact-card-primary" aria-label="Settlement">
             <span className="finance-compact-label">SETTLEMENT</span>
             <div className="finance-compact-metrics">
-              <span><strong>{financeView.payoutBatchSummary?.eligibleRowCount ?? 0}</strong> Review-ready rows</span>
+              <span><strong className={(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) === 0 ? 'finance-summary-value-muted' : undefined}>{financeView.payoutBatchSummary?.eligibleRowCount ?? 0}</strong> Review-ready rows</span>
               {typeof eligibleNetEstimate === 'string' && eligibleNetEstimate.trim() ? (
-                <span><strong>{eligibleNetEstimate}</strong> Eligible net estimate</span>
+                <span><strong className={isZeroCurrencyValue(eligibleNetEstimate) ? 'finance-summary-value-muted' : undefined}>{eligibleNetEstimate}</strong> Eligible net estimate</span>
               ) : null}
             </div>
           </div>
           {showFinancialSummary ? (
-            <div className="finance-compact-group" aria-label="Financial summary">
+            <div className="finance-compact-group finance-compact-card finance-compact-card-secondary" aria-label="Financial summary">
               <span className="finance-compact-label">FINANCIAL SUMMARY</span>
               <div className="finance-compact-metrics">
                 <span><strong className="finance-deduction-value">{refundDeductionsTotal}</strong> Refund deductions total</span>
               </div>
             </div>
           ) : null}
-          <div className="finance-compact-group" aria-label="Vendor balance">
+          <div className="finance-compact-group finance-compact-card finance-compact-card-secondary" aria-label="Vendor balance">
             <span className="finance-compact-label">VENDOR BALANCE</span>
             <div className="finance-compact-metrics">
-              <span><strong>{vendorBalance}</strong> Vendor balance</span>
+              <span><strong className={typeof financeView.summary.vendorBalance === 'string' && isZeroCurrencyValue(financeView.summary.vendorBalance) ? 'finance-summary-value-muted' : undefined}>{vendorBalance}</strong> Vendor balance</span>
               {!isZeroCurrencyValue(outstandingAdjustment) ? (
                 <span><strong className="finance-deduction-value">{financeValueOrUnknown(outstandingAdjustment)}</strong> Outstanding adjustment</span>
               ) : null}
             </div>
           </div>
           {showDraftStatus ? (
-            <div className="finance-compact-group" aria-label="Draft status">
+            <div className="finance-compact-group finance-compact-card finance-compact-card-reference" aria-label="Draft status">
               <span className="finance-compact-label">DRAFT STATUS</span>
               <div className="finance-compact-metrics">
                 <span><strong>{latestDraftDate}</strong> Latest draft date</span>

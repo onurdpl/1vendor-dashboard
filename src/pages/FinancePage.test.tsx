@@ -483,7 +483,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(screen.getByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search by order #, type, status, amount...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Source amount' })).toBeInTheDocument();
@@ -497,7 +497,12 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
+    const financeHeading = await screen.findByRole('heading', { name: 'Finance' });
+    const financeHeader = financeHeading.closest('.finance-page-header');
+    expect(financeHeader).not.toBeNull();
+    expect(within(financeHeader as HTMLElement).queryByText('FINANCE')).not.toBeInTheDocument();
+    expect(within(financeHeader as HTMLElement).queryByText('Finance workspace')).not.toBeInTheDocument();
+    expect(within(financeHeader as HTMLElement).queryByText('Track balances, upcoming payments, and recent finance activity for your marketplace sales.')).not.toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     const summary = await screen.findByLabelText('Finance workflow summary');
     expect(summary).not.toHaveTextContent('Action required');
@@ -517,7 +522,12 @@ describe('FinancePage control center', () => {
     expect(screen.getByLabelText('Vendor balance')).not.toHaveTextContent('Outstanding adjustment');
     expect(screen.getByLabelText('Draft status')).toHaveTextContent('Latest draft date');
     expect(screen.getByLabelText('Draft status')).toHaveTextContent('May 13, 2026');
-    expect(summary).toHaveClass('finance-compact-summary-5');
+    expect(summary.querySelectorAll('.finance-compact-card')).toHaveLength(5);
+    expect(screen.getByLabelText('Needs attention')).toHaveClass('finance-compact-card-attention');
+    expect(screen.getByLabelText('Settlement')).toHaveClass('finance-compact-card-primary');
+    expect(screen.getByLabelText('Financial summary')).toHaveClass('finance-compact-card-secondary');
+    expect(screen.getByLabelText('Vendor balance')).toHaveClass('finance-compact-card-secondary');
+    expect(screen.getByLabelText('Draft status')).toHaveClass('finance-compact-card-reference');
     expect(screen.queryByLabelText('Action Required')).not.toBeInTheDocument();
     expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
@@ -525,7 +535,7 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('Action required')).not.toBeInTheDocument();
     expect(screen.queryByText('This period')).not.toBeInTheDocument();
     expect(summary).not.toHaveTextContent('settlement estimate');
-    expect(screen.getByText('Track balances, upcoming payments, and recent finance activity for your marketplace sales.')).toBeInTheDocument();
+    expect(screen.queryByText('Track balances, upcoming payments, and recent finance activity for your marketplace sales.')).not.toBeInTheDocument();
     expect(screen.queryByText('Values update as orders become eligible, refunds are processed, or reviews are completed.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'This week' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument();
@@ -612,7 +622,7 @@ describe('FinancePage control center', () => {
     await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('1 Review-ready rows'));
     expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
     expect(screen.queryByText('No draft')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Finance workflow summary')).toHaveClass('finance-compact-summary-4');
+    expect(screen.getByLabelText('Finance workflow summary').querySelectorAll('.finance-compact-card')).toHaveLength(4);
   });
 
   it('hides secondary zero-value summary noise', async () => {
@@ -622,10 +632,13 @@ describe('FinancePage control center', () => {
         ...financeDashboard.summary,
         refunds: '$0.00',
         refundsThisMonth: '$0.00',
+        vendorBalance: '$0.00',
         outstandingVendorDebt: '$0.00',
       },
       payoutBatchSummary: {
         ...financeDashboard.payoutBatchSummary!,
+        eligibleRowCount: 0,
+        eligibleNetAmount: '$0.00',
         blockedRowCount: 3,
         outstandingDebtAmount: '$0.00',
         latestBatch: null,
@@ -642,7 +655,13 @@ describe('FinancePage control center', () => {
     expect(screen.queryByLabelText('Needs attention')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Vendor balance')).not.toHaveTextContent('Outstanding adjustment');
-    expect(screen.getByLabelText('Finance workflow summary')).toHaveClass('finance-compact-summary-2');
+    await waitFor(() => expect(within(screen.getByLabelText('Vendor balance')).getByText('$0.00')).toBeInTheDocument());
+    const summary = screen.getByLabelText('Finance workflow summary');
+    expect(summary.querySelectorAll('.finance-compact-card')).toHaveLength(2);
+    const settlement = screen.getByLabelText('Settlement');
+    expect(within(settlement).getByText('0')).toHaveClass('finance-summary-value-muted');
+    expect(within(settlement).getByText('$0.00')).toHaveClass('finance-summary-value-muted');
+    expect(within(screen.getByLabelText('Vendor balance')).getByText('$0.00')).toHaveClass('finance-summary-value-muted');
   });
 
   it('keeps refund deductions as the only financial summary metric', async () => {
@@ -663,7 +682,7 @@ describe('FinancePage control center', () => {
     expect(financialSummary).not.toHaveTextContent('Estimated balance');
     expect(screen.queryByLabelText('Needs attention')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Finance workflow summary')).toHaveClass('finance-compact-summary-3');
+    expect(screen.getByLabelText('Finance workflow summary').querySelectorAll('.finance-compact-card')).toHaveLength(3);
   });
 
   it.each(['review', 'approved', 'cancelled', 'execution_pending', 'paid', 'paid_placeholder'] as const)(
@@ -683,7 +702,7 @@ describe('FinancePage control center', () => {
       renderFinancePage();
 
       const summary = await screen.findByLabelText('Finance workflow summary');
-      await waitFor(() => expect(summary).toHaveClass('finance-compact-summary-4'));
+      await waitFor(() => expect(summary.querySelectorAll('.finance-compact-card')).toHaveLength(4));
       expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
       expect(screen.queryByText('No draft')).not.toBeInTheDocument();
     },
@@ -1237,6 +1256,12 @@ describe('FinancePage control center', () => {
     });
 
     const { container } = renderFinancePage();
+    const financeHeading = await screen.findByRole('heading', { name: 'Finance' });
+    const financeHeader = financeHeading.closest('.finance-page-header');
+    expect(financeHeader).not.toBeNull();
+    expect(within(financeHeader as HTMLElement).queryByText('FINANCE')).not.toBeInTheDocument();
+    expect(within(financeHeader as HTMLElement).queryByText('Finance workspace')).not.toBeInTheDocument();
+    expect(within(financeHeader as HTMLElement).queryByText('Track balances, upcoming payments, and recent finance activity for your marketplace sales.')).not.toBeInTheDocument();
     const panel = getSidePanel(container);
     const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
     expect(previewCard).not.toBeNull();
@@ -2679,7 +2704,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Finance workspace' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument();
     expect(screen.queryByText('Legacy invoice sync record')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Provider issue summary')).not.toBeInTheDocument();
@@ -2701,6 +2726,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument();
+    expect(screen.getByText('Track balances, upcoming payments, and recent payment activity.')).toBeInTheDocument();
     expect(screen.queryByText('Invoice visibility incomplete')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(screen.queryByText('Invoice visibility is reconciled from the merchant accounting workflow.')).not.toBeInTheDocument();
