@@ -1036,6 +1036,34 @@ function isCanonicalRefundFinancialPreview(record: FinanceTransaction) {
   );
 }
 
+function shouldSuppressSaleRefundNegativeEstimate(record: FinanceTransaction) {
+  const calculation = record.payoutCalculation;
+  if (record.category !== 'Invoice' || !calculation || record.splitFinanceSummary !== null) {
+    return false;
+  }
+
+  const requiredValues = [
+    calculation.grossAmount,
+    calculation.commission,
+    calculation.commissionVat,
+    calculation.shippingDeduction,
+    calculation.refundImpact,
+    calculation.estimatedPayout,
+  ];
+  const allValuesAreNumeric = requiredValues.every((value) => {
+    const numericText = value?.trim().replace(/[^0-9.-]/g, '') ?? '';
+    return /\d/.test(numericText) && Number.isFinite(Number(numericText));
+  });
+  if (!allValuesAreNumeric) {
+    return false;
+  }
+
+  return (
+    parseCurrencyValue(calculation.refundImpact) > 0 &&
+    parseCurrencyValue(calculation.estimatedPayout) < 0
+  );
+}
+
 function shouldShowBalanceAdjustmentImpact(finance: FinanceDashboard | null | undefined) {
   return (
     !isZeroCurrencyValue(finance?.payoutBatchSummary?.outstandingDebtAmount ?? finance?.summary.outstandingVendorDebt) ||
@@ -1923,6 +1951,9 @@ export function FinancePage() {
   const showSelectedRefundImpact = selectedRecord ? shouldShowRefundImpactRow(selectedRecord) : false;
   const showSelectedShippingFee = selectedRecord ? shouldShowShippingFeeRow(selectedRecord, selectedOperationalProjection) : false;
   const showCanonicalRefundFinancialPreview = selectedRecord ? isCanonicalRefundFinancialPreview(selectedRecord) : false;
+  const suppressSelectedSaleRefundNegativeEstimate = selectedRecord
+    ? shouldSuppressSaleRefundNegativeEstimate(selectedRecord)
+    : false;
   const showSelectedBalanceAdjustmentImpact = shouldShowBalanceAdjustmentImpact(finance);
   const showSelectedTimeline = financeTimelineEvents.some(isMeaningfulFinanceTimelineEvent);
   const selectedHasSingleRelatedOrder =
@@ -2678,13 +2709,13 @@ export function FinancePage() {
                       value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
                     />
                   ) : null}
-                  {showCanonicalRefundFinancialPreview ? null : (
+                  {showCanonicalRefundFinancialPreview || suppressSelectedSaleRefundNegativeEstimate ? null : (
                     <MetadataRow
                       label="Estimated vendor payable"
                       value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
                     />
                   )}
-                  {selectedPaymentEligibility === 'Not eligible' && !showCanonicalRefundFinancialPreview ? (
+                  {selectedPaymentEligibility === 'Not eligible' && !showCanonicalRefundFinancialPreview && !suppressSelectedSaleRefundNegativeEstimate ? (
                     <p className="page-description">This amount is not currently payable.</p>
                   ) : null}
                 </div>

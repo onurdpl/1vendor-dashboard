@@ -1010,6 +1010,195 @@ describe('FinancePage control center', () => {
     expect(preview.queryByText('This amount is not currently payable.')).not.toBeInTheDocument();
   });
 
+  it('suppresses only a negative Sale estimate when finite refund evidence is present', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-sale-refund-negative-preview',
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            grossAmount: 'TRY 4,199.00',
+            commission: 'TRY 629.85',
+            commissionVat: 'TRY 125.97',
+            shippingDeduction: 'TRY 80.00',
+            refundImpact: 'TRY 4,199.00',
+            estimatedPayout: '-TRY 835.82',
+            shippingApplied: true,
+          },
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'partially_refunded',
+            payoutReady: true,
+          },
+          splitFinanceSummary: null,
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+    expect(previewCard).not.toBeNull();
+    const preview = within(previewCard as HTMLElement);
+
+    expect(within(preview.getByText('Gross allocation amount').closest('.op-meta-row') as HTMLElement).getByText('TRY 4,199.00')).toBeInTheDocument();
+    expect(within(preview.getByText(/^Commission \(/).closest('.op-meta-row') as HTMLElement).getByText('-TRY 629.85')).toBeInTheDocument();
+    expect(within(preview.getByText(/^Commission VAT \(/).closest('.op-meta-row') as HTMLElement).getByText('-TRY 125.97')).toBeInTheDocument();
+    expect(within(preview.getByText('Shipping fee').closest('.op-meta-row') as HTMLElement).getByText('-TRY 80.00')).toBeInTheDocument();
+    expect(within(preview.getByText('Refund impact').closest('.op-meta-row') as HTMLElement).getByText('-TRY 4,199.00')).toBeInTheDocument();
+    expect(preview.queryByText('Estimated vendor payable')).not.toBeInTheDocument();
+    expect(preview.queryByText('This amount is not currently payable.')).not.toBeInTheDocument();
+    expect(panel.getByText('Payment eligibility')).toBeInTheDocument();
+    expect(panel.getByText('Eligible')).toBeInTheDocument();
+  });
+
+  it('suppresses the amount-dependent helper with a guarded negative Sale estimate', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-sale-refund-negative-not-eligible',
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            refundImpact: '$3,399.00',
+            estimatedPayout: '-$339.90',
+          },
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'accruing',
+            payoutReady: false,
+          },
+          payoutBatch: null,
+          splitFinanceSummary: null,
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+    expect(previewCard).not.toBeNull();
+    const preview = within(previewCard as HTMLElement);
+
+    expect(panel.getByText('Not eligible')).toBeInTheDocument();
+    expect(preview.getByText('Refund impact')).toBeInTheDocument();
+    expect(preview.queryByText('Estimated vendor payable')).not.toBeInTheDocument();
+    expect(preview.queryByText('This amount is not currently payable.')).not.toBeInTheDocument();
+  });
+
+  it('preserves Sale estimates outside the guarded negative refund projection', async () => {
+    const cases: Array<{ name: string; transaction: FinanceTransaction; expectedEstimate: string }> = [
+      {
+        name: 'ordinary Sale without refund evidence',
+        transaction: { ...financeDashboard.transactions[0], splitFinanceSummary: null },
+        expectedEstimate: '$3,059.10',
+      },
+      {
+        name: 'partial refund with a positive estimate',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-sale-partial-refund-positive',
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            refundImpact: '$500.00',
+            estimatedPayout: '$2,559.10',
+          },
+          splitFinanceSummary: null,
+        },
+        expectedEstimate: '$2,559.10',
+      },
+      {
+        name: 'Sale with a nonnumeric calculation value',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-sale-refund-unknown-calculation',
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            commission: 'Unknown',
+            refundImpact: '$3,399.00',
+            estimatedPayout: '-$339.90',
+          },
+          splitFinanceSummary: null,
+        },
+        expectedEstimate: '-$339.90',
+      },
+      {
+        name: 'split Sale with a negative refund projection',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-split-sale-refund-negative',
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            refundImpact: '$3,399.00',
+            estimatedPayout: '-$339.90',
+          },
+          splitFinanceSummary: splitFinanceSummaryBase,
+        },
+        expectedEstimate: '-$339.90',
+      },
+    ];
+
+    for (const previewCase of cases) {
+      getFinanceDashboardMock.mockResolvedValue({
+        ...financeDashboard,
+        transactions: [previewCase.transaction],
+      });
+
+      const { container, unmount } = renderFinancePage();
+      const panel = getSidePanel(container);
+      const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+      expect(previewCard, previewCase.name).not.toBeNull();
+      const preview = within(previewCard as HTMLElement);
+      expect(preview.getByText('Estimated vendor payable'), previewCase.name).toBeInTheDocument();
+      expect(
+        within(preview.getByText('Estimated vendor payable').closest('.op-meta-row') as HTMLElement).getByText(previewCase.expectedEstimate),
+        previewCase.name,
+      ).toBeInTheDocument();
+      unmount();
+      cleanup();
+    }
+  });
+
+  it('applies the guarded negative Sale estimate cleanup to the existing finance-role rail', async () => {
+    setCurrentUser({
+      email: 'finance@demo.com',
+      name: 'Demo Finance',
+      role: 'finance',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-sale-refund-negative-finance-role',
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            refundImpact: '$3,399.00',
+            estimatedPayout: '-$339.90',
+          },
+          splitFinanceSummary: null,
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+    expect(previewCard).not.toBeNull();
+    const preview = within(previewCard as HTMLElement);
+
+    expect(preview.getByText('Refund impact')).toBeInTheDocument();
+    expect(preview.queryByText('Estimated vendor payable')).not.toBeInTheDocument();
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
   it('applies the guarded refund preview cleanup to the existing finance-role rail', async () => {
     setCurrentUser({
       email: 'finance@demo.com',
