@@ -504,19 +504,20 @@ describe('FinancePage control center', () => {
     expect(summary).not.toHaveTextContent('Breakdown:');
     expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Needs review breakdown')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Needs attention')).toHaveTextContent('Failed rows');
-    expect(screen.getByLabelText('Needs attention')).toHaveTextContent('Blocked rows');
+    expect(screen.getByLabelText('Needs attention')).toHaveTextContent('1 Failed rows');
+    expect(screen.getByLabelText('Needs attention')).not.toHaveTextContent('Blocked rows');
     expect(screen.getByLabelText('Needs attention')).not.toHaveTextContent('Refund reviews');
     expect(screen.getByLabelText('Needs attention')).not.toHaveTextContent('Shipping reconciliation');
     expect(screen.getByLabelText('Settlement')).toHaveTextContent('Review-ready rows');
     expect(screen.getByLabelText('Settlement')).toHaveTextContent('Eligible net estimate');
     expect(screen.getByLabelText('Settlement')).toHaveTextContent('$3,059.10');
-    expect(screen.getByLabelText('Financial summary')).toHaveTextContent('Estimated balance');
+    expect(screen.getByLabelText('Financial summary')).not.toHaveTextContent('Estimated balance');
     expect(screen.getByLabelText('Financial summary')).toHaveTextContent('Refund deductions total');
     expect(screen.getByLabelText('Vendor balance')).toHaveTextContent('Vendor balance');
     expect(screen.getByLabelText('Vendor balance')).not.toHaveTextContent('Outstanding adjustment');
     expect(screen.getByLabelText('Draft status')).toHaveTextContent('Latest draft date');
     expect(screen.getByLabelText('Draft status')).toHaveTextContent('May 13, 2026');
+    expect(summary).toHaveClass('finance-compact-summary-5');
     expect(screen.queryByLabelText('Action Required')).not.toBeInTheDocument();
     expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
@@ -572,8 +573,8 @@ describe('FinancePage control center', () => {
 
     const needsAttention = await screen.findByLabelText('Needs attention');
     await waitFor(() => expect(needsAttention).toHaveTextContent('Refund reviews'));
-    expect(needsAttention).toHaveTextContent('Failed rows');
-    expect(needsAttention).toHaveTextContent('Blocked rows');
+    expect(needsAttention).not.toHaveTextContent('Failed rows');
+    expect(needsAttention).not.toHaveTextContent('Blocked rows');
     expect(needsAttention).toHaveTextContent('Shipping reconciliation');
     expect(needsAttention).not.toHaveTextContent('Action required');
     expect(needsAttention).not.toHaveTextContent('Breakdown:');
@@ -597,7 +598,7 @@ describe('FinancePage control center', () => {
     expect(settlement).not.toHaveTextContent(financeDashboard.summary.payoutEstimate);
   });
 
-  it('renders no draft instead of a monetary fallback when no latest batch exists', async () => {
+  it('hides draft status instead of making a no-draft claim when no latest batch exists', async () => {
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,
       payoutBatchSummary: {
@@ -608,11 +609,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    const draftStatus = await screen.findByLabelText('Draft status');
     await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('1 Review-ready rows'));
-    expect(draftStatus).toHaveTextContent('Latest draft date');
-    expect(draftStatus).toHaveTextContent('No draft');
-    expect(draftStatus).not.toHaveTextContent('$3,059.10');
+    expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
+    expect(screen.queryByText('No draft')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Finance workflow summary')).toHaveClass('finance-compact-summary-4');
   });
 
   it('hides secondary zero-value summary noise', async () => {
@@ -626,20 +626,68 @@ describe('FinancePage control center', () => {
       },
       payoutBatchSummary: {
         ...financeDashboard.payoutBatchSummary!,
+        blockedRowCount: 3,
         outstandingDebtAmount: '$0.00',
+        latestBatch: null,
       },
+      transactions: [financeDashboard.transactions[0]],
     });
 
     renderFinancePage();
 
     expect(await screen.findByLabelText('Finance workflow summary')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByLabelText('Financial summary')).toHaveTextContent('$2,947.50'));
-    expect(screen.getByLabelText('Financial summary')).toHaveTextContent('Estimated balance');
-    expect(screen.getByLabelText('Financial summary')).not.toHaveTextContent('Refund deductions total');
+    expect(screen.queryByLabelText('Financial summary')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimated balance')).not.toBeInTheDocument();
+    expect(screen.queryByText('Blocked rows')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Vendor balance')).not.toHaveTextContent('Outstanding adjustment');
-    expect(screen.getByLabelText('Needs attention')).not.toHaveTextContent('Refund reviews');
-    expect(screen.getByLabelText('Needs attention')).not.toHaveTextContent('Shipping reconciliation');
+    expect(screen.getByLabelText('Finance workflow summary')).toHaveClass('finance-compact-summary-2');
   });
+
+  it('keeps refund deductions as the only financial summary metric', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary!,
+        latestBatch: null,
+      },
+      transactions: [financeDashboard.transactions[0]],
+    });
+
+    renderFinancePage();
+
+    const financialSummary = await screen.findByLabelText('Financial summary');
+    expect(financialSummary).toHaveTextContent('Refund deductions total');
+    expect(financialSummary).toHaveTextContent('-$725.00');
+    expect(financialSummary).not.toHaveTextContent('Estimated balance');
+    expect(screen.queryByLabelText('Needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Finance workflow summary')).toHaveClass('finance-compact-summary-3');
+  });
+
+  it.each(['review', 'approved', 'cancelled', 'execution_pending', 'paid', 'paid_placeholder'] as const)(
+    'hides draft status when the latest payout batch is %s',
+    async (status) => {
+      getFinanceDashboardMock.mockResolvedValue({
+        ...financeDashboard,
+        payoutBatchSummary: {
+          ...financeDashboard.payoutBatchSummary!,
+          latestBatch: {
+            ...financeDashboard.payoutBatchSummary!.latestBatch!,
+            status,
+          },
+        },
+      });
+
+      renderFinancePage();
+
+      const summary = await screen.findByLabelText('Finance workflow summary');
+      await waitFor(() => expect(summary).toHaveClass('finance-compact-summary-4'));
+      expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
+      expect(screen.queryByText('No draft')).not.toBeInTheDocument();
+    },
+  );
 
   it('renders positive vendor balance in green', async () => {
     getFinanceDashboardMock.mockResolvedValue({
@@ -1197,6 +1245,7 @@ describe('FinancePage control center', () => {
     expect(preview.getByText('Refund impact')).toBeInTheDocument();
     expect(preview.queryByText('Estimated vendor payable')).not.toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(screen.queryByLabelText('Finance workflow summary')).not.toBeInTheDocument();
   });
 
   it('applies the guarded refund preview cleanup to the existing finance-role rail', async () => {

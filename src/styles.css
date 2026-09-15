@@ -4864,8 +4864,9 @@ h3 {
 }
 
 .finance-compact-summary {
+  --finance-compact-summary-columns: 5;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--finance-compact-summary-columns), minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
   padding: 10px 12px;
@@ -4873,6 +4874,18 @@ h3 {
   border-radius: 14px;
   background: #ffffff;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.finance-compact-summary-2 {
+  --finance-compact-summary-columns: 2;
+}
+
+.finance-compact-summary-3 {
+  --finance-compact-summary-columns: 3;
+}
+
+.finance-compact-summary-4 {
+  --finance-compact-summary-columns: 4;
 }
 
 .finance-compact-primary,

@@ -2019,9 +2019,15 @@ export function FinancePage() {
     financeView.summary,
     financeAudience,
   );
-  const estimatedBalance = financeValueOrUnknown(financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate);
   const eligibleNetEstimate = financeView.payoutBatchSummary?.eligibleNetAmount;
   const refundDeductionsTotal = formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds);
+  const showNeedsAttention =
+    needsReviewBreakdown.failedRows > 0 ||
+    needsReviewBreakdown.refundReview > 0 ||
+    needsReviewBreakdown.shippingReconciliation > 0;
+  const showFinancialSummary = !isZeroCurrencyValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds);
+  const showDraftStatus = financeView.payoutBatchSummary?.latestBatch?.status === 'draft';
+  const visibleSummaryCardCount = 2 + Number(showNeedsAttention) + Number(showFinancialSummary) + Number(showDraftStatus);
   const vendorBalance = financeValueOrUnknown(financeView.summary.vendorBalance);
   const outstandingAdjustment = financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt;
   const latestDraftDate = getLatestDraftDateLabel(financeView);
@@ -2187,16 +2193,17 @@ export function FinancePage() {
       ) : (
         <>
       {isAdmin ? (
-        <section className="finance-compact-summary" aria-label="Finance workflow summary">
-          <div className="finance-compact-group" aria-label="Needs attention">
-            <span className="finance-compact-label">NEEDS ATTENTION</span>
-            <div className="finance-compact-metrics">
-              <span><strong>{needsReviewBreakdown.failedRows}</strong> Failed rows</span>
-              <span><strong>{needsReviewBreakdown.blockedRows}</strong> Blocked rows</span>
-              {needsReviewBreakdown.refundReview > 0 ? <span><strong>{needsReviewBreakdown.refundReview}</strong> Refund reviews</span> : null}
-              {needsReviewBreakdown.shippingReconciliation > 0 ? <span><strong>{needsReviewBreakdown.shippingReconciliation}</strong> Shipping reconciliation</span> : null}
+        <section className={`finance-compact-summary finance-compact-summary-${visibleSummaryCardCount}`} aria-label="Finance workflow summary">
+          {showNeedsAttention ? (
+            <div className="finance-compact-group" aria-label="Needs attention">
+              <span className="finance-compact-label">NEEDS ATTENTION</span>
+              <div className="finance-compact-metrics">
+                {needsReviewBreakdown.failedRows > 0 ? <span><strong>{needsReviewBreakdown.failedRows}</strong> Failed rows</span> : null}
+                {needsReviewBreakdown.refundReview > 0 ? <span><strong>{needsReviewBreakdown.refundReview}</strong> Refund reviews</span> : null}
+                {needsReviewBreakdown.shippingReconciliation > 0 ? <span><strong>{needsReviewBreakdown.shippingReconciliation}</strong> Shipping reconciliation</span> : null}
+              </div>
             </div>
-          </div>
+          ) : null}
           <div className="finance-compact-group" aria-label="Settlement">
             <span className="finance-compact-label">SETTLEMENT</span>
             <div className="finance-compact-metrics">
@@ -2206,15 +2213,14 @@ export function FinancePage() {
               ) : null}
             </div>
           </div>
-          <div className="finance-compact-group" aria-label="Financial summary">
-            <span className="finance-compact-label">FINANCIAL SUMMARY</span>
-            <div className="finance-compact-metrics">
-              <span><strong>{estimatedBalance}</strong> Estimated balance</span>
-              {!isZeroCurrencyValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds) ? (
+          {showFinancialSummary ? (
+            <div className="finance-compact-group" aria-label="Financial summary">
+              <span className="finance-compact-label">FINANCIAL SUMMARY</span>
+              <div className="finance-compact-metrics">
                 <span><strong className="finance-deduction-value">{refundDeductionsTotal}</strong> Refund deductions total</span>
-              ) : null}
+              </div>
             </div>
-          </div>
+          ) : null}
           <div className="finance-compact-group" aria-label="Vendor balance">
             <span className="finance-compact-label">VENDOR BALANCE</span>
             <div className="finance-compact-metrics">
@@ -2224,12 +2230,14 @@ export function FinancePage() {
               ) : null}
             </div>
           </div>
-          <div className="finance-compact-group" aria-label="Draft status">
-            <span className="finance-compact-label">DRAFT STATUS</span>
-            <div className="finance-compact-metrics">
-              <span><strong>{latestDraftDate}</strong> Latest draft date</span>
+          {showDraftStatus ? (
+            <div className="finance-compact-group" aria-label="Draft status">
+              <span className="finance-compact-label">DRAFT STATUS</span>
+              <div className="finance-compact-metrics">
+                <span><strong>{latestDraftDate}</strong> Latest draft date</span>
+              </div>
             </div>
-          </div>
+          ) : null}
         </section>
       ) : null}
 
