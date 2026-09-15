@@ -344,7 +344,7 @@ function getPayoutActivityDetail(record: FinanceTransaction, audience: 'admin' |
     return 'Adjusted by Shopify refund';
   }
   if (isRefundDeductionSettlementReviewPending(record)) {
-    return 'Refund recorded. Awaiting settlement adjustment review.';
+    return null;
   }
   if (isSplitChildFinanceHold(record)) {
     return 'Split order assignment hold';
@@ -356,13 +356,7 @@ function getPayoutActivityDetail(record: FinanceTransaction, audience: 'admin' |
   if (isVendorBlockedFinanceHold(record)) {
     return 'Vendor blocked';
   }
-  if (record.category === 'Invoice') {
-    return 'Shopify order';
-  }
-  if (record.category === 'Refund') {
-    return 'Customer refund impact';
-  }
-  return 'Settlement preview';
+  return null;
 }
 
 function getSettlementReviewDisplay(record: FinanceTransaction) {
@@ -843,10 +837,14 @@ function getTransactionListSettlementImpactClass(record: FinanceTransaction, val
   if (value === NO_SETTLEMENT_IMPACT || value === 'Held' || value === 'Paid' || normalizedValue.includes('adjustment') || normalizedValue.includes('deduction') || normalizedValue.includes('deducts') || normalizedValue.includes('estimate')) {
     return 'finance-amount-emphasis';
   }
-  if (parseCurrencyValue(value) < 0 || isRefundRecord(record)) {
+  const numericValue = parseCurrencyValue(value);
+  if (numericValue < 0) {
     return 'finance-negative finance-amount-emphasis';
   }
-  return 'finance-positive finance-amount-emphasis';
+  if (numericValue > 0) {
+    return 'finance-positive finance-amount-emphasis';
+  }
+  return 'finance-amount-emphasis';
 }
 
 function formatVendorScenarioAmount(value: string, scenario: VendorFinanceScenario) {
@@ -2290,6 +2288,7 @@ export function FinancePage() {
               const rowStatusDetail = isVendorUser
                 ? null
                 : vendorBlockedHold ? null : projection.blockerState === 'None' ? projection.payoutReadiness : projection.blockerState;
+              const rowStatusSecondary = rowStatusDetail === rowStatusLabel ? null : rowStatusDetail;
               const rowActivityDetail = vendorBlockedHold && !isSplitChildFinanceHold(record) ? null : getPayoutActivityDetail(record, financeAudience);
               return (
                 <OperationalTableRow
@@ -2319,11 +2318,10 @@ export function FinancePage() {
                   </span>
                   <span>
                     <strong>{record.shopifyOrderNumber ? formatShopifyOrderNumber(record.shopifyOrderNumber) : '—'}</strong>
-                    {isVendorUser ? null : <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>}
                   </span>
                   <span className="finance-queue-state">
                     <StatusBadge tone={isVendorUser ? rowVendorFinanceScenario.tone : getPayoutActivityTone(record, financeAudience)}>{rowStatusLabel}</StatusBadge>
-                    {rowStatusDetail ? <small>{rowStatusDetail}</small> : null}
+                    {rowStatusSecondary ? <small>{rowStatusSecondary}</small> : null}
                   </span>
                   <strong className={isVendorUser ? getVendorScenarioAmountClass(record.amount, rowVendorFinanceScenario) : isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {isVendorUser ? formatVendorScenarioAmount(record.amount, rowVendorFinanceScenario) : `${isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}${record.amount}`}

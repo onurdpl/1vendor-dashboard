@@ -1352,6 +1352,208 @@ describe('FinancePage control center', () => {
     expect(fallbackRow.getByText('—')).toBeInTheDocument();
   });
 
+  it('removes only generic transaction table subtitles while preserving distinct status and row behavior', async () => {
+    const ordinarySale: FinanceTransaction = {
+      ...financeDashboard.transactions[0],
+      id: 'ledger-ordinary-sale-cleanup',
+      shopifyOrderNumber: '1201',
+      shopifyOrderId: '7819000001201',
+      payoutBatch: null,
+      settlement: {
+        ...financeDashboard.transactions[0].settlement!,
+        status: 'accruing',
+        payoutReady: false,
+        payableAt: null,
+        settledAt: null,
+        holdReason: null,
+      },
+    };
+    const ordinaryRefund: FinanceTransaction = {
+      ...financeDashboard.transactions[1],
+      id: 'ledger-ordinary-refund-cleanup',
+      shopifyOrderNumber: '1202',
+      shopifyOrderId: '7819000001202',
+    };
+    const heldSale: FinanceTransaction = {
+      ...ordinarySale,
+      id: 'ledger-held-sale-cleanup',
+      shopifyOrderNumber: '1203',
+      shopifyOrderId: '7819000001203',
+      settlement: {
+        ...ordinarySale.settlement!,
+        status: 'held',
+      },
+    };
+    const disputedSale: FinanceTransaction = {
+      ...ordinarySale,
+      id: 'ledger-disputed-sale-cleanup',
+      shopifyOrderNumber: '1204',
+      shopifyOrderId: '7819000001204',
+      settlement: {
+        ...ordinarySale.settlement!,
+        status: 'disputed',
+      },
+    };
+
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [ordinarySale, ordinaryRefund, heldSale, disputedSale],
+    });
+
+    const { container } = renderFinancePage();
+    const tableElement = container.querySelector('.finance-op-table') as HTMLElement;
+    const table = within(tableElement);
+    await table.findByText('#1201');
+    const rowForOrder = (orderNumber: string) =>
+      table.getByText(`#${orderNumber}`).closest('[role="button"]') as HTMLElement;
+
+    const saleRow = within(rowForOrder('1201'));
+    expect(saleRow.getByText('Sale estimate')).toBeInTheDocument();
+    expect(saleRow.queryByText('Shopify order')).not.toBeInTheDocument();
+    expect(saleRow.getByText('Estimated')).toBeInTheDocument();
+    expect(saleRow.getByText('Not ready for payout')).toBeInTheDocument();
+    expect(saleRow.getByText('$3,399.00')).toBeInTheDocument();
+    expect(saleRow.getByText('$3,059.10')).toBeInTheDocument();
+    expect(saleRow.getByRole('button', { name: 'View details' })).toBeInTheDocument();
+
+    const refundRow = within(rowForOrder('1202'));
+    expect(refundRow.getByText('Refund deduction')).toBeInTheDocument();
+    expect(refundRow.queryByText('Customer return')).not.toBeInTheDocument();
+    expect(refundRow.queryByText('Customer refund impact')).not.toBeInTheDocument();
+    expect(refundRow.getByText('Refund impact')).toBeInTheDocument();
+    expect(refundRow.getByText('Not ready for payout')).toBeInTheDocument();
+    expect(refundRow.getByText('-$425.00')).toBeInTheDocument();
+    expect(refundRow.getByText('Deducts balance')).toBeInTheDocument();
+    expect(refundRow.getByRole('button', { name: 'View details' })).toBeInTheDocument();
+
+    const heldStatus = within(rowForOrder('1203').querySelector('.finance-queue-state') as HTMLElement);
+    expect(heldStatus.getByText('Blocked')).toBeInTheDocument();
+    expect(heldStatus.getByText('Held')).toBeInTheDocument();
+
+    const disputedStatus = within(rowForOrder('1204').querySelector('.finance-queue-state') as HTMLElement);
+    expect(disputedStatus.getByText('Blocked')).toBeInTheDocument();
+    expect(disputedStatus.getByText('Disputed')).toBeInTheDocument();
+  });
+
+  it('uses positive styling only for positive monetary settlement impact values', async () => {
+    const saleWithRefundEvidence: FinanceTransaction = {
+      ...financeDashboard.transactions[0],
+      id: 'ledger-refund-recorded-impact-style',
+      shopifyOrderNumber: '1210',
+      shopifyOrderId: '7819000001210',
+      payoutBatch: null,
+      settlement: {
+        ...financeDashboard.transactions[0].settlement!,
+        status: 'partially_refunded',
+        payoutReady: false,
+        holdReason: null,
+      },
+      payoutCalculation: {
+        ...financeDashboard.transactions[0].payoutCalculation!,
+        refundImpact: '$100.00',
+      },
+    };
+    const refundedSplit: FinanceTransaction = {
+      ...saleWithRefundEvidence,
+      id: 'ledger-refund-review-impact-style',
+      shopifyOrderNumber: '1211',
+      shopifyOrderId: '7819000001211',
+      amount: '$4,213.50',
+      payoutCalculation: {
+        ...saleWithRefundEvidence.payoutCalculation!,
+        grossAmount: '$4,213.50',
+        refundImpact: '$4,213.50',
+        estimatedPayout: '$0.00',
+      },
+      settlement: {
+        ...saleWithRefundEvidence.settlement!,
+        payoutReady: true,
+      },
+      splitFinanceSummary: {
+        ...splitFinanceSummaryBase,
+        lineageRole: 'child',
+        refundedChildSaleBasis: true,
+        refundOffsetStatus: 'settlement_review_pending',
+      },
+    };
+    const payoutRecord = (id: string, orderNumber: string, status: string): FinanceTransaction => ({
+      id,
+      date: '2026-05-20T10:00:00Z',
+      description: `Payout ${status}`,
+      counterparty: 'Demo Vendor A',
+      category: 'Payout',
+      amount: '$100.00',
+      status: 'Recorded',
+      shopifyOrderNumber: orderNumber,
+      shopifyOrderId: `781900000${orderNumber}`,
+      payoutBatch: {
+        id: `batch-${status}`,
+        status,
+        netAmount: '$100.00',
+        createdAt: '2026-05-20T10:00:00Z',
+      },
+    });
+    const records: FinanceTransaction[] = [
+      {
+        ...financeDashboard.transactions[0],
+        id: 'ledger-positive-impact-style',
+        shopifyOrderNumber: '1208',
+        shopifyOrderId: '7819000001208',
+        payoutBatch: null,
+      },
+      {
+        ...financeDashboard.transactions[1],
+        id: 'ledger-negative-impact-style',
+        shopifyOrderNumber: '1209',
+        shopifyOrderId: '7819000001209',
+        payoutCalculation: {
+          ...financeDashboard.transactions[1].payoutCalculation!,
+          refundImpact: '$300.00',
+        },
+      },
+      saleWithRefundEvidence,
+      refundedSplit,
+      payoutRecord('ledger-pending-review-impact-style', '1212', 'review'),
+      payoutRecord('ledger-approved-impact-style', '1213', 'approved'),
+      payoutRecord('ledger-scheduled-impact-style', '1214', 'execution_pending'),
+      payoutRecord('ledger-payment-evidence-impact-style', '1215', 'paid_placeholder'),
+      payoutRecord('ledger-blocked-impact-style', '1216', 'cancelled'),
+      payoutRecord('ledger-unknown-impact-style', '1217', 'unrecognized'),
+    ];
+    getFinanceDashboardMock.mockResolvedValue({ ...financeDashboard, transactions: records });
+
+    const { container } = renderFinancePage();
+    const tableElement = container.querySelector('.finance-op-table') as HTMLElement;
+    const table = within(tableElement);
+    await table.findByText('#1208');
+    const impactCellForOrder = (orderNumber: string) => {
+      const row = table.getByText(`#${orderNumber}`).closest('[role="button"]') as HTMLElement;
+      return row.children[5] as HTMLElement;
+    };
+
+    expect(impactCellForOrder('1208')).toHaveTextContent('$3,059.10');
+    expect(impactCellForOrder('1208')).toHaveClass('finance-positive');
+    expect(impactCellForOrder('1209')).toHaveTextContent('-$300.00');
+    expect(impactCellForOrder('1209')).toHaveClass('finance-negative');
+
+    const neutralImpacts = [
+      ['1210', 'Refund recorded'],
+      ['1211', 'Refund offset review'],
+      ['1212', 'Pending review'],
+      ['1213', 'Approved'],
+      ['1214', 'Scheduled'],
+      ['1215', 'Payment evidence pending'],
+      ['1216', 'Blocked'],
+      ['1217', 'Unknown'],
+    ] as const;
+    neutralImpacts.forEach(([orderNumber, label]) => {
+      const impactCell = impactCellForOrder(orderNumber);
+      expect(impactCell).toHaveTextContent(label);
+      expect(impactCell).toHaveClass('finance-amount-emphasis');
+      expect(impactCell).not.toHaveClass('finance-positive');
+    });
+  });
+
   it('shows shipping reconciliation as required only when the finance projection needs it', async () => {
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,
@@ -1675,12 +1877,23 @@ describe('FinancePage control center', () => {
       ],
     });
 
-    renderFinancePage();
+    const { container } = renderFinancePage();
 
     expect((await screen.findAllByText('Refund deduction')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Refund recorded. Awaiting settlement adjustment review.').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Refund recorded. Awaiting settlement adjustment review.')).not.toBeInTheDocument();
     expect(screen.getAllByText('Refund offset review').length).toBeGreaterThan(0);
     expect(screen.queryByText('Settlement review pending')).not.toBeInTheDocument();
+
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    const refundRow = table.getByText('#1097').closest('[role="button"]') as HTMLElement;
+    const refundStatus = within(refundRow.querySelector('.finance-queue-state') as HTMLElement);
+    expect(refundStatus.getAllByText('Refund offset review')).toHaveLength(1);
+    expect(refundRow).toHaveTextContent('Refund deduction');
+    expect(refundRow).not.toHaveTextContent('Customer return');
+    expect(refundRow).not.toHaveTextContent('Refund recorded. Awaiting settlement adjustment review.');
+    expect(refundRow).toHaveTextContent('-$4,213.50');
+    expect(refundRow).toHaveTextContent('Deducts balance');
+    expect(within(refundRow).getByRole('button', { name: 'View details' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
