@@ -990,6 +990,151 @@ describe('FinancePage control center', () => {
     expect(within(transactionCard as HTMLElement).queryByText('Payment impact')).not.toBeInTheDocument();
   });
 
+  it('shows only the existing refund impact for the guarded canonical refund preview', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [financeDashboard.transactions[1]],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+    expect(previewCard).not.toBeNull();
+    const preview = within(previewCard as HTMLElement);
+
+    expect(within(preview.getByText('Refund impact').closest('.op-meta-row') as HTMLElement).getByText('-$425.00')).toBeInTheDocument();
+    expect(preview.queryByText('Gross allocation amount')).not.toBeInTheDocument();
+    expect(preview.queryByText(/^Commission \(/)).not.toBeInTheDocument();
+    expect(preview.queryByText(/^Commission VAT \(/)).not.toBeInTheDocument();
+    expect(preview.queryByText('Estimated vendor payable')).not.toBeInTheDocument();
+    expect(preview.queryByText('This amount is not currently payable.')).not.toBeInTheDocument();
+  });
+
+  it('applies the guarded refund preview cleanup to the existing finance-role rail', async () => {
+    setCurrentUser({
+      email: 'finance@demo.com',
+      name: 'Demo Finance',
+      role: 'finance',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [financeDashboard.transactions[1]],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+    expect(previewCard).not.toBeNull();
+    const preview = within(previewCard as HTMLElement);
+
+    expect(within(preview.getByText('Refund impact').closest('.op-meta-row') as HTMLElement).getByText('-$425.00')).toBeInTheDocument();
+    expect(preview.queryByText('Gross allocation amount')).not.toBeInTheDocument();
+    expect(preview.queryByText('Estimated vendor payable')).not.toBeInTheDocument();
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
+  it('preserves distinct refund preview values when a shipping deduction changes the net result', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[1],
+          payoutCalculation: {
+            ...financeDashboard.transactions[1].payoutCalculation!,
+            shippingDeduction: '$80.00',
+            estimatedPayout: '-$505.00',
+            shippingApplied: true,
+            shippingMode: 'external_provider',
+            shippingDeductionSource: 'external_provider',
+            shippingCostStatus: 'snapshot',
+          },
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+    expect(previewCard).not.toBeNull();
+    const preview = within(previewCard as HTMLElement);
+
+    expect(preview.getByText('Gross allocation amount')).toBeInTheDocument();
+    expect(preview.getByText(/^Commission \(/)).toBeInTheDocument();
+    expect(preview.getByText(/^Commission VAT \(/)).toBeInTheDocument();
+    expect(within(preview.getByText('Shipping fee').closest('.op-meta-row') as HTMLElement).getByText('-$80.00')).toBeInTheDocument();
+    expect(within(preview.getByText('Refund impact').closest('.op-meta-row') as HTMLElement).getByText('-$425.00')).toBeInTheDocument();
+    expect(within(preview.getByText('Estimated vendor payable').closest('.op-meta-row') as HTMLElement).getByText('-$505.00')).toBeInTheDocument();
+  });
+
+  it('preserves noncanonical and missing-calculation refund preview compatibility', async () => {
+    const cases: Array<{ name: string; transaction: FinanceTransaction; expectedGross: string; expectedEstimate: string }> = [
+      {
+        name: 'nonzero gross and commission',
+        transaction: {
+          ...financeDashboard.transactions[1],
+          id: 'ledger-refund-noncanonical-preview',
+          payoutCalculation: {
+            ...financeDashboard.transactions[1].payoutCalculation!,
+            grossAmount: '$100.00',
+            commission: '$10.00',
+            commissionVat: '$2.00',
+            estimatedPayout: '-$337.00',
+          },
+        },
+        expectedGross: '$100.00',
+        expectedEstimate: '-$337.00',
+      },
+      {
+        name: 'missing calculation',
+        transaction: {
+          ...financeDashboard.transactions[1],
+          id: 'ledger-refund-missing-preview',
+          payoutCalculation: undefined,
+        },
+        expectedGross: '$425.00',
+        expectedEstimate: '$425.00',
+      },
+      {
+        name: 'unknown gross calculation input',
+        transaction: {
+          ...financeDashboard.transactions[1],
+          id: 'ledger-refund-unknown-gross-preview',
+          payoutCalculation: {
+            ...financeDashboard.transactions[1].payoutCalculation!,
+            grossAmount: 'Unknown',
+          },
+        },
+        expectedGross: 'Unknown',
+        expectedEstimate: '-$425.00',
+      },
+    ];
+
+    for (const previewCase of cases) {
+      getFinanceDashboardMock.mockResolvedValue({
+        ...financeDashboard,
+        transactions: [previewCase.transaction],
+      });
+
+      const { container, unmount } = renderFinancePage();
+      const panel = getSidePanel(container);
+      const previewCard = (await panel.findByText('Financial preview')).closest('.finance-detail-card');
+      expect(previewCard, previewCase.name).not.toBeNull();
+      const preview = within(previewCard as HTMLElement);
+
+      expect(within(preview.getByText('Gross allocation amount').closest('.op-meta-row') as HTMLElement).getByText(previewCase.expectedGross), previewCase.name).toBeInTheDocument();
+      expect(preview.getByText(/^Commission \(/), previewCase.name).toBeInTheDocument();
+      expect(preview.getByText(/^Commission VAT \(/), previewCase.name).toBeInTheDocument();
+      expect(within(preview.getByText('Estimated vendor payable').closest('.op-meta-row') as HTMLElement).getByText(previewCase.expectedEstimate), previewCase.name).toBeInTheDocument();
+
+      unmount();
+      cleanup();
+    }
+  });
+
   it('renders a compact finance state column while detailed lifecycle states stay in the panel', async () => {
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,

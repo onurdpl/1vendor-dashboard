@@ -1000,6 +1000,42 @@ function shouldShowShippingFeeRow(record: FinanceTransaction, projection: Financ
   return !isZeroCurrencyValue(record.payoutCalculation?.shippingDeduction) || projection?.shippingImpact.state === 'required' || projection?.shippingImpact.state === 'completed';
 }
 
+function isCanonicalRefundFinancialPreview(record: FinanceTransaction) {
+  const calculation = record.payoutCalculation;
+  if (record.category !== 'Refund' || !calculation) {
+    return false;
+  }
+
+  const requiredValues = [
+    calculation.grossAmount,
+    calculation.commission,
+    calculation.commissionVat,
+    calculation.shippingDeduction,
+    calculation.refundImpact,
+    calculation.estimatedPayout,
+  ];
+  const allValuesAreNumeric = requiredValues.every((value) => {
+    const numericText = value?.trim().replace(/[^0-9.-]/g, '') ?? '';
+    return /\d/.test(numericText) && Number.isFinite(Number(numericText));
+  });
+  if (!allValuesAreNumeric) {
+    return false;
+  }
+
+  const refundImpact = parseCurrencyValue(calculation.refundImpact);
+  const estimatedPayout = parseCurrencyValue(calculation.estimatedPayout);
+
+  return (
+    parseCurrencyValue(calculation.grossAmount) === 0 &&
+    parseCurrencyValue(calculation.commission) === 0 &&
+    parseCurrencyValue(calculation.commissionVat) === 0 &&
+    parseCurrencyValue(calculation.shippingDeduction) === 0 &&
+    refundImpact > 0 &&
+    estimatedPayout < 0 &&
+    Math.abs(estimatedPayout) === refundImpact
+  );
+}
+
 function shouldShowBalanceAdjustmentImpact(finance: FinanceDashboard | null | undefined) {
   return (
     !isZeroCurrencyValue(finance?.payoutBatchSummary?.outstandingDebtAmount ?? finance?.summary.outstandingVendorDebt) ||
@@ -1886,6 +1922,7 @@ export function FinancePage() {
   const selectedSettlementActionHref = selectedAssignmentHref ?? selectedOrderSettlementHref;
   const showSelectedRefundImpact = selectedRecord ? shouldShowRefundImpactRow(selectedRecord) : false;
   const showSelectedShippingFee = selectedRecord ? shouldShowShippingFeeRow(selectedRecord, selectedOperationalProjection) : false;
+  const showCanonicalRefundFinancialPreview = selectedRecord ? isCanonicalRefundFinancialPreview(selectedRecord) : false;
   const showSelectedBalanceAdjustmentImpact = shouldShowBalanceAdjustmentImpact(finance);
   const showSelectedTimeline = financeTimelineEvents.some(isMeaningfulFinanceTimelineEvent);
   const selectedHasSingleRelatedOrder =
@@ -2613,18 +2650,22 @@ export function FinancePage() {
                   <h4>Financial preview</h4>
                 </div>
                 <div className="finance-detail-rows">
-                  <MetadataRow
-                    label="Gross allocation amount"
-                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.grossAmount ?? selectedRecord.amount)}</span>}
-                  />
-                  <MetadataRow
-                    label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? financeView.profile?.commissionPercent ?? '10.00'}%)`}
-                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commission)}</span>}
-                  />
-                  <MetadataRow
-                    label={`Commission VAT (${selectedRecord.payoutCalculation?.commissionVatPercent ?? financeView.profile?.commissionVatPercent ?? '0.00'}%)`}
-                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commissionVat)}</span>}
-                  />
+                  {showCanonicalRefundFinancialPreview ? null : (
+                    <>
+                      <MetadataRow
+                        label="Gross allocation amount"
+                        value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.grossAmount ?? selectedRecord.amount)}</span>}
+                      />
+                      <MetadataRow
+                        label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? financeView.profile?.commissionPercent ?? '10.00'}%)`}
+                        value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commission)}</span>}
+                      />
+                      <MetadataRow
+                        label={`Commission VAT (${selectedRecord.payoutCalculation?.commissionVatPercent ?? financeView.profile?.commissionVatPercent ?? '0.00'}%)`}
+                        value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commissionVat)}</span>}
+                      />
+                    </>
+                  )}
                   {showSelectedShippingFee ? (
                     <MetadataRow
                       label="Shipping fee"
@@ -2637,11 +2678,13 @@ export function FinancePage() {
                       value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
                     />
                   ) : null}
-                  <MetadataRow
-                    label="Estimated vendor payable"
-                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
-                  />
-                  {selectedPaymentEligibility === 'Not eligible' ? (
+                  {showCanonicalRefundFinancialPreview ? null : (
+                    <MetadataRow
+                      label="Estimated vendor payable"
+                      value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
+                    />
+                  )}
+                  {selectedPaymentEligibility === 'Not eligible' && !showCanonicalRefundFinancialPreview ? (
                     <p className="page-description">This amount is not currently payable.</p>
                   ) : null}
                 </div>
