@@ -881,6 +881,63 @@ describe('FinancePage control center', () => {
     );
   });
 
+  it('formats prefixed and unprefixed Shopify order numbers without duplicate prefixes', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-prefixed-order',
+          shopifyOrderNumber: '#1132',
+          payoutBatch: null,
+        },
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-unprefixed-order',
+          shopifyOrderNumber: '1133',
+          payoutBatch: null,
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#1132')).toBeInTheDocument();
+    expect(table.getByText('#1133')).toBeInTheDocument();
+    expect(table.queryByText('##1132')).not.toBeInTheDocument();
+
+    const panel = getSidePanel(container);
+    const transactionCard = panel.getByText('Transaction').closest('.finance-selected-summary-card');
+    expect(transactionCard).not.toBeNull();
+    expect(within(transactionCard as HTMLElement).getByText('#1132')).toBeInTheDocument();
+    expect(within(transactionCard as HTMLElement).queryByText('##1132')).not.toBeInTheDocument();
+  });
+
+  it('keeps the existing missing order-number fallbacks', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-missing-order-number',
+          shopifyOrderNumber: undefined,
+          shopifyOrderId: undefined,
+          payoutBatch: null,
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect((await table.findAllByText('—')).length).toBeGreaterThan(0);
+    const panel = getSidePanel(container);
+    const transactionCard = panel.getByText('Transaction').closest('.finance-selected-summary-card');
+    expect(transactionCard).not.toBeNull();
+    expect(within(transactionCard as HTMLElement).getByText('Unknown')).toBeInTheDocument();
+  });
+
   it('opens the finance detail panel for a selected ledger row', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
@@ -961,6 +1018,175 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Eligible')).toBeInTheDocument();
     expect(screen.queryByText('Ready for review')).not.toBeInTheDocument();
     expect(screen.getByText('Reason')).toBeInTheDocument();
+  });
+
+  it('keeps structured Settlement status canonical across representative non-vendor states', async () => {
+    const cases: Array<{
+      name: string;
+      transaction: FinanceTransaction;
+      status: string;
+      reason: string | null;
+    }> = [
+      {
+        name: 'refund offset review',
+        transaction: {
+          ...financeDashboard.transactions[1],
+          settlement: {
+            status: 'partially_refunded',
+            payoutReady: true,
+            eligibleAt: '2026-06-21T09:15:00Z',
+            accruedAt: '2026-06-21T09:15:00Z',
+            payableAt: '2026-06-21T09:15:00Z',
+            settledAt: null,
+            holdReason: null,
+            note: 'Refund impact is reducing the vendor balance.',
+          },
+        },
+        status: 'Refund offset review',
+        reason: null,
+      },
+      {
+        name: 'ordinary payable sale',
+        transaction: { ...financeDashboard.transactions[0], payoutBatch: null },
+        status: 'Pending review',
+        reason: 'None',
+      },
+      {
+        name: 'vendor-blocked hold',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'held',
+            payoutReady: false,
+            holdReason: 'Vendor allocation is blocked and awaiting admin resolution.',
+          },
+        },
+        status: 'On hold',
+        reason: 'Vendor blocked',
+      },
+      {
+        name: 'failed ledger',
+        transaction: financeDashboard.transactions[2],
+        status: 'Blocked',
+        reason: 'Finance issue',
+      },
+      {
+        name: 'disputed settlement',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'disputed',
+            payoutReady: false,
+            holdReason: null,
+          },
+        },
+        status: 'Blocked',
+        reason: 'Disputed',
+      },
+      {
+        name: 'paid transaction',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          status: 'Completed',
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'settled',
+            payoutReady: false,
+            settledAt: '2026-06-22T09:15:00Z',
+          },
+          payoutBatch: {
+            id: 'batch-paid-status-owner',
+            status: 'paid',
+            netAmount: '$3,059.10',
+            createdAt: '2026-06-21T09:15:00Z',
+            paidAt: '2026-06-22T09:15:00Z',
+            paymentReference: 'EFT-STATUS-OWNER',
+          },
+        },
+        status: 'Paid',
+        reason: 'None',
+      },
+      {
+        name: 'ordinary estimated fallback',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          payoutBatch: null,
+          settlement: undefined,
+        },
+        status: 'Estimated',
+        reason: 'None',
+      },
+    ];
+
+    for (const statusCase of cases) {
+      getFinanceDashboardMock.mockResolvedValue({ ...financeDashboard, transactions: [statusCase.transaction] });
+      const { container, unmount } = renderFinancePage();
+      const panel = getSidePanel(container);
+
+      const transactionHeading = (await panel.findByText('Transaction')).closest('.finance-detail-card-heading');
+      expect(transactionHeading, statusCase.name).not.toBeNull();
+      expect(transactionHeading?.querySelector('.op-badge'), statusCase.name).toBeNull();
+
+      const settlementCard = panel.getByText('Settlement').closest('.finance-detail-card');
+      expect(settlementCard, statusCase.name).not.toBeNull();
+      const settlementHeading = within(settlementCard as HTMLElement).getByText('Settlement').closest('.finance-detail-card-heading');
+      expect(settlementHeading?.querySelector('.op-badge'), statusCase.name).toBeNull();
+
+      const statusRow = within(settlementCard as HTMLElement).getByText('Status').closest('.op-meta-row');
+      expect(statusRow, statusCase.name).not.toBeNull();
+      expect(within(statusRow as HTMLElement).getByText(statusCase.status), statusCase.name).toBeInTheDocument();
+
+      if (statusCase.reason === null) {
+        expect(within(settlementCard as HTMLElement).queryByText('Reason'), statusCase.name).not.toBeInTheDocument();
+      } else {
+        const reasonRow = within(settlementCard as HTMLElement).getByText('Reason').closest('.op-meta-row');
+        expect(reasonRow, statusCase.name).not.toBeNull();
+        expect(within(reasonRow as HTMLElement).getByText(statusCase.reason), statusCase.name).toBeInTheDocument();
+      }
+
+      unmount();
+      cleanup();
+    }
+  });
+
+  it('keeps the existing finance-role audience projection while cleaning the non-vendor rail', async () => {
+    setCurrentUser({
+      email: 'finance@demo.com',
+      name: 'Demo Finance',
+      role: 'finance',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          payoutBatch: {
+            ...financeDashboard.transactions[0].payoutBatch!,
+            status: 'paid_placeholder',
+          },
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+
+    const transactionHeading = (await panel.findByText('Transaction')).closest('.finance-detail-card-heading');
+    expect(transactionHeading?.querySelector('.op-badge')).toBeNull();
+    const settlementCard = panel.getByText('Settlement').closest('.finance-detail-card');
+    expect(settlementCard).not.toBeNull();
+    const statusRow = within(settlementCard as HTMLElement).getByText('Status').closest('.op-meta-row');
+    expect(statusRow).not.toBeNull();
+    expect(within(statusRow as HTMLElement).getByText('Pending review')).toBeInTheDocument();
+    expect(within(settlementCard as HTMLElement).queryByText('Payment evidence pending')).not.toBeInTheDocument();
   });
 
   it('uses stable source amount and settlement impact semantics in the admin transaction list', async () => {
@@ -1398,7 +1624,8 @@ describe('FinancePage control center', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
-    expect(await screen.findByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
+    expect(screen.queryByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No shipment, refund, or vendor action is required.')).not.toBeInTheDocument();
     expect(screen.getByText('Operational status')).toBeInTheDocument();
     expect(screen.getAllByText('Resolved').length).toBeGreaterThan(0);
     expect(screen.getByText('Settlement status')).toBeInTheDocument();
@@ -1410,8 +1637,12 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('-$4,213.50').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
     expect(screen.getByText('Child order assignment operationally resolved')).toBeInTheDocument();
-    expect(screen.getByText('Settlement adjustment awaiting review')).toBeInTheDocument();
-    expect(screen.getByText('Operational resolution completed. Only settlement accounting review remains.')).toBeInTheDocument();
+    const settlementReviewEvent = screen.getByText('Settlement adjustment awaiting review').closest('li');
+    expect(settlementReviewEvent).not.toBeNull();
+    expect(within(settlementReviewEvent as HTMLElement).getByText('Review')).toBeInTheDocument();
+    expect(settlementReviewEvent?.querySelector('small')).not.toHaveTextContent('—');
+    expect(within(settlementReviewEvent as HTMLElement).queryByText('Operational resolution completed. Only settlement accounting review remains.')).not.toBeInTheDocument();
+    expect(within(settlementReviewEvent as HTMLElement).queryByText('Invoice')).not.toBeInTheDocument();
   });
 
   it('labels refund deduction settlement review separately from operational work', async () => {
@@ -1454,9 +1685,14 @@ describe('FinancePage control center', () => {
     await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
     expect((await screen.findAllByText('Settlement adjustment review pending')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
-    expect(screen.getByText('Settlement adjustment awaiting review')).toBeInTheDocument();
-    expect(screen.getByText('Operational resolution completed. Only settlement accounting review remains.')).toBeInTheDocument();
+    expect(screen.queryByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No shipment, refund, or vendor action is required.')).not.toBeInTheDocument();
+    const settlementReviewEvent = screen.getByText('Settlement adjustment awaiting review').closest('li');
+    expect(settlementReviewEvent).not.toBeNull();
+    expect(within(settlementReviewEvent as HTMLElement).getByText('Review')).toBeInTheDocument();
+    expect(settlementReviewEvent?.querySelector('small')).not.toHaveTextContent('—');
+    expect(within(settlementReviewEvent as HTMLElement).queryByText('Operational resolution completed. Only settlement accounting review remains.')).not.toBeInTheDocument();
+    expect(within(settlementReviewEvent as HTMLElement).queryByText('Refund')).not.toBeInTheDocument();
   });
 
   it('selects a finance row by ledgerId deep link', async () => {
@@ -1542,6 +1778,9 @@ describe('FinancePage control center', () => {
     await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[1]);
 
     const relatedReturn = await screen.findByText('Related return');
+    const relatedRecordsCard = screen.getByRole('heading', { name: 'Related records' }).closest('.operational-links-card');
+    expect(relatedRecordsCard).toBeTruthy();
+    expect(within(relatedRecordsCard as HTMLElement).queryByText('Grouped order, return, and support context for this transaction.')).not.toBeInTheDocument();
     expect(relatedReturn.closest('a')).toHaveAttribute(
       'href',
       `/returns?refundId=${encodeURIComponent('gid://shopify/Refund/501')}`,
@@ -1576,6 +1815,7 @@ describe('FinancePage control center', () => {
 
     const relatedRecordsCard = screen.getByRole('heading', { name: 'Related records' }).closest('.operational-links-card');
     expect(relatedRecordsCard).toBeTruthy();
+    expect(within(relatedRecordsCard as HTMLElement).queryByText('Grouped order, return, and support context for this transaction.')).not.toBeInTheDocument();
     expect(within(relatedRecordsCard as HTMLElement).getByText('Support activity')).toBeInTheDocument();
     expect(within(relatedRecordsCard as HTMLElement).queryByText('Help with order #1021')).not.toBeInTheDocument();
     expect(screen.getByText('Support history')).toBeInTheDocument();
@@ -1739,6 +1979,31 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('Draft settlement payout review')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
+  });
+
+  it('normalizes prefixed Shopify order numbers in the shared vendor table without changing vendor detail markup', async () => {
+    setVendorFinanceUser();
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'vendor-prefixed-order',
+          shopifyOrderNumber: '#1132',
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#1132')).toBeInTheDocument();
+    expect(table.queryByText('##1132')).not.toBeInTheDocument();
+
+    const panel = getSidePanel(container);
+    const vendorSummary = panel.getByText('İşlem Özeti').closest('.finance-selected-summary-card');
+    expect(vendorSummary).not.toBeNull();
+    expect(within(vendorSummary as HTMLElement).getByText('##1132')).toBeInTheDocument();
   });
 
   it('shows vendor payout status and upcoming payout in read-only detail', async () => {

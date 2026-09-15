@@ -62,6 +62,7 @@ type FinanceTimelineItem = {
   at: string | null;
   status: string;
   detail?: string;
+  omitDescription?: boolean;
   visibility?: 'admin';
 };
 
@@ -927,7 +928,7 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
       label: reviewDisplay?.timelineLabel ?? (settlementOffsetReviewPending ? 'Settlement adjustment awaiting review' : record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated'),
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
       status: reviewDisplay?.timelineStatus ?? (record.settlement?.payoutReady ? 'Review' : 'Preview'),
-      detail: settlementOffsetReviewPending ? 'Operational resolution completed. Only settlement accounting review remains.' : undefined,
+      omitDescription: settlementOffsetReviewPending,
     },
     record.payoutBatch
       ? {
@@ -1837,7 +1838,7 @@ export function FinancePage() {
       ...getFinanceTimelineItems(selectedRecord).map((item) => ({
         id: `finance-${selectedRecord.id}-${item.label}`,
         title: item.label,
-        description: item.detail ?? selectedRecord.category,
+        description: item.omitDescription ? undefined : item.detail ?? selectedRecord.category,
         at: item.at,
         status: item.status,
         tone: selectedRecord.category === 'Refund' ? ('warning' as const) : ('success' as const),
@@ -1879,6 +1880,7 @@ export function FinancePage() {
   const selectedSettlementReason = selectedRecord
     ? getSettlementReasonLabel(selectedRecord, selectedOperationalProjection)
     : UNKNOWN_FINANCE_VALUE;
+  const selectedSettlementStatus = selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE;
   const selectedSettlementNextAction = selectedRecord
     ? getSettlementNextActionLabel(selectedRecord, selectedOperationalProjection, selectedFinanceGuidance)
     : UNKNOWN_FINANCE_VALUE;
@@ -2316,7 +2318,7 @@ export function FinancePage() {
                     </span>
                   </span>
                   <span>
-                    <strong>{record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : '—'}</strong>
+                    <strong>{record.shopifyOrderNumber ? formatShopifyOrderNumber(record.shopifyOrderNumber) : '—'}</strong>
                     {isVendorUser ? null : <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>}
                   </span>
                   <span className="finance-queue-state">
@@ -2527,12 +2529,9 @@ export function FinancePage() {
               <div className="finance-selected-summary-card">
                 <div className="finance-detail-card-heading">
                   <h4>Transaction</h4>
-                  <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
-                    {selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE}
-                  </StatusBadge>
                 </div>
                 <div className="finance-selected-summary-grid">
-                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber) : UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Type" value={getPayoutActivityType(selectedRecord, financeAudience)} />
                 </div>
               </div>
@@ -2560,16 +2559,10 @@ export function FinancePage() {
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
                   <h4>Settlement</h4>
-                  <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
-                    {selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE}
-                  </StatusBadge>
                 </div>
-                {selectedSettlementOffsetReviewPending ? (
-                  <p className="page-description">Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.</p>
-                ) : null}
                 <div className="finance-detail-rows">
-                  <MetadataRow label="Status" value={selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Reason" value={selectedSettlementReason} />
+                  <MetadataRow label="Status" value={selectedSettlementStatus} />
+                  {selectedSettlementReason === selectedSettlementStatus ? null : <MetadataRow label="Reason" value={selectedSettlementReason} />}
                   {isSplitChildFinanceHold(selectedRecord) ? (
                     <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
                   ) : null}
@@ -2819,7 +2812,6 @@ export function FinancePage() {
               ) : (
                 <OperationalLinkCards
                   title="Related records"
-                  subtitle="Grouped order, return, and support context for this transaction."
                   links={financeCrossLinks}
                   audience={financeAudience}
                 />
