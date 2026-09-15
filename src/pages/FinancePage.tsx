@@ -2560,7 +2560,9 @@ export function FinancePage() {
                 </div>
                 <div className="finance-detail-rows">
                   <MetadataRow label="Status" value={selectedSettlementStatus} />
-                  {selectedSettlementReason === selectedSettlementStatus ? null : <MetadataRow label="Reason" value={selectedSettlementReason} />}
+                  {selectedOperationalProjection?.blockerState === 'None' || selectedSettlementReason === selectedSettlementStatus
+                    ? null
+                    : <MetadataRow label="Reason" value={selectedSettlementReason} />}
                   {isSplitChildFinanceHold(selectedRecord) ? (
                     <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
                   ) : null}
@@ -2588,8 +2590,10 @@ export function FinancePage() {
                     </>
                   ) : null}
                   {showSelectedSettlementState ? <MetadataRow label="Settlement state" value={selectedSettlementState} /> : null}
-                  {showSelectedPayoutState ? <MetadataRow label="Payment" value={selectedPayoutState} /> : null}
-                  {selectedReviewDisplay || selectedSettlementOffsetReviewPending ? (
+                  {showSelectedPayoutState && selectedPayoutState !== selectedSettlementStatus
+                    ? <MetadataRow label="Payment" value={selectedPayoutState} />
+                    : null}
+                  {(selectedReviewDisplay || selectedSettlementOffsetReviewPending) && selectedSettlementReviewStatusLabel !== selectedSettlementStatus ? (
                     <MetadataRow label="Review status" value={selectedSettlementReviewStatusLabel} />
                   ) : null}
                   {selectedRecord.settlement?.review ? (

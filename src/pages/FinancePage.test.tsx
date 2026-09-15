@@ -1017,7 +1017,11 @@ describe('FinancePage control center', () => {
     expect((await screen.findAllByText('Payment eligibility')).length).toBeGreaterThan(0);
     expect(screen.getByText('Eligible')).toBeInTheDocument();
     expect(screen.queryByText('Ready for review')).not.toBeInTheDocument();
-    expect(screen.getByText('Reason')).toBeInTheDocument();
+    expect(screen.queryByText('Reason')).not.toBeInTheDocument();
+    expect(screen.getByText('Next action')).toBeInTheDocument();
+    expect(screen.getByText('Review settlement')).toBeInTheDocument();
+    expect(screen.getByText('Settlement state')).toBeInTheDocument();
+    expect(screen.getByText('Review pending')).toBeInTheDocument();
   });
 
   it('keeps structured Settlement status canonical across representative non-vendor states', async () => {
@@ -1049,7 +1053,7 @@ describe('FinancePage control center', () => {
         name: 'ordinary payable sale',
         transaction: { ...financeDashboard.transactions[0], payoutBatch: null },
         status: 'Pending review',
-        reason: 'None',
+        reason: null,
       },
       {
         name: 'vendor-blocked hold',
@@ -1071,6 +1075,36 @@ describe('FinancePage control center', () => {
         transaction: financeDashboard.transactions[2],
         status: 'Blocked',
         reason: 'Finance issue',
+      },
+      {
+        name: 'held settlement without a reason',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'held',
+            payoutReady: false,
+            holdReason: null,
+          },
+        },
+        status: 'Blocked',
+        reason: 'Held',
+      },
+      {
+        name: 'held settlement with an active reason',
+        transaction: {
+          ...financeDashboard.transactions[0],
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'held',
+            payoutReady: false,
+            holdReason: 'operator_review',
+          },
+        },
+        status: 'Blocked',
+        reason: 'Hold active',
       },
       {
         name: 'disputed settlement',
@@ -1108,7 +1142,7 @@ describe('FinancePage control center', () => {
           },
         },
         status: 'Paid',
-        reason: 'None',
+        reason: null,
       },
       {
         name: 'ordinary estimated fallback',
@@ -1118,7 +1152,7 @@ describe('FinancePage control center', () => {
           settlement: undefined,
         },
         status: 'Estimated',
-        reason: 'None',
+        reason: null,
       },
     ];
 
@@ -1147,6 +1181,191 @@ describe('FinancePage control center', () => {
         expect(reasonRow, statusCase.name).not.toBeNull();
         expect(within(reasonRow as HTMLElement).getByText(statusCase.reason), statusCase.name).toBeInTheDocument();
       }
+
+      unmount();
+      cleanup();
+    }
+  });
+
+  it('hides only the absent Reason for an ordinary estimated sale', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-estimated-detail-cleanup',
+          payoutBatch: null,
+          settlement: undefined,
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const settlementCard = (await panel.findByText('Settlement')).closest('.finance-detail-card');
+    expect(settlementCard).not.toBeNull();
+    const settlement = within(settlementCard as HTMLElement);
+
+    expect(within(settlement.getByText('Status').closest('.op-meta-row') as HTMLElement).getByText('Estimated')).toBeInTheDocument();
+    expect(settlement.queryByText('Reason')).not.toBeInTheDocument();
+    expect(within(settlement.getByText('Payment eligibility').closest('.op-meta-row') as HTMLElement).getByText('Not eligible')).toBeInTheDocument();
+    expect(within(settlement.getByText('Next action').closest('.op-meta-row') as HTMLElement).getByText('Monitor eligibility')).toBeInTheDocument();
+    expect(panel.getByText('Financial preview')).toBeInTheDocument();
+    expect(panel.getByText('Gross allocation amount')).toBeInTheDocument();
+    expect(panel.getByText('Estimated vendor payable')).toBeInTheDocument();
+    expect(panel.getByText('This amount is not currently payable.')).toBeInTheDocument();
+  });
+
+  it('suppresses Payment only when its final label exactly matches Status', async () => {
+    const payoutCases = [
+      ['draft', 'Estimated'],
+      ['review', 'Pending review'],
+      ['approved', 'Approved'],
+      ['execution_pending', 'Scheduled'],
+      ['paid', 'Paid'],
+    ] as const;
+
+    for (const [batchStatus, expectedStatus] of payoutCases) {
+      getFinanceDashboardMock.mockResolvedValue({
+        ...financeDashboard,
+        transactions: [
+          {
+            ...financeDashboard.transactions[0],
+            id: `ledger-${batchStatus}-detail-cleanup`,
+            status: batchStatus === 'paid' ? 'Completed' : 'Recorded',
+            settlement: {
+              ...financeDashboard.transactions[0].settlement!,
+              status: batchStatus === 'paid' ? 'settled' : 'payable',
+              payoutReady: batchStatus !== 'paid',
+              settledAt: batchStatus === 'paid' ? '2026-06-22T09:15:00Z' : null,
+            },
+            payoutBatch: {
+              id: `batch-${batchStatus}-detail-cleanup`,
+              status: batchStatus,
+              netAmount: '$3,059.10',
+              createdAt: '2026-06-21T09:15:00Z',
+              paidAt: batchStatus === 'paid' ? '2026-06-22T09:15:00Z' : null,
+              paymentReference: batchStatus === 'paid' ? 'EFT-DETAIL-CLEANUP' : null,
+            },
+          },
+        ],
+      });
+
+      const { container, unmount } = renderFinancePage();
+      const panel = getSidePanel(container);
+      const settlementCard = (await panel.findByText('Settlement')).closest('.finance-detail-card');
+      expect(settlementCard, batchStatus).not.toBeNull();
+      const settlement = within(settlementCard as HTMLElement);
+      const statusRow = settlement.getByText('Status').closest('.op-meta-row');
+      expect(within(statusRow as HTMLElement).getByText(expectedStatus), batchStatus).toBeInTheDocument();
+      expect(settlement.queryByText('Payment'), batchStatus).not.toBeInTheDocument();
+      if (batchStatus === 'paid') {
+        expect(within(settlement.getByText('Settlement state').closest('.op-meta-row') as HTMLElement).getByText('Settled')).toBeInTheDocument();
+        expect(settlement.getByText('Not eligible')).toBeInTheDocument();
+      }
+
+      unmount();
+      cleanup();
+    }
+
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-distinct-payment-detail-cleanup',
+          status: 'Failed',
+          payoutBatch: {
+            id: 'batch-distinct-payment-detail-cleanup',
+            status: 'approved',
+            netAmount: '$3,059.10',
+            createdAt: '2026-06-21T09:15:00Z',
+          },
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+    const settlementCard = (await panel.findByText('Settlement')).closest('.finance-detail-card');
+    const settlement = within(settlementCard as HTMLElement);
+    expect(within(settlement.getByText('Status').closest('.op-meta-row') as HTMLElement).getByText('Blocked')).toBeInTheDocument();
+    expect(within(settlement.getByText('Reason').closest('.op-meta-row') as HTMLElement).getByText('Finance issue')).toBeInTheDocument();
+    expect(within(settlement.getByText('Payment').closest('.op-meta-row') as HTMLElement).getByText('Approved')).toBeInTheDocument();
+  });
+
+  it('suppresses Review status only when its final label exactly matches Status', async () => {
+    const reviewCases = [
+      {
+        name: 'draft',
+        status: 'Settlement draft locked',
+        review: {
+          approvalId: 'approval-draft-detail-cleanup',
+          approvalStatus: 'draft' as const,
+          commissionInvoiceId: null,
+          commissionInvoiceStatus: null,
+          invoiceNo: null,
+          providerUuid: null,
+        },
+        referenceLabel: 'Settlement reference',
+        referenceValue: 'approval-draft-detail-cleanup',
+      },
+      {
+        name: 'approved',
+        status: 'Settlement approved',
+        review: {
+          approvalId: 'approval-approved-detail-cleanup',
+          approvalStatus: 'approved' as const,
+          commissionInvoiceId: null,
+          commissionInvoiceStatus: null,
+          invoiceNo: null,
+          providerUuid: null,
+        },
+        referenceLabel: 'Settlement reference',
+        referenceValue: 'approval-approved-detail-cleanup',
+      },
+      {
+        name: 'commission invoiced',
+        status: 'Commission invoiced',
+        review: {
+          approvalId: 'approval-invoiced-detail-cleanup',
+          approvalStatus: 'approved' as const,
+          commissionInvoiceId: 'commission-invoice-detail-cleanup',
+          commissionInvoiceStatus: 'created',
+          invoiceNo: 'INV-DETAIL-CLEANUP',
+          providerUuid: 'provider-detail-cleanup',
+        },
+        referenceLabel: 'Commission invoice reference',
+        referenceValue: 'INV-DETAIL-CLEANUP',
+      },
+    ];
+
+    for (const reviewCase of reviewCases) {
+      getFinanceDashboardMock.mockResolvedValue({
+        ...financeDashboard,
+        transactions: [
+          {
+            ...financeDashboard.transactions[0],
+            id: `ledger-${reviewCase.name}-detail-cleanup`,
+            payoutBatch: null,
+            settlement: {
+              ...financeDashboard.transactions[0].settlement!,
+              review: reviewCase.review,
+            },
+          },
+        ],
+      });
+
+      const { container, unmount } = renderFinancePage();
+      const panel = getSidePanel(container);
+      const settlementCard = (await panel.findByText('Settlement')).closest('.finance-detail-card');
+      expect(settlementCard, reviewCase.name).not.toBeNull();
+      const settlement = within(settlementCard as HTMLElement);
+      expect(within(settlement.getByText('Status').closest('.op-meta-row') as HTMLElement).getByText(reviewCase.status), reviewCase.name).toBeInTheDocument();
+      expect(settlement.queryByText('Review status'), reviewCase.name).not.toBeInTheDocument();
+      expect(settlement.getByText('Approval'), reviewCase.name).toBeInTheDocument();
+      expect(settlement.getByText(reviewCase.referenceLabel), reviewCase.name).toBeInTheDocument();
+      expect(settlement.getAllByText(reviewCase.referenceValue).length, reviewCase.name).toBeGreaterThan(0);
 
       unmount();
       cleanup();
@@ -1187,6 +1406,8 @@ describe('FinancePage control center', () => {
     expect(statusRow).not.toBeNull();
     expect(within(statusRow as HTMLElement).getByText('Pending review')).toBeInTheDocument();
     expect(within(settlementCard as HTMLElement).queryByText('Payment evidence pending')).not.toBeInTheDocument();
+    expect(within(settlementCard as HTMLElement).queryByText('Reason')).not.toBeInTheDocument();
+    expect(within(settlementCard as HTMLElement).queryByText('Payment')).not.toBeInTheDocument();
   });
 
   it('uses stable source amount and settlement impact semantics in the admin transaction list', async () => {
@@ -1898,6 +2119,13 @@ describe('FinancePage control center', () => {
     await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
     expect((await screen.findAllByText('Settlement adjustment review pending')).length).toBeGreaterThan(0);
+    const settlementCard = screen.getByText('Settlement').closest('.finance-detail-card');
+    expect(settlementCard).not.toBeNull();
+    const settlement = within(settlementCard as HTMLElement);
+    expect(within(settlement.getByText('Status').closest('.op-meta-row') as HTMLElement).getByText('Refund offset review')).toBeInTheDocument();
+    expect(within(settlement.getByText('Review status').closest('.op-meta-row') as HTMLElement).getByText('Settlement adjustment review pending')).toBeInTheDocument();
+    expect(settlement.getByText('Not eligible')).toBeInTheDocument();
+    expect(settlement.getByText('Next action')).toBeInTheDocument();
     expect(screen.queryByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).not.toBeInTheDocument();
     expect(screen.queryByText('No shipment, refund, or vendor action is required.')).not.toBeInTheDocument();
     const settlementReviewEvent = screen.getByText('Settlement adjustment awaiting review').closest('li');
