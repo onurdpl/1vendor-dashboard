@@ -1326,7 +1326,10 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(within(reviewPanel).getByText('This allocation review is resolved.')).toBeInTheDocument();
       expect(within(reviewPanel).getByText('OUT_OF_STOCK')).toBeInTheDocument();
       expect(within(reviewPanel).getByText('Reviewed without a monetary refund.')).toBeInTheDocument();
-      expect(within(reviewPanel).getByText(formatDateTime('2026-08-12T09:30:00.000Z'))).toBeInTheDocument();
+      expect(within(reviewPanel).getByText(formatDateTime('2026-08-12T09:30:00.000Z', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }))).toBeInTheDocument();
       expect(within(reviewPanel).getByText('admin-1')).toBeInTheDocument();
       expect(within(reviewPanel).queryByText(
         'This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.',

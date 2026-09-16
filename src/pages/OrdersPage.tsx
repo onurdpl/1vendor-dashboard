@@ -993,12 +993,8 @@ export function OrdersPage() {
                     >
                       <span className="orders-table-order-cell">
                         <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
-                        {currentUser?.role !== 'vendor' ? (
-                          <>
-                            {visibleTableCustomerLabel ? <small>{visibleTableCustomerLabel}</small> : null}
-                            <small>{order.channel}</small>
-                          </>
-                        ) : null}
+                        {visibleTableCustomerLabel ? <small>{visibleTableCustomerLabel}</small> : null}
+                        {currentUser?.role !== 'vendor' ? <small>{order.channel}</small> : null}
                       </span>
                       <div className="orders-table-status-cell">
                         <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>

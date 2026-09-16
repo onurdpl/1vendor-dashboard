@@ -409,7 +409,7 @@ describe('OrdersPage control center', () => {
     expect(within(orderRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
   });
 
-  it('removes fixed identity and source microcopy from vendor rows without changing row data or selection', async () => {
+  it('shows approved customer name but hides source and sensitive customer metadata from vendor rows', async () => {
     setVendorUser();
     const secondOrder = {
       ...orderDetail,
@@ -426,9 +426,13 @@ describe('OrdersPage control center', () => {
 
     const orderRow = await screen.findByRole('button', { name: /#1002/ });
     expect(within(orderRow).getByText('#1002')).toBeInTheDocument();
+    expect(within(orderRow).getByText('Acme Supply Co.')).toBeInTheDocument();
     expect(within(orderRow).queryByText('Customer hidden for vendor scope')).not.toBeInTheDocument();
     expect(within(orderRow).queryByText('Demo Vendor A · Shopify')).not.toBeInTheDocument();
     expect(within(orderRow).queryByText('Shopify')).not.toBeInTheDocument();
+    expect(screen.queryByText('+900000000002')).not.toBeInTheDocument();
+    expect(screen.queryByText('22 Harbor Ave')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rail billing street')).not.toBeInTheDocument();
     expect(within(orderRow).getByText('Fulfilled')).toBeInTheDocument();
     expect(within(orderRow).queryByText('Tracking visible')).not.toBeInTheDocument();
     expect(within(orderRow).getByText('Tracking synced')).toBeInTheDocument();
