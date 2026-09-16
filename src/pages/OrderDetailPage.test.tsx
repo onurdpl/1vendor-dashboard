@@ -3078,6 +3078,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
     expect(within(financialSummary).queryByText('Gross Order Amount')).not.toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 4,999.00')).toBeInTheDocument();
+    expect(await within(financialSummary).findByText('Commission')).toBeInTheDocument();
     expect(within(financialSummary).getByText('Commission')).toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 499.90')).toBeInTheDocument();
     expect(within(financialSummary).getByText('Shipping Deduction')).toBeInTheDocument();
