@@ -164,6 +164,19 @@ enum SettlementRefundAdjustmentEventType {
   ADJUSTMENT_CANCELLED
 }
 
+enum RefundTerminalEvidenceReviewStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum RefundTerminalEvidenceReviewEventType {
+  DETECTED
+  ACKNOWLEDGED
+  RESOLVED
+  REOPENED
+}
+
 enum PayoutBatchStatus {
   DRAFT
   REVIEW
@@ -337,6 +350,7 @@ model User {
   supportTickets                       SupportTicket[]
   supportNotes                         SupportTicketNote[]
   supportReplies                       SupportTicketReply[]
+  refundTerminalEvidenceReviewEvents   RefundTerminalEvidenceReviewEvent[] @relation("refundTerminalEvidenceReviewEventActor")
 }
 
 model Vendor {
@@ -374,6 +388,8 @@ model Vendor {
   economicTransfersFrom        AllocationEconomicTransfer[]  @relation("economicTransferFromVendor")
   economicTransfersTo          AllocationEconomicTransfer[]  @relation("economicTransferToVendor")
   ownedReturnRecords           ReturnRecord[]                @relation("returnOwnerVendor")
+  refundEvidenceSnapshots       RefundEvidenceSnapshot[]       @relation("refundEvidenceHistoricalEconomicVendor")
+  refundTerminalEvidenceReviews RefundTerminalEvidenceReview[] @relation("refundTerminalEvidenceReviewEconomicVendor")
 }
 
 model SupportTicket {
@@ -693,6 +709,8 @@ model VendorAllocation {
   childAllocationSplitEvents             AllocationSplitEvent[]                  @relation("allocationSplitChildAllocation")
   customerCancellationRequestItems       CustomerCancellationRequestItem[]
   fullRefundTerminalFact                 AllocationFullRefundTerminalFact?
+  refundEvidenceSnapshots                RefundEvidenceSnapshot[]
+  refundTerminalEvidenceReviews          RefundTerminalEvidenceReview[]
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -1120,6 +1138,98 @@ model RefundRecord {
   operationalJobs             OperationalJob[]
 
   @@index([vendorAllocationId, createdAt])
+  refundEvidenceSnapshot      RefundEvidenceSnapshot?
+  terminalEvidenceReviews     RefundTerminalEvidenceReview[]
+}
+
+model RefundEvidenceSnapshot {
+  id                                 String                         @id @default(cuid())
+  sourceShopifyRefundId              String
+  sourceShopifyOrderId               String
+  vendorAllocationId                 String
+  refundRecordId                     String                         @unique
+  refundFinanceLedgerEntryId         String                         @unique
+  historicalEconomicVendorId         String
+  historicalSaleFinanceLedgerEntryId String
+  monetaryClassification             String
+  refundTotalAmount                  Decimal                        @db.Decimal(10, 2)
+  currency                           String
+  normalizedTransactionsJson         Json
+  normalizedRefundLinesJson          Json
+  normalizedOwnershipJson            Json
+  normalizedEvidenceJson             Json
+  supersededSaleLedgerIdsJson        Json
+  evidenceHash                       String
+  hashAlgorithm                      String
+  evidenceVersion                    Int
+  normalizationVersion               Int
+  evidenceSource                     String
+  capturedAt                         DateTime
+  createdAt                          DateTime                       @default(now())
+  vendorAllocation                   VendorAllocation               @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
+  refundRecord                       RefundRecord                   @relation(fields: [refundRecordId], references: [id], onDelete: Restrict)
+  refundFinanceLedgerEntry           FinanceLedgerEntry             @relation("refundEvidenceRefundLedger", fields: [refundFinanceLedgerEntryId], references: [id], onDelete: Restrict)
+  historicalEconomicVendor           Vendor                         @relation("refundEvidenceHistoricalEconomicVendor", fields: [historicalEconomicVendorId], references: [id], onDelete: Restrict)
+  historicalSaleFinanceLedgerEntry   FinanceLedgerEntry             @relation("refundEvidenceHistoricalSaleLedger", fields: [historicalSaleFinanceLedgerEntryId], references: [id], onDelete: Restrict)
+  terminalEvidenceReviews            RefundTerminalEvidenceReview[]
+
+  @@unique([sourceShopifyRefundId, vendorAllocationId])
+  @@index([sourceShopifyOrderId])
+  @@index([vendorAllocationId])
+  @@index([historicalEconomicVendorId])
+  @@index([evidenceHash])
+}
+
+model RefundTerminalEvidenceReview {
+  id                                 String                              @id @default(cuid())
+  sourceShopifyRefundId              String
+  sourceShopifyOrderId               String
+  vendorAllocationId                 String
+  terminalRefundFinanceLedgerEntryId String
+  refundRecordId                     String?
+  economicVendorId                   String
+  storedEvidenceSnapshotId           String?
+  dedupeKey                          String                              @unique
+  conflictCategory                   String
+  storedEvidenceHash                 String?
+  incomingEvidenceHash               String?
+  storedEvidenceSummaryJson          Json?
+  incomingEvidenceSummaryJson        Json?
+  conflictSummaryJson                Json
+  sourceContextJson                  Json?
+  status                             RefundTerminalEvidenceReviewStatus  @default(ACTIVE)
+  firstObservedAt                    DateTime                            @default(now())
+  lastObservedAt                     DateTime                            @default(now())
+  occurrenceCount                    Int                                 @default(1)
+  createdAt                          DateTime                            @default(now())
+  updatedAt                          DateTime                            @updatedAt
+  vendorAllocation                   VendorAllocation                    @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
+  terminalRefundFinanceLedgerEntry   FinanceLedgerEntry                  @relation("refundTerminalEvidenceReviewLedger", fields: [terminalRefundFinanceLedgerEntryId], references: [id], onDelete: Restrict)
+  refundRecord                       RefundRecord?                       @relation(fields: [refundRecordId], references: [id], onDelete: Restrict)
+  economicVendor                     Vendor                              @relation("refundTerminalEvidenceReviewEconomicVendor", fields: [economicVendorId], references: [id], onDelete: Restrict)
+  storedEvidenceSnapshot             RefundEvidenceSnapshot?             @relation(fields: [storedEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  events                             RefundTerminalEvidenceReviewEvent[]
+
+  @@index([status])
+  @@index([vendorAllocationId])
+  @@index([terminalRefundFinanceLedgerEntryId])
+  @@index([sourceShopifyRefundId])
+  @@index([firstObservedAt])
+}
+
+model RefundTerminalEvidenceReviewEvent {
+  id                String                                @id @default(cuid())
+  reviewId          String
+  eventType         RefundTerminalEvidenceReviewEventType
+  actorUserId       String?
+  note              String?
+  sourceContextJson Json?
+  createdAt         DateTime                              @default(now())
+  review            RefundTerminalEvidenceReview          @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  actorUser         User?                                 @relation("refundTerminalEvidenceReviewEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([reviewId, createdAt])
+  @@index([eventType, createdAt])
 }
 
 model ShopifyRefund {
@@ -1205,6 +1315,9 @@ model FinanceLedgerEntry {
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
   @@index([supersededByLedgerId])
+  refundEvidenceSnapshot          RefundEvidenceSnapshot?        @relation("refundEvidenceRefundLedger")
+  historicalSaleEvidenceSnapshots RefundEvidenceSnapshot[]       @relation("refundEvidenceHistoricalSaleLedger")
+  terminalEvidenceReviews         RefundTerminalEvidenceReview[] @relation("refundTerminalEvidenceReviewLedger")
 }
 
 model FinanceEvent {
