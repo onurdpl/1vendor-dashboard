@@ -4617,7 +4617,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       renderOrderDetail();
 
       const supportCard = await screen.findByLabelText('Shipment and return support');
-      expect(within(supportCard).getByLabelText('Support ticket summary')).toHaveTextContent(
+      expect(await within(supportCard).findByLabelText('Support ticket summary')).toHaveTextContent(
         status === 'RESOLVED' ? 'Resolved' : 'Closed',
       );
       expect(within(supportCard).getByRole('button', { name: 'Contact support' })).toBeEnabled();
