@@ -3187,23 +3187,60 @@ export async function validatePayoutBatchBeforeTransition(payoutBatchId: string)
 }
 
 export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto> {
-  const batch = await prisma.payoutBatch.update({
-    where: {
-      id: batchId,
-    },
-    data: {
-      status: 'CANCELLED',
-    },
-    include: {
-      lines: {
-        orderBy: {
-          createdAt: 'asc',
+  return prisma.$transaction(async (tx) => {
+    const cancellation = await tx.payoutBatch.updateMany({
+      where: {
+        id: batchId,
+        status: {
+          not: 'PAID',
+        },
+        paidAt: null,
+      },
+      data: {
+        status: 'CANCELLED',
+      },
+    });
+
+    if (cancellation.count !== 1) {
+      const currentBatch = await tx.payoutBatch.findUnique({
+        where: {
+          id: batchId,
+        },
+        select: {
+          status: true,
+          paidAt: true,
+        },
+      });
+
+      if (!currentBatch) {
+        throw new Error('Payout batch not found.');
+      }
+      if (currentBatch.status === 'PAID' || currentBatch.paidAt) {
+        throw new Error('Paid payout batches cannot be cancelled.');
+      }
+
+      throw new Error('Payout batch could not be cancelled because its status changed.');
+    }
+
+    const batch = await tx.payoutBatch.findUnique({
+      where: {
+        id: batchId,
+      },
+      include: {
+        lines: {
+          orderBy: {
+            createdAt: 'asc',
+          },
         },
       },
-    },
-  });
+    });
 
-  return mapPayoutBatch(batch);
+    if (!batch) {
+      throw new Error('Payout batch not found.');
+    }
+
+    return mapPayoutBatch(batch);
+  });
 }
 
 function normalizeOptionalPaymentEvidenceString(value: string | null | undefined) {

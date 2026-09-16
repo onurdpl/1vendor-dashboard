@@ -33,6 +33,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const {
+  cancelPayoutBatch,
   getVendorFinanceSummary,
   PayoutBatchTransitionRevalidationError,
   markPayoutBatchPaid,
@@ -2135,6 +2136,137 @@ describe('payout batch preparation', () => {
         }),
       ]),
     }));
+  });
+
+  it('rejects cancellation of a paid payout batch without changing paid evidence', async () => {
+    const paidAt = new Date('2026-06-02T08:30:00.000Z');
+    const paidBatch = {
+      ...buildTransitionBatch([], 'PAID'),
+      paidAt,
+      paidByUserId: 'admin-user',
+      paymentReference: 'EFT-PAID-1',
+    };
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce({
+      status: paidBatch.status,
+      paidAt: paidBatch.paidAt,
+    });
+
+    await expect(cancelPayoutBatch('batch-review'))
+      .rejects.toThrow('Paid payout batches cannot be cancelled.');
+
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'batch-review',
+        status: { not: 'PAID' },
+        paidAt: null,
+      },
+      data: { status: 'CANCELLED' },
+    });
+    expect(prismaMock.financeLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(paidBatch).toMatchObject({
+      status: 'PAID',
+      paidAt,
+      paidByUserId: 'admin-user',
+      paymentReference: 'EFT-PAID-1',
+    });
+  });
+
+  it('fails closed when paidAt evidence exists on a non-paid payout batch', async () => {
+    const paidAt = new Date('2026-06-02T08:30:00.000Z');
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce({
+      status: 'REVIEW',
+      paidAt,
+    });
+
+    await expect(cancelPayoutBatch('batch-review'))
+      .rejects.toThrow('Paid payout batches cannot be cancelled.');
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ paidAt: null }),
+    }));
+  });
+
+  it('cancels a legitimately cancellable non-paid payout batch', async () => {
+    const draftBatch = buildTransitionBatch([], 'DRAFT');
+    const cancelledBatch = {
+      ...draftBatch,
+      status: 'CANCELLED',
+      updatedAt: new Date('2026-06-02T08:31:00.000Z'),
+    };
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 1 });
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce(cancelledBatch);
+
+    await expect(cancelPayoutBatch('batch-review')).resolves.toMatchObject({
+      id: 'batch-review',
+      status: 'cancelled',
+    });
+  });
+
+  it('keeps paid as the terminal winner when Mark Paid completes before Cancel', async () => {
+    const paidAt = '2026-06-02T08:30:00.000Z';
+    const sale = buildEntry({
+      id: 'sale-paid-before-cancel',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+    });
+    const reviewBatch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ], 'REVIEW');
+    const paidBatch = {
+      ...reviewBatch,
+      status: 'PAID',
+      paidAt: new Date(paidAt),
+      paidByUserId: 'admin-user',
+    };
+    mockMarkPaidBatch(reviewBatch, paidBatch);
+
+    await markPayoutBatchPaid('batch-review', { paidAt }, 'admin-user');
+
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce({
+      status: 'PAID',
+      paidAt: new Date(paidAt),
+    });
+    await expect(cancelPayoutBatch('batch-review'))
+      .rejects.toThrow('Paid payout batches cannot be cancelled.');
+  });
+
+  it('keeps cancelled as the terminal winner when Cancel completes before Mark Paid', async () => {
+    const cancelledBatch = {
+      ...buildTransitionBatch([], 'DRAFT'),
+      status: 'CANCELLED',
+      updatedAt: new Date('2026-06-02T08:31:00.000Z'),
+    };
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 1 });
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce(cancelledBatch);
+
+    await cancelPayoutBatch('batch-review');
+
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce(cancelledBatch);
+    await expect(markPayoutBatchPaid(
+      'batch-review',
+      { paidAt: '2026-06-02T08:32:00.000Z' },
+      'admin-user',
+    )).rejects.toThrow('Cancelled payout batches cannot be marked paid.');
+    expect(prismaMock.financeLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('cannot overwrite a payout batch that becomes paid before the cancellation CAS', async () => {
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce({
+      status: 'PAID',
+      paidAt: new Date('2026-06-02T08:30:00.000Z'),
+    });
+
+    await expect(cancelPayoutBatch('batch-review'))
+      .rejects.toThrow('Paid payout batches cannot be cancelled.');
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.payoutBatch.findUnique).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a payout batch that is already paid', async () => {
