@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
   financeLedgerEntry: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
@@ -285,6 +286,8 @@ describe('settlement approval foundation', () => {
   beforeEach(() => {
     prismaMock.$transaction.mockReset();
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
+    prismaMock.$queryRaw.mockReset();
+    prismaMock.$queryRaw.mockResolvedValue([]);
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.financeLedgerEntry.findUnique.mockReset();
     prismaMock.settlementApproval.create.mockReset();
@@ -2198,6 +2201,109 @@ describe('settlement approval foundation', () => {
         amountMinor: true,
       },
     });
+  });
+
+  it('rejects cancellation of an approved settlement linked to a paid payout before any mutation', async () => {
+    const approved = buildApproval({ id: 'approval-1', status: 'APPROVED' });
+    const paidAt = new Date('2026-06-02T08:30:00.000Z');
+    const paidPayout = {
+      id: 'payout-paid-1',
+      status: 'PAID',
+      paidAt,
+    };
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(approved);
+    prismaMock.$queryRaw.mockResolvedValueOnce([paidPayout]);
+    prismaMock.settlementRefundAdjustmentApplication.findMany.mockResolvedValueOnce([
+      {
+        id: 'application-1',
+        settlementRefundAdjustmentId: 'adjustment-1',
+        settlementApprovalId: 'approval-1',
+        settlementApprovalLineId: 'line-1',
+        amountMinor: 600000,
+        currencyCode: 'TRY',
+        status: 'ACTIVE',
+        settlementRefundAdjustment: {
+          id: 'adjustment-1',
+          status: 'APPLIED',
+          appliedAmountMinor: 600000,
+          remainingAmountMinor: 0,
+          appliedSettlementApprovalId: 'approval-1',
+          appliedSettlementApprovalLineId: 'line-1',
+        },
+      },
+    ]);
+    prismaMock.settlementRefundAdjustment.findMany.mockResolvedValueOnce([
+      {
+        id: 'legacy-adjustment-1',
+        originalAmountMinor: 600000,
+        amountMinor: 600000,
+      },
+    ]);
+
+    await expect(cancelSettlementApproval('approval-1', 'admin-2')).rejects.toThrow(
+      'Settlement approval cannot be cancelled because it is linked to a paid payout batch.',
+    );
+
+    expect(approved).toMatchObject({
+      status: 'APPROVED',
+      cancelledBy: null,
+      cancelledAt: null,
+      lines: [expect.objectContaining({ id: 'line-1' })],
+    });
+    expect(paidPayout).toEqual({ id: 'payout-paid-1', status: 'PAID', paidAt });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+    expect(prismaMock.settlementApprovalLine.update).not.toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustmentApplication.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustmentApplication.update).not.toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustment.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustment.update).not.toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustmentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects the entire settlement when only one of several linked payout batches is paid', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue({
+      ...buildApproval({ id: 'approval-1', status: 'APPROVED' }),
+      lines: [
+        { ...buildApproval({ id: 'approval-1', status: 'APPROVED' }).lines[0], id: 'line-1' },
+        { ...buildApproval({ id: 'approval-1', status: 'APPROVED' }).lines[0], id: 'line-2', financeLedgerEntryId: 'sale-2' },
+      ],
+    });
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      { id: 'payout-review-1', status: 'REVIEW', paidAt: null },
+      { id: 'payout-paid-1', status: 'PAID', paidAt: new Date('2026-06-02T08:30:00.000Z') },
+    ]);
+
+    await expect(cancelSettlementApproval('approval-1', 'admin-2')).rejects.toThrow(
+      'Settlement approval cannot be cancelled because it is linked to a paid payout batch.',
+    );
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a linked non-paid payout batch has paidAt evidence', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'APPROVED' }));
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      { id: 'payout-review-with-paid-evidence', status: 'REVIEW', paidAt: new Date('2026-06-02T08:30:00.000Z') },
+    ]);
+
+    await expect(cancelSettlementApproval('approval-1', 'admin-2')).rejects.toThrow(
+      'Settlement approval cannot be cancelled because it is linked to a paid payout batch.',
+    );
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('locks linked payout authority before cancelling a settlement with no paid linkage', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'APPROVED' }));
+    prismaMock.$queryRaw.mockResolvedValueOnce([
+      { id: 'payout-review-1', status: 'REVIEW', paidAt: null },
+    ]);
+    prismaMock.settlementApproval.update.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'CANCELLED' }));
+
+    await expect(cancelSettlementApproval('approval-1', 'admin-2')).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$queryRaw.mock.invocationCallOrder[0])
+      .toBeLessThan(prismaMock.settlementApproval.update.mock.invocationCallOrder[0]);
   });
 
   it('cancels active refund adjustment applications and restores only the applied amount', async () => {

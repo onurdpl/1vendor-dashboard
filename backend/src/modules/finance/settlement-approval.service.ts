@@ -2466,6 +2466,25 @@ export async function cancelSettlementApproval(
         throw new Error('Settlement approval cannot be cancelled because an active commission invoice record exists.');
       }
 
+      const linkedPayoutBatches = await tx.$queryRaw<Array<{
+        id: string;
+        status: string;
+        paidAt: Date | null;
+      }>>(Prisma.sql`
+        SELECT payout_batch."id", payout_batch."status"::text AS "status", payout_batch."paidAt"
+        FROM "PayoutBatch" AS payout_batch
+        INNER JOIN "PayoutBatchLine" AS payout_line
+          ON payout_line."payoutBatchId" = payout_batch."id"
+        INNER JOIN "SettlementApprovalLine" AS settlement_line
+          ON settlement_line."id" = payout_line."settlementApprovalLineId"
+        WHERE settlement_line."settlementApprovalId" = ${id}
+        ORDER BY payout_batch."id"
+        FOR UPDATE OF payout_batch
+      `);
+      if (linkedPayoutBatches.some((batch) => batch.status === 'PAID' || batch.paidAt)) {
+        throw new Error('Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
+      }
+
       const cancelled = await tx.settlementApproval.update({
         where: {
           id,

@@ -1,5 +1,5 @@
 import { prisma } from '../../db/prisma.js';
-import { FinanceEventType, type Prisma } from '@prisma/client';
+import { FinanceEventType, Prisma } from '@prisma/client';
 import {
   auditVendorProfileChanges,
   type VendorProfileAuditActor,
@@ -3347,6 +3347,13 @@ export async function markPayoutBatchPaid(
   const paymentEvidence = parseMarkPayoutBatchPaidInput(input);
 
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id"
+      FROM "PayoutBatch"
+      WHERE "id" = ${batchId}
+      FOR UPDATE
+    `);
+
     const batch = await tx.payoutBatch.findUnique({
       where: {
         id: batchId,

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
   vendorFinancialProfile: {
     findFirst: vi.fn(),
   },
@@ -306,6 +307,8 @@ function mockMarkPaidBatch(
 describe('payout batch preparation', () => {
   beforeEach(() => {
     prismaMock.$transaction.mockReset();
+    prismaMock.$queryRaw.mockReset();
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'batch-review' }]);
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.financeLedgerEntry.updateMany.mockReset();
@@ -2010,6 +2013,9 @@ describe('payout batch preparation', () => {
       'admin-user',
     );
 
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$queryRaw.mock.invocationCallOrder[0])
+      .toBeLessThan(prismaMock.payoutBatch.findUnique.mock.invocationCallOrder[0]);
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'batch-review',
