@@ -7,14 +7,14 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "b4cb90cc9826a37f94fe8ffcb74b90eb4234d8b46f2937d89daeda7796e2facf"
+    "sha256": "c3f03e4d2e194f8c33932075c6d1d2035b1ff658a18ae9eaf89144a067be3e4d"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "eef720cec9c2a23a6a6dfe189379b4e8b03baa07317373789378c0a3da396439"
+    "sha256": "c14c71108fe9699191aa91c02181b16957e0b4e3321e0454621678ff885af4e1"
   },
-  "migrationCutoff": "20260904120000_add_allocation_full_refund_terminal_fact",
-  "baselineMigrationFilesSha256": "f87911747c58cc511fe97e14504b06286dfe19f5dfc8304ee7fab03111271405",
+  "migrationCutoff": "20260916120000_add_refund_terminal_evidence_foundation",
+  "baselineMigrationFilesSha256": "4a8e319cba64c77a72afe9a9331262dc1ee61fef6bd78fadd52ec13e989170ae",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -105,6 +105,7 @@
     "20260830150000_add_customer_cancellation_approved_for_refund",
     "20260830190000_add_customer_cancellation_auto_refund_processor",
     "20260902120000_add_customer_cancellation_refunded_awaiting_order_cancel",
-    "20260904120000_add_allocation_full_refund_terminal_fact"
+    "20260904120000_add_allocation_full_refund_terminal_fact",
+    "20260916120000_add_refund_terminal_evidence_foundation"
   ]
 }
