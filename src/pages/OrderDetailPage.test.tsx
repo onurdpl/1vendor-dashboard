@@ -4644,7 +4644,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const supportCard = await screen.findByLabelText('Shipment and return support');
-    expect(within(supportCard).getByRole('button', { name: 'Escalated' })).toBeDisabled();
+    expect(await within(supportCard).findByRole('button', { name: 'Escalated' })).toBeDisabled();
     expect(within(supportCard).getByLabelText('Support ticket summary')).toHaveTextContent('High priority');
     expectVendorSupportHelperCopyToBeAbsent(supportCard);
   });
