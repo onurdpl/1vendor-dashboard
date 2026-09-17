@@ -173,7 +173,11 @@ function buildRefundReturnRecordId(input: {
 
 async function reconcileCustomerCancellationItemsFromVerifiedRefund(
   tx: Prisma.TransactionClient,
-  input: { parsedRefund: ParsedShopifyRefundPayload; sourceShopifyRefundId: string },
+  input: {
+    parsedRefund: ParsedShopifyRefundPayload;
+    sourceShopifyRefundId: string;
+    targetVendorAllocationId?: string;
+  },
 ) {
   const quantitiesByLineItemId = new Map<string, number>();
   for (const line of input.parsedRefund.refundLineItems) {
@@ -184,6 +188,9 @@ async function reconcileCustomerCancellationItemsFromVerifiedRefund(
   const candidates = await tx.customerCancellationRequestItem.findMany({
     where: {
       status: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+      ...(input.targetVendorAllocationId
+        ? { vendorAllocationId: input.targetVendorAllocationId }
+        : {}),
       shopifyOrderLineItem: { sourceLineItemId: { in: [...quantitiesByLineItemId.keys()] } },
       outboundShopifyRefundAttempt: {
         status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
@@ -319,6 +326,10 @@ type ResolvedRefundLineItem = ParsedShopifyRefundLineItem & {
   refundAmount: string;
 };
 
+type RefundIngestionScope = Readonly<{
+  targetVendorAllocationId?: string;
+}>;
+
 function hasEmptySubmittedRefundLineItems(value: Prisma.JsonValue | null) {
   return Array.isArray(value) && value.length === 0;
 }
@@ -343,6 +354,7 @@ async function reconcileVerifiedShippingOnlyRefund(
     sourceShopifyOrderId: string;
     sourceShopifyRefundId: string;
     resolvedAt: Date;
+    targetVendorAllocationId?: string;
   },
 ) {
   const matchingClaims = await tx.orderShippingRefundClaim.findMany({
@@ -405,6 +417,16 @@ async function reconcileVerifiedShippingOnlyRefund(
     throw new Error('Shipping-only refund ownership evidence does not match the submitted refund attempt.');
   }
 
+  if (
+    input.targetVendorAllocationId &&
+    attempt.vendorAllocationId !== input.targetVendorAllocationId
+  ) {
+    return {
+      vendorAllocationId: attempt.vendorAllocationId,
+      terminalStateChanged: false,
+    };
+  }
+
   const alreadyTerminal =
     attempt.status === OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.RESOLVED &&
     claim.status === ORDER_SHIPPING_REFUND_CLAIM_STATUSES.RELEASED &&
@@ -460,13 +482,17 @@ async function reconcileVerifiedShippingOnlyRefund(
     vendorAllocationId: attempt.vendorAllocationId,
     releasedAt: input.resolvedAt,
   });
-  return { vendorAllocationId: attempt.vendorAllocationId, terminalStateChanged: true };
+  return {
+    vendorAllocationId: attempt.vendorAllocationId,
+    terminalStateChanged: true,
+  };
 }
 
 async function ingestShopifyRefundWebhookInternal(
   input: RefundIngestionInput,
   monetaryEvidence?: CanonicalRefundItemMonetaryEvidence,
   canonicalFinancialStatus?: string | null,
+  scope: RefundIngestionScope = {},
 ): Promise<RefundIngestionResult> {
   const parsedRefund = parseRefundPayload(input.payload);
 
@@ -554,6 +580,7 @@ async function ingestShopifyRefundWebhookInternal(
           sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
           resolvedAt: new Date(),
+          targetVendorAllocationId: scope.targetVendorAllocationId,
         });
 
         if (input.event) {
@@ -604,6 +631,13 @@ async function ingestShopifyRefundWebhookInternal(
         }, tx);
         const vendorAllocation = ownership.allocation;
         const originalVendorId = vendorAllocation.originalVendorId;
+
+        if (
+          scope.targetVendorAllocationId &&
+          vendorAllocation.id !== scope.targetVendorAllocationId
+        ) {
+          continue;
+        }
 
         const economicOwner = await assertResolvedEconomicOwnerForMoneyMovement({
           vendorAllocationId: vendorAllocation.id,
@@ -1057,6 +1091,7 @@ async function ingestShopifyRefundWebhookInternal(
         await reconcileCustomerCancellationItemsFromVerifiedRefund(tx, {
           parsedRefund,
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          targetVendorAllocationId: scope.targetVendorAllocationId,
         });
       }
 
@@ -1124,6 +1159,7 @@ export async function ingestVerifiedShopifyRefund(
   input: RefundIngestionInput & {
     monetaryEvidence: CanonicalRefundItemMonetaryEvidence;
     canonicalFinancialStatus: string | null | undefined;
+    targetVendorAllocationId?: string;
   },
 ): Promise<RefundIngestionResult> {
   const sourceShopifyRefundId = String(input.payload.id);
@@ -1138,5 +1174,6 @@ export async function ingestVerifiedShopifyRefund(
     input,
     input.monetaryEvidence,
     input.canonicalFinancialStatus,
+    { targetVendorAllocationId: input.targetVendorAllocationId },
   );
 }

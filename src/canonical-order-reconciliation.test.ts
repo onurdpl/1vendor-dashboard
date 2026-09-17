@@ -43,6 +43,14 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
+const reconcileShopifyOrderRefundsMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../backend/src/modules/reconciliation/canonical-refund-reconciliation.service.js', () => ({
+  createCanonicalRefundReconciliationService: vi.fn(() => ({
+    reconcileShopifyOrderRefunds: reconcileShopifyOrderRefundsMock,
+  })),
+}));
+
 const { createReconciliationService, __reconciliationTesting } = await import(
   '../backend/src/modules/reconciliation/reconciliation.service.js'
 );
@@ -228,6 +236,7 @@ describe('canonical Shopify order reconciliation', () => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation((callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
     prismaMock.vendor.findMany.mockResolvedValue([{ id: 'vendor-a' }, { id: 'vendor-b' }]);
+    reconcileShopifyOrderRefundsMock.mockResolvedValue(null);
   });
 
   it('repairs stale customer and address snapshot fields', async () => {
@@ -424,5 +433,20 @@ describe('canonical Shopify order reconciliation', () => {
       }),
     }));
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('propagates the requested allocation into canonical refund recovery', async () => {
+    const snapshot = buildCanonicalSnapshot();
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+      id: 'alloc-a',
+      order: { sourceShopifyOrderId: 'order-1' },
+    });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder());
+
+    await createReconciliationService(buildEnv(snapshot)).reconcileAllocation('alloc-a');
+
+    expect(reconcileShopifyOrderRefundsMock).toHaveBeenCalledWith('order-1', {
+      targetVendorAllocationId: 'alloc-a',
+    });
   });
 });

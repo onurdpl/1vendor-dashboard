@@ -626,6 +626,30 @@ describe('Shopify refund return linking', () => {
     expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
   });
 
+  it('does not terminalize a shipping-only refund owned by another allocation', async () => {
+    setupShippingOnlyOrder();
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
+      targetVendorAllocationId: 'alloc-other-vendor',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      refundAllocationCount: 0,
+      reconciliationMode: 'shipping_only',
+      terminalStateChanged: false,
+    });
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).not.toHaveBeenCalled();
+    expect(txMock.vendorAllocation.updateMany).not.toHaveBeenCalled();
+    expect(txMock.orderShippingRefundClaim.updateMany).not.toHaveBeenCalled();
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+  });
+
   it('keeps webhook then canonical shipping-only reconciliation idempotent', async () => {
     setupShippingOnlyOrder();
     txMock.orderShippingRefundClaim.findMany
@@ -1342,6 +1366,97 @@ describe('Shopify refund return linking', () => {
         }),
       }),
     );
+  });
+
+  it('keeps verified canonical refund ingestion scoped to the requested allocation', async () => {
+    setupSplitOrderRefund({
+      refundSourceLine: true,
+      refundChildLine: true,
+      sourceCancelRefundReviewStatus: 'PENDING_REVIEW',
+      childCancelRefundReviewStatus: 'PENDING_REVIEW',
+    });
+    txMock.vendorAllocation.findUnique.mockReset().mockResolvedValue({
+      id: 'alloc-source',
+      financeEntries: [{
+        id: 'fin-sporjinal-sale-split-order-alloc-source',
+        vendorId: 'sporjinal',
+        entryType: 'sale',
+        voidedAt: null,
+        supersededByLedgerId: null,
+        supersededBy: null,
+      }],
+      economicTransfers: [],
+    });
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: splitRefundPayload({ source: true, child: true }) as never,
+      monetaryEvidence: monetaryEvidence('refund-split', '150.00'),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+      targetVendorAllocationId: 'alloc-source',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledTimes(1);
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ vendorAllocationId: 'alloc-source', amount: '100.00' }),
+    }));
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ vendorAllocationId: 'alloc-child' }),
+    }));
+    expect(txMock.returnRecord.upsert).not.toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ vendorAllocationId: 'alloc-child' }),
+    }));
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ vendorAllocationId: 'alloc-child' }),
+    }));
+    expect(JSON.stringify(txMock.settlementRefundAdjustment.upsert.mock.calls)).not.toContain('alloc-child');
+    expect(JSON.stringify(txMock.vendorBalanceEvent.upsert.mock.calls)).not.toContain('alloc-child');
+    expect(JSON.stringify(txMock.financeEvent.createMany.mock.calls)).not.toContain('alloc-child');
+    expect(txMock.vendorAllocation.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'alloc-child' }),
+    }));
+    expect(txMock.customerCancellationRequestItem.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ vendorAllocationId: 'alloc-source' }),
+    }));
+  });
+
+  it('can scope the same canonical refund to the other allocation', async () => {
+    setupSplitOrderRefund({
+      refundSourceLine: true,
+      refundChildLine: true,
+      sourceCancelRefundReviewStatus: 'PENDING_REVIEW',
+      childCancelRefundReviewStatus: 'PENDING_REVIEW',
+    });
+    txMock.vendorAllocation.findUnique.mockReset().mockResolvedValue({
+      id: 'alloc-child',
+      financeEntries: [{
+        id: 'fin-sporjinal-sale-split-order-alloc-child',
+        vendorId: 'sporjinal',
+        entryType: 'sale',
+        voidedAt: null,
+        supersededByLedgerId: null,
+        supersededBy: null,
+      }],
+      economicTransfers: [],
+    });
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: splitRefundPayload({ source: true, child: true }) as never,
+      monetaryEvidence: monetaryEvidence('refund-split', '150.00'),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+      targetVendorAllocationId: 'alloc-child',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledTimes(1);
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ vendorAllocationId: 'alloc-child', amount: '50.00' }),
+    }));
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ vendorAllocationId: 'alloc-source' }),
+    }));
   });
 
   it('targets the replacement owner when original sale ledger is voided and superseded by an active sale ledger', async () => {

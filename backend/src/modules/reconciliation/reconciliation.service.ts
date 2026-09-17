@@ -37,6 +37,7 @@ import {
   repairBlockerMessage,
   resolveActiveEconomicOwnerForRepair,
 } from './reconciliation-transfer-policy.service.js';
+import { createCanonicalRefundReconciliationService } from './canonical-refund-reconciliation.service.js';
 
 function extractShopifyGidTail(gid: string) {
   const tail = gid.split('/').at(-1)?.trim() ?? '';
@@ -927,6 +928,7 @@ type ReconcileOrderOptions = {
 
 export function createReconciliationService(env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
+  const canonicalRefundReconciliationService = createCanonicalRefundReconciliationService(env);
 
   async function reconcileShopifyOrder(
     sourceShopifyOrderId: string,
@@ -1650,9 +1652,19 @@ export function createReconciliationService(env: AppEnv) {
       return null;
     }
 
-    return reconcileShopifyOrder(allocation.order.sourceShopifyOrderId, {
+    const result = await reconcileShopifyOrder(allocation.order.sourceShopifyOrderId, {
       targetAllocationId: allocationId,
     });
+    if (!result) {
+      return null;
+    }
+
+    await canonicalRefundReconciliationService.reconcileShopifyOrderRefunds(
+      allocation.order.sourceShopifyOrderId,
+      { targetVendorAllocationId: allocationId },
+    );
+
+    return result;
   }
 
   return {

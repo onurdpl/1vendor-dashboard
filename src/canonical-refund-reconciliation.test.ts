@@ -28,6 +28,7 @@ const prismaMock = vi.hoisted(() => ({
 const ingestVerifiedShopifyRefundMock = vi.hoisted(() => vi.fn());
 const terminalWriterMock = vi.hoisted(() => ({
   createVerifiedFactsForShopifyOrder: vi.fn(),
+  createVerifiedFact: vi.fn(),
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -161,6 +162,11 @@ describe('canonical Shopify refund reconciliation', () => {
       reasonCode: 'writer_disabled',
       allocations: [],
     });
+    terminalWriterMock.createVerifiedFact.mockResolvedValue({
+      outcome: 'DISABLED',
+      reasonCode: 'writer_disabled',
+      fact: null,
+    });
   });
 
   it('creates a missing local refund through the existing refund ingestion path', async () => {
@@ -226,6 +232,39 @@ describe('canonical Shopify refund reconciliation', () => {
       verificationSource: 'canonical_reconciliation',
     });
     expect(result?.terminalWriter).toMatchObject({ outcome: 'DISABLED' });
+  });
+
+  it('passes an explicit allocation scope after classifying complete canonical monetary evidence', async () => {
+    prismaMock.shopifyOrder.findUnique.mockResolvedValue({
+      id: 'shopify-order-db-1',
+      allocations: [{ id: 'alloc-a' }],
+    });
+    mockEvidenceCounts([
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+    ]);
+
+    await createCanonicalRefundReconciliationService(
+      buildEnv([canonicalRefund()]),
+    ).reconcileShopifyOrderRefunds('order-1', {
+      targetVendorAllocationId: 'alloc-a',
+    });
+
+    expect(ingestVerifiedShopifyRefundMock).toHaveBeenCalledWith(expect.objectContaining({
+      targetVendorAllocationId: 'alloc-a',
+      monetaryEvidence: expect.objectContaining({
+        classification: 'MONETARY_REFUND',
+        monetaryRefundAmount: '100',
+      }),
+      payload: expect.objectContaining({
+        refund_line_items: [expect.objectContaining({ id: '9001' })],
+      }),
+    }));
+    expect(terminalWriterMock.createVerifiedFact).toHaveBeenCalledWith({
+      vendorAllocationId: 'alloc-a',
+      verificationSource: 'canonical_reconciliation',
+    });
+    expect(terminalWriterMock.createVerifiedFactsForShopifyOrder).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -332,6 +371,37 @@ describe('canonical Shopify refund reconciliation', () => {
         }),
       ],
     });
+  });
+
+  it('keeps repeated allocation-scoped reconciliation idempotent', async () => {
+    prismaMock.shopifyOrder.findUnique.mockResolvedValue({
+      id: 'shopify-order-db-1',
+      allocations: [{ id: 'alloc-a' }],
+    });
+    mockEvidenceCounts([
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+    ]);
+    const service = createCanonicalRefundReconciliationService(buildEnv([canonicalRefund()]));
+
+    const first = await service.reconcileShopifyOrderRefunds('order-1', {
+      targetVendorAllocationId: 'alloc-a',
+    });
+    const second = await service.reconcileShopifyOrderRefunds('order-1', {
+      targetVendorAllocationId: 'alloc-a',
+    });
+
+    expect(first?.results[0]?.status).toBe('already_present');
+    expect(second?.results[0]?.status).toBe('already_present');
+    expect(ingestVerifiedShopifyRefundMock).toHaveBeenCalledTimes(2);
+    expect(ingestVerifiedShopifyRefundMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      targetVendorAllocationId: 'alloc-a',
+    }));
+    expect(ingestVerifiedShopifyRefundMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      targetVendorAllocationId: 'alloc-a',
+    }));
   });
 
   it('routes a canonical shipping-only refund through verified ingestion without product finance deltas', async () => {

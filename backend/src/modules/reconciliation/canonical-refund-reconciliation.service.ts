@@ -227,11 +227,15 @@ async function upsertSyntheticRefundWebhookEvent(input: {
   });
 }
 
-async function getRefundEvidenceCounts(sourceShopifyRefundId: string): Promise<RefundEvidenceCounts> {
+async function getRefundEvidenceCounts(
+  sourceShopifyRefundId: string,
+  targetVendorAllocationId?: string,
+): Promise<RefundEvidenceCounts> {
   const [refundRecords, refundLedgers, financeEvents] = await Promise.all([
     prisma.refundRecord.count({
       where: {
         sourceShopifyRefundId,
+        ...(targetVendorAllocationId ? { vendorAllocationId: targetVendorAllocationId } : {}),
       },
     }),
     prisma.financeLedgerEntry.count({
@@ -241,12 +245,16 @@ async function getRefundEvidenceCounts(sourceShopifyRefundId: string): Promise<R
         id: {
           contains: `-refund-${sourceShopifyRefundId}`,
         },
+        ...(targetVendorAllocationId ? { vendorAllocationId: targetVendorAllocationId } : {}),
       },
     }),
     prisma.financeEvent.count({
       where: {
         referenceType: 'shopify_refund',
         referenceId: sourceShopifyRefundId,
+        ...(targetVendorAllocationId
+          ? { financeLedgerEntry: { vendorAllocationId: targetVendorAllocationId } }
+          : {}),
       },
     }),
   ]);
@@ -258,10 +266,14 @@ async function getRefundEvidenceCounts(sourceShopifyRefundId: string): Promise<R
   };
 }
 
-async function getRefundRecordSummary(sourceShopifyRefundId: string) {
+async function getRefundRecordSummary(
+  sourceShopifyRefundId: string,
+  targetVendorAllocationId?: string,
+) {
   return prisma.refundRecord.findMany({
     where: {
       sourceShopifyRefundId,
+      ...(targetVendorAllocationId ? { vendorAllocationId: targetVendorAllocationId } : {}),
     },
     select: {
       id: true,
@@ -313,7 +325,10 @@ export function createCanonicalRefundReconciliationService(
     { logger: dependencies.logger },
   );
 
-  async function reconcileShopifyOrderRefunds(sourceShopifyOrderId: string): Promise<CanonicalRefundReconciliationReport | null> {
+  async function reconcileShopifyOrderRefunds(
+    sourceShopifyOrderId: string,
+    options: { targetVendorAllocationId?: string } = {},
+  ): Promise<CanonicalRefundReconciliationReport | null> {
     const canonicalRefunds = await shopifyAdminService.fetchCanonicalRefundsForOrder(sourceShopifyOrderId);
     if (!canonicalRefunds) {
       return null;
@@ -405,6 +420,12 @@ export function createCanonicalRefundReconciliationService(
       },
       select: {
         id: true,
+        allocations: options.targetVendorAllocationId
+          ? {
+              where: { id: options.targetVendorAllocationId },
+              select: { id: true },
+            }
+          : false,
       },
     });
 
@@ -452,6 +473,15 @@ export function createCanonicalRefundReconciliationService(
       return report;
     }
 
+    if (
+      options.targetVendorAllocationId &&
+      (!('allocations' in localOrder) || localOrder.allocations.length === 0)
+    ) {
+      throw new Error(
+        `Target allocation ${options.targetVendorAllocationId} does not belong to Shopify order ${sourceShopifyOrderId}.`,
+      );
+    }
+
     for (const refund of canonicalRefunds.refunds) {
       const refundEvidence = monetaryEvidence
         ? findCanonicalRefundItemEvidence(monetaryEvidence, refund.sourceShopifyRefundId)
@@ -492,7 +522,10 @@ export function createCanonicalRefundReconciliationService(
         continue;
       }
 
-      const before = await getRefundEvidenceCounts(refund.sourceShopifyRefundId);
+      const before = await getRefundEvidenceCounts(
+        refund.sourceShopifyRefundId,
+        options.targetVendorAllocationId,
+      );
       const payload = canonicalRefundToWebhookPayload({
         sourceShopifyOrderId: canonicalRefunds.sourceShopifyOrderId,
         refund,
@@ -510,9 +543,16 @@ export function createCanonicalRefundReconciliationService(
         payload,
         monetaryEvidence: refundEvidence,
         canonicalFinancialStatus: canonicalRefunds.displayFinancialStatus,
+        targetVendorAllocationId: options.targetVendorAllocationId,
       });
-      const after = await getRefundEvidenceCounts(refund.sourceShopifyRefundId);
-      const recordSummary = await getRefundRecordSummary(refund.sourceShopifyRefundId);
+      const after = await getRefundEvidenceCounts(
+        refund.sourceShopifyRefundId,
+        options.targetVendorAllocationId,
+      );
+      const recordSummary = await getRefundRecordSummary(
+        refund.sourceShopifyRefundId,
+        options.targetVendorAllocationId,
+      );
 
       if (!ingestionResult.ok) {
         const lineItemUnmatched = /line item|sku|mapping|allocated/i.test(ingestionResult.error);
@@ -618,10 +658,29 @@ export function createCanonicalRefundReconciliationService(
 
     if (report.failedCount === 0) {
       try {
-        report.terminalWriter = await fullRefundTerminalFactService.createVerifiedFactsForShopifyOrder({
-          sourceShopifyOrderId,
-          verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
-        });
+        if (options.targetVendorAllocationId) {
+          const terminalResult = await fullRefundTerminalFactService.createVerifiedFact({
+            vendorAllocationId: options.targetVendorAllocationId,
+            verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+          });
+          report.terminalWriter = {
+            sourceShopifyOrderId,
+            verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+            outcome: terminalResult.outcome === 'DISABLED' ? 'DISABLED' : 'COMPLETED',
+            reasonCode: terminalResult.reasonCode,
+            allocations: [{
+              allocationId: options.targetVendorAllocationId,
+              verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+              outcome: terminalResult.outcome,
+              reasonCode: terminalResult.reasonCode,
+            }],
+          };
+        } else {
+          report.terminalWriter = await fullRefundTerminalFactService.createVerifiedFactsForShopifyOrder({
+            sourceShopifyOrderId,
+            verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+          });
+        }
       } catch {
         dependencies.logger?.error({
           sourceShopifyOrderId,
