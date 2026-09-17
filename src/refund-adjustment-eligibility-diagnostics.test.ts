@@ -17,6 +17,7 @@ function refundLedgerRow(overrides: Record<string, unknown> = {}) {
     commissionPercentSnapshot: 10,
     commissionVatPercentSnapshot: 20,
     refundAdjustments: [],
+    refundEvidenceSnapshot: { refundRecordId: 'refund-record-1001' },
     vendorBalanceEvents: [],
     vendorAllocation: {
       id: 'allocation-1',
@@ -67,6 +68,37 @@ function refundLedgerRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('refund adjustment eligibility diagnostics', () => {
+  it('excludes legacy refund finance without accepted snapshot authority from backfill preview', async () => {
+    const row = refundLedgerRow({ refundEvidenceSnapshot: null });
+    const db = {
+      financeLedgerEntry: { findMany: vi.fn().mockResolvedValue([row]) },
+      refundEvidenceSnapshot: { create: vi.fn() },
+      settlementRefundAdjustment: { upsert: vi.fn() },
+      $transaction: vi.fn(),
+    };
+
+    const preview = await previewRefundAdjustmentEligibility({ db: db as never });
+    const result = await backfillPendingRefundAdjustments({ db: db as never });
+
+    expect(preview.records[0].recommendedAction).toBe('UNKNOWN');
+    expect(preview.records[0].blockerReason).toContain('no accepted evidence snapshot');
+    expect(preview.summary.createPendingAdjustment).toBe(0);
+    expect(result.writesPerformed).toBe(false);
+    expect(result.summary.eligible).toBe(0);
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(db.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(row.refundEvidenceSnapshot).toBeNull();
+  });
+
+  it('does not accept a snapshot linked to another refund record', () => {
+    const result = classifyRefundAdjustmentEligibility(refundLedgerRow({
+      refundEvidenceSnapshot: { refundRecordId: 'another-refund-record' },
+    }));
+
+    expect(result.recommendedAction).toBe('UNKNOWN');
+  });
+
   it('marks eligible refund after approved settlement as CREATE_PENDING_ADJUSTMENT', () => {
     const result = classifyRefundAdjustmentEligibility(refundLedgerRow());
 
@@ -282,6 +314,7 @@ describe('refund adjustment eligibility diagnostics', () => {
     const second = refundLedgerRow({
       id: 'fin-yalispor-refund-1002',
       amount: 500,
+      refundEvidenceSnapshot: { refundRecordId: 'refund-record-1002' },
       vendorAllocation: {
         ...refundLedgerRow().vendorAllocation,
         refundRecords: [
@@ -344,6 +377,9 @@ describe('refund adjustment eligibility diagnostics', () => {
       financeLedgerEntry: {
         findUnique: vi.fn().mockResolvedValue(refundLedgerRow()),
       },
+      refundEvidenceSnapshot: {
+        findUnique: vi.fn().mockResolvedValue({ refundRecordId: 'refund-record-1001' }),
+      },
       settlementRefundAdjustment: {
         upsert: vi.fn().mockResolvedValue(adjustmentRow),
       },
@@ -379,12 +415,44 @@ describe('refund adjustment eligibility diagnostics', () => {
       },
     ]);
     expect(tx.settlementRefundAdjustment.upsert).toHaveBeenCalledTimes(1);
+    expect(tx.refundEvidenceSnapshot.findUnique).toHaveBeenCalledWith({
+      where: { refundFinanceLedgerEntryId: 'fin-yalispor-refund-1001' },
+      select: { refundRecordId: true },
+    });
     expect(tx.settlementRefundAdjustment.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         status: 'PENDING',
         refundFinanceLedgerEntryId: 'fin-yalispor-refund-1001',
       }),
     }));
+  });
+
+  it('rechecks snapshot authority inside confirmed backfill and fails closed when it disappears', async () => {
+    const row = refundLedgerRow();
+    const tx = {
+      financeLedgerEntry: { findUnique: vi.fn() },
+      refundEvidenceSnapshot: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn() },
+      settlementRefundAdjustment: { upsert: vi.fn() },
+      vendorBalanceEvent: { create: vi.fn() },
+    };
+    const db = {
+      financeLedgerEntry: { findMany: vi.fn().mockResolvedValue([row]) },
+      refundEvidenceSnapshot: tx.refundEvidenceSnapshot,
+      settlementRefundAdjustment: tx.settlementRefundAdjustment,
+      $transaction: vi.fn((callback) => callback(tx)),
+    };
+
+    const result = await backfillPendingRefundAdjustments({ db: db as never });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.summary).toEqual({ eligible: 1, created: 0, alreadyExisting: 0, skipped: 1, failed: 1 });
+    expect(result.skippedRecords[0].reason).toContain('no accepted evidence snapshot');
+    expect(tx.refundEvidenceSnapshot.findUnique).toHaveBeenCalledTimes(1);
+    expect(tx.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
+    expect(tx.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(tx.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(tx.vendorBalanceEvent.create).not.toHaveBeenCalled();
+    expect(row.refundEvidenceSnapshot).toEqual({ refundRecordId: 'refund-record-1001' });
   });
 
   it('creates adjustment using active sale ledger while ignoring voided sale ledger rows', async () => {
@@ -489,6 +557,7 @@ describe('refund adjustment eligibility diagnostics', () => {
       financeLedgerEntry: {
         findMany: vi.fn().mockResolvedValue([
           refundLedgerRow({
+            refundEvidenceSnapshot: null,
             refundAdjustments: [{ id: 'adjustment-2', status: 'PENDING' }],
           }),
         ]),
@@ -510,6 +579,7 @@ describe('refund adjustment eligibility diagnostics', () => {
       failed: 0,
     });
     expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
   });
 
   it('returns writesPerformed false when no eligible records exist', async () => {

@@ -77,7 +77,7 @@ export type RefundAdjustmentEligibilityPreview = {
 type RefundAdjustmentEligibilityDbClient = Pick<Prisma.TransactionClient, 'financeLedgerEntry'>;
 type RefundAdjustmentBackfillTransaction = Pick<
   Prisma.TransactionClient,
-  'financeLedgerEntry' | 'settlementRefundAdjustment'
+  'financeLedgerEntry' | 'refundEvidenceSnapshot' | 'settlementRefundAdjustment'
 >;
 type RefundAdjustmentBackfillDbClient = RefundAdjustmentBackfillTransaction & {
   $transaction<T>(callback: (tx: RefundAdjustmentBackfillTransaction) => Promise<T>): Promise<T>;
@@ -338,6 +338,9 @@ export function classifyRefundAdjustmentEligibility(row: RefundLedgerRow): Refun
         : !refundRecord?.id
           ? 'Refund record id is unavailable.'
           : 'Refund payable reversal amount is zero or invalid.';
+    } else if (!row.refundEvidenceSnapshot || row.refundEvidenceSnapshot.refundRecordId !== refundRecord.id) {
+      recommendedAction = 'UNKNOWN';
+      blockerReason = 'Refund ledger has no accepted evidence snapshot for its refund record; adjustment backfill requires review.';
     } else {
       recommendedAction = 'CREATE_PENDING_ADJUSTMENT';
     }
@@ -443,6 +446,11 @@ async function findRefundLedgerRows(
           status: true,
         },
         take: 1,
+      },
+      refundEvidenceSnapshot: {
+        select: {
+          refundRecordId: true,
+        },
       },
       vendorBalanceEvents: {
         where: {
@@ -588,15 +596,24 @@ export async function backfillPendingRefundAdjustments(input: {
     }
 
     try {
-      const adjustment = await db.$transaction((tx: RefundAdjustmentBackfillTransaction) =>
-        createSettlementRefundAdjustmentForRefundLedger(tx, {
+      const result = await db.$transaction(async (tx: RefundAdjustmentBackfillTransaction) => {
+        const snapshot = await tx.refundEvidenceSnapshot.findUnique({
+          where: { refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId },
+          select: { refundRecordId: true },
+        });
+        if (!snapshot || snapshot.refundRecordId !== record.refundRecordId) {
+          return { adjustment: null, authorityMissing: true };
+        }
+        const adjustment = await createSettlementRefundAdjustmentForRefundLedger(tx, {
           refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId,
           refundRecordId: record.refundRecordId as string,
           createdBy: input.createdBy ?? 'system:refund_adjustment_backfill',
-        })
-      );
+        });
+        return { adjustment, authorityMissing: false };
+      });
 
-      if (adjustment) {
+      if (result.adjustment) {
+        const adjustment = result.adjustment;
         createdRecords.push({
           id: adjustment.id,
           refundFinanceLedgerEntryId: adjustment.refundFinanceLedgerEntryId,
@@ -610,7 +627,9 @@ export async function backfillPendingRefundAdjustments(input: {
           refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId,
           refundRecordId: record.refundRecordId,
           recommendedAction: record.recommendedAction,
-          reason: 'Eligibility changed before adjustment could be created.',
+          reason: result.authorityMissing
+            ? 'Refund ledger has no accepted evidence snapshot for its refund record; adjustment backfill requires review.'
+            : 'Eligibility changed before adjustment could be created.',
         });
       }
     } catch (error) {
