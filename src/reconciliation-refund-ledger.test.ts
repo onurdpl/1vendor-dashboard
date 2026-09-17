@@ -20,15 +20,22 @@ const prismaMock = vi.hoisted(() => ({
   },
   financeLedgerEntry: {
     create: vi.fn(),
+    findMany: vi.fn(),
   },
   vendorBalanceEvent: {
     upsert: vi.fn(),
   },
   $transaction: vi.fn((callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock)),
 }));
+const reconcileCanonicalRefundsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
+}));
+vi.mock('../backend/src/modules/reconciliation/canonical-refund-reconciliation.service.js', () => ({
+  createCanonicalRefundReconciliationService: () => ({
+    reconcileShopifyOrderRefunds: reconcileCanonicalRefundsMock,
+  }),
 }));
 
 const { createReconciliationService } = await import('../backend/src/modules/reconciliation/reconciliation.service.js');
@@ -160,6 +167,8 @@ describe('refund ledger reconciliation ids', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation((callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
+    reconcileCanonicalRefundsMock.mockResolvedValue(null);
   });
 
   it('does not mark an existing allocation-scoped refund ledger as missing', async () => {
@@ -183,7 +192,7 @@ describe('refund ledger reconciliation ids', () => {
     expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
   });
 
-  it('repairs multi-allocation refunds with one allocation-scoped ledger per allocation', async () => {
+  it('delegates missing multi-allocation refund finance to canonical reconciliation without a local first effect', async () => {
     const firstSale = saleLedger({ id: 'fin-vendor-a-sale-order-1-alloc-a', vendorId: 'vendor-a' });
     const secondSale = saleLedger({ id: 'fin-vendor-a-sale-order-1-alloc-b', vendorId: 'vendor-a' });
     const allocations = [
@@ -202,24 +211,90 @@ describe('refund ledger reconciliation ids', () => {
     ];
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder(allocations));
     mockEconomicOwnerFromAllocationRows(allocations);
-    prismaMock.financeLedgerEntry.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => data);
+    const result = await createReconciliationService(env).reconcileShopifyOrder('order-1');
+
+    expect(result?.reconciliationStatus).toBe('needs_attention');
+    expect(result?.skippedFields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scope: 'refund-record-alloc-a', field: 'financeLedgerEntry' }),
+      expect.objectContaining({ scope: 'refund-record-alloc-b', field: 'financeLedgerEntry' }),
+    ]));
+    expect(reconcileCanonicalRefundsMock).toHaveBeenCalledTimes(1);
+    expect(reconcileCanonicalRefundsMock).toHaveBeenCalledWith('order-1', {});
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('reports finance repaired only after canonical reconciliation creates the expected active ledger', async () => {
+    const allocations = [allocation({
+      id: 'alloc-a',
+      vendorId: 'vendor-a',
+      sourceLineItemId: 'line-1',
+      financeEntries: [saleLedger({ id: 'fin-vendor-a-sale-order-1-alloc-a', vendorId: 'vendor-a' })],
+    })];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder(allocations));
+    mockEconomicOwnerFromAllocationRows(allocations);
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValueOnce([
+      { id: 'fin-vendor-a-refund-refund-1-alloc-a', vendorId: 'vendor-a' },
+    ]);
 
     const result = await createReconciliationService(env).reconcileShopifyOrder('order-1');
 
     expect(result?.reconciliationStatus).toBe('repaired');
-    expect(prismaMock.financeLedgerEntry.create).toHaveBeenCalledTimes(2);
-    expect(prismaMock.financeLedgerEntry.create).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      data: expect.objectContaining({
-        id: 'fin-vendor-a-refund-refund-1-alloc-a',
-        vendorAllocationId: 'alloc-a',
+    expect(result?.repairedFields).toEqual([
+      expect.objectContaining({ scope: 'refund-record-alloc-a', field: 'financeLedgerEntry' }),
+    ]);
+    expect(result?.skippedFields).toEqual([]);
+    expect(result?.warnings).toEqual([]);
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps canonical refund recovery scoped to the requested allocation', async () => {
+    const allocations = [
+      allocation({
+        id: 'alloc-a',
+        vendorId: 'vendor-a',
+        sourceLineItemId: 'line-1',
+        financeEntries: [saleLedger({ id: 'fin-vendor-a-sale-order-1-alloc-a', vendorId: 'vendor-a' })],
       }),
-    }));
-    expect(prismaMock.financeLedgerEntry.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      data: expect.objectContaining({
-        id: 'fin-vendor-a-refund-refund-1-alloc-b',
-        vendorAllocationId: 'alloc-b',
+      allocation({
+        id: 'alloc-b',
+        vendorId: 'vendor-b',
+        sourceLineItemId: 'line-2',
+        financeEntries: [saleLedger({ id: 'fin-vendor-b-sale-order-1-alloc-b', vendorId: 'vendor-b' })],
       }),
-    }));
+    ];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder(allocations));
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+      order: { sourceShopifyOrderId: 'order-1' },
+    });
+    mockEconomicOwnerFromAllocationRows(allocations);
+
+    await createReconciliationService(env).reconcileAllocation('alloc-a');
+
+    expect(reconcileCanonicalRefundsMock).toHaveBeenCalledTimes(1);
+    expect(reconcileCanonicalRefundsMock).toHaveBeenCalledWith('order-1', {
+      targetVendorAllocationId: 'alloc-a',
+    });
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('leaves canonical recovery to the runner when the runner already invokes it', async () => {
+    const allocations = [allocation({
+      id: 'alloc-a',
+      vendorId: 'vendor-a',
+      sourceLineItemId: 'line-1',
+      financeEntries: [saleLedger({ id: 'fin-vendor-a-sale-order-1-alloc-a', vendorId: 'vendor-a' })],
+    })];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder(allocations));
+    mockEconomicOwnerFromAllocationRows(allocations);
+
+    await createReconciliationService(env).reconcileShopifyOrder('order-1', {
+      deferCanonicalRefundReconciliation: true,
+    });
+
+    expect(reconcileCanonicalRefundsMock).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
   });
 
   it('reports legacy non-allocation-scoped refund ledgers without creating duplicates', async () => {

@@ -471,7 +471,9 @@ async function repairOrder(env: AppEnv, shopifyOrderId: string): Promise<Canonic
   const returnReconciliation = createCanonicalReturnReconciliationService(env);
   const cancellationReconciliation = createCanonicalCancellationReconciliationService(env);
 
-  const orderResult = await orderReconciliation.reconcileShopifyOrder(shopifyOrderId);
+  const orderResult = await orderReconciliation.reconcileShopifyOrder(shopifyOrderId, {
+    deferCanonicalRefundReconciliation: true,
+  });
   if (orderResult?.reconciliationStatus === 'repaired') {
     detail.wouldRepair.order = orderResult.repairedFields.length;
     detail.actions.push('Repaired canonical order and fulfillment state.');

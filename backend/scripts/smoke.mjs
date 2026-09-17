@@ -1874,8 +1874,19 @@ async function runSmoke() {
       reconcileOrderFinanceJson.skippedFields?.some((field) => field.field === 'financeLedgerEntry')
     ) {
       throw new Error(
-        `/admin/reconciliation/shopify-order/:shopifyOrderId second pass should repair the refund ledger after sale-ledger restoration: ${JSON.stringify(reconcileOrderFinanceJson)}`,
+        `/admin/reconciliation/shopify-order/:shopifyOrderId must report first refund finance repaired only after canonical reconciliation: ${JSON.stringify(reconcileOrderFinanceJson)}`,
       );
+    }
+    if (prisma) {
+      const reconciledRefundLedger = await prisma.financeLedgerEntry.findUnique({
+        where: { id: `fin-yalispor-refund-rf-${runId}-alloc-yalispor-${smokeOrderId}` },
+      });
+      if (
+        reconciledRefundLedger?.entryType !== 'refund' ||
+        reconciledRefundLedger.description !== `Refund allocation for Shopify refund rf-${runId}`
+      ) {
+        throw new Error('Canonical refund reconciliation did not restore the missing refund ledger.');
+      }
     }
 
     const vendorReconcileResponse = await fetch(`${baseUrl}/admin/reconciliation/orders/alloc-yalispor-${smokeOrderId}`, {

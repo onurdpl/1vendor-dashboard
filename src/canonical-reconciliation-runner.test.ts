@@ -362,7 +362,9 @@ describe('canonical reconciliation runner', () => {
     const report = await runCanonicalReconciliation(buildEnv({ mode: 'repair' }), { mode: 'repair' });
 
     expect(report.status).toBe('COMPLETED');
-    expect(reconcileShopifyOrderMock).toHaveBeenCalledWith('order-1');
+    expect(reconcileShopifyOrderMock).toHaveBeenCalledWith('order-1', {
+      deferCanonicalRefundReconciliation: true,
+    });
     expect(reconcileShopifyOrderRefundsMock).toHaveBeenCalledWith('order-1');
     expect(reconcileShopifyOrderReturnsMock).toHaveBeenCalledWith('order-1');
     expect(reconcileShopifyOrderCancellationMock).toHaveBeenCalledWith('order-1');

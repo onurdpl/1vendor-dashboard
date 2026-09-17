@@ -21,15 +21,10 @@ import type {
   ReconciliationFieldChange,
 } from './reconciliation.types.js';
 import {
-  classifyPostApprovalRefundRisk,
-  getUnsettledRefundOffsetEligibility,
-} from '../finance/refund-offset.service.js';
-import {
   buildLegacyRefundLedgerEntryId,
   buildRefundLedgerEntryId,
   matchesRefundLedgerSource,
 } from '../finance/refund-ledger-id.service.js';
-import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import { isLedgerVoided } from '../finance/active-ledger-policy.service.js';
 import {
   classifySaleLedgerRepairReadiness,
@@ -508,6 +503,7 @@ function recordSkippedRepair(input: {
   input.skippedFields.push(change);
   input.allocationResult.skippedFields.push(change);
   input.allocationResult.warnings.push(input.reason);
+  return change;
 }
 
 type LocalCanonicalLineItem = {
@@ -924,6 +920,7 @@ function buildCanonicalLineItemMaps(fulfillmentState: ShopifyOrderFulfillmentSta
 
 type ReconcileOrderOptions = {
   targetAllocationId?: string;
+  deferCanonicalRefundReconciliation?: boolean;
 };
 
 export function createReconciliationService(env: AppEnv) {
@@ -940,6 +937,12 @@ export function createReconciliationService(env: AppEnv) {
     const warnings: string[] = [];
     const affectedAllocations: ReconciliationAllocationResult[] = [];
     const affectedVendorIds = new Set<string>();
+    const pendingCanonicalRefundFinance: Array<{
+      ledgerId: string;
+      vendorId: string;
+      change: ReconciliationFieldChange;
+      allocationResult: ReconciliationAllocationResult;
+    }> = [];
 
     let canonicalOrderSnapshot: CanonicalShopifyOrderSnapshot | null = null;
     try {
@@ -1445,74 +1448,21 @@ export function createReconciliationService(env: AppEnv) {
             continue;
           }
 
-          const saleLedgerEntry = allocation.financeEntries.find((entry) =>
-            entry.id === activeSaleLedgerId &&
-            entry.entryType === 'sale' &&
-            !isLedgerVoided(entry)
-          ) ?? null;
-          if (!saleLedgerEntry) {
-            recordSkippedRepair({
-              scope: refundRecord.id,
-              field: 'financeLedgerEntry',
-              localValue: null,
-              canonicalValue: expectedLedgerId,
-              reason: `Active sale ledger ${activeSaleLedgerId} could not be loaded for reconciliation repair.`,
-              skippedFields,
-              allocationResult,
-            });
-            continue;
-          }
-          const refundOffsetEligibility = getUnsettledRefundOffsetEligibility({
-            refundRecord,
-            relatedSaleLedgerEntry: saleLedgerEntry,
-          });
-          const postApprovalRefundRisk = classifyPostApprovalRefundRisk({
-            refundRecord,
-            relatedSaleLedgerEntry: saleLedgerEntry,
-          });
-          const change = {
+          const change = recordSkippedRepair({
             scope: refundRecord.id,
             field: 'financeLedgerEntry',
             localValue: null,
             canonicalValue: expectedLedgerId,
-          };
-          await prisma.financeLedgerEntry.create({
-            data: {
-              id: expectedLedgerId,
-              vendorAllocationId: allocation.id,
-              vendorId: economicOwnerVendorId,
-              entryType: 'refund',
-              amount: refundRecord.amount,
-              payoutStatus: refundOffsetEligibility.eligible ? 'PENDING' : 'HOLD',
-              commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot ?? null,
-              commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot ?? null,
-              settlementStatus: 'PARTIALLY_REFUNDED',
-              settlementHoldReason: refundOffsetEligibility.eligible
-                ? null
-                : postApprovalRefundRisk.reason ?? refundOffsetEligibility.reason,
-              description: `Reconciled refund ledger for Shopify refund ${refundRecord.sourceShopifyRefundId}`,
-            },
+            reason: 'First refund finance requires canonical Shopify refund reconciliation.',
+            skippedFields,
+            allocationResult,
           });
-          if (postApprovalRefundRisk.state === 'already_paid_requires_vendor_debt') {
-            await createVendorDebtForPaidRefund(prisma, {
-              vendorId: economicOwnerVendorId,
-              refundRecordId: refundRecord.id,
-              sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
-              financeLedgerEntryId: expectedLedgerId,
-              refundAmount: refundRecord.amount,
-              commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot,
-              commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot,
-              currency: shopifyOrder.currency ?? 'TRY',
-              sourceShopifyOrderId: refundRecord.sourceShopifyOrderId,
-              sourceShopifyOrderNumber: refundRecord.sourceShopifyOrderNumber,
-              vendorAllocationId: allocation.id,
-            });
-          }
-          staleFields.push(change);
-          repairedFields.push(change);
-          allocationResult.staleFields.push(change);
-          allocationResult.repairedFields.push(change);
-          affectedVendorIds.add(economicOwnerVendorId);
+          pendingCanonicalRefundFinance.push({
+            ledgerId: expectedLedgerId,
+            vendorId: economicOwnerVendorId,
+            change,
+            allocationResult,
+          });
         }
       }
 
@@ -1604,6 +1554,40 @@ export function createReconciliationService(env: AppEnv) {
       warnings.push(...allocationResult.warnings);
     }
 
+    if (pendingCanonicalRefundFinance.length > 0 && !options.deferCanonicalRefundReconciliation) {
+      await canonicalRefundReconciliationService.reconcileShopifyOrderRefunds(
+        sourceShopifyOrderId,
+        options.targetAllocationId ? { targetVendorAllocationId: options.targetAllocationId } : {},
+      );
+      const recoveredLedgers = await prisma.financeLedgerEntry.findMany({
+        where: {
+          id: { in: pendingCanonicalRefundFinance.map((pending) => pending.ledgerId) },
+          entryType: 'refund',
+          voidedAt: null,
+        },
+        select: { id: true, vendorId: true },
+      });
+      for (const pending of pendingCanonicalRefundFinance) {
+        if (!recoveredLedgers.some((ledger) => ledger.id === pending.ledgerId && ledger.vendorId === pending.vendorId)) {
+          continue;
+        }
+        const skippedIndex = skippedFields.indexOf(pending.change);
+        const allocationSkippedIndex = pending.allocationResult.skippedFields.indexOf(pending.change);
+        const reason = 'First refund finance requires canonical Shopify refund reconciliation.';
+        const allocationWarningIndex = pending.allocationResult.warnings.indexOf(reason);
+        const warningIndex = warnings.indexOf(reason);
+        if (skippedIndex >= 0) skippedFields.splice(skippedIndex, 1);
+        if (allocationSkippedIndex >= 0) pending.allocationResult.skippedFields.splice(allocationSkippedIndex, 1);
+        if (allocationWarningIndex >= 0) pending.allocationResult.warnings.splice(allocationWarningIndex, 1);
+        if (warningIndex >= 0) warnings.splice(warningIndex, 1);
+        staleFields.push(pending.change);
+        repairedFields.push(pending.change);
+        pending.allocationResult.staleFields.push(pending.change);
+        pending.allocationResult.repairedFields.push(pending.change);
+        affectedVendorIds.add(pending.vendorId);
+      }
+    }
+
     const requiresManualReview = skippedFields.length > 0 || warnings.length > 0;
     const reconciliationStatus = requiresManualReview
       ? 'needs_attention'
@@ -1654,6 +1638,7 @@ export function createReconciliationService(env: AppEnv) {
 
     const result = await reconcileShopifyOrder(allocation.order.sourceShopifyOrderId, {
       targetAllocationId: allocationId,
+      deferCanonicalRefundReconciliation: true,
     });
     if (!result) {
       return null;
