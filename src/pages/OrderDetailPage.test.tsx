@@ -4493,7 +4493,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByLabelText('Current order state')).toBeInTheDocument();
     const alerts = screen.getByLabelText('Operational alerts');
-    expect(within(alerts).getByText('Support action needed')).toBeInTheDocument();
+    expect(await within(alerts).findByText('Support action needed')).toBeInTheDocument();
     expect(within(alerts).getByText('Vendor response required')).toBeInTheDocument();
     expect(within(alerts).getByRole('link', { name: 'Open support' })).toHaveAttribute(
       'href',
