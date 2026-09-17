@@ -206,6 +206,7 @@ describe('canonical Shopify refund reconciliation', () => {
         monetaryRefundAmount: '100',
       }),
       canonicalEvidence: {
+        evidenceSource: 'mock',
         sourceShopifyRefundId: '5001',
         sourceShopifyOrderId: 'order-1',
         monetaryClassification: 'MONETARY_REFUND',

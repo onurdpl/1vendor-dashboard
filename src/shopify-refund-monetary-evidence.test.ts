@@ -152,6 +152,7 @@ describe('Shopify canonical refund monetary evidence', () => {
         refund: canonicalRefund,
         monetaryEvidence: itemEvidence,
       });
+      expect(transport.evidenceSource).toBe('shopify_admin');
       expect(transport.sourceShopifyOrderId).toBe('7856043819345');
       expect(transport.lines[0]?.sourceLineItemId).toBeNull();
       expect(transport.lines[0]?.subtotalCurrency).toBeNull();

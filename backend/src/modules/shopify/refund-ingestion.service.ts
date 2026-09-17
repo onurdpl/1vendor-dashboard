@@ -1,6 +1,7 @@
 import { prisma } from '../../db/prisma.js';
 import { CustomerCancellationStatus, FinanceEventType, OperationalJobStatus, type Prisma } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
+import { normalizeRefundEvidence } from '../finance/refund-evidence-normalizer.service.js';
 import {
   resolveCompleteSaleLineage,
   type CompleteSaleLineage,
@@ -29,6 +30,7 @@ import { resolveAllocationForShopifyOrderLineItem } from '../orders/allocation-o
 import type {
   ParsedShopifyRefundLineItem,
   ParsedShopifyRefundPayload,
+  RefundIngestionFailureResult,
   RefundIngestionInput,
   RefundIngestionResult,
   ShopifyRefundLineItemPayload,
@@ -40,6 +42,7 @@ import {
   type CanonicalRefundItemMonetaryEvidence,
 } from './shopify-refund-monetary-evidence.js';
 import { synchronizeCanonicalShopifyOrderFinancialStatus } from './shopify-order-financial-status.service.js';
+import { acquireShopifyOrderTransactionLock } from './orders-create-ownership.service.js';
 
 const CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET = new Set<string>(CANCEL_REFUND_REVIEW_BLOCKING_STATUSES);
 
@@ -336,6 +339,143 @@ type RefundIngestionScope = Readonly<{
   targetVendorAllocationId?: string;
 }>;
 
+async function classifyPersistedRefundFinance(
+  tx: Prisma.TransactionClient,
+  input: {
+    sourceShopifyRefundId: string;
+    vendorAllocationId: string;
+    expectedRefundLedgerId: string;
+    legacyRefundLedgerId: string;
+  },
+) {
+  const snapshot = await tx.refundEvidenceSnapshot.findUnique({
+    where: {
+      sourceShopifyRefundId_vendorAllocationId: {
+        sourceShopifyRefundId: input.sourceShopifyRefundId,
+        vendorAllocationId: input.vendorAllocationId,
+      },
+    },
+  });
+  if (snapshot) return { kind: 'snapshot' as const, snapshot };
+
+  // Do not filter out voided/superseded rows: they are historical financial effects.
+  const ledgers = await tx.financeLedgerEntry.findMany({
+    where: {
+      entryType: 'refund',
+      OR: [
+        { id: input.expectedRefundLedgerId },
+        { id: input.legacyRefundLedgerId },
+        { id: { contains: `-refund-${input.sourceShopifyRefundId}-` } },
+      ],
+    },
+    select: { id: true, vendorAllocationId: true },
+  });
+  const pairLedger = ledgers.some((ledger) => ledger.vendorAllocationId === input.vendorAllocationId);
+  const unscopedLedger = ledgers.some((ledger) => ledger.vendorAllocationId == null);
+  const conflictingIdentityLedger = ledgers.some((ledger) =>
+    (ledger.id === input.expectedRefundLedgerId || ledger.id === input.legacyRefundLedgerId) &&
+    ledger.vendorAllocationId !== null &&
+    ledger.vendorAllocationId !== input.vendorAllocationId);
+  const refundRecord = await tx.refundRecord.findFirst({
+    where: {
+      vendorAllocationId: input.vendorAllocationId,
+      sourceShopifyRefundId: input.sourceShopifyRefundId,
+    },
+    select: { id: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  const [adjustment, debtEvent, financeEvents] = await Promise.all([
+    refundRecord
+      ? tx.settlementRefundAdjustment.findFirst({
+          where: { refundRecordId: refundRecord.id },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+    refundRecord
+      ? tx.vendorBalanceEvent.findFirst({
+          where: { refundRecordId: refundRecord.id, type: 'VENDOR_DEBT_CREATED' },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+    tx.financeEvent.findMany({
+      where: { referenceType: 'shopify_refund', referenceId: input.sourceShopifyRefundId },
+      select: {
+        id: true,
+        financeLedgerEntry: { select: { vendorAllocationId: true } },
+        metadataJson: true,
+      },
+    }),
+  ]);
+  const pairEvent = financeEvents.some((event) =>
+    event.financeLedgerEntry?.vendorAllocationId === input.vendorAllocationId ||
+    (typeof event.metadataJson === 'object' && event.metadataJson !== null &&
+      !Array.isArray(event.metadataJson) &&
+      event.metadataJson.vendorAllocationId === input.vendorAllocationId));
+  const ambiguousEvent = financeEvents.some((event) =>
+    !event.financeLedgerEntry?.vendorAllocationId &&
+    !(typeof event.metadataJson === 'object' && event.metadataJson !== null &&
+      !Array.isArray(event.metadataJson) && typeof event.metadataJson.vendorAllocationId === 'string'));
+
+  if (pairLedger || adjustment || debtEvent || pairEvent) {
+    return { kind: 'historical_finance' as const, refundRecord };
+  }
+  if (unscopedLedger || conflictingIdentityLedger || ambiguousEvent) {
+    return { kind: 'ambiguous_legacy' as const, refundRecord };
+  }
+  return { kind: 'new' as const, refundRecord };
+}
+
+function normalizeAllocationRefundEvidence(input: {
+  canonicalEvidence: CanonicalRefundEvidenceTransport;
+  vendorLineItems: readonly ResolvedRefundLineItem[];
+  vendorAllocationId: string;
+}) {
+  const { canonicalEvidence, vendorLineItems } = input;
+  if (!canonicalEvidence.refundTotalAmount || !canonicalEvidence.refundCurrency) {
+    throw new Error('Canonical refund total and currency are required for accepted refund evidence.');
+  }
+  const activeSaleLedgerId = vendorLineItems[0]!.activeSaleLedgerId;
+  const vendorId = vendorLineItems[0]!.vendorId;
+  if (vendorLineItems.some((line) => line.activeSaleLedgerId !== activeSaleLedgerId || line.vendorId !== vendorId)) {
+    throw new Error('Allocation refund lines have conflicting historical economic ownership.');
+  }
+  const refundLines = vendorLineItems.map((line) => {
+    const matches = canonicalEvidence.lines.filter((candidate) =>
+      candidate.sourceRefundLineItemId === line.sourceRefundLineItemId);
+    if (matches.length !== 1 || !matches[0]!.sourceLineItemId ||
+        matches[0]!.quantityProvenance !== 'OBSERVED_VALID' ||
+        matches[0]!.subtotalAmountProvenance !== 'OBSERVED') {
+      throw new Error(`Canonical refund line ${line.sourceRefundLineItemId} is not authoritative.`);
+    }
+    const canonicalLine = matches[0]!;
+    return {
+      sourceLineItemId: canonicalLine.sourceLineItemId!,
+      quantity: canonicalLine.quantity!,
+      subtotalAmount: canonicalLine.subtotalAmount!,
+      currency: canonicalLine.subtotalCurrency,
+    };
+  });
+  const transactions = canonicalEvidence.selectedTransactions.map((transaction) => {
+    if (transaction.kind !== 'REFUND' || transaction.status !== 'SUCCESS') {
+      throw new Error('Only selected canonical REFUND/SUCCESS transactions may enter refund evidence.');
+    }
+    return { ...transaction, kind: 'REFUND' as const, status: 'SUCCESS' as const };
+  });
+  return normalizeRefundEvidence({
+    sourceShopifyRefundId: canonicalEvidence.sourceShopifyRefundId,
+    sourceShopifyOrderId: canonicalEvidence.sourceShopifyOrderId,
+    vendorAllocationId: input.vendorAllocationId,
+    monetaryClassification: 'MONETARY_REFUND',
+    refundTotalAmount: canonicalEvidence.refundTotalAmount,
+    currency: canonicalEvidence.refundCurrency,
+    transactions,
+    refundLines,
+    historicalEconomicVendorId: vendorId,
+    historicalSaleFinanceLedgerEntryId: activeSaleLedgerId,
+    supersededSaleLedgerIds: [...new Set(vendorLineItems.flatMap((line) => line.supersededSaleLedgerIds))],
+  });
+}
+
 function hasEmptySubmittedRefundLineItems(value: Prisma.JsonValue | null) {
   return Array.isArray(value) && value.length === 0;
 }
@@ -550,6 +690,7 @@ async function ingestShopifyRefundWebhookInternal(
 
   try {
     const applyRefund = async (tx: Prisma.TransactionClient) => {
+      await acquireShopifyOrderTransactionLock(tx, parsedRefund.sourceShopifyOrderId);
       if (input.event) {
         await tx.webhookEvent.update({
           where: { id: input.event.id },
@@ -706,7 +847,8 @@ async function ingestShopifyRefundWebhookInternal(
 
       const reviewRequiredAllocations: Array<{
         vendorAllocationId: string;
-        failures: ReturnType<typeof evaluateCanonicalRefundLineAuthority>['failures'];
+        reason: string;
+        reasonCode: NonNullable<RefundIngestionFailureResult['reasonCode']>;
       }> = [];
       for (const [, vendorLineItems] of groupedByAllocationAndVendor.entries()) {
         const vendorId = vendorLineItems[0].vendorId;
@@ -720,62 +862,73 @@ async function ingestShopifyRefundWebhookInternal(
           vendorId,
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
         });
-        const refundLedgerEntries = await tx.financeLedgerEntry.findMany({
-          where: {
-            vendorAllocationId,
-            entryType: 'refund',
-            voidedAt: null,
-            OR: [
-              { id: legacyRefundLedgerId },
-              { id: expectedRefundLedgerId },
-              { id: { contains: `-refund-${parsedRefund.sourceShopifyRefundId}-` } },
-            ],
-          },
-          select: {
-            id: true,
-            vendorId: true,
-            payoutStatus: true,
-          },
-          orderBy: { createdAt: 'asc' },
-          take: 2,
+        const persistedFinance = await classifyPersistedRefundFinance(tx, {
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          vendorAllocationId,
+          expectedRefundLedgerId,
+          legacyRefundLedgerId,
         });
-        if (refundLedgerEntries.length > 1) {
-          throw new Error(
-            `Multiple active refund ledgers already exist for allocation ${vendorAllocationId} and Shopify refund ${parsedRefund.sourceShopifyRefundId}.`,
-          );
+        if (persistedFinance.kind === 'historical_finance' || persistedFinance.kind === 'ambiguous_legacy') {
+          reviewRequiredAllocations.push({
+            vendorAllocationId,
+            reason: persistedFinance.kind === 'historical_finance'
+              ? 'historical refund finance has no accepted evidence snapshot'
+              : 'legacy refund finance cannot be attributed to one allocation',
+            reasonCode: 'refund_finance_review_required',
+          });
+          continue;
         }
-        const existingRefundLedgerEntry = refundLedgerEntries[0] ?? null;
-        if (existingRefundLedgerEntry && existingRefundLedgerEntry.vendorId !== vendorId) {
-          throw new Error(
-            `Active refund ledger ${existingRefundLedgerEntry.id} already exists for allocation ${vendorAllocationId} and Shopify refund ${parsedRefund.sourceShopifyRefundId}.`,
-          );
+        if (!canonicalEvidence) {
+          reviewRequiredAllocations.push({
+            vendorAllocationId,
+            reason: 'verified canonical refund evidence is absent',
+            reasonCode: 'refund_finance_review_required',
+          });
+          continue;
         }
-
-        if (!existingRefundLedgerEntry && canonicalEvidence) {
-          const authority = evaluateCanonicalRefundLineAuthority({
+        const authority = evaluateCanonicalRefundLineAuthority({
             sourceRefundLineItemIds: vendorLineItems.map((lineItem) => lineItem.sourceRefundLineItemId),
             canonicalLines: canonicalEvidence.lines,
+        });
+        if (!authority.authoritative) {
+          reviewRequiredAllocations.push({
+            vendorAllocationId,
+            reason: authority.failures.map((failure) =>
+              `${failure.sourceRefundLineItemId}:${failure.reasonCode}`).join(','),
+            reasonCode: 'canonical_refund_line_evidence_incomplete',
           });
-          if (!authority.authoritative) {
-            reviewRequiredAllocations.push({
-              vendorAllocationId,
-              failures: authority.failures,
-            });
+          continue;
+        }
+        let normalizedEvidence: ReturnType<typeof normalizeRefundEvidence>;
+        try {
+          normalizedEvidence = normalizeAllocationRefundEvidence({
+            canonicalEvidence,
+            vendorLineItems,
+            vendorAllocationId,
+          });
+        } catch (error) {
+          reviewRequiredAllocations.push({
+            vendorAllocationId,
+            reason: error instanceof Error ? error.message : 'canonical refund evidence could not be normalized',
+            reasonCode: 'refund_finance_review_required',
+          });
+          continue;
+        }
+        if (persistedFinance.kind === 'snapshot') {
+          const stored = persistedFinance.snapshot;
+          if (stored.evidenceVersion === normalizedEvidence.evidenceVersion &&
+              stored.normalizationVersion === normalizedEvidence.normalizationVersion &&
+              stored.evidenceHash === normalizedEvidence.evidenceHash) {
             continue;
           }
-        }
-        const existingRefundRecord = await tx.refundRecord.findFirst({
-          where: {
+          reviewRequiredAllocations.push({
             vendorAllocationId,
-            sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
-          },
-          select: {
-            id: true,
-          },
-          orderBy: {
-            createdAt: 'asc',
-          },
-        });
+            reason: 'terminal refund evidence conflicts with accepted snapshot',
+            reasonCode: 'refund_terminal_evidence_conflict',
+          });
+          continue;
+        }
+        const existingRefundRecord = persistedFinance.refundRecord;
         const refundRecordId = existingRefundRecord?.id ?? buildRefundRecordId({
           vendorId,
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
@@ -901,7 +1054,7 @@ async function ingestShopifyRefundWebhookInternal(
           });
         }
 
-        const refundLedgerId = existingRefundLedgerEntry?.id ?? expectedRefundLedgerId;
+        const refundLedgerId = expectedRefundLedgerId;
         const saleLedgerEntry = await tx.financeLedgerEntry.findFirst({
           where: {
             id: vendorLineItems[0].activeSaleLedgerId,
@@ -970,33 +1123,13 @@ async function ingestShopifyRefundWebhookInternal(
           },
           relatedSaleLedgerEntry: saleLedgerEntry,
         });
-        const refundPayoutStatus =
-          existingRefundLedgerEntry?.payoutStatus === 'PAID'
-            ? 'PAID'
-            : refundOffsetEligibility.eligible
-              ? 'PENDING'
-              : 'HOLD';
+        const refundPayoutStatus = refundOffsetEligibility.eligible ? 'PENDING' : 'HOLD';
         const refundSettlementHoldReason = refundOffsetEligibility.eligible
           ? null
           : postApprovalRefundRisk.reason ?? refundOffsetEligibility.reason;
 
-        await tx.financeLedgerEntry.upsert({
-          where: {
-            id: refundLedgerId,
-          },
-          update: {
-            vendorAllocationId,
-            vendorId,
-            entryType: 'refund',
-            amount: totalRefundAmount,
-            payoutStatus: refundPayoutStatus,
-            commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot ?? null,
-            commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot ?? null,
-            settlementStatus: 'PARTIALLY_REFUNDED',
-            settlementHoldReason: refundSettlementHoldReason,
-            description: `Refund allocation for Shopify refund ${parsedRefund.sourceShopifyRefundId}`,
-          },
-          create: {
+        await tx.financeLedgerEntry.create({
+          data: {
             id: refundLedgerId,
             vendorAllocationId,
             vendorId,
@@ -1008,6 +1141,33 @@ async function ingestShopifyRefundWebhookInternal(
             settlementStatus: 'PARTIALLY_REFUNDED',
             settlementHoldReason: refundSettlementHoldReason,
             description: `Refund allocation for Shopify refund ${parsedRefund.sourceShopifyRefundId}`,
+          },
+        });
+
+        const capturedAt = new Date();
+        await tx.refundEvidenceSnapshot.create({
+          data: {
+            sourceShopifyRefundId: normalizedEvidence.sourceShopifyRefundId,
+            sourceShopifyOrderId: normalizedEvidence.sourceShopifyOrderId,
+            vendorAllocationId: normalizedEvidence.vendorAllocationId,
+            refundRecordId,
+            refundFinanceLedgerEntryId: refundLedgerId,
+            historicalEconomicVendorId: normalizedEvidence.historicalEconomicVendorId,
+            historicalSaleFinanceLedgerEntryId: normalizedEvidence.historicalSaleFinanceLedgerEntryId,
+            monetaryClassification: normalizedEvidence.monetaryClassification,
+            refundTotalAmount: normalizedEvidence.refundTotalAmount,
+            currency: normalizedEvidence.currency,
+            normalizedTransactionsJson: normalizedEvidence.normalizedTransactionsJson,
+            normalizedRefundLinesJson: normalizedEvidence.normalizedRefundLinesJson,
+            normalizedOwnershipJson: normalizedEvidence.normalizedOwnershipJson,
+            normalizedEvidenceJson: normalizedEvidence.normalizedEvidenceJson,
+            supersededSaleLedgerIdsJson: normalizedEvidence.supersededSaleLedgerIdsJson,
+            evidenceHash: normalizedEvidence.evidenceHash,
+            hashAlgorithm: normalizedEvidence.hashAlgorithm,
+            evidenceVersion: normalizedEvidence.evidenceVersion,
+            normalizationVersion: normalizedEvidence.normalizationVersion,
+            evidenceSource: canonicalEvidence.evidenceSource,
+            capturedAt,
           },
         });
 
@@ -1120,10 +1280,8 @@ async function ingestShopifyRefundWebhookInternal(
       }
 
       if (reviewRequiredAllocations.length > 0) {
-        const error = `Canonical refund line evidence requires finance review: ${reviewRequiredAllocations
-          .map(({ vendorAllocationId, failures }) =>
-            `${vendorAllocationId}[${failures.map((failure) =>
-              `${failure.sourceRefundLineItemId}:${failure.reasonCode}`).join(',')}]`)
+        const error = `Canonical refund evidence requires finance review: ${reviewRequiredAllocations
+          .map(({ vendorAllocationId, reason }) => `${vendorAllocationId}[${reason}]`)
           .join(';')}.`;
         if (input.event) {
           await tx.webhookEvent.update({
@@ -1139,6 +1297,13 @@ async function ingestShopifyRefundWebhookInternal(
           shopifyOrderId: parsedRefund.sourceShopifyOrderId,
           refundAllocationCount: groupedByAllocationAndVendor.size - reviewRequiredAllocations.length,
           reviewRequiredError: error,
+          reviewReasonCode: reviewRequiredAllocations.some(({ reasonCode }) =>
+            reasonCode === 'refund_terminal_evidence_conflict')
+            ? 'refund_terminal_evidence_conflict' as const
+            : reviewRequiredAllocations.every(({ reasonCode }) =>
+              reasonCode === 'canonical_refund_line_evidence_incomplete')
+              ? 'canonical_refund_line_evidence_incomplete' as const
+              : 'refund_finance_review_required' as const,
         };
       }
 
@@ -1169,7 +1334,7 @@ async function ingestShopifyRefundWebhookInternal(
         action: 'received_needs_attention',
         processingStatus: 'needs_attention',
         error: result.reviewRequiredError,
-        reasonCode: 'canonical_refund_line_evidence_incomplete',
+        reasonCode: result.reviewReasonCode,
         refundAllocationCount: result.refundAllocationCount,
       };
     }
@@ -1229,20 +1394,16 @@ export async function ingestVerifiedShopifyRefund(
     throw new Error('Verified positive Shopify monetary refund evidence is required before refund ingestion.');
   }
 
-  const canonicalEvidence = input.canonicalEvidence ?? {
-    sourceShopifyRefundId,
-    sourceShopifyOrderId: String(input.payload.order_id ?? ''),
-    monetaryClassification: input.monetaryEvidence.classification,
-    refundTotalAmount: null,
-    refundCurrency: null,
-    selectedTransactions: [],
-    lines: [],
-  };
-  if (
+  const canonicalEvidence = input.canonicalEvidence;
+  const hasMerchandiseLines = Array.isArray(input.payload.refund_line_items) && input.payload.refund_line_items.length > 0;
+  if (!canonicalEvidence && hasMerchandiseLines) {
+    throw new Error('Canonical Shopify refund evidence transport is required before verified refund ingestion.');
+  }
+  if (canonicalEvidence && (
     canonicalEvidence.sourceShopifyRefundId !== sourceShopifyRefundId ||
     canonicalEvidence.sourceShopifyOrderId !== String(input.payload.order_id ?? '') ||
     canonicalEvidence.monetaryClassification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund
-  ) {
+  )) {
     throw new Error('Canonical Shopify refund evidence transport identity does not match verified refund ingestion.');
   }
 

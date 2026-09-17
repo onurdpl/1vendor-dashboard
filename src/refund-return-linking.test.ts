@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const txMock = vi.hoisted(() => ({
+  $queryRaw: vi.fn(),
   webhookEvent: {
     update: vi.fn(),
   },
@@ -57,19 +58,27 @@ const txMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
+    create: vi.fn(),
     upsert: vi.fn(),
   },
   financeEvent: {
+    findMany: vi.fn(),
     createMany: vi.fn(),
   },
   vendorBalanceEvent: {
+    findFirst: vi.fn(),
     upsert: vi.fn(),
   },
   financeIntegrityAlert: {
     findMany: vi.fn(),
   },
   settlementRefundAdjustment: {
+    findFirst: vi.fn(),
     upsert: vi.fn(),
+  },
+  refundEvidenceSnapshot: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
   },
 }));
 
@@ -84,7 +93,10 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { ingestShopifyRefundWebhook, ingestVerifiedShopifyRefund } = await import('../backend/src/modules/shopify/refund-ingestion.service.js');
+const {
+  ingestShopifyRefundWebhook: ingestRawShopifyRefundWebhook,
+  ingestVerifiedShopifyRefund,
+} = await import('../backend/src/modules/shopify/refund-ingestion.service.js');
 
 function webhookEvent() {
   return {
@@ -585,13 +597,21 @@ function splitRefundPayload(input: {
 }
 
 function canonicalEvidenceForPayload(payload: ReturnType<typeof refundPayload> | ReturnType<typeof splitRefundPayload>) {
+  const total = payload.refund_line_items.reduce((sum, line) => sum + Number(line.subtotal), 0).toFixed(2);
   return {
+    evidenceSource: 'mock' as const,
     sourceShopifyRefundId: String(payload.id),
     sourceShopifyOrderId: String(payload.order_id),
     monetaryClassification: 'MONETARY_REFUND' as const,
-    refundTotalAmount: null,
+    refundTotalAmount: total,
     refundCurrency: 'TRY',
-    selectedTransactions: [],
+    selectedTransactions: [{
+      transactionGid: `gid://shopify/OrderTransaction/${String(payload.id)}`,
+      kind: 'REFUND',
+      status: 'SUCCESS',
+      amount: total,
+      currency: 'TRY',
+    }],
     lines: payload.refund_line_items.map((line) => ({
       sourceRefundLineItemId: String(line.id),
       sourceLineItemId: line.line_item_id,
@@ -605,10 +625,24 @@ function canonicalEvidenceForPayload(payload: ReturnType<typeof refundPayload> |
   };
 }
 
+async function ingestShopifyRefundWebhook(input: {
+  event: ReturnType<typeof webhookEvent>;
+  payload: ReturnType<typeof refundPayload> | ReturnType<typeof splitRefundPayload>;
+}) {
+  const total = input.payload.refund_line_items.reduce((sum, line) => sum + Number(line.subtotal), 0).toFixed(2);
+  return ingestVerifiedShopifyRefund({
+    ...input,
+    monetaryEvidence: monetaryEvidence(String(input.payload.id), total),
+    canonicalEvidence: canonicalEvidenceForPayload(input.payload),
+    canonicalFinancialStatus: null,
+  });
+}
+
 describe('Shopify refund return linking', () => {
   beforeEach(() => {
     prismaMock.$transaction.mockClear();
     prismaMock.webhookEvent.update.mockReset();
+    txMock.$queryRaw.mockReset();
     Object.values(txMock).forEach((model) => {
       Object.values(model).forEach((fn) => {
         if (typeof fn === 'function' && 'mockReset' in fn) {
@@ -617,6 +651,19 @@ describe('Shopify refund return linking', () => {
       });
     });
     txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
+    txMock.$queryRaw.mockResolvedValue([{ advisoryLock: '' }]);
+    txMock.refundEvidenceSnapshot.findUnique.mockResolvedValue(null);
+    txMock.financeEvent.findMany.mockResolvedValue([]);
+    txMock.settlementRefundAdjustment.findFirst.mockResolvedValue(null);
+    txMock.vendorBalanceEvent.findFirst.mockResolvedValue(null);
+    txMock.financeLedgerEntry.create.mockImplementation(async (input: { data: Record<string, unknown> }) => {
+      await txMock.financeLedgerEntry.upsert({
+        where: { id: input.data.id },
+        update: input.data,
+        create: input.data,
+      });
+      return input.data;
+    });
     txMock.financeLedgerEntry.findUnique.mockImplementation(async (query: { where?: { id?: string } }) => ({
       id: query.where?.id ?? 'sale-active',
       entryType: 'sale',
@@ -898,7 +945,7 @@ describe('Shopify refund return linking', () => {
   it('does not allow unverified zero-line payloads into shipping-only reconciliation', async () => {
     setupShippingOnlyOrder();
 
-    const result = await ingestShopifyRefundWebhook({
+    const result = await ingestRawShopifyRefundWebhook({
       event: webhookEvent() as never,
       payload: shippingOnlyPayload(),
     });
@@ -910,6 +957,24 @@ describe('Shopify refund return linking', () => {
     expect(txMock.orderShippingRefundClaim.findMany).not.toHaveBeenCalled();
     expect(txMock.outboundShopifyRefundAttempt.updateMany).not.toHaveBeenCalled();
     expect(txMock.shopifyOrder.update).not.toHaveBeenCalled();
+  });
+
+  it('does not allow an unverified merchandise refund to create its first finance effect', async () => {
+    setupOrder();
+
+    const result = await ingestRawShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload(),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      reasonCode: 'refund_finance_review_required',
+      error: expect.stringContaining('verified canonical refund evidence is absent'),
+    });
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
   });
 
   it('keeps product plus checkout-shipping money on the existing product accounting path', async () => {
@@ -1025,12 +1090,14 @@ describe('Shopify refund return linking', () => {
     expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
   });
 
-  it('does not reclassify an existing historical refund ledger for D1 review', async () => {
+  it('treats a voided historical refund ledger as prior finance and does not backfill a snapshot', async () => {
     setupOrder();
     txMock.financeLedgerEntry.findMany.mockReset().mockResolvedValueOnce([{
       id: NORMAL_REFUND_LEDGER_ID,
       vendorId: 'sporjinal',
+      vendorAllocationId: 'alloc-1029-sporjinal',
       payoutStatus: 'PENDING',
+      voidedAt: new Date('2026-01-02T00:00:00.000Z'),
     }]);
     const payload = refundPayload();
     const canonicalEvidence = canonicalEvidenceForPayload(payload);
@@ -1044,10 +1111,38 @@ describe('Shopify refund return linking', () => {
       canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
     });
 
-    expect(result).toMatchObject({ ok: true, processingStatus: 'processed' });
-    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: NORMAL_REFUND_LEDGER_ID },
-    }));
+    expect(result).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      error: expect.stringContaining('historical refund finance has no accepted evidence snapshot'),
+    });
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a deterministic refund ledger identity belongs to another allocation', async () => {
+    setupOrder();
+    txMock.financeLedgerEntry.findMany.mockReset().mockResolvedValueOnce([{
+      id: NORMAL_REFUND_LEDGER_ID,
+      vendorAllocationId: 'alloc-other',
+    }]);
+    const payload = refundPayload();
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence: canonicalEvidenceForPayload(payload),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      error: expect.stringContaining('legacy refund finance cannot be attributed to one allocation'),
+    });
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
   });
 
   it('processes a complete allocation while routing an incomplete sibling allocation to review', async () => {
@@ -1593,6 +1688,19 @@ describe('Shopify refund return linking', () => {
         },
       }),
     );
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledTimes(2);
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        sourceShopifyRefundId: 'refund-split',
+        vendorAllocationId: 'alloc-source',
+      }),
+    });
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        sourceShopifyRefundId: 'refund-split',
+        vendorAllocationId: 'alloc-child',
+      }),
+    });
     const financeEventCalls = txMock.financeEvent.createMany.mock.calls.map((call) => call[0]);
     expect(financeEventCalls).toEqual([
       expect.objectContaining({
@@ -1756,6 +1864,16 @@ describe('Shopify refund return linking', () => {
         }),
       }),
     );
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        historicalEconomicVendorId: 'sporjinal',
+        historicalSaleFinanceLedgerEntryId: 'fin-sporjinal-sale-7621834670417',
+        supersededSaleLedgerIdsJson: [
+          'fin-intermediate-sale-7621834670417',
+          'fin-yalispor-sale-7621834670417',
+        ],
+      }),
+    });
     expect(txMock.financeEvent.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.arrayContaining([
@@ -1932,6 +2050,7 @@ describe('Shopify refund return linking', () => {
       {
         id: 'fin-yalispor-refund-1074533826897',
         vendorId: 'yalispor',
+        vendorAllocationId: 'alloc-1029-yalispor',
       },
     ]);
     txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
@@ -1945,7 +2064,7 @@ describe('Shopify refund return linking', () => {
       ok: false,
       action: 'received_needs_attention',
       processingStatus: 'needs_attention',
-      error: 'Active refund ledger fin-yalispor-refund-1074533826897 already exists for allocation alloc-1029-yalispor and Shopify refund 1074533826897.',
+      error: expect.stringContaining('historical refund finance has no accepted evidence snapshot'),
     });
     expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
     expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
@@ -2000,7 +2119,7 @@ describe('Shopify refund return linking', () => {
     );
   });
 
-  it('repairs missing refund finance events idempotently when the refund ledger row already exists', async () => {
+  it('does not repair or mutate historical refund finance when its evidence snapshot is absent', async () => {
     setupOrder();
     txMock.financeLedgerEntry.findMany.mockReset();
     txMock.financeLedgerEntry.findFirst.mockReset();
@@ -2008,6 +2127,7 @@ describe('Shopify refund return linking', () => {
     txMock.financeLedgerEntry.findMany.mockResolvedValueOnce([{
       id: 'fin-sporjinal-refund-1074533826897',
       vendorId: 'sporjinal',
+      vendorAllocationId: 'alloc-1029-sporjinal',
       payoutStatus: 'PENDING',
     }]);
     txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
@@ -2016,7 +2136,7 @@ describe('Shopify refund return linking', () => {
     });
     txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
 
-    await ingestShopifyRefundWebhook({
+    const result = await ingestShopifyRefundWebhook({
       event: webhookEvent() as never,
       payload: {
         id: '1074533826897',
@@ -2040,19 +2160,14 @@ describe('Shopify refund return linking', () => {
       },
     });
 
-    expect(txMock.financeEvent.createMany).toHaveBeenCalledWith({
-      data: expect.arrayContaining([
-        expect.objectContaining({
-          eventType: 'REFUND_RECORDED',
-          idempotencyKey: 'fin-sporjinal-refund-1074533826897:REFUND_RECORDED',
-        }),
-        expect.objectContaining({
-          eventType: 'COMMISSION_VAT_REVERSED',
-          idempotencyKey: 'fin-sporjinal-refund-1074533826897:COMMISSION_VAT_REVERSED',
-        }),
-      ]),
-      skipDuplicates: true,
+    expect(result).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      error: expect.stringContaining('historical refund finance has no accepted evidence snapshot'),
     });
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
   });
 
   it('keeps refund ledger held when the related sale is already paid', async () => {
@@ -2129,6 +2244,12 @@ describe('Shopify refund return linking', () => {
       }),
     );
     expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.create.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.refundEvidenceSnapshot.create.mock.invocationCallOrder[0],
+    );
+    expect(txMock.refundEvidenceSnapshot.create.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.vendorBalanceEvent.upsert.mock.invocationCallOrder[0],
+    );
   });
 
   it('marks refund ledger as adjustment required when refund arrives after settlement approval before payment', async () => {
@@ -2312,5 +2433,216 @@ describe('Shopify refund return linking', () => {
         }),
       }),
     );
+    expect(txMock.financeLedgerEntry.create.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.refundEvidenceSnapshot.create.mock.invocationCallOrder[0],
+    );
+    expect(txMock.refundEvidenceSnapshot.create.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.settlementRefundAdjustment.upsert.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('creates the first refund ledger and immutable normalized evidence snapshot in the same transaction', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    const payload = refundPayload();
+    const acceptanceStartedAt = Date.now();
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence: canonicalEvidenceForPayload(payload),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+    const acceptanceFinishedAt = Date.now();
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.refundEvidenceSnapshot.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: NORMAL_REFUND_LEDGER_ID,
+        vendorAllocationId: 'alloc-1029-sporjinal',
+        vendorId: 'sporjinal',
+        entryType: 'refund',
+        amount: '3399.00',
+      }),
+    });
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        sourceShopifyRefundId: '1074533826897',
+        sourceShopifyOrderId: '7621834670417',
+        vendorAllocationId: 'alloc-1029-sporjinal',
+        refundRecordId: NORMAL_REFUND_RECORD_ID,
+        refundFinanceLedgerEntryId: NORMAL_REFUND_LEDGER_ID,
+        historicalEconomicVendorId: 'sporjinal',
+        historicalSaleFinanceLedgerEntryId: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+        monetaryClassification: 'MONETARY_REFUND',
+        refundTotalAmount: '3399',
+        currency: 'TRY',
+        evidenceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        hashAlgorithm: 'SHA-256',
+        evidenceVersion: 1,
+        normalizationVersion: 1,
+        evidenceSource: 'mock',
+        capturedAt: expect.any(Date),
+        supersededSaleLedgerIdsJson: [],
+      }),
+    });
+    const capturedAt = txMock.refundEvidenceSnapshot.create.mock.calls[0]![0].data.capturedAt as Date;
+    expect(capturedAt.getTime()).toBeGreaterThanOrEqual(acceptanceStartedAt);
+    expect(capturedAt.getTime()).toBeLessThanOrEqual(acceptanceFinishedAt);
+    expect(txMock.financeLedgerEntry.create.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.refundEvidenceSnapshot.create.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('treats the same accepted evidence hash as an already-processed finance no-op', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    const payload = refundPayload();
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+    const accepted = txMock.refundEvidenceSnapshot.create.mock.calls[0]![0].data;
+
+    txMock.financeLedgerEntry.create.mockClear();
+    txMock.refundEvidenceSnapshot.create.mockClear();
+    txMock.settlementRefundAdjustment.upsert.mockClear();
+    txMock.vendorBalanceEvent.upsert.mockClear();
+    txMock.financeEvent.createMany.mockClear();
+    setupOrder();
+    txMock.refundEvidenceSnapshot.findUnique.mockResolvedValueOnce({ id: 'snapshot-1', ...accepted });
+
+    const replay = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(replay).toMatchObject({ ok: true, processingStatus: 'processed', refundAllocationCount: 1 });
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['different hash', { evidenceHash: '0'.repeat(64) }],
+    ['evidence version mismatch', { evidenceVersion: 2 }],
+    ['normalization version mismatch', { normalizationVersion: 2 }],
+  ])('routes %s to review without mutating accepted finance', async (_label, mismatch) => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    const payload = refundPayload();
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+    const accepted = txMock.refundEvidenceSnapshot.create.mock.calls[0]![0].data;
+
+    txMock.financeLedgerEntry.create.mockClear();
+    txMock.refundEvidenceSnapshot.create.mockClear();
+    txMock.settlementRefundAdjustment.upsert.mockClear();
+    txMock.vendorBalanceEvent.upsert.mockClear();
+    txMock.financeEvent.createMany.mockClear();
+    setupOrder();
+    txMock.refundEvidenceSnapshot.findUnique.mockResolvedValueOnce({ id: 'snapshot-1', ...accepted, ...mismatch });
+
+    const replay = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(replay).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      error: expect.stringContaining('terminal refund evidence conflicts with accepted snapshot'),
+    });
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('allows a RefundRecord-only state to receive its first canonical finance effect', async () => {
+    setupOrder();
+    txMock.refundRecord.findFirst.mockReset().mockResolvedValue({ id: NORMAL_REFUND_RECORD_ID });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    const payload = refundPayload();
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence: canonicalEvidenceForPayload(payload),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledTimes(1);
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ refundRecordId: NORMAL_REFUND_RECORD_ID }),
+    });
+  });
+
+  it('does not attempt a snapshot when first refund ledger creation fails', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    txMock.financeLedgerEntry.create.mockRejectedValueOnce(new Error('ledger create failed'));
+    const payload = refundPayload();
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence: canonicalEvidenceForPayload(payload),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: false, error: 'ledger create failed' });
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('fails the shared transaction when snapshot creation fails before adjustment or debt', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    txMock.refundEvidenceSnapshot.create.mockRejectedValueOnce(new Error('snapshot create failed'));
+    const payload = refundPayload();
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence: canonicalEvidenceForPayload(payload),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: false, error: 'snapshot create failed' });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledTimes(1);
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
   });
 });

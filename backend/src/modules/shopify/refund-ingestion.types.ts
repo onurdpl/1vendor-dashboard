@@ -55,7 +55,10 @@ export type RefundIngestionFailureResult = {
   action: 'received_needs_attention';
   processingStatus: 'needs_attention';
   error: string;
-  reasonCode?: 'canonical_refund_line_evidence_incomplete';
+  reasonCode?:
+    | 'canonical_refund_line_evidence_incomplete'
+    | 'refund_finance_review_required'
+    | 'refund_terminal_evidence_conflict';
   refundAllocationCount?: number;
 };
 

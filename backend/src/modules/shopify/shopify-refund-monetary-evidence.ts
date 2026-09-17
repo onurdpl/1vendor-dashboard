@@ -57,6 +57,7 @@ export type CanonicalRefundLineEvidence = Readonly<{
 }>;
 
 export type CanonicalRefundEvidenceTransport = Readonly<{
+  evidenceSource: 'mock' | 'shopify_admin';
   sourceShopifyRefundId: string;
   sourceShopifyOrderId: string;
   monetaryClassification: RefundMonetaryClassification;
@@ -666,6 +667,7 @@ export function buildCanonicalRefundEvidenceTransport(input: {
   }
 
   return {
+    evidenceSource: input.collection.source,
     sourceShopifyRefundId: input.refund.sourceShopifyRefundId,
     sourceShopifyOrderId: input.collection.sourceShopifyOrderId,
     monetaryClassification: input.monetaryEvidence.classification,

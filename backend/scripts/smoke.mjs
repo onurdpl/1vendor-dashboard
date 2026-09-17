@@ -198,6 +198,7 @@ async function runSmoke() {
           createdAt: '2026-05-11T12:30:00.000Z',
           updatedAt: '2026-05-11T12:30:01.000Z',
           note: 'Customer requested refund',
+          observedTotalRefundedAmount: '255.00',
           totalRefundedAmount: '255.00',
           totalRefundedCurrencyCode: 'TRY',
           transactionPaginationComplete: true,
@@ -253,6 +254,7 @@ async function runSmoke() {
           createdAt: '2026-05-11T12:35:00.000Z',
           updatedAt: '2026-05-11T12:35:01.000Z',
           note: null,
+          observedTotalRefundedAmount: '50.00',
           totalRefundedAmount: '50.00',
           totalRefundedCurrencyCode: 'TRY',
           transactionPaginationComplete: true,
@@ -1825,6 +1827,12 @@ async function runSmoke() {
       await prisma.refundRecord.update({
         where: { id: `refund-yalispor-rf-${runId}-alloc-yalispor-${smokeOrderId}` },
         data: { status: 'failed' },
+      });
+      await prisma.refundEvidenceSnapshot.deleteMany({
+        where: { sourceShopifyRefundId: `rf-${runId}`, vendorAllocationId: `alloc-yalispor-${smokeOrderId}` },
+      });
+      await prisma.financeEvent.deleteMany({
+        where: { financeLedgerEntryId: `fin-yalispor-refund-rf-${runId}-alloc-yalispor-${smokeOrderId}` },
       });
       await prisma.financeLedgerEntry.deleteMany({
         where: { id: `fin-yalispor-refund-rf-${runId}-alloc-yalispor-${smokeOrderId}` },

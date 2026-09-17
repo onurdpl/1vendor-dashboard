@@ -270,6 +270,7 @@ describe('Shopify current-state order repair', () => {
       refund_line_items: [expect.objectContaining({ subtotal: '100.00' })],
     });
     expect(input.canonicalEvidence).toEqual({
+      evidenceSource: 'mock',
       sourceShopifyRefundId: '6001',
       sourceShopifyOrderId: '7856043819345',
       monetaryClassification: 'MONETARY_REFUND',

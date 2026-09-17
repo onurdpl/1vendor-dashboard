@@ -853,7 +853,11 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
             transactionClient: tx,
           }));
           if (!result.ok) {
-            if (result.reasonCode === 'canonical_refund_line_evidence_incomplete') {
+            if (
+              result.reasonCode === 'canonical_refund_line_evidence_incomplete' ||
+              result.reasonCode === 'refund_finance_review_required' ||
+              result.reasonCode === 'refund_terminal_evidence_conflict'
+            ) {
               refundAllocationCount += result.refundAllocationCount ?? 0;
               refundReviewWarnings.push(result.error);
               continue;
