@@ -55,6 +55,8 @@ export type RefundIngestionFailureResult = {
   action: 'received_needs_attention';
   processingStatus: 'needs_attention';
   error: string;
+  reasonCode?: 'canonical_refund_line_evidence_incomplete';
+  refundAllocationCount?: number;
 };
 
 export type RefundIngestionResult = RefundIngestionSuccessResult | RefundIngestionFailureResult;

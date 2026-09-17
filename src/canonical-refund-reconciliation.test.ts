@@ -565,6 +565,45 @@ describe('canonical Shopify refund reconciliation', () => {
     }));
   });
 
+  it('keeps allocation-scoped finance-review signals idempotent and isolated', async () => {
+    prismaMock.shopifyOrder.findUnique.mockResolvedValue({
+      id: 'shopify-order-db-1',
+      allocations: [{ id: 'alloc-a' }],
+    });
+    mockEvidenceCounts([
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+    ]);
+    prismaMock.refundRecord.findMany.mockResolvedValue([]);
+    ingestVerifiedShopifyRefundMock.mockResolvedValue({
+      ok: false,
+      action: 'received_needs_attention',
+      processingStatus: 'needs_attention',
+      reasonCode: 'canonical_refund_line_evidence_incomplete',
+      refundAllocationCount: 0,
+      error: 'Canonical refund line evidence requires finance review.',
+    });
+    const service = createCanonicalRefundReconciliationService(buildEnv([canonicalRefund()]));
+
+    await service.reconcileShopifyOrderRefunds('order-1', { targetVendorAllocationId: 'alloc-a' });
+    await service.reconcileShopifyOrderRefunds('order-1', { targetVendorAllocationId: 'alloc-a' });
+
+    expect(prismaMock.operationalSignal.upsert).toHaveBeenCalledTimes(2);
+    for (const [input] of prismaMock.operationalSignal.upsert.mock.calls) {
+      expect(input).toMatchObject({
+        where: {
+          id: 'signal-canonical-refund-requires-manual-review-order-1-5001-alloc-a',
+        },
+        create: {
+          allocationId: 'alloc-a',
+          ruleKey: 'canonical_refund_requires_manual_review',
+        },
+      });
+    }
+  });
+
   it('skips zero-value void evidence without creating synthetic refund finance', async () => {
     const zeroValueVoid = canonicalRefund({
       totalRefundedAmount: '0.00',
@@ -611,5 +650,11 @@ describe('canonical Shopify refund reconciliation', () => {
     expect(payload.refund_line_items?.[0]?.subtotal).toBe('50.00');
     expect(__canonicalRefundReconciliationTesting.CANONICAL_REFUND_SIGNAL_RULE_KEYS)
       .toHaveProperty('repaired', 'canonical_refund_repaired');
+    expect(__canonicalRefundReconciliationTesting.buildCanonicalRefundSignalId({
+      ruleKey: 'canonical_refund_requires_manual_review',
+      sourceShopifyOrderId: 'order-1',
+      sourceShopifyRefundId: '5001',
+      targetVendorAllocationId: 'alloc-a',
+    })).toBe('signal-canonical-refund-requires-manual-review-order-1-5001-alloc-a');
   });
 });

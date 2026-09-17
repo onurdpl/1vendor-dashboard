@@ -57,12 +57,14 @@ function buildCanonicalRefundSignalId(input: {
   ruleKey: CanonicalRefundSignalRuleKey;
   sourceShopifyOrderId: string;
   sourceShopifyRefundId?: string | null;
+  targetVendorAllocationId?: string | null;
 }) {
   return [
     'signal',
     sanitizeSignalPart(input.ruleKey),
     sanitizeSignalPart(input.sourceShopifyOrderId),
     input.sourceShopifyRefundId ? sanitizeSignalPart(input.sourceShopifyRefundId) : null,
+    input.targetVendorAllocationId ? sanitizeSignalPart(input.targetVendorAllocationId) : null,
   ].filter(Boolean).join('-');
 }
 
@@ -74,6 +76,7 @@ async function upsertCanonicalRefundSignal(input: {
   ruleKey: CanonicalRefundSignalRuleKey;
   sourceShopifyOrderId: string;
   sourceShopifyRefundId?: string | null;
+  targetVendorAllocationId?: string | null;
   severity?: OperationalSignalSeverity;
   title: string;
   description: string;
@@ -89,6 +92,7 @@ async function upsertCanonicalRefundSignal(input: {
       type: 'reconciliation_issue',
       severity: input.severity ?? OperationalSignalSeverity.WARNING,
       sourceArea: OperationalSignalSourceArea.RECONCILIATION,
+      allocationId: input.targetVendorAllocationId ?? null,
       title: input.title,
       description: input.description,
       suggestedAction: input.suggestedAction,
@@ -98,12 +102,14 @@ async function upsertCanonicalRefundSignal(input: {
       metadata: toJsonObject({
         sourceShopifyOrderId: input.sourceShopifyOrderId,
         sourceShopifyRefundId: input.sourceShopifyRefundId ?? null,
+        targetVendorAllocationId: input.targetVendorAllocationId ?? null,
         ...(input.metadata ?? {}),
       }),
     },
     update: {
       severity: input.severity ?? OperationalSignalSeverity.WARNING,
       sourceArea: OperationalSignalSourceArea.RECONCILIATION,
+      allocationId: input.targetVendorAllocationId ?? null,
       title: input.title,
       description: input.description,
       suggestedAction: input.suggestedAction,
@@ -113,6 +119,7 @@ async function upsertCanonicalRefundSignal(input: {
       metadata: toJsonObject({
         sourceShopifyOrderId: input.sourceShopifyOrderId,
         sourceShopifyRefundId: input.sourceShopifyRefundId ?? null,
+        targetVendorAllocationId: input.targetVendorAllocationId ?? null,
         ...(input.metadata ?? {}),
       }),
     },
@@ -122,19 +129,22 @@ async function upsertCanonicalRefundSignal(input: {
 async function resolveCanonicalRefundSignals(input: {
   sourceShopifyOrderId: string;
   sourceShopifyRefundId?: string | null;
+  targetVendorAllocationId?: string | null;
   ruleKeys: CanonicalRefundSignalRuleKey[];
 }) {
   await prisma.operationalSignal.updateMany({
     where: {
-      id: {
-        in: input.ruleKeys.map((ruleKey) =>
-          buildCanonicalRefundSignalId({
-            ruleKey,
-            sourceShopifyOrderId: input.sourceShopifyOrderId,
-            sourceShopifyRefundId: input.sourceShopifyRefundId,
-          })
-        ),
-      },
+      OR: input.ruleKeys.flatMap((ruleKey) => {
+        const id = buildCanonicalRefundSignalId({
+          ruleKey,
+          sourceShopifyOrderId: input.sourceShopifyOrderId,
+          sourceShopifyRefundId: input.sourceShopifyRefundId,
+          targetVendorAllocationId: input.targetVendorAllocationId,
+        });
+        return input.targetVendorAllocationId
+          ? [{ id }]
+          : [{ id }, { id: { startsWith: `${id}-` } }];
+      }),
       status: {
         in: [OperationalSignalStatus.ACTIVE, OperationalSignalStatus.ACKNOWLEDGED],
       },
@@ -359,6 +369,7 @@ export function createCanonicalRefundReconciliationService(
         await upsertCanonicalRefundSignal({
           ruleKey: CANONICAL_REFUND_SIGNAL_RULE_KEYS.requiresManualReview,
           sourceShopifyOrderId,
+          targetVendorAllocationId: options.targetVendorAllocationId,
           sourceShopifyRefundId: refund?.sourceShopifyRefundId,
           severity: OperationalSignalSeverity.HIGH,
           title: 'Canonical refund requires monetary evidence review',
@@ -394,6 +405,7 @@ export function createCanonicalRefundReconciliationService(
         await resolveCanonicalRefundSignals({
           sourceShopifyOrderId,
           sourceShopifyRefundId: refund.sourceShopifyRefundId,
+          targetVendorAllocationId: options.targetVendorAllocationId,
           ruleKeys: [
             CANONICAL_REFUND_SIGNAL_RULE_KEYS.missingLocalOrder,
             CANONICAL_REFUND_SIGNAL_RULE_KEYS.lineItemUnmatched,
@@ -450,6 +462,7 @@ export function createCanonicalRefundReconciliationService(
         await upsertCanonicalRefundSignal({
           ruleKey: CANONICAL_REFUND_SIGNAL_RULE_KEYS.missingLocalOrder,
           sourceShopifyOrderId,
+          targetVendorAllocationId: options.targetVendorAllocationId,
           sourceShopifyRefundId: refund.sourceShopifyRefundId,
           severity: OperationalSignalSeverity.CRITICAL,
           title: 'Canonical refund missing local order',
@@ -568,6 +581,7 @@ export function createCanonicalRefundReconciliationService(
             : CANONICAL_REFUND_SIGNAL_RULE_KEYS.requiresManualReview,
           sourceShopifyOrderId,
           sourceShopifyRefundId: refund.sourceShopifyRefundId,
+          targetVendorAllocationId: options.targetVendorAllocationId,
           severity: OperationalSignalSeverity.HIGH,
           title: lineItemUnmatched
             ? 'Canonical refund line item unmatched'
@@ -590,9 +604,9 @@ export function createCanonicalRefundReconciliationService(
           refundId: refund.sourceShopifyRefundId,
           status: 'failed',
           reason: ingestionResult.error,
-          affectedAllocationIds: [],
-          affectedVendorIds: [],
-          affectedRefundRecordIds: [],
+          affectedAllocationIds: [...new Set(recordSummary.map((record) => record.vendorAllocationId))],
+          affectedVendorIds: [...new Set(recordSummary.map((record) => record.vendorAllocation.assignedVendorId))],
+          affectedRefundRecordIds: recordSummary.map((record) => record.id),
         });
         continue;
       }
@@ -621,6 +635,7 @@ export function createCanonicalRefundReconciliationService(
       await resolveCanonicalRefundSignals({
         sourceShopifyOrderId,
         sourceShopifyRefundId: refund.sourceShopifyRefundId,
+        targetVendorAllocationId: options.targetVendorAllocationId,
         ruleKeys: [
           CANONICAL_REFUND_SIGNAL_RULE_KEYS.missingLocalOrder,
           CANONICAL_REFUND_SIGNAL_RULE_KEYS.lineItemUnmatched,
@@ -634,6 +649,7 @@ export function createCanonicalRefundReconciliationService(
           ruleKey: CANONICAL_REFUND_SIGNAL_RULE_KEYS.repaired,
           sourceShopifyOrderId,
           sourceShopifyRefundId: refund.sourceShopifyRefundId,
+          targetVendorAllocationId: options.targetVendorAllocationId,
           severity: OperationalSignalSeverity.INFO,
           title: shippingOnlyReconciliation ? 'Canonical shipping refund reconciled' : 'Canonical refund repaired',
           description: shippingOnlyReconciliation

@@ -843,6 +843,8 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
         const base = await applyBaseOrderInTransaction(tx, input.bundle);
 
         const monetaryRefunds = getMonetaryRefunds(input.bundle, input.refundEvidence);
+        const refundReviewWarnings: string[] = [];
+        let refundAllocationCount = 0;
         for (const { refund, itemEvidence } of monetaryRefunds) {
           const result = await ingestVerifiedShopifyRefund(buildCurrentStateRefundIngestionInput({
             bundle: input.bundle,
@@ -851,8 +853,14 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
             transactionClient: tx,
           }));
           if (!result.ok) {
+            if (result.reasonCode === 'canonical_refund_line_evidence_incomplete') {
+              refundAllocationCount += result.refundAllocationCount ?? 0;
+              refundReviewWarnings.push(result.error);
+              continue;
+            }
             throw new Error(result.error);
           }
+          refundAllocationCount += result.refundAllocationCount;
         }
 
         const orderForReturns = await tx.shopifyOrder.findUnique({
@@ -875,12 +883,16 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
         const summary: CurrentStateOrderRepairSummary = {
           ...base.summary,
           cancellationApplied: cancellation.applied,
-          refundApplied: monetaryRefunds.length > 0,
+          refundApplied: refundAllocationCount > 0,
           returnApplied: input.bundle.returns.length > 0,
           refundEvidence: input.refundEvidence ? toSafeRefundMonetaryEvidence(input.refundEvidence) : null,
           executionBlocked: false,
           executionBlockedReason: null,
-          warnings: [...(input.refundEvidence?.sanitizedWarnings ?? []), ...cancellation.warnings],
+          warnings: [
+            ...(input.refundEvidence?.sanitizedWarnings ?? []),
+            ...refundReviewWarnings,
+            ...cancellation.warnings,
+          ],
           skipped: base.summary.shopifyOrder === 'Existing' &&
             base.summary.allocation === 'Existing' &&
             base.summary.finance === 'Existing' &&
