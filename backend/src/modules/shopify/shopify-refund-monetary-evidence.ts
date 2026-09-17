@@ -34,7 +34,37 @@ export type CanonicalRefundItemMonetaryEvidence = {
   currency: string | null;
   reasonCode: RefundMonetaryEvidenceReasonCode;
   sanitizedWarnings: string[];
+  selectedTransactions: CanonicalRefundSelectedTransactionEvidence[];
 };
+
+export type CanonicalRefundSelectedTransactionEvidence = Readonly<{
+  transactionGid: string;
+  kind: string;
+  status: string;
+  amount: string;
+  currency: string;
+}>;
+
+export type CanonicalRefundLineEvidence = Readonly<{
+  sourceRefundLineItemId: string;
+  sourceLineItemId: string | null;
+  sku: string | null;
+  quantity: number | null;
+  quantityProvenance: 'OBSERVED_VALID' | 'OBSERVED_INVALID' | 'ABSENT';
+  subtotalAmount: string | null;
+  subtotalAmountProvenance: 'OBSERVED' | 'ABSENT';
+  subtotalCurrency: string | null;
+}>;
+
+export type CanonicalRefundEvidenceTransport = Readonly<{
+  sourceShopifyRefundId: string;
+  sourceShopifyOrderId: string;
+  monetaryClassification: RefundMonetaryClassification;
+  refundTotalAmount: string | null;
+  refundCurrency: string | null;
+  selectedTransactions: readonly CanonicalRefundSelectedTransactionEvidence[];
+  lines: readonly CanonicalRefundLineEvidence[];
+}>;
 
 export type CanonicalRefundMonetaryEvidence = {
   classification: RefundMonetaryClassification;
@@ -174,6 +204,7 @@ function itemResult(input: {
   currency?: string | null;
   reasonCode: RefundMonetaryEvidenceReasonCode;
   warning?: string;
+  selectedTransactions?: CanonicalRefundSelectedTransactionEvidence[];
 }): CanonicalRefundItemMonetaryEvidence {
   return {
     sourceShopifyRefundId: input.refund.sourceShopifyRefundId,
@@ -182,6 +213,7 @@ function itemResult(input: {
     currency: input.currency ?? null,
     reasonCode: input.reasonCode,
     sanitizedWarnings: input.warning ? [input.warning] : [],
+    selectedTransactions: input.selectedTransactions ?? [],
   };
 }
 
@@ -248,6 +280,7 @@ export function classifyCanonicalRefundMonetaryEvidence(
     kind: string;
     status: string;
     money: ParsedMoney;
+    source: CanonicalShopifyRefundSnapshot['transactions'][number];
   }>();
   let duplicateTransactionCount = 0;
   let duplicateConflict = false;
@@ -275,7 +308,13 @@ export function classifyCanonicalRefundMonetaryEvidence(
         }
         continue;
       }
-      uniqueTransactions.set(transactionId, { fingerprint, kind, status, money });
+      uniqueTransactions.set(transactionId, {
+        fingerprint,
+        kind,
+        status,
+        money,
+        source: transaction,
+      });
       if (kind === REFUND_TRANSACTION_KIND && status !== FINAL_TRANSACTION_STATUS) {
         nonFinalTransactionCount += 1;
       }
@@ -349,6 +388,7 @@ export function classifyCanonicalRefundMonetaryEvidence(
 
     const localIds = new Set<string>();
     const localPositiveRefunds: Prisma.Decimal[] = [];
+    const localSelectedTransactions: CanonicalRefundSelectedTransactionEvidence[] = [];
     let localSuccessfulVoidCount = 0;
     for (const transaction of refund.transactions) {
       const transactionId = transaction.transactionGid.trim();
@@ -366,6 +406,13 @@ export function classifyCanonicalRefundMonetaryEvidence(
         unique.money.decimal.greaterThan(0)
       ) {
         localPositiveRefunds.push(unique.money.decimal);
+        localSelectedTransactions.push({
+          transactionGid: unique.source.transactionGid,
+          kind: unique.source.kind!,
+          status: unique.source.status!,
+          amount: unique.source.amount!,
+          currency: unique.source.currencyCode!,
+        });
         globalSuccessfulRefunds.set(transactionId, unique.money.decimal);
       }
       if (
@@ -390,6 +437,7 @@ export function classifyCanonicalRefundMonetaryEvidence(
         amount: localRefundAmount,
         currency: refundTotal.currency,
         reasonCode: 'monetary_refund_verified',
+        selectedTransactions: localSelectedTransactions,
       }));
     } else if (localSuccessfulVoidCount > 0) {
       perRefundResults.push(itemResult({
@@ -606,6 +654,41 @@ export function findCanonicalRefundItemEvidence(
   sourceShopifyRefundId: string,
 ) {
   return evidence.refunds.find((refund) => refund.sourceShopifyRefundId === sourceShopifyRefundId) ?? null;
+}
+
+export function buildCanonicalRefundEvidenceTransport(input: {
+  collection: CanonicalRefundCollection;
+  refund: CanonicalShopifyRefundSnapshot;
+  monetaryEvidence: CanonicalRefundItemMonetaryEvidence;
+}): CanonicalRefundEvidenceTransport {
+  if (input.refund.sourceShopifyRefundId !== input.monetaryEvidence.sourceShopifyRefundId) {
+    throw new Error('Canonical refund evidence transport identity does not match monetary evidence.');
+  }
+
+  return {
+    sourceShopifyRefundId: input.refund.sourceShopifyRefundId,
+    sourceShopifyOrderId: input.collection.sourceShopifyOrderId,
+    monetaryClassification: input.monetaryEvidence.classification,
+    refundTotalAmount: input.refund.observedTotalRefundedAmount ?? null,
+    refundCurrency: input.refund.totalRefundedCurrencyCode,
+    selectedTransactions: input.monetaryEvidence.selectedTransactions.map((transaction) => ({ ...transaction })),
+    lines: input.refund.refundLineItems.map((line) => ({
+      sourceRefundLineItemId: line.sourceRefundLineItemId,
+      sourceLineItemId: line.sourceLineItemId,
+      sku: line.sku,
+      quantity: line.observedQuantity ?? null,
+      quantityProvenance: line.observedQuantity === null || line.observedQuantity === undefined
+        ? 'ABSENT'
+        : Number.isInteger(line.observedQuantity) && line.observedQuantity > 0
+          ? 'OBSERVED_VALID'
+          : 'OBSERVED_INVALID',
+      subtotalAmount: line.observedSubtotalAmount ?? null,
+      subtotalAmountProvenance: line.observedSubtotalAmount === null || line.observedSubtotalAmount === undefined
+        ? 'ABSENT'
+        : 'OBSERVED',
+      subtotalCurrency: line.currencyCode,
+    })),
+  };
 }
 
 export function toSafeRefundMonetaryEvidence(

@@ -215,6 +215,47 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
     ]);
   });
 
+  it('preserves missing versus observed refund-line values before compatibility defaults', async () => {
+    const missing = refundNode('1083708080465', '20754005197137', 'SKU-MISSING');
+    delete missing.refundLineItems.edges[0]!.node.quantity;
+    delete missing.refundLineItems.edges[0]!.node.subtotalSet;
+    missing.refundLineItems.edges[0]!.node.lineItem = null as never;
+    const observedZero = refundNode('1083708080466', '20754005229905', 'SKU-ZERO');
+    observedZero.refundLineItems.edges[0]!.node.subtotalSet = {
+      shopMoney: { amount: '0.00', currencyCode: null },
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
+      data: {
+        order: {
+          id: 'gid://shopify/Order/7856043819345',
+          legacyResourceId: '7856043819345',
+          totalRefundedSet: { shopMoney: { amount: '200.00', currencyCode: 'TRY' } },
+          refunds: [missing, observedZero],
+        },
+      },
+    }));
+
+    const result = await createShopifyAdminService(env).fetchCanonicalRefundsForOrder('7856043819345');
+
+    expect(result?.refunds[0]?.refundLineItems[0]).toMatchObject({
+      sourceLineItemId: null,
+      observedQuantity: null,
+      quantity: 1,
+      observedSubtotalAmount: null,
+      subtotalAmount: '0.00',
+      currencyCode: null,
+    });
+    expect(result?.refunds[1]?.refundLineItems[0]).toMatchObject({
+      sourceLineItemId: '20754005229905',
+      observedQuantity: 1,
+      quantity: 1,
+      observedSubtotalAmount: '0.00',
+      subtotalAmount: '0.00',
+      currencyCode: null,
+    });
+  });
+
   it('returns an empty canonical refund collection safely', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
       data: {

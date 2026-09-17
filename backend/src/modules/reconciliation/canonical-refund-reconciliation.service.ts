@@ -14,6 +14,7 @@ import type {
 } from '../shopify/shopify-admin.types.js';
 import { ingestVerifiedShopifyRefund } from '../shopify/refund-ingestion.service.js';
 import {
+  buildCanonicalRefundEvidenceTransport,
   classifyCanonicalRefundMonetaryEvidence,
   findCanonicalRefundItemEvidence,
   isRefundEvidenceBlocked,
@@ -542,6 +543,11 @@ export function createCanonicalRefundReconciliationService(
         event: webhookEvent,
         payload,
         monetaryEvidence: refundEvidence,
+        canonicalEvidence: buildCanonicalRefundEvidenceTransport({
+          collection: canonicalRefunds,
+          refund,
+          monetaryEvidence: refundEvidence,
+        }),
         canonicalFinancialStatus: canonicalRefunds.displayFinancialStatus,
         targetVendorAllocationId: options.targetVendorAllocationId,
       });

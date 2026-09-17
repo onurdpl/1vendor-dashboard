@@ -14,6 +14,7 @@ import { applyCanonicalReturnsInTransaction } from '../reconciliation/canonical-
 import { applyCanonicalCancellationInTransaction } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
 import { ingestVerifiedShopifyRefund } from './refund-ingestion.service.js';
 import {
+  buildCanonicalRefundEvidenceTransport,
   classifyCanonicalRefundMonetaryEvidence,
   findCanonicalRefundItemEvidence,
   isRefundEvidenceBlocked,
@@ -255,6 +256,28 @@ function getMonetaryRefunds(
       ? [{ refund, itemEvidence }]
       : [];
   });
+}
+
+function buildCurrentStateRefundIngestionInput(input: {
+  bundle: CanonicalRepairBundle;
+  refund: CanonicalShopifyRefundSnapshot;
+  itemEvidence: ReturnType<typeof getMonetaryRefunds>[number]['itemEvidence'];
+  transactionClient: Prisma.TransactionClient;
+}) {
+  return {
+    payload: canonicalRefundToWebhookPayload({
+      sourceShopifyOrderId: input.bundle.order.sourceShopifyOrderId,
+      refund: input.refund,
+    }),
+    transactionClient: input.transactionClient,
+    monetaryEvidence: input.itemEvidence,
+    canonicalEvidence: buildCanonicalRefundEvidenceTransport({
+      collection: input.bundle.refundCollection,
+      refund: input.refund,
+      monetaryEvidence: input.itemEvidence,
+    }),
+    canonicalFinancialStatus: input.bundle.refundCollection.displayFinancialStatus,
+  };
 }
 
 function validateCanonicalBundle(bundle: CanonicalRepairBundle, state: LocalRepairState) {
@@ -821,15 +844,12 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
 
         const monetaryRefunds = getMonetaryRefunds(input.bundle, input.refundEvidence);
         for (const { refund, itemEvidence } of monetaryRefunds) {
-          const result = await ingestVerifiedShopifyRefund({
-            payload: canonicalRefundToWebhookPayload({
-              sourceShopifyOrderId: input.bundle.order.sourceShopifyOrderId,
-              refund,
-            }),
+          const result = await ingestVerifiedShopifyRefund(buildCurrentStateRefundIngestionInput({
+            bundle: input.bundle,
+            refund,
+            itemEvidence,
             transactionClient: tx,
-            monetaryEvidence: itemEvidence,
-            canonicalFinancialStatus: input.bundle.refundCollection.displayFinancialStatus,
-          });
+          }));
           if (!result.ok) {
             throw new Error(result.error);
           }
@@ -1099,6 +1119,9 @@ export const __currentStateOrderRepairTesting = {
   normalizeIdentifier,
   validateCanonicalBundle,
   fetchCanonicalRepairBundle,
+  classifyBundleRefunds,
+  getMonetaryRefunds,
+  buildCurrentStateRefundIngestionInput,
   applyBaseOrderInTransaction,
   assertRepairLocalAssumptionsUnchanged,
 };

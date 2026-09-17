@@ -82,6 +82,7 @@ function canonicalRefunds() {
       createdAt: '2026-07-11T18:00:00.000Z',
       updatedAt: '2026-07-11T18:00:01.000Z',
       note: null,
+      observedTotalRefundedAmount: '100.00',
       totalRefundedAmount: '100.00',
       totalRefundedCurrencyCode: 'TRY',
       transactionPaginationComplete: true,
@@ -105,7 +106,9 @@ function canonicalRefunds() {
         title: 'Product',
         name: 'Product',
         variantTitle: null,
+        observedQuantity: 1,
         quantity: 1,
+        observedSubtotalAmount: '100.00',
         subtotalAmount: '100.00',
         currencyCode: 'TRY',
       }],
@@ -188,6 +191,22 @@ describe('refunds/create full-refund terminal writer wiring', () => {
     expect(refundIngestionMock.ingestVerifiedShopifyRefund.mock.invocationCallOrder[0]).toBeLessThan(
       terminalWriterMock.createVerifiedFactsForShopifyOrder.mock.invocationCallOrder[0]!,
     );
+    expect(refundIngestionMock.ingestVerifiedShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalEvidence: expect.objectContaining({
+        sourceShopifyRefundId: '5001',
+        sourceShopifyOrderId: '1105',
+        selectedTransactions: [expect.objectContaining({
+          transactionGid: 'gid://shopify/OrderTransaction/5001',
+          amount: '100.00',
+          currency: 'TRY',
+        })],
+        lines: [expect.objectContaining({
+          sourceLineItemId: '7001',
+          quantity: 1,
+          quantityProvenance: 'OBSERVED_VALID',
+        })],
+      }),
+    }));
     expect(result).toMatchObject({ status: 202, body: { action: 'accepted', processingStatus: 'processed' } });
     expect(operationalJobsMock.markOperationalJobFailed).not.toHaveBeenCalled();
   });

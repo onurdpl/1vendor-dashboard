@@ -4,6 +4,7 @@ import type {
   FetchCanonicalShopifyRefundsForOrderResult,
 } from '../backend/src/modules/shopify/shopify-admin.types.js';
 import {
+  buildCanonicalRefundEvidenceTransport,
   classifyCanonicalRefundMonetaryEvidence,
   classifyCustomerRefundCompletion,
   requiresRefundMonetaryEvidenceClassification,
@@ -46,6 +47,7 @@ function refund(input: {
     createdAt: '2026-07-11T18:00:00.000Z',
     updatedAt: '2026-07-11T18:00:01.000Z',
     note: null,
+    observedTotalRefundedAmount: input.total ?? '100.00',
     totalRefundedAmount: input.total ?? '100.00',
     totalRefundedCurrencyCode: input.currency ?? 'TRY',
     transactionPaginationComplete: input.transactionPaginationComplete ?? true,
@@ -60,7 +62,9 @@ function refund(input: {
       title: 'Product',
       name: 'Product',
       variantTitle: null,
+      observedQuantity: 1,
       quantity: 1,
+      observedSubtotalAmount: '4799.00',
       subtotalAmount: '4799.00',
       currencyCode: 'TRY',
     }],
@@ -99,6 +103,87 @@ function collection(input: {
 }
 
 describe('Shopify canonical refund monetary evidence', () => {
+  it('exposes the exact selected successful REFUND transaction from the existing monetary gate', () => {
+    const canonical = collection();
+    const evidence = classifyCanonicalRefundMonetaryEvidence(canonical);
+
+    expect(evidence.classification).toBe('MONETARY_REFUND');
+    expect(evidence.refunds[0]?.selectedTransactions).toEqual([{
+      transactionGid: 'gid://shopify/OrderTransaction/1',
+      kind: 'REFUND',
+      status: 'SUCCESS',
+      amount: '100.00',
+      currency: 'TRY',
+    }]);
+  });
+
+  it('transports observed canonical line provenance separately from compatibility defaults', () => {
+    const observedZero = refund({ id: 'refund-observed-zero' });
+    observedZero.observedTotalRefundedAmount = '100.00';
+    observedZero.refundLineItems[0] = {
+      ...observedZero.refundLineItems[0],
+      sourceLineItemId: null,
+      lineItemGid: null,
+      observedQuantity: 1,
+      quantity: 1,
+      observedSubtotalAmount: '0.00',
+      subtotalAmount: '0.00',
+      currencyCode: null,
+    };
+    const missing = refund({ id: 'refund-missing' });
+    missing.observedTotalRefundedAmount = '100.00';
+    missing.refundLineItems[0] = {
+      ...missing.refundLineItems[0],
+      sourceLineItemId: null,
+      lineItemGid: null,
+      observedQuantity: null,
+      quantity: 1,
+      observedSubtotalAmount: null,
+      subtotalAmount: '0.00',
+      currencyCode: null,
+    };
+
+    for (const canonicalRefund of [observedZero, missing]) {
+      const canonical = collection({ refunds: [canonicalRefund] });
+      const evidence = classifyCanonicalRefundMonetaryEvidence(canonical);
+      const itemEvidence = evidence.refunds[0]!;
+      const transport = buildCanonicalRefundEvidenceTransport({
+        collection: canonical,
+        refund: canonicalRefund,
+        monetaryEvidence: itemEvidence,
+      });
+      expect(transport.sourceShopifyOrderId).toBe('7856043819345');
+      expect(transport.lines[0]?.sourceLineItemId).toBeNull();
+      expect(transport.lines[0]?.subtotalCurrency).toBeNull();
+    }
+
+    const observedTransport = buildCanonicalRefundEvidenceTransport({
+      collection: collection({ refunds: [observedZero] }),
+      refund: observedZero,
+      monetaryEvidence: classifyCanonicalRefundMonetaryEvidence(
+        collection({ refunds: [observedZero] }),
+      ).refunds[0]!,
+    });
+    const missingTransport = buildCanonicalRefundEvidenceTransport({
+      collection: collection({ refunds: [missing] }),
+      refund: missing,
+      monetaryEvidence: classifyCanonicalRefundMonetaryEvidence(
+        collection({ refunds: [missing] }),
+      ).refunds[0]!,
+    });
+    expect(observedTransport.lines[0]).toMatchObject({
+      quantity: 1,
+      quantityProvenance: 'OBSERVED_VALID',
+      subtotalAmount: '0.00',
+      subtotalAmountProvenance: 'OBSERVED',
+    });
+    expect(missingTransport.lines[0]).toMatchObject({
+      quantity: null,
+      quantityProvenance: 'ABSENT',
+      subtotalAmount: null,
+      subtotalAmountProvenance: 'ABSENT',
+    });
+  });
   it('classifies a complete empty canonical refund collection as no verified monetary refund', () => {
     const canonical = collection({
       financialStatus: 'PAID',

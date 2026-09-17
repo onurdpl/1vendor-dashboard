@@ -47,6 +47,7 @@ import {
 } from '../operational-jobs/operational-jobs.service.js';
 import { createCanonicalCancellationReconciliationService } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
 import {
+  buildCanonicalRefundEvidenceTransport,
   classifyCanonicalRefundMonetaryEvidence,
   findCanonicalRefundItemEvidence,
   isRefundEvidenceBlocked,
@@ -1339,10 +1340,21 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       if (refundEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund) {
         throw new Error(`Canonical Shopify refund verification blocked: ${refundEvidence.reasonCode}.`);
       }
+      const canonicalRefund = canonicalRefunds.refunds.find(
+        (refund) => refund.sourceShopifyRefundId === sourceShopifyRefundId,
+      );
+      if (!canonicalRefund) {
+        throw new Error('Canonical Shopify refund evidence is unavailable for the verified refund.');
+      }
       ingestionResult = await ingestVerifiedShopifyRefund({
         event: idempotencyResult.event,
         payload,
         monetaryEvidence: refundEvidence,
+        canonicalEvidence: buildCanonicalRefundEvidenceTransport({
+          collection: canonicalRefunds,
+          refund: canonicalRefund,
+          monetaryEvidence: refundEvidence,
+        }),
         canonicalFinancialStatus: canonicalRefunds.displayFinancialStatus,
       });
     } catch (error) {

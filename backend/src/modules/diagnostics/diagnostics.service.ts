@@ -28,6 +28,7 @@ import {
 } from '../shopify/orders-create-ownership.service.js';
 import { ingestVerifiedShopifyRefund } from '../shopify/refund-ingestion.service.js';
 import {
+  buildCanonicalRefundEvidenceTransport,
   classifyCanonicalRefundMonetaryEvidence,
   findCanonicalRefundItemEvidence,
   isRefundEvidenceBlocked,
@@ -2990,10 +2991,30 @@ async function processWebhookEvent(
       };
     }
 
+    const canonicalRefund = canonicalRefunds.refunds.find(
+      (refund) => refund.sourceShopifyRefundId === sourceShopifyRefundId,
+    );
+    if (!canonicalRefund) {
+      const message = 'Canonical Shopify refund evidence is unavailable for the verified refund.';
+      await markWebhookFailed(event.id, message);
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message,
+      };
+    }
+
     const ingestionResult = await ingestVerifiedShopifyRefund({
       event,
       payload: typedPayload,
       monetaryEvidence: refundEvidence,
+      canonicalEvidence: buildCanonicalRefundEvidenceTransport({
+        collection: canonicalRefunds,
+        refund: canonicalRefund,
+        monetaryEvidence: refundEvidence,
+      }),
       canonicalFinancialStatus: canonicalRefunds.displayFinancialStatus,
     });
 

@@ -31,6 +31,7 @@ import type {
 } from './refund-ingestion.types.js';
 import {
   REFUND_MONETARY_CLASSIFICATIONS,
+  type CanonicalRefundEvidenceTransport,
   type CanonicalRefundItemMonetaryEvidence,
 } from './shopify-refund-monetary-evidence.js';
 import { synchronizeCanonicalShopifyOrderFinancialStatus } from './shopify-order-financial-status.service.js';
@@ -1158,6 +1159,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
 export async function ingestVerifiedShopifyRefund(
   input: RefundIngestionInput & {
     monetaryEvidence: CanonicalRefundItemMonetaryEvidence;
+    canonicalEvidence: CanonicalRefundEvidenceTransport;
     canonicalFinancialStatus: string | null | undefined;
     targetVendorAllocationId?: string;
   },

@@ -2481,6 +2481,7 @@ export function createShopifyAdminService(env: AppEnv) {
           createdAt: refund.createdAt ?? null,
           updatedAt: refund.updatedAt ?? null,
           note: normalizeShopifyString(refund.note),
+          observedTotalRefundedAmount: refund.totalRefundedSet?.shopMoney?.amount ?? null,
           totalRefundedAmount: readMoneyAmount(refund.totalRefundedSet ?? null),
           totalRefundedCurrencyCode: refund.totalRefundedSet?.shopMoney?.currencyCode ?? null,
           transactionPaginationComplete: refund.transactions.pageInfo?.hasNextPage !== true,
@@ -2509,7 +2510,9 @@ export function createShopifyAdminService(env: AppEnv) {
               title: normalizeShopifyString(lineItem.lineItem?.title),
               name: normalizeShopifyString(lineItem.lineItem?.name),
               variantTitle: normalizeShopifyString(lineItem.lineItem?.variantTitle),
+              observedQuantity: typeof lineItem.quantity === 'number' ? lineItem.quantity : null,
               quantity: typeof lineItem.quantity === 'number' && lineItem.quantity > 0 ? lineItem.quantity : 1,
+              observedSubtotalAmount: lineItem.subtotalSet?.shopMoney?.amount ?? null,
               subtotalAmount: readMoneyAmount(lineItem.subtotalSet ?? null),
               currencyCode: lineItem.subtotalSet?.shopMoney?.currencyCode ?? null,
             };

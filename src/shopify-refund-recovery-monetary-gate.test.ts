@@ -41,6 +41,7 @@ function canonicalRefunds(kind: 'REFUND' | 'VOID', amount: string) {
       createdAt: '2026-07-11T18:00:00.000Z',
       updatedAt: '2026-07-11T18:00:01.000Z',
       note: null,
+      observedTotalRefundedAmount: amount,
       totalRefundedAmount: amount,
       totalRefundedCurrencyCode: 'TRY',
       transactionPaginationComplete: true,
@@ -64,7 +65,9 @@ function canonicalRefunds(kind: 'REFUND' | 'VOID', amount: string) {
         title: 'Product',
         name: 'Product',
         variantTitle: null,
+        observedQuantity: 1,
         quantity: 1,
+        observedSubtotalAmount: kind === 'VOID' ? '4799.00' : amount,
         subtotalAmount: kind === 'VOID' ? '4799.00' : amount,
         currencyCode: 'TRY',
       }],
@@ -92,6 +95,17 @@ describe('stored refund replay/recovery monetary gate', () => {
 
     expect(refundIngestionMock.ingestVerifiedShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
       monetaryEvidence: expect.objectContaining({ classification: 'MONETARY_REFUND' }),
+      canonicalEvidence: expect.objectContaining({
+        sourceShopifyRefundId: '5001',
+        sourceShopifyOrderId: '1105',
+        selectedTransactions: [expect.objectContaining({
+          transactionGid: 'gid://shopify/OrderTransaction/5001',
+          kind: 'REFUND',
+          status: 'SUCCESS',
+          amount: '100.00',
+          currency: 'TRY',
+        })],
+      }),
     }));
     expect(result).toMatchObject({ processingStatus: 'processed', refundAllocationCount: 1 });
   });

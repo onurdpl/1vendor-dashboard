@@ -100,6 +100,7 @@ function canonicalRefund(
     createdAt: '2026-07-11T17:00:00.000Z',
     updatedAt: '2026-07-11T17:00:01.000Z',
     note: 'Refunded',
+    observedTotalRefundedAmount: '100.00',
     totalRefundedAmount: '100.00',
     totalRefundedCurrencyCode: 'TRY',
     transactionPaginationComplete: true,
@@ -126,7 +127,9 @@ function canonicalRefund(
         title: 'Test product',
         name: 'Test product',
         variantTitle: null,
+        observedQuantity: 1,
         quantity: 1,
+        observedSubtotalAmount: '100.00',
         subtotalAmount: '100.00',
         currencyCode: 'TRY',
       },
@@ -243,6 +246,55 @@ function service(deps: CurrentStateOrderRepairDependencies) {
 }
 
 describe('Shopify current-state order repair', () => {
+  it('builds verified refund ingestion input with canonical evidence separate from its compatibility payload', () => {
+    const refund = canonicalRefund();
+    const bundle = {
+      order: canonicalOrder(),
+      refundCollection: canonicalRefundCollection([refund]),
+      refunds: [refund],
+      returns: [],
+    };
+    const evidence = __currentStateOrderRepairTesting.classifyBundleRefunds(bundle);
+    const monetaryRefund = __currentStateOrderRepairTesting.getMonetaryRefunds(bundle, evidence)[0]!;
+
+    const input = __currentStateOrderRepairTesting.buildCurrentStateRefundIngestionInput({
+      bundle,
+      refund,
+      itemEvidence: monetaryRefund.itemEvidence,
+      transactionClient: {} as never,
+    });
+
+    expect(input.payload).toMatchObject({
+      id: '6001',
+      order_id: '7856043819345',
+      refund_line_items: [expect.objectContaining({ subtotal: '100.00' })],
+    });
+    expect(input.canonicalEvidence).toEqual({
+      sourceShopifyRefundId: '6001',
+      sourceShopifyOrderId: '7856043819345',
+      monetaryClassification: 'MONETARY_REFUND',
+      refundTotalAmount: '100.00',
+      refundCurrency: 'TRY',
+      selectedTransactions: [{
+        transactionGid: 'gid://shopify/OrderTransaction/6001',
+        kind: 'REFUND',
+        status: 'SUCCESS',
+        amount: '100.00',
+        currency: 'TRY',
+      }],
+      lines: [{
+        sourceRefundLineItemId: '7001',
+        sourceLineItemId: '1001',
+        sku: 'SKU-1',
+        quantity: 1,
+        quantityProvenance: 'OBSERVED_VALID',
+        subtotalAmount: '100.00',
+        subtotalAmountProvenance: 'OBSERVED',
+        subtotalCurrency: 'TRY',
+      }],
+    });
+  });
+
   it('reports authoritative active intake as a safe dry-run execution block', async () => {
     const fixture = dependencies({
       activeIntake: {

@@ -254,7 +254,9 @@ export type CanonicalShopifyRefundLineItemSnapshot = {
   title: string | null;
   name: string | null;
   variantTitle: string | null;
+  observedQuantity: number | null;
   quantity: number;
+  observedSubtotalAmount: string | null;
   subtotalAmount: string | null;
   currencyCode: string | null;
 };
@@ -276,6 +278,7 @@ export type CanonicalShopifyRefundSnapshot = {
   createdAt: string | null;
   updatedAt: string | null;
   note: string | null;
+  observedTotalRefundedAmount: string | null;
   totalRefundedAmount: string | null;
   totalRefundedCurrencyCode: string | null;
   transactionPaginationComplete: boolean;
