@@ -1,6 +1,10 @@
 import { prisma } from '../../db/prisma.js';
 import { CustomerCancellationStatus, FinanceEventType, OperationalJobStatus, type Prisma } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
+import {
+  resolveCompleteSaleLineage,
+  type CompleteSaleLineage,
+} from '../finance/complete-sale-lineage.service.js';
 import { assertResolvedEconomicOwnerForMoneyMovement } from '../finance/economic-owner-resolution.service.js';
 import { CANCEL_REFUND_REVIEW_BLOCKING_STATUSES } from '../finance/cancel-refund-review-hold.service.js';
 import { assertNoOpenFinanceIntegrityAlertForMoneyMovement } from '../finance/finance-integrity-alert.service.js';
@@ -320,7 +324,7 @@ type ResolvedRefundLineItem = ParsedShopifyRefundLineItem & {
   originalVendorId: string;
   vendorAllocationId: string;
   activeSaleLedgerId: string;
-  supersededFromLedgerIds: string[];
+  supersededSaleLedgerIds: readonly string[];
   shopifyOrderLineItemId: string;
   sourceShopifyOrderNumber: string;
   cancelRefundReviewStatus: string | null;
@@ -605,6 +609,7 @@ async function ingestShopifyRefundWebhookInternal(
       }
 
       const resolvedLineItems: ResolvedRefundLineItem[] = [];
+      const completeSaleLineageByActiveLedgerId = new Map<string, CompleteSaleLineage>();
       for (const lineItem of parsedRefund.refundLineItems) {
         if (!lineItem.sku) {
           throw new Error(`Refund line item ${lineItem.sourceRefundLineItemId} is missing SKU and cannot be allocated.`);
@@ -644,6 +649,14 @@ async function ingestShopifyRefundWebhookInternal(
           vendorAllocationId: vendorAllocation.id,
           db: tx,
         });
+        let completeSaleLineage = completeSaleLineageByActiveLedgerId.get(economicOwner.activeSaleLedgerId);
+        if (!completeSaleLineage) {
+          completeSaleLineage = await resolveCompleteSaleLineage({
+            activeSaleFinanceLedgerEntryId: economicOwner.activeSaleLedgerId,
+            db: tx,
+          });
+          completeSaleLineageByActiveLedgerId.set(economicOwner.activeSaleLedgerId, completeSaleLineage);
+        }
         await assertNoOpenFinanceIntegrityAlertForMoneyMovement({
           vendorAllocationId: vendorAllocation.id,
         }, tx);
@@ -654,7 +667,7 @@ async function ingestShopifyRefundWebhookInternal(
           originalVendorId,
           vendorAllocationId: vendorAllocation.id,
           activeSaleLedgerId: economicOwner.activeSaleLedgerId,
-          supersededFromLedgerIds: economicOwner.supersededFromLedgerIds,
+          supersededSaleLedgerIds: completeSaleLineage.supersededSaleLedgerIds,
           shopifyOrderLineItemId: ownership.shopifyOrderLineItem.id,
           sourceShopifyOrderNumber: vendorAllocation.sourceShopifyOrderNumber,
           cancelRefundReviewStatus: vendorAllocation.cancelRefundReviewStatus ?? null,
@@ -1039,7 +1052,7 @@ async function ingestShopifyRefundWebhookInternal(
             originalVendorIds: [...new Set(vendorLineItems.map((lineItem) => lineItem.originalVendorId))],
             activeSaleLedgerId: vendorLineItems[0].activeSaleLedgerId,
             supersededFromLedgerIds: [
-              ...new Set(vendorLineItems.flatMap((lineItem) => lineItem.supersededFromLedgerIds)),
+              ...new Set(vendorLineItems.flatMap((lineItem) => lineItem.supersededSaleLedgerIds)),
             ],
             sourceRefundLineItemIds: vendorLineItems.map((lineItem) => lineItem.sourceRefundLineItemId),
             sourceLineItemIds,

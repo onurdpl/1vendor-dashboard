@@ -321,6 +321,19 @@ function setupTransferredOrder() {
         vendorId: 'yalispor',
         entryType: 'sale',
         voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+        supersededByLedgerId: 'fin-intermediate-sale-7621834670417',
+        supersededBy: {
+          id: 'fin-intermediate-sale-7621834670417',
+          vendorId: 'intermediate-vendor',
+          entryType: 'sale',
+          voidedAt: new Date('2026-06-21T10:30:00.000Z'),
+        },
+      },
+      {
+        id: 'fin-intermediate-sale-7621834670417',
+        vendorId: 'intermediate-vendor',
+        entryType: 'sale',
+        voidedAt: new Date('2026-06-21T10:30:00.000Z'),
         supersededByLedgerId: 'fin-sporjinal-sale-7621834670417',
         supersededBy: {
           id: 'fin-sporjinal-sale-7621834670417',
@@ -329,12 +342,58 @@ function setupTransferredOrder() {
           voidedAt: null,
         },
       },
+      {
+        id: 'fin-sporjinal-sale-7621834670417',
+        vendorId: 'sporjinal',
+        entryType: 'sale',
+        voidedAt: null,
+        supersededByLedgerId: null,
+        supersededBy: null,
+      },
     ],
     economicTransfers: [{
       id: 'economic-transfer-1',
       status: 'completed',
       createdAt: new Date('2026-06-21T10:00:00.000Z'),
     }],
+  });
+  txMock.financeLedgerEntry.findUnique.mockResolvedValueOnce({
+    id: 'fin-sporjinal-sale-7621834670417',
+    entryType: 'sale',
+    voidedAt: null,
+    supersededByLedgerId: null,
+    supersedes: [{
+      id: 'fin-intermediate-sale-7621834670417',
+      entryType: 'sale',
+      voidedAt: new Date('2026-06-21T10:30:00.000Z'),
+      supersededByLedgerId: 'fin-sporjinal-sale-7621834670417',
+    }],
+    economicTransfersTo: [],
+    remainingAllocationSplitEvents: [],
+    childAllocationSplitEvents: [],
+  }).mockResolvedValueOnce({
+    id: 'fin-intermediate-sale-7621834670417',
+    entryType: 'sale',
+    voidedAt: new Date('2026-06-21T10:30:00.000Z'),
+    supersededByLedgerId: 'fin-sporjinal-sale-7621834670417',
+    supersedes: [{
+      id: 'fin-yalispor-sale-7621834670417',
+      entryType: 'sale',
+      voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+      supersededByLedgerId: 'fin-intermediate-sale-7621834670417',
+    }],
+    economicTransfersTo: [],
+    remainingAllocationSplitEvents: [],
+    childAllocationSplitEvents: [],
+  }).mockResolvedValueOnce({
+    id: 'fin-yalispor-sale-7621834670417',
+    entryType: 'sale',
+    voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+    supersededByLedgerId: 'fin-intermediate-sale-7621834670417',
+    supersedes: [],
+    economicTransfersTo: [],
+    remainingAllocationSplitEvents: [],
+    childAllocationSplitEvents: [],
   });
   txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 1 });
   txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 1 });
@@ -537,6 +596,16 @@ describe('Shopify refund return linking', () => {
       });
     });
     txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
+    txMock.financeLedgerEntry.findUnique.mockImplementation(async (query: { where?: { id?: string } }) => ({
+      id: query.where?.id ?? 'sale-active',
+      entryType: 'sale',
+      voidedAt: null,
+      supersededByLedgerId: null,
+      supersedes: [],
+      economicTransfersTo: [],
+      remainingAllocationSplitEvents: [],
+      childAllocationSplitEvents: [],
+    }));
     txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 0 });
     txMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
     txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 0 });
@@ -1510,7 +1579,10 @@ describe('Shopify refund return linking', () => {
             metadataJson: expect.objectContaining({
               originalVendorIds: ['yalispor'],
               activeSaleLedgerId: 'fin-sporjinal-sale-7621834670417',
-              supersededFromLedgerIds: ['fin-yalispor-sale-7621834670417'],
+              supersededFromLedgerIds: [
+                'fin-yalispor-sale-7621834670417',
+                'fin-intermediate-sale-7621834670417',
+              ],
             }),
           }),
         ]),
@@ -1876,6 +1948,16 @@ describe('Shopify refund return linking', () => {
     setupOrder();
     txMock.financeLedgerEntry.findUnique.mockReset();
     txMock.financeLedgerEntry.findUnique
+      .mockResolvedValueOnce({
+        id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+        entryType: 'sale',
+        voidedAt: null,
+        supersededByLedgerId: null,
+        supersedes: [],
+        economicTransfersTo: [],
+        remainingAllocationSplitEvents: [],
+        childAllocationSplitEvents: [],
+      })
       .mockResolvedValueOnce({
         id: NORMAL_REFUND_LEDGER_ID,
         vendorId: 'sporjinal',
