@@ -80,6 +80,14 @@ const txMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     create: vi.fn(),
   },
+  refundTerminalEvidenceReview: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  refundTerminalEvidenceReviewEvent: {
+    create: vi.fn(),
+  },
 }));
 
 const prismaMock = vi.hoisted(() => ({
@@ -653,6 +661,13 @@ describe('Shopify refund return linking', () => {
     txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
     txMock.$queryRaw.mockResolvedValue([{ advisoryLock: '' }]);
     txMock.refundEvidenceSnapshot.findUnique.mockResolvedValue(null);
+    txMock.refundTerminalEvidenceReview.findUnique.mockResolvedValue(null);
+    txMock.refundTerminalEvidenceReview.create.mockImplementation(async (input: { data: Record<string, unknown> }) => ({
+      id: `terminal-review-${String(input.data.dedupeKey)}`,
+      ...input.data,
+    }));
+    txMock.refundTerminalEvidenceReview.update.mockImplementation(async (input: { data: Record<string, unknown> }) => input.data);
+    txMock.refundTerminalEvidenceReviewEvent.create.mockImplementation(async (input: { data: Record<string, unknown> }) => input.data);
     txMock.financeEvent.findMany.mockResolvedValue([]);
     txMock.settlementRefundAdjustment.findFirst.mockResolvedValue(null);
     txMock.vendorBalanceEvent.findFirst.mockResolvedValue(null);
@@ -818,6 +833,9 @@ describe('Shopify refund return linking', () => {
     expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
     expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
     expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.create).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.update).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReviewEvent.create).not.toHaveBeenCalled();
   });
 
   it('keeps a duplicate live shipping-only webhook free of repeated side effects', async () => {
@@ -2168,6 +2186,9 @@ describe('Shopify refund return linking', () => {
     expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
     expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
     expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.create).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.update).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReviewEvent.create).not.toHaveBeenCalled();
   });
 
   it('keeps refund ledger held when the related sale is already paid', async () => {
@@ -2535,13 +2556,42 @@ describe('Shopify refund return linking', () => {
     expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
     expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
     expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.create).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.update).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReviewEvent.create).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['different hash', { evidenceHash: '0'.repeat(64) }],
-    ['evidence version mismatch', { evidenceVersion: 2 }],
-    ['normalization version mismatch', { normalizationVersion: 2 }],
-  ])('routes %s to review without mutating accepted finance', async (_label, mismatch) => {
+    [
+      'different hash',
+      { evidenceHash: '0'.repeat(64) },
+      'refund_evidence_hash_mismatch',
+      { evidenceHashMismatch: true, evidenceVersionMismatch: false, normalizationVersionMismatch: false },
+    ],
+    [
+      'evidence version mismatch',
+      { evidenceVersion: 2 },
+      'refund_evidence_version_mismatch',
+      { evidenceHashMismatch: false, evidenceVersionMismatch: true, normalizationVersionMismatch: false },
+    ],
+    [
+      'normalization version mismatch',
+      { normalizationVersion: 2 },
+      'refund_normalization_version_mismatch',
+      { evidenceHashMismatch: false, evidenceVersionMismatch: false, normalizationVersionMismatch: true },
+    ],
+    [
+      'multiple mismatches',
+      { evidenceHash: '0'.repeat(64), evidenceVersion: 2 },
+      'refund_evidence_multiple_mismatch',
+      { evidenceHashMismatch: true, evidenceVersionMismatch: true, normalizationVersionMismatch: false },
+    ],
+  ])('routes %s to durable review without mutating accepted finance', async (
+    _label,
+    mismatch,
+    conflictCategory,
+    mismatchSummary,
+  ) => {
     setupOrder();
     txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
     const payload = refundPayload();
@@ -2574,8 +2624,243 @@ describe('Shopify refund return linking', () => {
     expect(replay).toMatchObject({
       ok: false,
       processingStatus: 'needs_attention',
+      reasonCode: 'refund_terminal_evidence_conflict',
       error: expect.stringContaining('terminal refund evidence conflicts with accepted snapshot'),
     });
+    expect(txMock.refundTerminalEvidenceReview.create).toHaveBeenCalledWith({
+      data: {
+        sourceShopifyRefundId: '1074533826897',
+        sourceShopifyOrderId: '7621834670417',
+        vendorAllocationId: 'alloc-1029-sporjinal',
+        terminalRefundFinanceLedgerEntryId: NORMAL_REFUND_LEDGER_ID,
+        refundRecordId: NORMAL_REFUND_RECORD_ID,
+        economicVendorId: 'sporjinal',
+        storedEvidenceSnapshotId: 'snapshot-1',
+        dedupeKey: expect.stringMatching(/^[a-f0-9]{64}$/),
+        conflictCategory,
+        storedEvidenceHash: 'evidenceHash' in mismatch
+          ? mismatch.evidenceHash
+          : accepted.evidenceHash,
+        incomingEvidenceHash: accepted.evidenceHash,
+        conflictSummaryJson: {
+          storedEvidenceVersion: 'evidenceVersion' in mismatch
+            ? mismatch.evidenceVersion
+            : accepted.evidenceVersion,
+          incomingEvidenceVersion: accepted.evidenceVersion,
+          storedNormalizationVersion: 'normalizationVersion' in mismatch
+            ? mismatch.normalizationVersion
+            : accepted.normalizationVersion,
+          incomingNormalizationVersion: accepted.normalizationVersion,
+          ...mismatchSummary,
+        },
+        status: 'ACTIVE',
+        firstObservedAt: expect.any(Date),
+        lastObservedAt: expect.any(Date),
+        occurrenceCount: 1,
+      },
+    });
+    const review = txMock.refundTerminalEvidenceReview.create.mock.calls[0]![0].data;
+    expect(review.firstObservedAt).toEqual(review.lastObservedAt);
+    expect(txMock.refundTerminalEvidenceReviewEvent.create).toHaveBeenCalledWith({
+      data: {
+        reviewId: `terminal-review-${String(review.dedupeKey)}`,
+        eventType: 'DETECTED',
+      },
+    });
+    expect(txMock.refundTerminalEvidenceReview.update).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates a repeated identical terminal evidence conflict and increments only observation metadata', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-17T10:00:00.000Z'));
+      setupOrder();
+      txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+      const payload = refundPayload();
+      const canonicalEvidence = canonicalEvidenceForPayload(payload);
+      await ingestVerifiedShopifyRefund({
+        event: webhookEvent() as never,
+        payload,
+        monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+        canonicalEvidence,
+        canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+      });
+      const accepted = txMock.refundEvidenceSnapshot.create.mock.calls[0]![0].data;
+      const stored = { id: 'snapshot-1', ...accepted, evidenceHash: '0'.repeat(64) };
+
+      txMock.financeLedgerEntry.create.mockClear();
+      txMock.refundEvidenceSnapshot.create.mockClear();
+      txMock.settlementRefundAdjustment.upsert.mockClear();
+      txMock.vendorBalanceEvent.upsert.mockClear();
+      txMock.financeEvent.createMany.mockClear();
+      txMock.refundEvidenceSnapshot.findUnique.mockResolvedValue(stored);
+      txMock.refundTerminalEvidenceReview.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'terminal-review-existing', status: 'ACTIVE', occurrenceCount: 1 });
+
+      setupOrder();
+      const first = await ingestVerifiedShopifyRefund({
+        event: webhookEvent() as never,
+        payload,
+        monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+        canonicalEvidence,
+        canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+      });
+      const created = txMock.refundTerminalEvidenceReview.create.mock.calls[0]![0].data;
+      vi.setSystemTime(new Date('2026-09-17T10:05:00.000Z'));
+      setupOrder();
+      const second = await ingestVerifiedShopifyRefund({
+        event: webhookEvent() as never,
+        payload,
+        monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+        canonicalEvidence,
+        canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+      });
+
+      expect(first).toMatchObject({ ok: false, reasonCode: 'refund_terminal_evidence_conflict' });
+      expect(second).toMatchObject({ ok: false, reasonCode: 'refund_terminal_evidence_conflict' });
+      expect(txMock.refundTerminalEvidenceReview.create).toHaveBeenCalledTimes(1);
+      expect(txMock.refundTerminalEvidenceReview.update).toHaveBeenCalledTimes(1);
+      expect(txMock.refundTerminalEvidenceReview.update).toHaveBeenCalledWith({
+        where: { dedupeKey: created.dedupeKey },
+        data: {
+          occurrenceCount: { increment: 1 },
+          lastObservedAt: new Date('2026-09-17T10:05:00.000Z'),
+        },
+      });
+      expect(txMock.refundTerminalEvidenceReview.update.mock.calls[0]![0].data).not.toHaveProperty('firstObservedAt');
+      expect(txMock.refundTerminalEvidenceReview.update.mock.calls[0]![0].data).not.toHaveProperty('status');
+      expect(txMock.refundTerminalEvidenceReviewEvent.create).toHaveBeenCalledTimes(1);
+      expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+      expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+      expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+      expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+      expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('creates separate reviews for distinct incoming terminal evidence conflicts', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    const payload = refundPayload();
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+    const accepted = txMock.refundEvidenceSnapshot.create.mock.calls[0]![0].data;
+    const stored = { id: 'snapshot-1', ...accepted, evidenceHash: '0'.repeat(64) };
+    const secondCanonicalEvidence = {
+      ...canonicalEvidence,
+      selectedTransactions: [{
+        ...canonicalEvidence.selectedTransactions[0],
+        transactionGid: 'gid://shopify/OrderTransaction/different-conflict',
+      }],
+    };
+
+    txMock.financeLedgerEntry.create.mockClear();
+    txMock.refundEvidenceSnapshot.create.mockClear();
+    txMock.settlementRefundAdjustment.upsert.mockClear();
+    txMock.vendorBalanceEvent.upsert.mockClear();
+    txMock.financeEvent.createMany.mockClear();
+    txMock.refundEvidenceSnapshot.findUnique.mockResolvedValue(stored);
+
+    setupOrder();
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+    setupOrder();
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence: secondCanonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(txMock.refundTerminalEvidenceReview.create).toHaveBeenCalledTimes(2);
+    const firstReview = txMock.refundTerminalEvidenceReview.create.mock.calls[0]![0].data;
+    const secondReview = txMock.refundTerminalEvidenceReview.create.mock.calls[1]![0].data;
+    expect(firstReview.dedupeKey).not.toBe(secondReview.dedupeKey);
+    expect(firstReview.incomingEvidenceHash).not.toBe(secondReview.incomingEvidenceHash);
+    expect(firstReview.occurrenceCount).toBe(1);
+    expect(secondReview.occurrenceCount).toBe(1);
+    expect(txMock.refundTerminalEvidenceReviewEvent.create).toHaveBeenCalledTimes(2);
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['ACKNOWLEDGED', 'RESOLVED'])('preserves a non-active %s review while recording a repeat', async (status) => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    const payload = refundPayload();
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+    const accepted = txMock.refundEvidenceSnapshot.create.mock.calls[0]![0].data;
+
+    txMock.financeLedgerEntry.create.mockClear();
+    txMock.refundEvidenceSnapshot.create.mockClear();
+    txMock.settlementRefundAdjustment.upsert.mockClear();
+    txMock.vendorBalanceEvent.upsert.mockClear();
+    txMock.financeEvent.createMany.mockClear();
+    setupOrder();
+    txMock.refundEvidenceSnapshot.findUnique.mockResolvedValueOnce({
+      id: 'snapshot-1',
+      ...accepted,
+      evidenceHash: '0'.repeat(64),
+    });
+    txMock.refundTerminalEvidenceReview.findUnique.mockResolvedValueOnce({
+      id: 'terminal-review-existing',
+      status,
+      occurrenceCount: 4,
+    });
+
+    const replay = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(replay).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      reasonCode: 'refund_terminal_evidence_conflict',
+    });
+    expect(txMock.refundTerminalEvidenceReview.create).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.update).toHaveBeenCalledWith({
+      where: { dedupeKey: expect.stringMatching(/^[a-f0-9]{64}$/) },
+      data: {
+        occurrenceCount: { increment: 1 },
+        lastObservedAt: expect.any(Date),
+      },
+    });
+    expect(txMock.refundTerminalEvidenceReview.update.mock.calls[0]![0].data).not.toHaveProperty('status');
+    expect(txMock.refundTerminalEvidenceReviewEvent.create).not.toHaveBeenCalled();
     expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
     expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
     expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();

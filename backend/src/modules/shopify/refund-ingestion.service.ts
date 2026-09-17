@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 import { CustomerCancellationStatus, FinanceEventType, OperationalJobStatus, type Prisma } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
@@ -45,6 +46,13 @@ import { synchronizeCanonicalShopifyOrderFinancialStatus } from './shopify-order
 import { acquireShopifyOrderTransactionLock } from './orders-create-ownership.service.js';
 
 const CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET = new Set<string>(CANCEL_REFUND_REVIEW_BLOCKING_STATUSES);
+
+const TERMINAL_REFUND_CONFLICT_CATEGORIES = {
+  evidenceHashMismatch: 'refund_evidence_hash_mismatch',
+  evidenceVersionMismatch: 'refund_evidence_version_mismatch',
+  normalizationVersionMismatch: 'refund_normalization_version_mismatch',
+  multipleMismatch: 'refund_evidence_multiple_mismatch',
+} as const;
 
 function toDate(value: string | null | undefined) {
   if (!value) {
@@ -473,6 +481,142 @@ function normalizeAllocationRefundEvidence(input: {
     historicalEconomicVendorId: vendorId,
     historicalSaleFinanceLedgerEntryId: activeSaleLedgerId,
     supersededSaleLedgerIds: [...new Set(vendorLineItems.flatMap((line) => line.supersededSaleLedgerIds))],
+  });
+}
+
+function classifyTerminalRefundEvidenceConflict(input: {
+  storedEvidenceVersion: number;
+  incomingEvidenceVersion: number;
+  storedNormalizationVersion: number;
+  incomingNormalizationVersion: number;
+  storedEvidenceHash: string;
+  incomingEvidenceHash: string;
+}) {
+  const evidenceHashMismatch = input.storedEvidenceHash !== input.incomingEvidenceHash;
+  const evidenceVersionMismatch = input.storedEvidenceVersion !== input.incomingEvidenceVersion;
+  const normalizationVersionMismatch =
+    input.storedNormalizationVersion !== input.incomingNormalizationVersion;
+  const mismatchCount = [evidenceHashMismatch, evidenceVersionMismatch, normalizationVersionMismatch]
+    .filter(Boolean).length;
+  const conflictCategory = mismatchCount > 1
+    ? TERMINAL_REFUND_CONFLICT_CATEGORIES.multipleMismatch
+    : evidenceHashMismatch
+      ? TERMINAL_REFUND_CONFLICT_CATEGORIES.evidenceHashMismatch
+      : evidenceVersionMismatch
+        ? TERMINAL_REFUND_CONFLICT_CATEGORIES.evidenceVersionMismatch
+        : TERMINAL_REFUND_CONFLICT_CATEGORIES.normalizationVersionMismatch;
+
+  return {
+    conflictCategory,
+    conflictSummaryJson: {
+      storedEvidenceVersion: input.storedEvidenceVersion,
+      incomingEvidenceVersion: input.incomingEvidenceVersion,
+      storedNormalizationVersion: input.storedNormalizationVersion,
+      incomingNormalizationVersion: input.incomingNormalizationVersion,
+      evidenceHashMismatch,
+      evidenceVersionMismatch,
+      normalizationVersionMismatch,
+    },
+  };
+}
+
+function buildTerminalRefundEvidenceReviewDedupeKey(input: {
+  sourceShopifyRefundId: string;
+  vendorAllocationId: string;
+  storedEvidenceVersion: number;
+  storedNormalizationVersion: number;
+  storedEvidenceHash: string;
+  incomingEvidenceVersion: number;
+  incomingNormalizationVersion: number;
+  incomingEvidenceHash: string;
+}) {
+  const fingerprint = JSON.stringify({
+    sourceShopifyRefundId: input.sourceShopifyRefundId,
+    vendorAllocationId: input.vendorAllocationId,
+    storedEvidenceVersion: input.storedEvidenceVersion,
+    storedNormalizationVersion: input.storedNormalizationVersion,
+    storedEvidenceHash: input.storedEvidenceHash,
+    incomingEvidenceVersion: input.incomingEvidenceVersion,
+    incomingNormalizationVersion: input.incomingNormalizationVersion,
+    incomingEvidenceHash: input.incomingEvidenceHash,
+  });
+  return createHash('sha256').update(fingerprint, 'utf8').digest('hex');
+}
+
+async function persistTerminalRefundEvidenceConflictReview(
+  tx: Prisma.TransactionClient,
+  input: {
+    stored: {
+      id: string;
+      sourceShopifyRefundId: string;
+      sourceShopifyOrderId: string;
+      vendorAllocationId: string;
+      refundRecordId: string;
+      refundFinanceLedgerEntryId: string;
+      historicalEconomicVendorId: string;
+      evidenceHash: string;
+      evidenceVersion: number;
+      normalizationVersion: number;
+    };
+    incoming: ReturnType<typeof normalizeRefundEvidence>;
+  },
+) {
+  const comparison = classifyTerminalRefundEvidenceConflict({
+    storedEvidenceVersion: input.stored.evidenceVersion,
+    incomingEvidenceVersion: input.incoming.evidenceVersion,
+    storedNormalizationVersion: input.stored.normalizationVersion,
+    incomingNormalizationVersion: input.incoming.normalizationVersion,
+    storedEvidenceHash: input.stored.evidenceHash,
+    incomingEvidenceHash: input.incoming.evidenceHash,
+  });
+  const dedupeKey = buildTerminalRefundEvidenceReviewDedupeKey({
+    sourceShopifyRefundId: input.stored.sourceShopifyRefundId,
+    vendorAllocationId: input.stored.vendorAllocationId,
+    storedEvidenceVersion: input.stored.evidenceVersion,
+    storedNormalizationVersion: input.stored.normalizationVersion,
+    storedEvidenceHash: input.stored.evidenceHash,
+    incomingEvidenceVersion: input.incoming.evidenceVersion,
+    incomingNormalizationVersion: input.incoming.normalizationVersion,
+    incomingEvidenceHash: input.incoming.evidenceHash,
+  });
+  const observedAt = new Date();
+  const existing = await tx.refundTerminalEvidenceReview.findUnique({ where: { dedupeKey } });
+  if (existing) {
+    await tx.refundTerminalEvidenceReview.update({
+      where: { dedupeKey },
+      data: {
+        occurrenceCount: { increment: 1 },
+        lastObservedAt: observedAt,
+      },
+    });
+    return;
+  }
+
+  const review = await tx.refundTerminalEvidenceReview.create({
+    data: {
+      sourceShopifyRefundId: input.stored.sourceShopifyRefundId,
+      sourceShopifyOrderId: input.stored.sourceShopifyOrderId,
+      vendorAllocationId: input.stored.vendorAllocationId,
+      terminalRefundFinanceLedgerEntryId: input.stored.refundFinanceLedgerEntryId,
+      refundRecordId: input.stored.refundRecordId,
+      economicVendorId: input.stored.historicalEconomicVendorId,
+      storedEvidenceSnapshotId: input.stored.id,
+      dedupeKey,
+      conflictCategory: comparison.conflictCategory,
+      storedEvidenceHash: input.stored.evidenceHash,
+      incomingEvidenceHash: input.incoming.evidenceHash,
+      conflictSummaryJson: comparison.conflictSummaryJson,
+      status: 'ACTIVE',
+      firstObservedAt: observedAt,
+      lastObservedAt: observedAt,
+      occurrenceCount: 1,
+    },
+  });
+  await tx.refundTerminalEvidenceReviewEvent.create({
+    data: {
+      reviewId: review.id,
+      eventType: 'DETECTED',
+    },
   });
 }
 
@@ -921,6 +1065,10 @@ async function ingestShopifyRefundWebhookInternal(
               stored.evidenceHash === normalizedEvidence.evidenceHash) {
             continue;
           }
+          await persistTerminalRefundEvidenceConflictReview(tx, {
+            stored,
+            incoming: normalizedEvidence,
+          });
           reviewRequiredAllocations.push({
             vendorAllocationId,
             reason: 'terminal refund evidence conflicts with accepted snapshot',
