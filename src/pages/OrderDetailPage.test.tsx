@@ -3291,7 +3291,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const financialSummary = await screen.findByLabelText('Order financial summary');
-    expect(within(financialSummary).getByText('Estimated Earnings')).toBeInTheDocument();
+    expect(await within(financialSummary).findByText('Estimated Earnings')).toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 4,449.20')).toBeInTheDocument();
   });
 
