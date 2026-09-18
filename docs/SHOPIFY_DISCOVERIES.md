@@ -159,9 +159,10 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 
 ### Admin GraphQL 2026-01 Monetary Refund Evidence
 
+- `RefundLineItem.lineItem.id` identifies the original Order LineItem, and `RefundLineItem.quantity` is the refunded quantity (Shopify GraphQL field semantics). For vendor merchandise finance, Shopify Support/team confirmed that `RefundLineItem.subtotalSet.shopMoney.amount` is the subtotal for that specific refunded quantity, already quantity-extended and after applicable line-level discounts; it excludes tax, shipping, and duties and is not cumulative across refunds. Official sample data is consistent with this interpretation, but the public field description does not explicitly state the quantity-extension rule. Use this canonical line subtotal as-is, without multiplying by quantity. Formal equivalence to `refunds/create` webhook `refund_line_items[].subtotal` remains UNKNOWN; webhook subtotal is not accepted vendor-finance authority.
 - A Shopify `Refund` object or refund line-item subtotal does not by itself prove that money was refunded.
 - Monetary refund ingestion requires canonical Admin GraphQL evidence from `Order.totalRefundedSet`, each `Refund.totalRefundedSet`, and unique `Refund.transactions` rows where `kind = REFUND`, `status = SUCCESS`, and `shopMoney.amount > 0`.
-- Exact transaction totals must agree with each refund total and the order total in one shop currency. Refund line-item subtotals remain allocation and quantity evidence only.
+- Exact transaction totals must agree with each refund total and the order total in one shop currency. Refund line-item subtotals do not prove cash movement by themselves; after the canonical monetary gate, they determine allocation-scoped merchandise amounts.
 - A successful zero-value `VOID` with zero refund and order aggregates is classified `ZERO_VALUE_VOID`; it creates no refund, refund-derived return, refund ledger/event, adjustment, or vendor debt.
 - `PENDING`, `FAILURE`, `ERROR`, `AWAITING_RESPONSE`, or unknown refund transaction states are non-final and create no finance mutation.
 - Canonical refund reads request at most 250 refunds, transactions, and refund line items. Exactly 250 refunds, `hasNextPage` on either connection, malformed money, duplicate transaction conflicts, currency mismatch, or aggregate mismatch fail closed for review.

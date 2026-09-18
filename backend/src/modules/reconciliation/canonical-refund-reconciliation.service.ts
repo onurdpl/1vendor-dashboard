@@ -156,21 +156,12 @@ async function resolveCanonicalRefundSignals(input: {
   });
 }
 
-function amountPerUnit(totalAmount: string | null, quantity: number) {
-  const numeric = Number(totalAmount ?? 0);
-  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
-  if (!Number.isFinite(numeric)) {
-    return null;
-  }
-  return (numeric / safeQuantity).toFixed(2);
-}
-
 function canonicalRefundLineToWebhookLine(lineItem: CanonicalShopifyRefundLineItemSnapshot) {
   return {
     id: lineItem.sourceRefundLineItemId,
     line_item_id: lineItem.sourceLineItemId,
     quantity: lineItem.quantity,
-    subtotal: amountPerUnit(lineItem.subtotalAmount, lineItem.quantity),
+    subtotal: lineItem.observedSubtotalAmount,
     line_item: {
       id: lineItem.sourceLineItemId,
       sku: lineItem.sku,

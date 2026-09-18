@@ -1108,6 +1108,180 @@ describe('Shopify refund return linking', () => {
     expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
   });
 
+  it('uses canonical quantity and line subtotal instead of differing webhook economics', async () => {
+    setupOrder();
+    const payload = refundPayload();
+    payload.refund_line_items[0].quantity = 7;
+    payload.refund_line_items[0].subtotal = '1.00';
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    canonicalEvidence.refundTotalAmount = '30.00';
+    canonicalEvidence.selectedTransactions[0].amount = '30.00';
+    canonicalEvidence.lines[0].quantity = 3;
+    canonicalEvidence.lines[0].subtotalAmount = '30.00';
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence(String(payload.id), '30.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amount: '30.00' }),
+    });
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ amount: '30.00' }),
+    }));
+    expect(txMock.shopifyRefundLineItem.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ quantity: 3, subtotal: '30.00' }),
+    }));
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        normalizedRefundLinesJson: [{ sourceLineItemId: '20346971095377', quantity: 3, subtotalAmount: '30', currency: null }],
+      }),
+    });
+  });
+
+  it('preserves a non-divisible canonical line subtotal without unit-price rounding', async () => {
+    setupOrder();
+    const payload = refundPayload();
+    payload.refund_line_items[0].quantity = 3;
+    payload.refund_line_items[0].subtotal = '33.33';
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    canonicalEvidence.refundTotalAmount = '100.00';
+    canonicalEvidence.selectedTransactions[0].amount = '100.00';
+    canonicalEvidence.lines[0].quantity = 3;
+    canonicalEvidence.lines[0].subtotalAmount = '100.00';
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence(String(payload.id), '100.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amount: '100.00' }),
+    });
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        normalizedRefundLinesJson: [{ sourceLineItemId: '20346971095377', quantity: 3, subtotalAmount: '100', currency: null }],
+      }),
+    });
+  });
+
+  it('uses every canonical refund line even when the event omits one line', async () => {
+    setupSplitOrderRefund({ refundSourceLine: true, refundChildLine: true });
+    const payload = splitRefundPayload({ source: true });
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    canonicalEvidence.lines.push({
+      ...canonicalEvidence.lines[0],
+      sourceRefundLineItemId: 'refund-line-child',
+      sourceLineItemId: 'line-child',
+      sku: 'SKU-CHILD',
+      subtotalAmount: '50.00',
+    });
+    canonicalEvidence.refundTotalAmount = '150.00';
+    canonicalEvidence.selectedTransactions[0].amount = '150.00';
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence(String(payload.id), '150.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 2 });
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ vendorAllocationId: 'alloc-source', amount: '100.00' }),
+    });
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ vendorAllocationId: 'alloc-child', amount: '50.00' }),
+    });
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed if a canonical subtotal exceeds the REFUND ledger decimal precision', async () => {
+    setupOrder();
+    const payload = refundPayload();
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    canonicalEvidence.lines[0].subtotalAmount = '100.001';
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence(String(payload.id), '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'Canonical refund line subtotal cannot be represented by the REFUND ledger amount.',
+    });
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+  });
+
+  it('uses the canonical original line for allocation ownership when the payload points elsewhere', async () => {
+    setupSplitOrderRefund({ refundChildLine: true });
+    const payload = splitRefundPayload({ source: true });
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    canonicalEvidence.lines[0].sourceLineItemId = 'line-child';
+    canonicalEvidence.lines[0].sku = 'SKU-CHILD';
+    canonicalEvidence.lines[0].subtotalAmount = '50.00';
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence(String(payload.id), '50.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ vendorAllocationId: 'alloc-child', amount: '50.00' }),
+    });
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ vendorAllocationId: 'alloc-child' }),
+    });
+  });
+
+  it('keeps distinct canonical line amounts with their own allocations in a multi-line refund', async () => {
+    setupSplitOrderRefund({ refundSourceLine: true, refundChildLine: true });
+    const payload = splitRefundPayload({ source: true, child: true });
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    canonicalEvidence.refundTotalAmount = '145.00';
+    canonicalEvidence.selectedTransactions[0].amount = '145.00';
+    canonicalEvidence.lines[0].quantity = 3;
+    canonicalEvidence.lines[0].subtotalAmount = '100.00';
+    canonicalEvidence.lines[1].quantity = 2;
+    canonicalEvidence.lines[1].subtotalAmount = '45.00';
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence(String(payload.id), '145.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 2 });
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ vendorAllocationId: 'alloc-source', amount: '100.00' }),
+    });
+    expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ vendorAllocationId: 'alloc-child', amount: '45.00' }),
+    });
+    expect(txMock.refundEvidenceSnapshot.create).toHaveBeenCalledTimes(2);
+  });
+
   it('treats a voided historical refund ledger as prior finance and does not backfill a snapshot', async () => {
     setupOrder();
     txMock.financeLedgerEntry.findMany.mockReset().mockResolvedValueOnce([{
@@ -2544,7 +2718,7 @@ describe('Shopify refund return linking', () => {
 
     const replay = await ingestVerifiedShopifyRefund({
       event: webhookEvent() as never,
-      payload,
+      payload: { ...payload, refund_line_items: [] },
       monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
       canonicalEvidence,
       canonicalFinancialStatus: 'PARTIALLY_REFUNDED',

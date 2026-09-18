@@ -239,7 +239,7 @@ describe('canonical Shopify refund reconciliation', () => {
             id: '9001',
             line_item_id: '1001',
             quantity: 2,
-            subtotal: '50.00',
+            subtotal: '100.00',
             line_item: expect.objectContaining({
               id: '1001',
               sku: 'SKU-1',
@@ -648,7 +648,19 @@ describe('canonical Shopify refund reconciliation', () => {
       refund: canonicalRefund(),
     });
 
-    expect(payload.refund_line_items?.[0]?.subtotal).toBe('50.00');
+    expect(payload.refund_line_items?.[0]?.subtotal).toBe('100.00');
+    expect(__canonicalRefundReconciliationTesting.canonicalRefundToWebhookPayload({
+      sourceShopifyOrderId: 'order-1',
+      refund: canonicalRefund({
+        refundLineItems: [{
+          ...canonicalRefund().refundLineItems[0]!,
+          observedQuantity: 3,
+          quantity: 3,
+          observedSubtotalAmount: '100.00',
+          subtotalAmount: '100.00',
+        }],
+      }),
+    }).refund_line_items?.[0]?.subtotal).toBe('100.00');
     expect(__canonicalRefundReconciliationTesting.CANONICAL_REFUND_SIGNAL_RULE_KEYS)
       .toHaveProperty('repaired', 'canonical_refund_repaired');
     expect(__canonicalRefundReconciliationTesting.buildCanonicalRefundSignalId({

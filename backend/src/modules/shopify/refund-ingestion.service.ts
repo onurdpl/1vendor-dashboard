@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
-import { CustomerCancellationStatus, FinanceEventType, OperationalJobStatus, type Prisma } from '@prisma/client';
+import { CustomerCancellationStatus, FinanceEventType, OperationalJobStatus, Prisma } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import { normalizeRefundEvidence } from '../finance/refund-evidence-normalizer.service.js';
 import {
@@ -148,20 +148,14 @@ function parseRefundPayload(payload: ShopifyRefundsCreateWebhookPayload): Parsed
   };
 }
 
-function toAmountString(value: string | null, quantity: number) {
-  const numeric = Number(value ?? 0);
-  if (!Number.isFinite(numeric)) {
-    return '0.00';
-  }
-
-  return (numeric * quantity).toFixed(2);
-}
-
 function sumAmounts(values: string[]) {
   return values.reduce((sum, value) => {
-    const numeric = Number(value);
-    return sum + (Number.isFinite(numeric) ? numeric : 0);
-  }, 0).toFixed(2);
+    const amount = new Prisma.Decimal(value);
+    if (amount.decimalPlaces() > 2) {
+      throw new Error('Canonical refund line subtotal cannot be represented by the REFUND ledger amount.');
+    }
+    return sum.plus(amount);
+  }, new Prisma.Decimal(0)).toFixed(2);
 }
 
 function toNumber(value: unknown) {
@@ -341,7 +335,7 @@ type ResolvedRefundLineItem = ParsedShopifyRefundLineItem & {
   shopifyOrderLineItemId: string;
   sourceShopifyOrderNumber: string;
   cancelRefundReviewStatus: string | null;
-  refundAmount: string;
+  refundAmount: string | null;
 };
 
 type RefundIngestionScope = Readonly<{
@@ -775,6 +769,20 @@ async function ingestShopifyRefundWebhookInternal(
   scope: RefundIngestionScope = {},
 ): Promise<RefundIngestionResult> {
   const parsedRefund = parseRefundPayload(input.payload);
+  const refundLineItemsForFinance = canonicalEvidence?.lines.length
+    ? canonicalEvidence.lines.map((line) => {
+        const payloadLine = parsedRefund.refundLineItems.find((candidate) =>
+          candidate.sourceRefundLineItemId === line.sourceRefundLineItemId);
+        return {
+          sourceRefundLineItemId: line.sourceRefundLineItemId,
+          sourceLineItemId: line.sourceLineItemId ?? payloadLine?.sourceLineItemId ?? null,
+          sku: line.sku ?? payloadLine?.sku ?? null,
+          title: payloadLine?.title ?? null,
+          quantity: line.quantity ?? payloadLine?.quantity ?? 1,
+          subtotal: line.subtotalAmount,
+        };
+      })
+    : parsedRefund.refundLineItems;
 
   if (!parsedRefund.sourceShopifyOrderId) {
     if (input.event) {
@@ -796,7 +804,7 @@ async function ingestShopifyRefundWebhookInternal(
   }
 
   if (
-    parsedRefund.refundLineItems.length === 0 &&
+    refundLineItemsForFinance.length === 0 &&
     (
       monetaryEvidence?.sourceShopifyRefundId !== parsedRefund.sourceShopifyRefundId ||
       monetaryEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund ||
@@ -856,7 +864,7 @@ async function ingestShopifyRefundWebhookInternal(
         });
       }
 
-      if (parsedRefund.refundLineItems.length === 0) {
+      if (refundLineItemsForFinance.length === 0) {
         const terminalization = await reconcileVerifiedShippingOnlyRefund(tx, {
           sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
@@ -886,30 +894,50 @@ async function ingestShopifyRefundWebhookInternal(
 
       const resolvedLineItems: ResolvedRefundLineItem[] = [];
       const completeSaleLineageByActiveLedgerId = new Map<string, CompleteSaleLineage>();
-      for (const lineItem of parsedRefund.refundLineItems) {
-        if (!lineItem.sku) {
+      for (const lineItem of refundLineItemsForFinance) {
+        const lineAuthority = canonicalEvidence ? evaluateCanonicalRefundLineAuthority({
+          sourceRefundLineItemIds: [lineItem.sourceRefundLineItemId],
+          canonicalLines: canonicalEvidence.lines,
+        }) : null;
+        const canonicalLine = lineAuthority?.authoritative
+          ? canonicalEvidence!.lines.find((candidate) =>
+              candidate.sourceRefundLineItemId === lineItem.sourceRefundLineItemId)!
+          : null;
+        // Payload fields may help attribute incomplete evidence to an allocation for review,
+        // but only a validated canonical line can control an accepted financial effect.
+        const resolvedLine = canonicalLine ? {
+          ...lineItem,
+          sourceLineItemId: canonicalLine.sourceLineItemId!,
+          sku: canonicalLine.sku,
+          quantity: canonicalLine.quantity!,
+          subtotal: canonicalLine.subtotalAmount!,
+        } : lineItem;
+        if (!canonicalLine && !resolvedLine.sku) {
           throw new Error(`Refund line item ${lineItem.sourceRefundLineItemId} is missing SKU and cannot be allocated.`);
         }
 
-        const skuMatches = shopifyOrder.lineItems.filter((orderLineItem) => orderLineItem.sku === lineItem.sku);
-        const matchedOrderLineItem = lineItem.sourceLineItemId
-          ? skuMatches.find((orderLineItem) => orderLineItem.sourceLineItemId === lineItem.sourceLineItemId)
-          : skuMatches.length === 1
-            ? skuMatches[0]
-            : null;
+        const skuMatches = canonicalLine ? [] : shopifyOrder.lineItems.filter((orderLineItem) => orderLineItem.sku === resolvedLine.sku);
+        const matchedOrderLineItem = canonicalLine
+          ? shopifyOrder.lineItems.find((orderLineItem) =>
+              orderLineItem.sourceLineItemId === canonicalLine.sourceLineItemId)
+          : resolvedLine.sourceLineItemId
+            ? skuMatches.find((orderLineItem) => orderLineItem.sourceLineItemId === resolvedLine.sourceLineItemId)
+            : skuMatches.length === 1
+              ? skuMatches[0]
+              : null;
 
         if (!matchedOrderLineItem) {
           if (skuMatches.length > 1) {
-            throw new Error(`Refund SKU ${lineItem.sku} matched multiple original order line items and could not be resolved safely.`);
+            throw new Error(`Refund SKU ${resolvedLine.sku} matched multiple original order line items and could not be resolved safely.`);
           }
 
-          throw new Error(`No original order mapping found for refund SKU ${lineItem.sku}.`);
+          throw new Error(`No original order mapping found for refund SKU ${resolvedLine.sku}.`);
         }
 
         const ownership = await resolveAllocationForShopifyOrderLineItem({
           shopifyOrderId: shopifyOrder.id,
           shopifyOrderLineItemId: matchedOrderLineItem.id,
-          sourceLineItemId: matchedOrderLineItem.sourceLineItemId ?? lineItem.sourceLineItemId ?? null,
+          sourceLineItemId: matchedOrderLineItem.sourceLineItemId ?? resolvedLine.sourceLineItemId ?? null,
         }, tx);
         const vendorAllocation = ownership.allocation;
         const originalVendorId = vendorAllocation.originalVendorId;
@@ -938,7 +966,7 @@ async function ingestShopifyRefundWebhookInternal(
         }, tx);
 
         resolvedLineItems.push({
-          ...lineItem,
+          ...resolvedLine,
           vendorId: economicOwner.economicOwnerVendorId,
           originalVendorId,
           vendorAllocationId: vendorAllocation.id,
@@ -947,7 +975,7 @@ async function ingestShopifyRefundWebhookInternal(
           shopifyOrderLineItemId: ownership.shopifyOrderLineItem.id,
           sourceShopifyOrderNumber: vendorAllocation.sourceShopifyOrderNumber,
           cancelRefundReviewStatus: vendorAllocation.cancelRefundReviewStatus ?? null,
-          refundAmount: toAmountString(lineItem.subtotal, lineItem.quantity),
+          refundAmount: canonicalLine?.subtotalAmount ?? null,
         });
       }
 
@@ -1071,7 +1099,12 @@ async function ingestShopifyRefundWebhookInternal(
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
           vendorAllocationId,
         });
-        const totalRefundAmount = sumAmounts(vendorLineItems.map((lineItem) => lineItem.refundAmount));
+        const totalRefundAmount = sumAmounts(vendorLineItems.map((lineItem) => {
+          if (lineItem.refundAmount === null) {
+            throw new Error(`Canonical refund amount is unavailable for line ${lineItem.sourceRefundLineItemId}.`);
+          }
+          return lineItem.refundAmount;
+        }));
         const orderNumber = vendorLineItems[0].sourceShopifyOrderNumber;
         const sourceLineItemIds = vendorLineItems
           .map((lineItem) => lineItem.sourceLineItemId)
@@ -1175,7 +1208,7 @@ async function ingestShopifyRefundWebhookInternal(
               sku: lineItem.sku,
               title: lineItem.title,
               quantity: lineItem.quantity,
-              subtotal: lineItem.refundAmount,
+              subtotal: lineItem.refundAmount!,
             },
             create: {
               shopifyRefundId: shopifyRefund.id,
@@ -1186,7 +1219,7 @@ async function ingestShopifyRefundWebhookInternal(
               sku: lineItem.sku,
               title: lineItem.title,
               quantity: lineItem.quantity,
-              subtotal: lineItem.refundAmount,
+              subtotal: lineItem.refundAmount!,
             },
           });
         }
