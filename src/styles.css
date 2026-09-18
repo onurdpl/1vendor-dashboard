@@ -17187,6 +17187,25 @@ summary.provider-response-heading::-webkit-details-marker {
     minmax(0, 0.72fr);
 }
 
+.refund-review-queue {
+  margin-top: 20px;
+}
+
+.refund-review-table .op-table-head,
+.refund-review-table .op-table-row {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.refund-review-table .op-table-row > span {
+  overflow-wrap: anywhere;
+}
+
+.refund-review-pagination {
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .payment-preparation-tabs {
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }

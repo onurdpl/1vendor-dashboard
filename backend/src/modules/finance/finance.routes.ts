@@ -81,6 +81,7 @@ import {
   EconomicTransferValidationError,
 } from './economic-transfer.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
+import { listAdminRefundReviews } from './admin-refund-review-projection.service.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import type {
@@ -1187,6 +1188,24 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         orderNumber,
         limit: pagination.limit,
         createdBy: request.authUser.id ?? request.authUser.email ?? 'admin',
+      });
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-reviews',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+      const query = typeof request.query === 'object' && request.query !== null
+        ? request.query as Record<string, unknown>
+        : {};
+      return listAdminRefundReviews({
+        vendorId: readOptionalQueryString(request.query, 'vendorId'),
+        terminal: resolvePagination({ limit: query.terminalLimit, offset: query.terminalOffset }, { limit: 50, offset: 0 }),
+        legacy: resolvePagination({ limit: query.legacyLimit, offset: query.legacyOffset }, { limit: 50, offset: 0 }),
       });
     },
   );

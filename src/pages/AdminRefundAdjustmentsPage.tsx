@@ -9,6 +9,7 @@ import {
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import {
+  listAdminRefundReviews,
   listRefundAdjustments,
   type RefundAdjustmentRecord,
   type RefundAdjustmentStatus,
@@ -22,6 +23,7 @@ type StatusFilter = 'all' | RefundAdjustmentStatus;
 type NextAction = 'Apply' | 'Investigate' | 'View';
 
 const HIGH_VALUE_AMOUNT_MINOR = 100000;
+const REVIEW_PAGE_SIZE = 25;
 
 const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'all', label: 'All' },
@@ -61,6 +63,17 @@ function formatDate(value: string | null | undefined) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatRecordedMoney(amount: string | null, amountMinor: number | null, currency: string | null) {
+  if (!currency) {
+    if (amount !== null) return `${amount} (currency UNKNOWN)`;
+    if (amountMinor !== null) return `${amountMinor} minor units (currency UNKNOWN)`;
+    return 'UNKNOWN';
+  }
+  if (amount !== null) return formatCurrency(amount, currency);
+  if (amountMinor !== null) return formatCurrency((amountMinor / 100).toFixed(2), currency);
+  return 'UNKNOWN';
 }
 
 function getStatusTone(status: RefundAdjustmentStatus) {
@@ -202,6 +215,8 @@ export function AdminRefundAdjustmentsPage() {
   const [periodEnd, setPeriodEnd] = useState('');
   const [highValueOnly, setHighValueOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [terminalOffset, setTerminalOffset] = useState(0);
+  const [legacyOffset, setLegacyOffset] = useState(0);
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -211,6 +226,20 @@ export function AdminRefundAdjustmentsPage() {
       endpoint: '/admin/finance/refund-adjustments',
     },
   );
+  const reviewQuery = useQueryResource(
+    ['admin', 'finance', 'refund-reviews', vendorFilter, terminalOffset, legacyOffset],
+    ({ signal }) => listAdminRefundReviews({
+      vendorId: vendorFilter || null,
+      terminalLimit: REVIEW_PAGE_SIZE,
+      terminalOffset,
+      legacyLimit: REVIEW_PAGE_SIZE,
+      legacyOffset,
+      signal,
+    }),
+    { routeName: 'Refund reviews', endpoint: '/admin/finance/refund-reviews' },
+  );
+  const terminalPage = reviewQuery.data?.terminalReviews;
+  const legacyPage = reviewQuery.data?.legacyCandidates;
 
   const records = query.data?.records ?? [];
   const advancedFilteredRecords = useMemo(() => {
@@ -288,7 +317,11 @@ export function AdminRefundAdjustmentsPage() {
           </label>
           <label>
             <span>Vendor</span>
-            <input value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)} placeholder="Vendor id" />
+            <input value={vendorFilter} onChange={(event) => {
+              setVendorFilter(event.target.value);
+              setTerminalOffset(0);
+              setLegacyOffset(0);
+            }} placeholder="Vendor id" />
           </label>
           <label>
             <span>Status</span>
@@ -435,6 +468,72 @@ export function AdminRefundAdjustmentsPage() {
             </aside>
           </div>
         ) : null}
+      </section>
+
+      <section className="settlement-review-queue refund-review-queue" aria-label="Refund evidence conflicts">
+        <div className="op-page-heading"><div><h2>Refund evidence conflicts</h2><p className="page-description">Read-only terminal refund evidence requiring Admin review.</p></div></div>
+        {reviewQuery.isLoading ? <p className="page-description">Loading refund evidence conflicts...</p> : null}
+        {reviewQuery.isError || terminalPage?.error ? <SectionErrorRetry
+          description={terminalPage?.error ?? reviewQuery.error ?? 'Unable to load refund evidence conflicts.'}
+          onRetry={() => void reviewQuery.refetch()}
+        /> : null}
+        {!reviewQuery.isLoading && !reviewQuery.isError && !terminalPage?.error && terminalPage?.count === 0 ? (
+          <EmptyStatePanel title="No refund evidence conflicts" description="No terminal refund evidence conflicts are recorded for this vendor scope." />
+        ) : null}
+        {!reviewQuery.isLoading && !reviewQuery.isError && !terminalPage?.error && terminalPage?.count && terminalPage.items.length === 0 ? (
+          <p className="settlement-compact-empty">No refund evidence conflicts on this page.</p>
+        ) : null}
+        {!reviewQuery.isLoading && !reviewQuery.isError && !terminalPage?.error && terminalPage?.items.length ? (
+          <OperationalTable columns={['Order / refund', 'Vendor', 'Allocation', 'Conflict', 'Accepted refund', 'Status', 'Observed']} className="refund-review-table" stickyHeader={false}>
+            {terminalPage.items.map((review) => <OperationalTableRow key={review.id}>
+              <span><strong>{review.sourceShopifyOrderId}</strong><small>Refund {review.sourceShopifyRefundId}</small></span>
+              <span>{review.vendorName ?? review.economicVendorId}</span>
+              <span>{review.vendorAllocationId}</span>
+              <span><strong>{review.conflictCategory}</strong><small>Stored {review.storedEvidenceHash?.slice(0, 12) ?? 'UNKNOWN'} · Incoming {review.incomingEvidenceHash?.slice(0, 12) ?? 'UNKNOWN'}</small></span>
+              <span>{formatRecordedMoney(review.acceptedRecordedAmount, null, review.acceptedRecordedCurrency)}</span>
+              <span><StatusBadge tone={review.status === 'RESOLVED' ? 'neutral' : 'attention'}>{review.status}</StatusBadge><small>{review.occurrenceCount} observation(s)</small></span>
+              <span><strong>{formatDate(review.lastObservedAt)}</strong><small>First {formatDate(review.firstObservedAt)}</small></span>
+            </OperationalTableRow>)}
+          </OperationalTable>
+        ) : null}
+        {terminalPage && !terminalPage.error && (terminalPage.count > REVIEW_PAGE_SIZE || terminalOffset > 0) ? <div className="op-toolbar refund-review-pagination">
+          <button type="button" disabled={terminalOffset === 0} onClick={() => setTerminalOffset(Math.max(0, terminalOffset - REVIEW_PAGE_SIZE))}>Previous conflicts</button>
+          <span>{terminalPage.items.length ? `${terminalOffset + 1}–${Math.min(terminalOffset + REVIEW_PAGE_SIZE, terminalPage.count)}` : '0'} of {terminalPage.count}</span>
+          <button type="button" disabled={terminalOffset + REVIEW_PAGE_SIZE >= terminalPage.count} onClick={() => setTerminalOffset(terminalOffset + REVIEW_PAGE_SIZE)}>Next conflicts</button>
+        </div> : null}
+      </section>
+
+      <section className="settlement-review-queue refund-review-queue" aria-label="Legacy refund finance">
+        <div className="op-page-heading"><div><h2>Legacy refund finance</h2><p className="page-description">Read-only historical finance without accepted evidence snapshots.</p></div></div>
+        {reviewQuery.isLoading ? <p className="page-description">Loading legacy refund finance...</p> : null}
+        {reviewQuery.isError || legacyPage?.error ? <SectionErrorRetry
+          description={legacyPage?.error ?? reviewQuery.error ?? 'Unable to load legacy refund finance.'}
+          onRetry={() => void reviewQuery.refetch()}
+        /> : null}
+        {!reviewQuery.isLoading && !reviewQuery.isError && !legacyPage?.error && legacyPage?.count === 0 ? (
+          <EmptyStatePanel title="No legacy refund finance" description="No historical refund-finance candidates are recorded for this vendor scope." />
+        ) : null}
+        {!reviewQuery.isLoading && !reviewQuery.isError && !legacyPage?.error && legacyPage?.count && legacyPage.items.length === 0 ? (
+          <p className="settlement-compact-empty">No legacy refund finance on this page.</p>
+        ) : null}
+        {!reviewQuery.isLoading && !reviewQuery.isError && !legacyPage?.error && legacyPage?.items.length ? (
+          <OperationalTable columns={['Order / refund', 'Vendor', 'Allocation', 'Source', 'Recorded amount', 'Attribution', 'Recorded']} className="refund-review-table" stickyHeader={false}>
+            {legacyPage.items.map((candidate) => <OperationalTableRow key={`${candidate.artifactType}-${candidate.id}`}>
+              <span><strong>{candidate.sourceShopifyOrderId ?? 'UNKNOWN'}</strong><small>Refund {candidate.sourceShopifyRefundId ?? 'UNKNOWN'}</small></span>
+              <span>{candidate.vendorName ?? candidate.economicVendorId}</span>
+              <span>{candidate.vendorAllocationId ?? 'UNKNOWN'}</span>
+              <span><strong>{candidate.artifactType.replaceAll('_', ' ')}</strong><small>{candidate.state ?? 'State UNKNOWN'}</small><small>{candidate.reason}</small></span>
+              <span>{formatRecordedMoney(candidate.recordedAmount, candidate.recordedAmountMinor, candidate.recordedCurrency)}</span>
+              <span><StatusBadge tone={candidate.attribution === 'exact' ? 'neutral' : 'attention'}>{candidate.attribution}</StatusBadge></span>
+              <span>{formatDate(candidate.observedAt)}</span>
+            </OperationalTableRow>)}
+          </OperationalTable>
+        ) : null}
+        {legacyPage && !legacyPage.error && (legacyPage.count > REVIEW_PAGE_SIZE || legacyOffset > 0) ? <div className="op-toolbar refund-review-pagination">
+          <button type="button" disabled={legacyOffset === 0} onClick={() => setLegacyOffset(Math.max(0, legacyOffset - REVIEW_PAGE_SIZE))}>Previous legacy</button>
+          <span>{legacyPage.items.length ? `${legacyOffset + 1}–${Math.min(legacyOffset + REVIEW_PAGE_SIZE, legacyPage.count)}` : '0'} of {legacyPage.count}</span>
+          <button type="button" disabled={legacyOffset + REVIEW_PAGE_SIZE >= legacyPage.count} onClick={() => setLegacyOffset(legacyOffset + REVIEW_PAGE_SIZE)}>Next legacy</button>
+        </div> : null}
       </section>
     </section>
   );

@@ -4,6 +4,11 @@ const previewRefundAdjustmentEligibilityMock = vi.hoisted(() => vi.fn());
 const backfillPendingRefundAdjustmentsMock = vi.hoisted(() => vi.fn());
 const previewPendingRefundAdjustmentApplicationMock = vi.hoisted(() => vi.fn());
 const getSettlementRefundAdjustmentDetailMock = vi.hoisted(() => vi.fn());
+const listAdminRefundReviewsMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../backend/src/modules/finance/admin-refund-review-projection.service.js', () => ({
+  listAdminRefundReviews: listAdminRefundReviewsMock,
+}));
 
 vi.mock('../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js', () => ({
   backfillPendingRefundAdjustments: backfillPendingRefundAdjustmentsMock,
@@ -96,10 +101,30 @@ function buildReply() {
 
 describe('refund adjustment eligibility preview route', () => {
   beforeEach(() => {
+    listAdminRefundReviewsMock.mockReset();
     previewRefundAdjustmentEligibilityMock.mockReset();
     backfillPendingRefundAdjustmentsMock.mockReset();
     previewPendingRefundAdjustmentApplicationMock.mockReset();
     getSettlementRefundAdjustmentDetailMock.mockReset();
+  });
+
+  it('keeps the new read-only review projection admin-only with bounded independent pages', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => gets.set(path, handler)),
+      put: vi.fn(), post: vi.fn(), delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+    const handler = gets.get('/admin/finance/refund-reviews');
+    expect(handler).toBeDefined();
+    for (const role of ['vendor', 'finance', 'support']) {
+      expect(await handler?.({ authUser: { role }, query: {} }, buildReply())).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    }
+    expect(listAdminRefundReviewsMock).not.toHaveBeenCalled();
+    const response = { ok: true, writesPerformed: false, terminalReviews: { items: [] }, legacyCandidates: { items: [] } };
+    listAdminRefundReviewsMock.mockResolvedValue(response);
+    expect(await handler?.({ authUser: { role: 'admin' }, query: { vendorId: 'vendor', terminalLimit: '999', terminalOffset: '3', legacyLimit: '4', legacyOffset: '8' } }, buildReply())).toBe(response);
+    expect(listAdminRefundReviewsMock).toHaveBeenCalledWith({ vendorId: 'vendor', terminal: { limit: 250, offset: 3 }, legacy: { limit: 4, offset: 8 } });
   });
 
   it('requires admin auth', async () => {

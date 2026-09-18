@@ -44,6 +44,7 @@ import {
 } from './shopify-refund-monetary-evidence.js';
 import { synchronizeCanonicalShopifyOrderFinancialStatus } from './shopify-order-financial-status.service.js';
 import { acquireShopifyOrderTransactionLock } from './orders-create-ownership.service.js';
+import { classifyPersistedRefundFinanceEvidence } from './refund-persisted-finance-classifier.js';
 
 const CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET = new Set<string>(CANCEL_REFUND_REVIEW_BLOCKING_STATUSES);
 
@@ -378,12 +379,6 @@ async function classifyPersistedRefundFinance(
     },
     select: { id: true, vendorAllocationId: true },
   });
-  const pairLedger = ledgers.some((ledger) => ledger.vendorAllocationId === input.vendorAllocationId);
-  const unscopedLedger = ledgers.some((ledger) => ledger.vendorAllocationId == null);
-  const conflictingIdentityLedger = ledgers.some((ledger) =>
-    (ledger.id === input.expectedRefundLedgerId || ledger.id === input.legacyRefundLedgerId) &&
-    ledger.vendorAllocationId !== null &&
-    ledger.vendorAllocationId !== input.vendorAllocationId);
   const refundRecord = await tx.refundRecord.findFirst({
     where: {
       vendorAllocationId: input.vendorAllocationId,
@@ -414,23 +409,17 @@ async function classifyPersistedRefundFinance(
       },
     }),
   ]);
-  const pairEvent = financeEvents.some((event) =>
-    event.financeLedgerEntry?.vendorAllocationId === input.vendorAllocationId ||
-    (typeof event.metadataJson === 'object' && event.metadataJson !== null &&
-      !Array.isArray(event.metadataJson) &&
-      event.metadataJson.vendorAllocationId === input.vendorAllocationId));
-  const ambiguousEvent = financeEvents.some((event) =>
-    !event.financeLedgerEntry?.vendorAllocationId &&
-    !(typeof event.metadataJson === 'object' && event.metadataJson !== null &&
-      !Array.isArray(event.metadataJson) && typeof event.metadataJson.vendorAllocationId === 'string'));
-
-  if (pairLedger || adjustment || debtEvent || pairEvent) {
-    return { kind: 'historical_finance' as const, refundRecord };
-  }
-  if (unscopedLedger || conflictingIdentityLedger || ambiguousEvent) {
-    return { kind: 'ambiguous_legacy' as const, refundRecord };
-  }
-  return { kind: 'new' as const, refundRecord };
+  return classifyPersistedRefundFinanceEvidence({
+    snapshot,
+    ledgers,
+    expectedRefundLedgerId: input.expectedRefundLedgerId,
+    legacyRefundLedgerId: input.legacyRefundLedgerId,
+    vendorAllocationId: input.vendorAllocationId,
+    refundRecord,
+    adjustment,
+    debtEvent,
+    financeEvents,
+  });
 }
 
 function normalizeAllocationRefundEvidence(input: {

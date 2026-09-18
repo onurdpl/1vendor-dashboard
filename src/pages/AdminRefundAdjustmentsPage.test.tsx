@@ -5,7 +5,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminRefundAdjustmentsPage } from './AdminRefundAdjustmentsPage';
 import {
+  listAdminRefundReviews,
   listRefundAdjustments,
+  type AdminRefundReviewsResponse,
   type RefundAdjustmentRecord,
   type RefundAdjustmentsListResponse,
 } from '../features/finance/refundAdjustmentsApi';
@@ -15,11 +17,23 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/finance/refundAdjustmentsApi')>();
   return {
     ...actual,
+    listAdminRefundReviews: vi.fn(),
     listRefundAdjustments: vi.fn(),
   };
 });
 
 const listRefundAdjustmentsMock = vi.mocked(listRefundAdjustments);
+const listAdminRefundReviewsMock = vi.mocked(listAdminRefundReviews);
+
+function reviewResponse(overrides: Partial<AdminRefundReviewsResponse> = {}): AdminRefundReviewsResponse {
+  return {
+    ok: true,
+    writesPerformed: false,
+    terminalReviews: { error: null, count: 0, limit: 25, offset: 0, items: [] },
+    legacyCandidates: { error: null, count: 0, limit: 25, offset: 0, items: [] },
+    ...overrides,
+  };
+}
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -141,6 +155,7 @@ beforeEach(() => {
   setSession('test-session', adminUser);
   setCurrentVendorId('yalispor');
   listRefundAdjustmentsMock.mockResolvedValue(response());
+  listAdminRefundReviewsMock.mockResolvedValue(reviewResponse());
 });
 
 afterEach(() => {
@@ -168,7 +183,7 @@ describe('AdminRefundAdjustmentsPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0));
 
-    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent);
+    const headers = within(screen.getByLabelText('Refund adjustments queue')).getAllByRole('columnheader').map((header) => header.textContent);
     expect(headers).toEqual(['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated']);
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0);
@@ -239,5 +254,78 @@ describe('AdminRefundAdjustmentsPage', () => {
 
     expect(screen.getByText('Vendor debt exists')).toBeInTheDocument();
     expect(screen.queryByText('Balance offset')).not.toBeInTheDocument();
+  });
+
+  it('shows distinct read-only terminal conflicts and exact/ambiguous legacy evidence', async () => {
+    const terminal = {
+      type: 'terminal_conflict' as const, id: 'review-1', status: 'ACTIVE', sourceShopifyRefundId: 'refund-1',
+      sourceShopifyOrderId: 'order-1', vendorAllocationId: 'allocation-1', economicVendorId: 'yalispor',
+      vendorName: 'Yalı Spor', terminalRefundFinanceLedgerEntryId: 'ledger-1', storedEvidenceSnapshotId: 'snapshot-1',
+      conflictCategory: 'refund_evidence_hash_mismatch', storedEvidenceHash: 'stored-hash', incomingEvidenceHash: 'incoming-hash',
+      occurrenceCount: 2, firstObservedAt: '2026-07-01T00:00:00Z', lastObservedAt: '2026-07-02T00:00:00Z',
+      acceptedRecordedAmount: '42.00', acceptedRecordedCurrency: 'TRY',
+    };
+    const legacy = {
+      type: 'legacy_refund_finance' as const, id: 'ledger-legacy', artifactType: 'refund_ledger' as const,
+      artifactId: 'ledger-legacy', attribution: 'exact' as const, sourceShopifyOrderId: 'order-2',
+      sourceShopifyRefundId: 'refund-2', vendorAllocationId: 'allocation-2', economicVendorId: 'yalispor',
+      vendorName: 'Yalı Spor', recordedAmount: '30.00', recordedAmountMinor: null, recordedCurrency: 'TRY',
+      observedAt: '2026-07-03T00:00:00Z', state: 'PENDING', voidedAt: null, supersededByLedgerId: null,
+      reason: 'Historical refund finance without accepted evidence snapshot.',
+    };
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 2, limit: 25, offset: 0, items: [terminal, { ...terminal, id: 'review-2' }] },
+      legacyCandidates: { error: null, count: 2, limit: 25, offset: 0, items: [legacy, { ...legacy, id: 'event-unknown', artifactId: 'event-unknown', artifactType: 'finance_event', attribution: 'ambiguous', sourceShopifyOrderId: null, sourceShopifyRefundId: null, vendorAllocationId: null, recordedAmount: null, recordedAmountMinor: 120, recordedCurrency: 'TRY' }] },
+    }));
+    renderPage();
+    const conflicts = await screen.findByLabelText('Refund evidence conflicts');
+    const legacySection = screen.getByLabelText('Legacy refund finance');
+    await waitFor(() => expect(within(conflicts).getAllByText('refund_evidence_hash_mismatch')).toHaveLength(2));
+    expect(within(legacySection).getByText('Refund refund-2')).toBeInTheDocument();
+    expect(within(legacySection).getAllByText('UNKNOWN').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Refund adjustments queue')).toBeInTheDocument();
+    expect(within(conflicts).queryByRole('button', { name: /resolve|acknowledge|repair/i })).not.toBeInTheDocument();
+    expect(within(legacySection).queryByRole('button', { name: /resolve|accept evidence/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/customer@example|shipping address/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps review-list errors independent from the adjustment queue and the other review list', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: 'Unable to load refund evidence conflicts.', count: 0, limit: 25, offset: 0, items: [] },
+    }));
+    renderPage();
+    const conflicts = await screen.findByLabelText('Refund evidence conflicts');
+    const legacySection = screen.getByLabelText('Legacy refund finance');
+    await waitFor(() => expect(within(conflicts).getByText('Unable to load refund evidence conflicts.')).toBeInTheDocument());
+    expect(within(conflicts).queryByText('No refund evidence conflicts')).not.toBeInTheDocument();
+    expect(within(legacySection).getByText('No legacy refund finance')).toBeInTheDocument();
+    expect(screen.getByLabelText('Refund adjustment detail panel')).toBeInTheDocument();
+  });
+
+  it('pages the two read-only lists independently and reuses the existing vendor filter', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockImplementation(async (input) => reviewResponse({
+      terminalReviews: { error: null, count: 60, limit: 25, offset: input.terminalOffset ?? 0, items: [] },
+      legacyCandidates: { error: null, count: 60, limit: 25, offset: input.legacyOffset ?? 0, items: [] },
+    }));
+    renderPage();
+    await screen.findByRole('button', { name: 'Next conflicts' });
+    await user.click(screen.getByRole('button', { name: 'Next conflicts' }));
+    await waitFor(() => expect(listAdminRefundReviewsMock).toHaveBeenCalledWith(expect.objectContaining({ terminalOffset: 25, legacyOffset: 0 })));
+    await user.click(screen.getByRole('button', { name: 'Next legacy' }));
+    await waitFor(() => expect(listAdminRefundReviewsMock).toHaveBeenCalledWith(expect.objectContaining({ terminalOffset: 25, legacyOffset: 25 })));
+    const vendorInput = within(screen.getByLabelText('Refund adjustment filters')).getByRole('textbox', { name: 'Vendor' });
+    await user.clear(vendorInput);
+    await user.type(vendorInput, 'other-vendor');
+    await waitFor(() => expect(listAdminRefundReviewsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'other-vendor', terminalOffset: 0, legacyOffset: 0 })));
+  });
+
+  it('shows review loading without claiming either list is empty', async () => {
+    listAdminRefundReviewsMock.mockReturnValue(new Promise(() => {}));
+    renderPage();
+    expect(await screen.findByText('Loading refund evidence conflicts...')).toBeInTheDocument();
+    expect(screen.getByText('Loading legacy refund finance...')).toBeInTheDocument();
+    expect(screen.queryByText('No refund evidence conflicts')).not.toBeInTheDocument();
+    expect(screen.queryByText('No legacy refund finance')).not.toBeInTheDocument();
   });
 });
