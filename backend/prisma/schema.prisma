@@ -177,6 +177,12 @@ enum RefundTerminalEvidenceReviewEventType {
   REOPENED
 }
 
+enum RefundTerminalEvidenceResolutionOutcome {
+  NO_CORRECTION_NEEDED
+  CORRECTION_REQUIRED
+  INSUFFICIENT_EVIDENCE
+}
+
 enum PayoutBatchStatus {
   DRAFT
   REVIEW
@@ -1198,6 +1204,7 @@ model RefundTerminalEvidenceReview {
   conflictSummaryJson                Json
   sourceContextJson                  Json?
   status                             RefundTerminalEvidenceReviewStatus  @default(ACTIVE)
+  resolutionOutcome                  RefundTerminalEvidenceResolutionOutcome?
   firstObservedAt                    DateTime                            @default(now())
   lastObservedAt                     DateTime                            @default(now())
   occurrenceCount                    Int                                 @default(1)
@@ -1223,6 +1230,7 @@ model RefundTerminalEvidenceReviewEvent {
   eventType         RefundTerminalEvidenceReviewEventType
   actorUserId       String?
   note              String?
+  resolutionOutcome RefundTerminalEvidenceResolutionOutcome?
   sourceContextJson Json?
   createdAt         DateTime                              @default(now())
   review            RefundTerminalEvidenceReview          @relation(fields: [reviewId], references: [id], onDelete: Restrict)

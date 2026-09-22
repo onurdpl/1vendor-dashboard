@@ -5,9 +5,24 @@ const backfillPendingRefundAdjustmentsMock = vi.hoisted(() => vi.fn());
 const previewPendingRefundAdjustmentApplicationMock = vi.hoisted(() => vi.fn());
 const getSettlementRefundAdjustmentDetailMock = vi.hoisted(() => vi.fn());
 const listAdminRefundReviewsMock = vi.hoisted(() => vi.fn());
+const getAdminRefundReviewDetailMock = vi.hoisted(() => vi.fn());
+const acknowledgeAdminRefundReviewMock = vi.hoisted(() => vi.fn());
+const resolveAdminRefundReviewMock = vi.hoisted(() => vi.fn());
+const reopenAdminRefundReviewMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/admin-refund-review-projection.service.js', () => ({
   listAdminRefundReviews: listAdminRefundReviewsMock,
+}));
+
+vi.mock('../backend/src/modules/finance/admin-refund-review-lifecycle.service.js', () => ({
+  getAdminRefundReviewDetail: getAdminRefundReviewDetailMock,
+  acknowledgeAdminRefundReview: acknowledgeAdminRefundReviewMock,
+  resolveAdminRefundReview: resolveAdminRefundReviewMock,
+  reopenAdminRefundReview: reopenAdminRefundReviewMock,
+  AdminRefundReviewLifecycleError: class AdminRefundReviewLifecycleError extends Error {
+    statusCode: number;
+    constructor(message: string, statusCode = 409) { super(message); this.statusCode = statusCode; }
+  },
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js', () => ({
@@ -124,7 +139,47 @@ describe('refund adjustment eligibility preview route', () => {
     const response = { ok: true, writesPerformed: false, terminalReviews: { items: [] }, legacyCandidates: { items: [] } };
     listAdminRefundReviewsMock.mockResolvedValue(response);
     expect(await handler?.({ authUser: { role: 'admin' }, query: { vendorId: 'vendor', terminalLimit: '999', terminalOffset: '3', legacyLimit: '4', legacyOffset: '8' } }, buildReply())).toBe(response);
-    expect(listAdminRefundReviewsMock).toHaveBeenCalledWith({ vendorId: 'vendor', terminal: { limit: 250, offset: 3 }, legacy: { limit: 4, offset: 8 } });
+    expect(listAdminRefundReviewsMock).toHaveBeenCalledWith({
+      vendorId: 'vendor', terminalStatus: null, terminalResolutionOutcome: null,
+      terminal: { limit: 250, offset: 3 }, legacy: { limit: 4, offset: 8 },
+    });
+  });
+
+  it('keeps terminal review detail and lifecycle commands explicitly admin-only', async () => {
+    const gets = new Map<string, (request: any, reply: ReturnType<typeof buildReply>) => unknown>();
+    const posts = new Map<string, (request: any, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: any, reply: ReturnType<typeof buildReply>) => unknown) => gets.set(path, handler)),
+      post: vi.fn((path: string, _options: unknown, handler: (request: any, reply: ReturnType<typeof buildReply>) => unknown) => posts.set(path, handler)),
+      put: vi.fn(), delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+
+    for (const role of ['vendor', 'finance', 'support']) {
+      expect(await gets.get('/admin/finance/refund-reviews/:reviewId')?.(
+        { authUser: { role }, params: { reviewId: 'review-1' } }, buildReply(),
+      )).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+      expect(await posts.get('/admin/finance/refund-reviews/:reviewId/acknowledge')?.(
+        { authUser: { role }, params: { reviewId: 'review-1' }, body: {} }, buildReply(),
+      )).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    }
+
+    const review = { id: 'review-1', status: 'ACKNOWLEDGED' };
+    acknowledgeAdminRefundReviewMock.mockResolvedValue(review);
+    expect(await posts.get('/admin/finance/refund-reviews/:reviewId/acknowledge')?.({
+      authUser: { role: 'admin', id: 'admin-1' },
+      params: { reviewId: 'review-1' },
+      body: {
+        expectedStatus: 'ACTIVE', expectedUpdatedAt: '2026-09-20T10:00:00.000Z',
+        expectedOccurrenceCount: 2, note: 'Investigating',
+      },
+    }, buildReply())).toEqual({ ok: true, review });
+    expect(acknowledgeAdminRefundReviewMock).toHaveBeenCalledWith({
+      reviewId: 'review-1', actorUserId: 'admin-1', note: 'Investigating',
+      freshness: {
+        expectedStatus: 'ACTIVE', expectedUpdatedAt: '2026-09-20T10:00:00.000Z', expectedOccurrenceCount: 2,
+      },
+    });
   });
 
   it('requires admin auth', async () => {

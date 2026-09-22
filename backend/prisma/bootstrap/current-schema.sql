@@ -71,6 +71,9 @@ CREATE TYPE "RefundTerminalEvidenceReviewStatus" AS ENUM ('ACTIVE', 'ACKNOWLEDGE
 CREATE TYPE "RefundTerminalEvidenceReviewEventType" AS ENUM ('DETECTED', 'ACKNOWLEDGED', 'RESOLVED', 'REOPENED');
 
 -- CreateEnum
+CREATE TYPE "RefundTerminalEvidenceResolutionOutcome" AS ENUM ('NO_CORRECTION_NEEDED', 'CORRECTION_REQUIRED', 'INSUFFICIENT_EVIDENCE');
+
+-- CreateEnum
 CREATE TYPE "PayoutBatchStatus" AS ENUM ('DRAFT', 'REVIEW', 'APPROVED', 'CANCELLED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER');
 
 -- CreateEnum
@@ -818,6 +821,7 @@ CREATE TABLE "RefundTerminalEvidenceReview" (
     "conflictSummaryJson" JSONB NOT NULL,
     "sourceContextJson" JSONB,
     "status" "RefundTerminalEvidenceReviewStatus" NOT NULL DEFAULT 'ACTIVE',
+    "resolutionOutcome" "RefundTerminalEvidenceResolutionOutcome",
     "firstObservedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lastObservedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "occurrenceCount" INTEGER NOT NULL DEFAULT 1,
@@ -834,6 +838,7 @@ CREATE TABLE "RefundTerminalEvidenceReviewEvent" (
     "eventType" "RefundTerminalEvidenceReviewEventType" NOT NULL,
     "actorUserId" TEXT,
     "note" TEXT,
+    "resolutionOutcome" "RefundTerminalEvidenceResolutionOutcome",
     "sourceContextJson" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

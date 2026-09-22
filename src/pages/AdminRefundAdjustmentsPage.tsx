@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   EmptyStatePanel,
   MetadataGroup,
@@ -11,8 +12,14 @@ import {
 import {
   listAdminRefundReviews,
   listRefundAdjustments,
+  acknowledgeAdminRefundReview,
+  getAdminRefundReview,
+  reopenAdminRefundReview,
+  resolveAdminRefundReview,
   type RefundAdjustmentRecord,
   type RefundAdjustmentStatus,
+  type TerminalRefundReviewResolutionOutcome,
+  type TerminalRefundReviewStatus,
 } from '../features/finance/refundAdjustmentsApi';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -74,6 +81,18 @@ function formatRecordedMoney(amount: string | null, amountMinor: number | null, 
   if (amount !== null) return formatCurrency(amount, currency);
   if (amountMinor !== null) return formatCurrency((amountMinor / 100).toFixed(2), currency);
   return 'UNKNOWN';
+}
+
+function formatReviewOutcome(outcome: TerminalRefundReviewResolutionOutcome | null) {
+  if (!outcome) return 'Not resolved';
+  if (outcome === 'NO_CORRECTION_NEEDED') return 'No correction needed';
+  if (outcome === 'CORRECTION_REQUIRED') return 'Correction required';
+  return 'Insufficient evidence';
+}
+
+function formatReviewJson(value: unknown) {
+  if (value === null || value === undefined) return 'UNKNOWN';
+  return JSON.stringify(value);
 }
 
 function getStatusTone(status: RefundAdjustmentStatus) {
@@ -217,6 +236,13 @@ export function AdminRefundAdjustmentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [terminalOffset, setTerminalOffset] = useState(0);
   const [legacyOffset, setLegacyOffset] = useState(0);
+  const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
+  const [terminalStatusFilter, setTerminalStatusFilter] = useState<'all' | TerminalRefundReviewStatus>('all');
+  const [terminalOutcomeFilter, setTerminalOutcomeFilter] = useState<'all' | TerminalRefundReviewResolutionOutcome>('all');
+  const [terminalActionNote, setTerminalActionNote] = useState('');
+  const [terminalResolutionOutcome, setTerminalResolutionOutcome] = useState<TerminalRefundReviewResolutionOutcome | ''>('');
+  const [terminalActionPending, setTerminalActionPending] = useState(false);
+  const [terminalActionError, setTerminalActionError] = useState<string | null>(null);
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -227,19 +253,68 @@ export function AdminRefundAdjustmentsPage() {
     },
   );
   const reviewQuery = useQueryResource(
-    ['admin', 'finance', 'refund-reviews', vendorFilter, terminalOffset, legacyOffset],
+    ['admin', 'finance', 'refund-reviews', vendorFilter, terminalOffset, legacyOffset, terminalStatusFilter, terminalOutcomeFilter],
     ({ signal }) => listAdminRefundReviews({
       vendorId: vendorFilter || null,
       terminalLimit: REVIEW_PAGE_SIZE,
       terminalOffset,
       legacyLimit: REVIEW_PAGE_SIZE,
       legacyOffset,
+      terminalStatus: terminalStatusFilter === 'all' ? null : terminalStatusFilter,
+      terminalResolutionOutcome: terminalOutcomeFilter === 'all' ? null : terminalOutcomeFilter,
       signal,
     }),
     { routeName: 'Refund reviews', endpoint: '/admin/finance/refund-reviews' },
   );
   const terminalPage = reviewQuery.data?.terminalReviews;
   const legacyPage = reviewQuery.data?.legacyCandidates;
+  const selectedTerminalReview = terminalPage?.items.find((review) => review.id === selectedTerminalId)
+    ?? terminalPage?.items[0]
+    ?? null;
+  const terminalDetailQuery = useQueryResource(
+    ['admin', 'finance', 'refund-review', selectedTerminalReview?.id ?? 'none'],
+    ({ signal }) => getAdminRefundReview(selectedTerminalReview!.id, signal),
+    {
+      routeName: 'Refund review detail',
+      endpoint: selectedTerminalReview ? `/admin/finance/refund-reviews/${selectedTerminalReview.id}` : '/admin/finance/refund-reviews',
+      enabled: Boolean(selectedTerminalReview),
+    },
+  );
+  const terminalDetail = terminalDetailQuery.data?.review ?? null;
+
+  const runTerminalReviewAction = async (action: 'acknowledge' | 'resolve' | 'reopen') => {
+    if (!terminalDetail || terminalActionPending) return;
+    setTerminalActionPending(true);
+    setTerminalActionError(null);
+    const freshness = {
+      expectedStatus: terminalDetail.status,
+      expectedUpdatedAt: terminalDetail.updatedAt,
+      expectedOccurrenceCount: terminalDetail.occurrenceCount,
+      note: terminalActionNote || null,
+    };
+    try {
+      if (action === 'acknowledge') await acknowledgeAdminRefundReview(terminalDetail.id, freshness);
+      if (action === 'reopen') await reopenAdminRefundReview(terminalDetail.id, freshness);
+      if (action === 'resolve') {
+        if (!terminalResolutionOutcome) {
+          setTerminalActionError('Select a resolution outcome.');
+          return;
+        }
+        await resolveAdminRefundReview(terminalDetail.id, {
+          ...freshness,
+          resolutionOutcome: terminalResolutionOutcome,
+        });
+      }
+      setTerminalActionNote('');
+      setTerminalResolutionOutcome('');
+      await Promise.all([reviewQuery.refetch(), terminalDetailQuery.refetch()]);
+    } catch (error) {
+      setTerminalActionError(error instanceof Error ? error.message : 'Refund review action failed.');
+      await Promise.all([reviewQuery.refetch(), terminalDetailQuery.refetch()]);
+    } finally {
+      setTerminalActionPending(false);
+    }
+  };
 
   const records = query.data?.records ?? [];
   const advancedFilteredRecords = useMemo(() => {
@@ -471,7 +546,35 @@ export function AdminRefundAdjustmentsPage() {
       </section>
 
       <section className="settlement-review-queue refund-review-queue" aria-label="Refund evidence conflicts">
-        <div className="op-page-heading"><div><h2>Refund evidence conflicts</h2><p className="page-description">Read-only terminal refund evidence requiring Admin review.</p></div></div>
+        <div className="op-page-heading"><div><h2>Refund evidence conflicts</h2><p className="page-description">Terminal refund evidence requiring Admin investigation.</p></div></div>
+        <div className="op-toolbar refund-review-filters" aria-label="Refund evidence conflict filters">
+          <label>
+            <span>Status</span>
+            <select value={terminalStatusFilter} onChange={(event) => {
+              setTerminalStatusFilter(event.target.value as 'all' | TerminalRefundReviewStatus);
+              setTerminalOffset(0);
+              setSelectedTerminalId(null);
+            }}>
+              <option value="all">All statuses</option>
+              <option value="ACTIVE">Active</option>
+              <option value="ACKNOWLEDGED">Acknowledged</option>
+              <option value="RESOLVED">Resolved</option>
+            </select>
+          </label>
+          <label>
+            <span>Resolution outcome</span>
+            <select value={terminalOutcomeFilter} onChange={(event) => {
+              setTerminalOutcomeFilter(event.target.value as 'all' | TerminalRefundReviewResolutionOutcome);
+              setTerminalOffset(0);
+              setSelectedTerminalId(null);
+            }}>
+              <option value="all">All outcomes</option>
+              <option value="NO_CORRECTION_NEEDED">No correction needed</option>
+              <option value="CORRECTION_REQUIRED">Correction required</option>
+              <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
+            </select>
+          </label>
+        </div>
         {reviewQuery.isLoading ? <p className="page-description">Loading refund evidence conflicts...</p> : null}
         {reviewQuery.isError || terminalPage?.error ? <SectionErrorRetry
           description={terminalPage?.error ?? reviewQuery.error ?? 'Unable to load refund evidence conflicts.'}
@@ -484,17 +587,116 @@ export function AdminRefundAdjustmentsPage() {
           <p className="settlement-compact-empty">No refund evidence conflicts on this page.</p>
         ) : null}
         {!reviewQuery.isLoading && !reviewQuery.isError && !terminalPage?.error && terminalPage?.items.length ? (
-          <OperationalTable columns={['Order / refund', 'Vendor', 'Allocation', 'Conflict', 'Accepted refund', 'Status', 'Observed']} className="refund-review-table" stickyHeader={false}>
-            {terminalPage.items.map((review) => <OperationalTableRow key={review.id}>
-              <span><strong>{review.sourceShopifyOrderId}</strong><small>Refund {review.sourceShopifyRefundId}</small></span>
-              <span>{review.vendorName ?? review.economicVendorId}</span>
-              <span>{review.vendorAllocationId}</span>
-              <span><strong>{review.conflictCategory}</strong><small>Stored {review.storedEvidenceHash?.slice(0, 12) ?? 'UNKNOWN'} · Incoming {review.incomingEvidenceHash?.slice(0, 12) ?? 'UNKNOWN'}</small></span>
-              <span>{formatRecordedMoney(review.acceptedRecordedAmount, null, review.acceptedRecordedCurrency)}</span>
-              <span><StatusBadge tone={review.status === 'RESOLVED' ? 'neutral' : 'attention'}>{review.status}</StatusBadge><small>{review.occurrenceCount} observation(s)</small></span>
-              <span><strong>{formatDate(review.lastObservedAt)}</strong><small>First {formatDate(review.firstObservedAt)}</small></span>
-            </OperationalTableRow>)}
-          </OperationalTable>
+          <div className="settlement-review-layout refund-review-layout">
+            <OperationalTable columns={['Order / refund', 'Vendor', 'Allocation', 'Conflict', 'Accepted refund', 'Status', 'Observed']} className="refund-review-table" stickyHeader={false}>
+              {terminalPage.items.map((review) => <OperationalTableRow
+                key={review.id}
+                selected={review.id === selectedTerminalReview?.id}
+                onSelect={() => {
+                  setSelectedTerminalId(review.id);
+                  setTerminalActionNote('');
+                  setTerminalResolutionOutcome('');
+                  setTerminalActionError(null);
+                }}
+              >
+                <span><strong>{review.sourceShopifyOrderId}</strong><small>Refund {review.sourceShopifyRefundId}</small></span>
+                <span>{review.vendorName ?? review.economicVendorId}</span>
+                <span>{review.vendorAllocationId}</span>
+                <span><strong>{review.conflictCategory}</strong><small>Stored {review.storedEvidenceHash?.slice(0, 12) ?? 'UNKNOWN'} · Incoming {review.incomingEvidenceHash?.slice(0, 12) ?? 'UNKNOWN'}</small></span>
+                <span>{formatRecordedMoney(review.acceptedRecordedAmount, null, review.acceptedRecordedCurrency)}</span>
+                <span><StatusBadge tone={review.status === 'RESOLVED' ? 'neutral' : 'attention'}>{review.status}</StatusBadge>{review.resolutionOutcome ? <small>{formatReviewOutcome(review.resolutionOutcome)}</small> : null}<small>{review.occurrenceCount} observation(s)</small></span>
+                <span><strong>{formatDate(review.lastObservedAt)}</strong><small>First {formatDate(review.firstObservedAt)}</small></span>
+              </OperationalTableRow>)}
+            </OperationalTable>
+            <aside className="op-side-panel refund-review-detail-panel" aria-label="Refund evidence review detail panel">
+              {terminalDetailQuery.isLoading ? <p className="page-description">Loading review...</p> : null}
+              {terminalDetailQuery.isError ? <SectionErrorRetry
+                description={terminalDetailQuery.error ?? 'Unable to load refund evidence review.'}
+                onRetry={() => void terminalDetailQuery.refetch()}
+              /> : null}
+              {terminalDetail ? (
+                <>
+                  <div className="op-side-panel-heading">
+                    <div><p className="eyebrow">TERMINAL REFUND REVIEW</p><h3>{terminalDetail.sourceShopifyRefundId}</h3></div>
+                    <StatusBadge tone={terminalDetail.status === 'RESOLVED' ? 'neutral' : 'attention'}>{terminalDetail.status}</StatusBadge>
+                  </div>
+                  <p className="page-description">Review actions do not change accepted finance.</p>
+                  {terminalDetail.resolutionOutcome === 'CORRECTION_REQUIRED' ? (
+                    <p className="op-alert op-tone-attention">Financial correction required. No financial correction has been applied.</p>
+                  ) : null}
+
+                  <MetadataGroup title="Review">
+                    <MetadataRow label="Status" value={terminalDetail.status} />
+                    <MetadataRow label="Resolution outcome" value={formatReviewOutcome(terminalDetail.resolutionOutcome)} />
+                    <MetadataRow label="Conflict category" value={terminalDetail.conflictCategory} />
+                    <MetadataRow label="Occurrences" value={terminalDetail.occurrenceCount} />
+                    <MetadataRow label="First observed" value={formatDate(terminalDetail.firstObservedAt)} />
+                    <MetadataRow label="Last observed" value={formatDate(terminalDetail.lastObservedAt)} />
+                  </MetadataGroup>
+
+                  <MetadataGroup title="References">
+                    <MetadataRow label="Order" value={<Link to={`/admin/orders/${encodeURIComponent(terminalDetail.sourceShopifyOrderId)}`}>{terminalDetail.sourceShopifyOrderId}</Link>} />
+                    <MetadataRow label="Refund" value={terminalDetail.sourceShopifyRefundId} />
+                    <MetadataRow label="Vendor" value={terminalDetail.vendorName ?? terminalDetail.economicVendorId} />
+                    <MetadataRow label="Allocation" value={terminalDetail.vendorAllocationId} />
+                  </MetadataGroup>
+
+                  <MetadataGroup title="Accepted finance">
+                    <MetadataRow label="Accepted refund" value={formatRecordedMoney(terminalDetail.acceptedRecordedAmount, null, terminalDetail.acceptedRecordedCurrency)} />
+                    <MetadataRow label="Currency" value={terminalDetail.acceptedRecordedCurrency ?? 'UNKNOWN'} />
+                    <MetadataRow label="Ledger reference" value={terminalDetail.terminalRefundFinanceLedgerEntryId} />
+                    <MetadataRow label="Snapshot reference" value={terminalDetail.storedEvidenceSnapshotId ?? 'UNKNOWN'} />
+                  </MetadataGroup>
+
+                  <MetadataGroup title="Evidence">
+                    <MetadataRow label="Stored hash" value={terminalDetail.storedEvidenceHash ?? 'UNKNOWN'} />
+                    <MetadataRow label="Incoming hash" value={terminalDetail.incomingEvidenceHash ?? 'UNKNOWN'} />
+                    <MetadataRow label="Evidence version" value={terminalDetail.evidenceVersion ?? 'UNKNOWN'} />
+                    <MetadataRow label="Normalization version" value={terminalDetail.normalizationVersion ?? 'UNKNOWN'} />
+                    <MetadataRow label="Conflict summary" value={<code>{formatReviewJson(terminalDetail.conflictSummary)}</code>} />
+                  </MetadataGroup>
+
+                  <section className="op-panel-section">
+                    <h4>History</h4>
+                    <ul className="settlement-review-timeline">
+                      {terminalDetail.events.map((event) => (
+                        <li key={event.id}>
+                          <strong>{event.eventType}</strong>
+                          <span>{formatDate(event.createdAt)}</span>
+                          {event.actorName || event.actorUserId ? <small>{event.actorName ?? event.actorUserId}</small> : null}
+                          {event.resolutionOutcome ? <small>{formatReviewOutcome(event.resolutionOutcome)}</small> : null}
+                          {event.note ? <small>{event.note}</small> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+
+                  <section className="op-panel-section" aria-label="Refund evidence review actions">
+                    <h4>Review action</h4>
+                    {terminalDetail.status === 'ACKNOWLEDGED' ? (
+                      <label>
+                        <span>Resolution outcome</span>
+                        <select value={terminalResolutionOutcome} onChange={(event) => setTerminalResolutionOutcome(event.target.value as TerminalRefundReviewResolutionOutcome)}>
+                          <option value="">Select outcome</option>
+                          <option value="NO_CORRECTION_NEEDED">No correction needed</option>
+                          <option value="CORRECTION_REQUIRED">Correction required</option>
+                          <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
+                        </select>
+                      </label>
+                    ) : null}
+                    <label>
+                      <span>Optional note</span>
+                      <textarea value={terminalActionNote} onChange={(event) => setTerminalActionNote(event.target.value)} />
+                    </label>
+                    {terminalActionError ? <p className="op-alert op-tone-danger" role="alert">{terminalActionError}</p> : null}
+                    {terminalDetail.status === 'ACTIVE' ? <button type="button" disabled={terminalActionPending} onClick={() => void runTerminalReviewAction('acknowledge')}>Acknowledge</button> : null}
+                    {terminalDetail.status === 'ACKNOWLEDGED' ? <button type="button" disabled={terminalActionPending || !terminalResolutionOutcome} onClick={() => void runTerminalReviewAction('resolve')}>Resolve</button> : null}
+                    {terminalDetail.status === 'RESOLVED' ? <button type="button" disabled={terminalActionPending} onClick={() => void runTerminalReviewAction('reopen')}>Reopen</button> : null}
+                  </section>
+                </>
+              ) : null}
+            </aside>
+          </div>
         ) : null}
         {terminalPage && !terminalPage.error && (terminalPage.count > REVIEW_PAGE_SIZE || terminalOffset > 0) ? <div className="op-toolbar refund-review-pagination">
           <button type="button" disabled={terminalOffset === 0} onClick={() => setTerminalOffset(Math.max(0, terminalOffset - REVIEW_PAGE_SIZE))}>Previous conflicts</button>
@@ -504,7 +706,7 @@ export function AdminRefundAdjustmentsPage() {
       </section>
 
       <section className="settlement-review-queue refund-review-queue" aria-label="Legacy refund finance">
-        <div className="op-page-heading"><div><h2>Legacy refund finance</h2><p className="page-description">Read-only historical finance without accepted evidence snapshots.</p></div></div>
+        <div className="op-page-heading"><div><h2>Legacy refund finance</h2><p className="page-description">Historical finance review — read only. No lifecycle actions are available for records without accepted evidence snapshots.</p></div></div>
         {reviewQuery.isLoading ? <p className="page-description">Loading legacy refund finance...</p> : null}
         {reviewQuery.isError || legacyPage?.error ? <SectionErrorRetry
           description={legacyPage?.error ?? reviewQuery.error ?? 'Unable to load legacy refund finance.'}

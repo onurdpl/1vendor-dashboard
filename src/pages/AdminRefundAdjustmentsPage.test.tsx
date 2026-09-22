@@ -5,11 +5,17 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminRefundAdjustmentsPage } from './AdminRefundAdjustmentsPage';
 import {
+  acknowledgeAdminRefundReview,
+  getAdminRefundReview,
   listAdminRefundReviews,
   listRefundAdjustments,
+  reopenAdminRefundReview,
+  resolveAdminRefundReview,
   type AdminRefundReviewsResponse,
   type RefundAdjustmentRecord,
   type RefundAdjustmentsListResponse,
+  type TerminalRefundReview,
+  type TerminalRefundReviewDetail,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -19,11 +25,19 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     ...actual,
     listAdminRefundReviews: vi.fn(),
     listRefundAdjustments: vi.fn(),
+    getAdminRefundReview: vi.fn(),
+    acknowledgeAdminRefundReview: vi.fn(),
+    resolveAdminRefundReview: vi.fn(),
+    reopenAdminRefundReview: vi.fn(),
   };
 });
 
 const listRefundAdjustmentsMock = vi.mocked(listRefundAdjustments);
 const listAdminRefundReviewsMock = vi.mocked(listAdminRefundReviews);
+const getAdminRefundReviewMock = vi.mocked(getAdminRefundReview);
+const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
+const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
+const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
 
 function reviewResponse(overrides: Partial<AdminRefundReviewsResponse> = {}): AdminRefundReviewsResponse {
   return {
@@ -131,6 +145,33 @@ function response(records = adjustments): RefundAdjustmentsListResponse {
   };
 }
 
+function makeTerminalReview(overrides: Partial<TerminalRefundReview> = {}): TerminalRefundReview {
+  return {
+    type: 'terminal_conflict', id: 'review-1', status: 'ACTIVE', resolutionOutcome: null,
+    sourceShopifyRefundId: 'refund-1', sourceShopifyOrderId: 'order-1',
+    vendorAllocationId: 'allocation-1', economicVendorId: 'yalispor', vendorName: 'Yalı Spor',
+    terminalRefundFinanceLedgerEntryId: 'ledger-1', storedEvidenceSnapshotId: 'snapshot-1',
+    conflictCategory: 'refund_evidence_hash_mismatch', storedEvidenceHash: 'stored-hash', incomingEvidenceHash: 'incoming-hash',
+    occurrenceCount: 2, firstObservedAt: '2026-07-01T00:00:00Z', lastObservedAt: '2026-07-02T00:00:00Z',
+    createdAt: '2026-07-01T00:00:00Z', updatedAt: '2026-07-02T00:00:00Z',
+    acceptedRecordedAmount: '42.00', acceptedRecordedCurrency: 'TRY',
+    ...overrides,
+  };
+}
+
+function makeTerminalDetail(overrides: Partial<TerminalRefundReviewDetail> = {}): TerminalRefundReviewDetail {
+  return {
+    ...makeTerminalReview(),
+    evidenceVersion: 'v1', normalizationVersion: 'n1',
+    conflictSummary: { changed: ['amount'] },
+    events: [{
+      id: 'event-detected', eventType: 'DETECTED', actorUserId: null, actorName: null,
+      note: null, resolutionOutcome: null, createdAt: '2026-07-01T00:00:00Z',
+    }],
+    ...overrides,
+  };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -156,6 +197,10 @@ beforeEach(() => {
   setCurrentVendorId('yalispor');
   listRefundAdjustmentsMock.mockResolvedValue(response());
   listAdminRefundReviewsMock.mockResolvedValue(reviewResponse());
+  getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
+  acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
+  resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
+  reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
 });
 
 afterEach(() => {
@@ -256,15 +301,8 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.queryByText('Balance offset')).not.toBeInTheDocument();
   });
 
-  it('shows distinct read-only terminal conflicts and exact/ambiguous legacy evidence', async () => {
-    const terminal = {
-      type: 'terminal_conflict' as const, id: 'review-1', status: 'ACTIVE', sourceShopifyRefundId: 'refund-1',
-      sourceShopifyOrderId: 'order-1', vendorAllocationId: 'allocation-1', economicVendorId: 'yalispor',
-      vendorName: 'Yalı Spor', terminalRefundFinanceLedgerEntryId: 'ledger-1', storedEvidenceSnapshotId: 'snapshot-1',
-      conflictCategory: 'refund_evidence_hash_mismatch', storedEvidenceHash: 'stored-hash', incomingEvidenceHash: 'incoming-hash',
-      occurrenceCount: 2, firstObservedAt: '2026-07-01T00:00:00Z', lastObservedAt: '2026-07-02T00:00:00Z',
-      acceptedRecordedAmount: '42.00', acceptedRecordedCurrency: 'TRY',
-    };
+  it('shows selectable terminal conflicts and keeps exact/ambiguous legacy evidence read-only', async () => {
+    const terminal = makeTerminalReview();
     const legacy = {
       type: 'legacy_refund_finance' as const, id: 'ledger-legacy', artifactType: 'refund_ledger' as const,
       artifactId: 'ledger-legacy', attribution: 'exact' as const, sourceShopifyOrderId: 'order-2',
@@ -284,9 +322,106 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(within(legacySection).getByText('Refund refund-2')).toBeInTheDocument();
     expect(within(legacySection).getAllByText('UNKNOWN').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Refund adjustments queue')).toBeInTheDocument();
-    expect(within(conflicts).queryByRole('button', { name: /resolve|acknowledge|repair/i })).not.toBeInTheDocument();
+    expect(await within(conflicts).findByRole('button', { name: 'Acknowledge' })).toBeInTheDocument();
     expect(within(legacySection).queryByRole('button', { name: /resolve|accept evidence/i })).not.toBeInTheDocument();
+    expect(within(legacySection).getByText(/Historical finance review — read only/)).toBeInTheDocument();
     expect(screen.queryByText(/customer@example|shipping address/i)).not.toBeInTheDocument();
+  });
+
+  it('selects a conflict and loads safe detail history with the Admin order link', async () => {
+    const first = makeTerminalReview();
+    const second = makeTerminalReview({ id: 'review-2', sourceShopifyRefundId: 'refund-2', sourceShopifyOrderId: 'order-2' });
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 2, limit: 25, offset: 0, items: [first, second] },
+    }));
+    getAdminRefundReviewMock.mockImplementation(async (id) => ({
+      ok: true,
+      review: makeTerminalDetail({
+        id,
+        sourceShopifyRefundId: id === 'review-2' ? 'refund-2' : 'refund-1',
+        sourceShopifyOrderId: id === 'review-2' ? 'order-2' : 'order-1',
+      }),
+    }));
+    const user = userEvent.setup();
+    renderPage();
+    const conflicts = await screen.findByLabelText('Refund evidence conflicts');
+    const secondRow = (await within(conflicts).findAllByRole('button')).find((row) => row.textContent?.includes('refund-2'));
+    expect(secondRow).toBeTruthy();
+    await user.click(secondRow!);
+    const panel = await within(conflicts).findByLabelText('Refund evidence review detail panel');
+    expect(within(panel).getByText('DETECTED')).toBeInTheDocument();
+    expect(within(panel).getByRole('link', { name: 'order-2' })).toHaveAttribute('href', '/admin/orders/order-2');
+    expect(within(panel).getByText('Review actions do not change accepted finance.')).toBeInTheDocument();
+  });
+
+  it('acknowledges ACTIVE with current freshness and no finance correction control', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview()] },
+    }));
+    const user = userEvent.setup();
+    renderPage();
+    const action = await screen.findByRole('button', { name: 'Acknowledge' });
+    await user.type(screen.getByRole('textbox', { name: 'Optional note' }), 'Investigating');
+    await user.click(action);
+    await waitFor(() => expect(acknowledgeAdminRefundReviewMock).toHaveBeenCalledWith('review-1', {
+      expectedStatus: 'ACTIVE', expectedUpdatedAt: '2026-07-02T00:00:00Z', expectedOccurrenceCount: 2,
+      note: 'Investigating',
+    }));
+    expect(screen.queryByRole('button', { name: /financial correction/i })).not.toBeInTheDocument();
+  });
+
+  it('requires a controlled outcome to resolve ACKNOWLEDGED', async () => {
+    const acknowledged = makeTerminalReview({ status: 'ACKNOWLEDGED' });
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [acknowledged] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
+    const user = userEvent.setup();
+    renderPage();
+    const resolve = await screen.findByRole('button', { name: 'Resolve' });
+    expect(resolve).toBeDisabled();
+    const actions = screen.getByLabelText('Refund evidence review actions');
+    await user.selectOptions(within(actions).getByRole('combobox', { name: 'Resolution outcome' }), 'CORRECTION_REQUIRED');
+    await user.click(resolve);
+    await waitFor(() => expect(resolveAdminRefundReviewMock).toHaveBeenCalledWith('review-1', expect.objectContaining({
+      expectedStatus: 'ACKNOWLEDGED', resolutionOutcome: 'CORRECTION_REQUIRED',
+    })));
+  });
+
+  it('shows correction-required as information and allows explicit reopen only', async () => {
+    const resolved = makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' });
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [resolved] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({
+      ok: true,
+      review: makeTerminalDetail({
+        status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED',
+        events: [
+          ...makeTerminalDetail().events,
+          { id: 'event-resolved', eventType: 'RESOLVED', actorUserId: 'admin-1', actorName: 'Admin User', note: 'Needs separate correction', resolutionOutcome: 'CORRECTION_REQUIRED', createdAt: '2026-07-02T00:00:00Z' },
+        ],
+      }),
+    });
+    renderPage();
+    expect(await screen.findByText('Financial correction required. No financial correction has been applied.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reopen' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply correction|correct finance/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a stale action error and refetches list and detail', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview()] },
+    }));
+    acknowledgeAdminRefundReviewMock.mockRejectedValue(new Error('Refund evidence review changed after it was loaded. Reload and try again.'));
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Acknowledge' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refund evidence review changed after it was loaded. Reload and try again.');
+    await waitFor(() => {
+      expect(listAdminRefundReviewsMock.mock.calls.length).toBeGreaterThan(1);
+      expect(getAdminRefundReviewMock.mock.calls.length).toBeGreaterThan(1);
+    });
   });
 
   it('keeps review-list errors independent from the adjustment queue and the other review list', async () => {

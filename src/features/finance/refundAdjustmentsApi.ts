@@ -75,7 +75,8 @@ export function listRefundAdjustments(input: { vendorId?: string | null; signal?
 export type TerminalRefundReview = {
   type: 'terminal_conflict';
   id: string;
-  status: string;
+  status: TerminalRefundReviewStatus;
+  resolutionOutcome: TerminalRefundReviewResolutionOutcome | null;
   sourceShopifyRefundId: string;
   sourceShopifyOrderId: string;
   vendorAllocationId: string;
@@ -89,8 +90,33 @@ export type TerminalRefundReview = {
   occurrenceCount: number;
   firstObservedAt: string;
   lastObservedAt: string;
+  createdAt: string;
+  updatedAt: string;
   acceptedRecordedAmount: string;
   acceptedRecordedCurrency: string | null;
+};
+
+export type TerminalRefundReviewStatus = 'ACTIVE' | 'ACKNOWLEDGED' | 'RESOLVED';
+export type TerminalRefundReviewResolutionOutcome =
+  | 'NO_CORRECTION_NEEDED'
+  | 'CORRECTION_REQUIRED'
+  | 'INSUFFICIENT_EVIDENCE';
+
+export type TerminalRefundReviewEvent = {
+  id: string;
+  eventType: 'DETECTED' | 'ACKNOWLEDGED' | 'RESOLVED' | 'REOPENED';
+  actorUserId: string | null;
+  actorName: string | null;
+  note: string | null;
+  resolutionOutcome: TerminalRefundReviewResolutionOutcome | null;
+  createdAt: string;
+};
+
+export type TerminalRefundReviewDetail = TerminalRefundReview & {
+  evidenceVersion: string | null;
+  normalizationVersion: string | null;
+  conflictSummary: unknown;
+  events: TerminalRefundReviewEvent[];
 };
 
 export type LegacyRefundFinanceCandidate = {
@@ -129,6 +155,8 @@ export function listAdminRefundReviews(input: {
   terminalOffset?: number;
   legacyLimit?: number;
   legacyOffset?: number;
+  terminalStatus?: TerminalRefundReviewStatus | null;
+  terminalResolutionOutcome?: TerminalRefundReviewResolutionOutcome | null;
   signal?: AbortSignal;
 } = {}) {
   const params = new URLSearchParams();
@@ -137,5 +165,44 @@ export function listAdminRefundReviews(input: {
   params.set('terminalOffset', String(input.terminalOffset ?? 0));
   params.set('legacyLimit', String(input.legacyLimit ?? 25));
   params.set('legacyOffset', String(input.legacyOffset ?? 0));
+  if (input.terminalStatus) params.set('terminalStatus', input.terminalStatus);
+  if (input.terminalResolutionOutcome) params.set('terminalResolutionOutcome', input.terminalResolutionOutcome);
   return apiClient.get<AdminRefundReviewsResponse>(`/admin/finance/refund-reviews?${params}`, { signal: input.signal });
+}
+
+export function getAdminRefundReview(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; review: TerminalRefundReviewDetail }>(
+    `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}`,
+    { signal },
+  );
+}
+
+type RefundReviewActionInput = {
+  expectedStatus: TerminalRefundReviewStatus;
+  expectedUpdatedAt: string;
+  expectedOccurrenceCount: number;
+  note?: string | null;
+};
+
+function postRefundReviewAction(reviewId: string, action: 'acknowledge' | 'resolve' | 'reopen', input: RefundReviewActionInput & {
+  resolutionOutcome?: TerminalRefundReviewResolutionOutcome;
+}) {
+  return apiClient.post<{ ok: true; review: TerminalRefundReviewDetail }>(
+    `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/${action}`,
+    input,
+  );
+}
+
+export function acknowledgeAdminRefundReview(reviewId: string, input: RefundReviewActionInput) {
+  return postRefundReviewAction(reviewId, 'acknowledge', input);
+}
+
+export function resolveAdminRefundReview(reviewId: string, input: RefundReviewActionInput & {
+  resolutionOutcome: TerminalRefundReviewResolutionOutcome;
+}) {
+  return postRefundReviewAction(reviewId, 'resolve', input);
+}
+
+export function reopenAdminRefundReview(reviewId: string, input: RefundReviewActionInput) {
+  return postRefundReviewAction(reviewId, 'reopen', input);
 }

@@ -33,12 +33,13 @@ beforeEach(() => {
 describe('Admin refund review read-only projection', () => {
   it('returns distinct terminal review IDs with only persisted accepted money', async () => {
     const review = (id: string) => ({
-      id, status: 'ACTIVE', sourceShopifyRefundId: 'r1', sourceShopifyOrderId: 'order',
+      id, status: 'ACTIVE', resolutionOutcome: null, sourceShopifyRefundId: 'r1', sourceShopifyOrderId: 'order',
       vendorAllocationId: 'a1', economicVendorId: 'vendor', economicVendor: { name: 'Vendor' },
       terminalRefundFinanceLedgerEntryId: 'ledger', storedEvidenceSnapshotId: 'snapshot',
       storedEvidenceSnapshot: { currency: 'TRY' },
       conflictCategory: 'refund_evidence_hash_mismatch', storedEvidenceHash: 'stored', incomingEvidenceHash: 'incoming',
       occurrenceCount: 2, firstObservedAt: new Date('2026-07-01T00:00:00Z'), lastObservedAt: new Date('2026-07-02T00:00:00Z'),
+      createdAt: new Date('2026-07-01T00:00:00Z'), updatedAt: new Date('2026-07-02T00:00:00Z'),
       terminalRefundFinanceLedgerEntry: { amount: { toString: () => '42.00' } },
     });
     db.refundTerminalEvidenceReview.count.mockResolvedValue(2);

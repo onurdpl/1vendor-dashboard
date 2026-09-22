@@ -1,5 +1,9 @@
-import type { FastifyInstance } from 'fastify';
-import { SettlementCommissionInvoiceProvider } from '@prisma/client';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import {
+  RefundTerminalEvidenceResolutionOutcome,
+  RefundTerminalEvidenceReviewStatus,
+  SettlementCommissionInvoiceProvider,
+} from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
@@ -82,6 +86,13 @@ import {
 } from './economic-transfer.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { listAdminRefundReviews } from './admin-refund-review-projection.service.js';
+import {
+  acknowledgeAdminRefundReview,
+  AdminRefundReviewLifecycleError,
+  getAdminRefundReviewDetail,
+  reopenAdminRefundReview,
+  resolveAdminRefundReview,
+} from './admin-refund-review-lifecycle.service.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import type {
@@ -103,6 +114,8 @@ const SUPPORTED_REFUND_ADJUSTMENT_RECOMMENDED_ACTIONS = new Set<RefundAdjustment
   'ZERO_OR_INVALID_AMOUNT',
   'UNKNOWN',
 ]);
+const REFUND_REVIEW_STATUSES = new Set(Object.values(RefundTerminalEvidenceReviewStatus));
+const REFUND_REVIEW_RESOLUTION_OUTCOMES = new Set(Object.values(RefundTerminalEvidenceResolutionOutcome));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -201,6 +214,23 @@ function readOptionalBodyNumber(body: unknown, key: string) {
     throw new Error(`${key} must be a valid number.`);
   }
   return numeric;
+}
+
+function readRefundReviewFreshness(body: unknown) {
+  const expectedStatus = readOptionalBodyString(body, 'expectedStatus');
+  const expectedUpdatedAt = readOptionalBodyString(body, 'expectedUpdatedAt');
+  const expectedOccurrenceCount = readOptionalBodyNumber(body, 'expectedOccurrenceCount');
+  if (!expectedStatus || !REFUND_REVIEW_STATUSES.has(expectedStatus as RefundTerminalEvidenceReviewStatus)) {
+    throw new AdminRefundReviewLifecycleError('A valid expectedStatus value is required.', 400);
+  }
+  if (!expectedUpdatedAt || expectedOccurrenceCount === null) {
+    throw new AdminRefundReviewLifecycleError('expectedUpdatedAt and expectedOccurrenceCount are required.', 400);
+  }
+  return {
+    expectedStatus: expectedStatus as RefundTerminalEvidenceReviewStatus,
+    expectedUpdatedAt,
+    expectedOccurrenceCount,
+  };
 }
 
 function readOptionalBodyStringArray(body: unknown, key: string) {
@@ -1202,12 +1232,102 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       const query = typeof request.query === 'object' && request.query !== null
         ? request.query as Record<string, unknown>
         : {};
+      const requestedStatus = readOptionalQueryString(request.query, 'terminalStatus');
+      const requestedOutcome = readOptionalQueryString(request.query, 'terminalResolutionOutcome');
       return listAdminRefundReviews({
         vendorId: readOptionalQueryString(request.query, 'vendorId'),
+        terminalStatus: requestedStatus && REFUND_REVIEW_STATUSES.has(requestedStatus as RefundTerminalEvidenceReviewStatus)
+          ? requestedStatus as RefundTerminalEvidenceReviewStatus
+          : null,
+        terminalResolutionOutcome: requestedOutcome && REFUND_REVIEW_RESOLUTION_OUTCOMES.has(requestedOutcome as RefundTerminalEvidenceResolutionOutcome)
+          ? requestedOutcome as RefundTerminalEvidenceResolutionOutcome
+          : null,
         terminal: resolvePagination({ limit: query.terminalLimit, offset: query.terminalOffset }, { limit: 50, offset: 0 }),
         legacy: resolvePagination({ limit: query.legacyLimit, offset: query.legacyOffset }, { limit: 50, offset: 0 }),
       });
     },
+  );
+
+  app.get(
+    '/admin/finance/refund-reviews/:reviewId',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+      try {
+        const { reviewId } = request.params as { reviewId: string };
+        return { ok: true as const, review: await getAdminRefundReviewDetail(reviewId) };
+      } catch (error) {
+        const statusCode = error instanceof AdminRefundReviewLifecycleError ? error.statusCode : 400;
+        return reply.code(statusCode).send({
+          ok: false,
+          message: error instanceof Error ? error.message : 'Refund evidence review could not be loaded.',
+        });
+      }
+    },
+  );
+
+  const runRefundReviewAction = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    action: 'acknowledge' | 'resolve' | 'reopen',
+  ) => {
+    if (request.authUser?.role !== 'admin') {
+      return reply.code(403).send({ message: 'Admin access required.' });
+    }
+    const actorUserId = request.authUser.id;
+    if (!actorUserId) {
+      return reply.code(403).send({ message: 'Authenticated Admin actor is required.' });
+    }
+    try {
+      const { reviewId } = request.params as { reviewId: string };
+      const common = {
+        reviewId,
+        actorUserId,
+        note: readOptionalBodyString(request.body, 'note'),
+        freshness: readRefundReviewFreshness(request.body),
+      };
+      if (action === 'acknowledge') {
+        return { ok: true as const, review: await acknowledgeAdminRefundReview(common) };
+      }
+      if (action === 'reopen') {
+        return { ok: true as const, review: await reopenAdminRefundReview(common) };
+      }
+      const outcome = readOptionalBodyString(request.body, 'resolutionOutcome');
+      if (!outcome || !REFUND_REVIEW_RESOLUTION_OUTCOMES.has(outcome as RefundTerminalEvidenceResolutionOutcome)) {
+        throw new AdminRefundReviewLifecycleError('A valid resolutionOutcome is required.', 400);
+      }
+      return {
+        ok: true as const,
+        review: await resolveAdminRefundReview({
+          ...common,
+          resolutionOutcome: outcome as RefundTerminalEvidenceResolutionOutcome,
+        }),
+      };
+    } catch (error) {
+      const statusCode = error instanceof AdminRefundReviewLifecycleError ? error.statusCode : 400;
+      return reply.code(statusCode).send({
+        ok: false,
+        message: error instanceof Error ? error.message : 'Refund evidence review action failed.',
+      });
+    }
+  };
+
+  app.post(
+    '/admin/finance/refund-reviews/:reviewId/acknowledge',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    (request, reply) => runRefundReviewAction(request, reply, 'acknowledge'),
+  );
+  app.post(
+    '/admin/finance/refund-reviews/:reviewId/resolve',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    (request, reply) => runRefundReviewAction(request, reply, 'resolve'),
+  );
+  app.post(
+    '/admin/finance/refund-reviews/:reviewId/reopen',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    (request, reply) => runRefundReviewAction(request, reply, 'reopen'),
   );
 
   app.get(

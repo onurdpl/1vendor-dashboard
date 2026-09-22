@@ -1,4 +1,8 @@
-import { Prisma } from '@prisma/client';
+import {
+  Prisma,
+  type RefundTerminalEvidenceResolutionOutcome,
+  type RefundTerminalEvidenceReviewStatus,
+} from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { classifyPersistedRefundFinanceEvidence } from '../shopify/refund-persisted-finance-classifier.js';
 import { buildLegacyRefundLedgerEntryId, buildRefundLedgerEntryId } from './refund-ledger-id.service.js';
@@ -123,10 +127,16 @@ function legacySources(vendorId: string | null) {
 
 export async function listAdminRefundReviews(input: {
   vendorId: string | null;
+  terminalStatus?: RefundTerminalEvidenceReviewStatus | null;
+  terminalResolutionOutcome?: RefundTerminalEvidenceResolutionOutcome | null;
   terminal: Page;
   legacy: Page;
 }) {
-  const terminalWhere = input.vendorId ? { economicVendorId: input.vendorId } : {};
+  const terminalWhere: Prisma.RefundTerminalEvidenceReviewWhereInput = {
+    ...(input.vendorId ? { economicVendorId: input.vendorId } : {}),
+    ...(input.terminalStatus ? { status: input.terminalStatus } : {}),
+    ...(input.terminalResolutionOutcome ? { resolutionOutcome: input.terminalResolutionOutcome } : {}),
+  };
   const [terminalResult, legacyResult] = await Promise.allSettled([
     Promise.all([
       prisma.refundTerminalEvidenceReview.count({ where: terminalWhere }),
@@ -136,12 +146,12 @@ export async function listAdminRefundReviews(input: {
       skip: input.terminal.offset,
       take: input.terminal.limit,
       select: {
-        id: true, status: true, sourceShopifyRefundId: true, sourceShopifyOrderId: true,
+        id: true, status: true, resolutionOutcome: true, sourceShopifyRefundId: true, sourceShopifyOrderId: true,
         vendorAllocationId: true, economicVendorId: true, economicVendor: { select: { name: true } },
         terminalRefundFinanceLedgerEntryId: true, storedEvidenceSnapshotId: true,
         storedEvidenceSnapshot: { select: { currency: true } },
         conflictCategory: true, storedEvidenceHash: true, incomingEvidenceHash: true,
-        occurrenceCount: true, firstObservedAt: true, lastObservedAt: true,
+        occurrenceCount: true, firstObservedAt: true, lastObservedAt: true, createdAt: true, updatedAt: true,
         terminalRefundFinanceLedgerEntry: { select: { amount: true } },
       },
       }),
@@ -173,6 +183,7 @@ export async function listAdminRefundReviews(input: {
         type: 'terminal_conflict' as const,
         id: review.id,
         status: review.status,
+        resolutionOutcome: review.resolutionOutcome,
         sourceShopifyRefundId: review.sourceShopifyRefundId,
         sourceShopifyOrderId: review.sourceShopifyOrderId,
         vendorAllocationId: review.vendorAllocationId,
@@ -186,6 +197,8 @@ export async function listAdminRefundReviews(input: {
         occurrenceCount: review.occurrenceCount,
         firstObservedAt: review.firstObservedAt.toISOString(),
         lastObservedAt: review.lastObservedAt.toISOString(),
+        createdAt: review.createdAt.toISOString(),
+        updatedAt: review.updatedAt.toISOString(),
         acceptedRecordedAmount: review.terminalRefundFinanceLedgerEntry.amount.toString(),
         acceptedRecordedCurrency: review.storedEvidenceSnapshot?.currency ?? null,
       })),
