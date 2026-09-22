@@ -6,14 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminRefundAdjustmentsPage } from './AdminRefundAdjustmentsPage';
 import {
   acknowledgeAdminRefundReview,
+  acknowledgeAdminLegacyRefundReview,
+  getAdminLegacyRefundReview,
   getAdminRefundReview,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
+  reopenAdminLegacyRefundReview,
   resolveAdminRefundReview,
+  resolveAdminLegacyRefundReview,
+  syncLegacyRefundReviews,
   type AdminRefundReviewsResponse,
   type RefundAdjustmentRecord,
   type RefundAdjustmentsListResponse,
+  type LegacyRefundFinanceCandidate,
+  type LegacyRefundReviewDetail,
   type TerminalRefundReview,
   type TerminalRefundReviewDetail,
 } from '../features/finance/refundAdjustmentsApi';
@@ -29,6 +36,11 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
+    syncLegacyRefundReviews: vi.fn(),
+    getAdminLegacyRefundReview: vi.fn(),
+    acknowledgeAdminLegacyRefundReview: vi.fn(),
+    resolveAdminLegacyRefundReview: vi.fn(),
+    reopenAdminLegacyRefundReview: vi.fn(),
   };
 });
 
@@ -38,6 +50,11 @@ const getAdminRefundReviewMock = vi.mocked(getAdminRefundReview);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
+const syncLegacyRefundReviewsMock = vi.mocked(syncLegacyRefundReviews);
+const getAdminLegacyRefundReviewMock = vi.mocked(getAdminLegacyRefundReview);
+const acknowledgeAdminLegacyRefundReviewMock = vi.mocked(acknowledgeAdminLegacyRefundReview);
+const resolveAdminLegacyRefundReviewMock = vi.mocked(resolveAdminLegacyRefundReview);
+const reopenAdminLegacyRefundReviewMock = vi.mocked(reopenAdminLegacyRefundReview);
 
 function reviewResponse(overrides: Partial<AdminRefundReviewsResponse> = {}): AdminRefundReviewsResponse {
   return {
@@ -172,6 +189,29 @@ function makeTerminalDetail(overrides: Partial<TerminalRefundReviewDetail> = {})
   };
 }
 
+function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
+  return {
+    type: 'legacy_refund_finance', id: 'legacy-review-1', status: 'ACTIVE', resolutionOutcome: null,
+    attribution: 'exact', sourceShopifyOrderId: 'order-2', sourceShopifyRefundId: 'refund-2',
+    vendorAllocationId: 'allocation-2', observedVendorId: 'yalispor', vendorName: 'Yalı Spor',
+    sourceCount: 2, firstObservedAt: '2026-07-03T00:00:00Z', lastObservedAt: '2026-07-04T00:00:00Z',
+    occurrenceCount: 1, createdAt: '2026-07-03T00:00:00Z', updatedAt: '2026-07-04T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function makeLegacyDetail(overrides: Partial<LegacyRefundReviewDetail> = {}): LegacyRefundReviewDetail {
+  return {
+    ...makeLegacyReview(),
+    sources: [
+      { id: 'source-1', artifactType: 'refund_ledger', artifactId: 'ledger-legacy', observedAt: '2026-07-03T00:00:00Z', sourceState: 'PENDING', recordedAmount: '30.00', recordedAmountMinor: null, currency: 'TRY', voidedAt: null, supersededByLedgerId: null },
+      { id: 'source-2', artifactType: 'finance_event', artifactId: 'event-legacy', observedAt: '2026-07-03T01:00:00Z', sourceState: 'REFUND_CREATED', recordedAmount: null, recordedAmountMinor: 3000, currency: 'TRY', voidedAt: null, supersededByLedgerId: null },
+    ],
+    events: [{ id: 'legacy-detected', eventType: 'DETECTED', actorUserId: null, actorName: null, note: null, resolutionOutcome: null, createdAt: '2026-07-03T00:00:00Z' }],
+    ...overrides,
+  };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -201,6 +241,11 @@ beforeEach(() => {
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
+  syncLegacyRefundReviewsMock.mockResolvedValue({ ok: true, candidates: 2, createdReviews: 1, updatedReviews: 0, createdSources: 2, updatedSources: 0 });
+  getAdminLegacyRefundReviewMock.mockResolvedValue({ ok: true, review: makeLegacyDetail() });
+  acknowledgeAdminLegacyRefundReviewMock.mockResolvedValue({ ok: true, review: makeLegacyDetail({ status: 'ACKNOWLEDGED' }) });
+  resolveAdminLegacyRefundReviewMock.mockResolvedValue({ ok: true, review: makeLegacyDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
+  reopenAdminLegacyRefundReviewMock.mockResolvedValue({ ok: true, review: makeLegacyDetail() });
 });
 
 afterEach(() => {
@@ -301,19 +346,12 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.queryByText('Balance offset')).not.toBeInTheDocument();
   });
 
-  it('shows selectable terminal conflicts and keeps exact/ambiguous legacy evidence read-only', async () => {
+  it('shows selectable persisted exact and ambiguous legacy review cases', async () => {
     const terminal = makeTerminalReview();
-    const legacy = {
-      type: 'legacy_refund_finance' as const, id: 'ledger-legacy', artifactType: 'refund_ledger' as const,
-      artifactId: 'ledger-legacy', attribution: 'exact' as const, sourceShopifyOrderId: 'order-2',
-      sourceShopifyRefundId: 'refund-2', vendorAllocationId: 'allocation-2', economicVendorId: 'yalispor',
-      vendorName: 'Yalı Spor', recordedAmount: '30.00', recordedAmountMinor: null, recordedCurrency: 'TRY',
-      observedAt: '2026-07-03T00:00:00Z', state: 'PENDING', voidedAt: null, supersededByLedgerId: null,
-      reason: 'Historical refund finance without accepted evidence snapshot.',
-    };
+    const legacy = makeLegacyReview();
     listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
       terminalReviews: { error: null, count: 2, limit: 25, offset: 0, items: [terminal, { ...terminal, id: 'review-2' }] },
-      legacyCandidates: { error: null, count: 2, limit: 25, offset: 0, items: [legacy, { ...legacy, id: 'event-unknown', artifactId: 'event-unknown', artifactType: 'finance_event', attribution: 'ambiguous', sourceShopifyOrderId: null, sourceShopifyRefundId: null, vendorAllocationId: null, recordedAmount: null, recordedAmountMinor: 120, recordedCurrency: 'TRY' }] },
+      legacyCandidates: { error: null, count: 2, limit: 25, offset: 0, items: [legacy, makeLegacyReview({ id: 'legacy-unknown', attribution: 'ambiguous', sourceShopifyOrderId: null, sourceShopifyRefundId: null, vendorAllocationId: null, sourceCount: 1 })] },
     }));
     renderPage();
     const conflicts = await screen.findByLabelText('Refund evidence conflicts');
@@ -323,9 +361,47 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(within(legacySection).getAllByText('UNKNOWN').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Refund adjustments queue')).toBeInTheDocument();
     expect(await within(conflicts).findByRole('button', { name: 'Acknowledge' })).toBeInTheDocument();
-    expect(within(legacySection).queryByRole('button', { name: /resolve|accept evidence/i })).not.toBeInTheDocument();
-    expect(within(legacySection).getByText(/Historical finance review — read only/)).toBeInTheDocument();
+    expect(await within(legacySection).findByText('refund ledger')).toBeInTheDocument();
+    expect(within(legacySection).getByText(/Reviews persisted historical finance without recalculating or changing it/)).toBeInTheDocument();
+    expect(within(legacySection).getByRole('button', { name: 'Acknowledge' })).toBeInTheDocument();
     expect(screen.queryByText(/customer@example|shipping address/i)).not.toBeInTheDocument();
+  });
+
+  it('runs explicit legacy discovery, refreshes the list, and forwards persisted filters', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole('heading', { name: 'Refund Adjustments' });
+    await user.click(screen.getByRole('button', { name: 'Sync legacy reviews' }));
+    await waitFor(() => expect(syncLegacyRefundReviewsMock).toHaveBeenCalledWith('yalispor'));
+    await waitFor(() => expect(listAdminRefundReviewsMock.mock.calls.length).toBeGreaterThan(1));
+
+    const filters = screen.getByLabelText('Legacy refund finance filters');
+    await user.selectOptions(within(filters).getByRole('combobox', { name: 'Status' }), 'ACKNOWLEDGED');
+    await user.selectOptions(within(filters).getByRole('combobox', { name: 'Resolution outcome' }), 'CORRECTION_REQUIRED');
+    await user.selectOptions(within(filters).getByRole('combobox', { name: 'Attribution' }), 'AMBIGUOUS');
+    await waitFor(() => expect(listAdminRefundReviewsMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      legacyStatus: 'ACKNOWLEDGED', legacyResolutionOutcome: 'CORRECTION_REQUIRED', legacyAttribution: 'AMBIGUOUS',
+    })));
+  });
+
+  it('uses the persisted legacy lifecycle and requires a resolution outcome', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      legacyCandidates: { error: null, count: 1, limit: 25, offset: 0, items: [makeLegacyReview({ status: 'ACKNOWLEDGED' })] },
+    }));
+    getAdminLegacyRefundReviewMock.mockResolvedValue({ ok: true, review: makeLegacyDetail({ status: 'ACKNOWLEDGED' }) });
+    const user = userEvent.setup();
+    renderPage();
+    const actions = await screen.findByLabelText('Legacy refund finance review actions');
+    const resolve = within(actions).getByRole('button', { name: 'Resolve' });
+    expect(resolve).toBeDisabled();
+    await user.selectOptions(within(actions).getByRole('combobox', { name: 'Resolution outcome' }), 'CORRECTION_REQUIRED');
+    await user.type(within(actions).getByRole('textbox', { name: 'Optional note' }), 'Needs correction workflow');
+    await user.click(resolve);
+    await waitFor(() => expect(resolveAdminLegacyRefundReviewMock).toHaveBeenCalledWith('legacy-review-1', {
+      expectedStatus: 'ACKNOWLEDGED', expectedUpdatedAt: '2026-07-04T00:00:00Z', expectedOccurrenceCount: 1,
+      note: 'Needs correction workflow', resolutionOutcome: 'CORRECTION_REQUIRED',
+    }));
+    expect(screen.queryByRole('button', { name: /apply correction|correct finance/i })).not.toBeInTheDocument();
   });
 
   it('selects a conflict and loads safe detail history with the Admin order link', async () => {

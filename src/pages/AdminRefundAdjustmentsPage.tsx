@@ -16,6 +16,13 @@ import {
   getAdminRefundReview,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
+  acknowledgeAdminLegacyRefundReview,
+  getAdminLegacyRefundReview,
+  reopenAdminLegacyRefundReview,
+  resolveAdminLegacyRefundReview,
+  syncLegacyRefundReviews,
+  type LegacyRefundReviewResolutionOutcome,
+  type LegacyRefundReviewStatus,
   type RefundAdjustmentRecord,
   type RefundAdjustmentStatus,
   type TerminalRefundReviewResolutionOutcome,
@@ -236,6 +243,14 @@ export function AdminRefundAdjustmentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [terminalOffset, setTerminalOffset] = useState(0);
   const [legacyOffset, setLegacyOffset] = useState(0);
+  const [selectedLegacyId, setSelectedLegacyId] = useState<string | null>(null);
+  const [legacyStatusFilter, setLegacyStatusFilter] = useState<'all' | LegacyRefundReviewStatus>('all');
+  const [legacyOutcomeFilter, setLegacyOutcomeFilter] = useState<'all' | LegacyRefundReviewResolutionOutcome>('all');
+  const [legacyAttributionFilter, setLegacyAttributionFilter] = useState<'all' | 'EXACT' | 'AMBIGUOUS'>('all');
+  const [legacyActionNote, setLegacyActionNote] = useState('');
+  const [legacyResolutionOutcome, setLegacyResolutionOutcome] = useState<LegacyRefundReviewResolutionOutcome | ''>('');
+  const [legacyActionPending, setLegacyActionPending] = useState(false);
+  const [legacyActionError, setLegacyActionError] = useState<string | null>(null);
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [terminalStatusFilter, setTerminalStatusFilter] = useState<'all' | TerminalRefundReviewStatus>('all');
   const [terminalOutcomeFilter, setTerminalOutcomeFilter] = useState<'all' | TerminalRefundReviewResolutionOutcome>('all');
@@ -253,7 +268,7 @@ export function AdminRefundAdjustmentsPage() {
     },
   );
   const reviewQuery = useQueryResource(
-    ['admin', 'finance', 'refund-reviews', vendorFilter, terminalOffset, legacyOffset, terminalStatusFilter, terminalOutcomeFilter],
+    ['admin', 'finance', 'refund-reviews', vendorFilter, terminalOffset, legacyOffset, terminalStatusFilter, terminalOutcomeFilter, legacyStatusFilter, legacyOutcomeFilter, legacyAttributionFilter],
     ({ signal }) => listAdminRefundReviews({
       vendorId: vendorFilter || null,
       terminalLimit: REVIEW_PAGE_SIZE,
@@ -262,12 +277,22 @@ export function AdminRefundAdjustmentsPage() {
       legacyOffset,
       terminalStatus: terminalStatusFilter === 'all' ? null : terminalStatusFilter,
       terminalResolutionOutcome: terminalOutcomeFilter === 'all' ? null : terminalOutcomeFilter,
+      legacyStatus: legacyStatusFilter === 'all' ? null : legacyStatusFilter,
+      legacyResolutionOutcome: legacyOutcomeFilter === 'all' ? null : legacyOutcomeFilter,
+      legacyAttribution: legacyAttributionFilter === 'all' ? null : legacyAttributionFilter,
       signal,
     }),
     { routeName: 'Refund reviews', endpoint: '/admin/finance/refund-reviews' },
   );
   const terminalPage = reviewQuery.data?.terminalReviews;
   const legacyPage = reviewQuery.data?.legacyCandidates;
+  const selectedLegacyReview = legacyPage?.items.find((review) => review.id === selectedLegacyId) ?? legacyPage?.items[0] ?? null;
+  const legacyDetailQuery = useQueryResource(
+    ['admin', 'finance', 'legacy-refund-review', selectedLegacyReview?.id ?? 'none'],
+    ({ signal }) => getAdminLegacyRefundReview(selectedLegacyReview!.id, signal),
+    { routeName: 'Legacy refund finance review detail', endpoint: selectedLegacyReview ? `/admin/finance/legacy-refund-reviews/${selectedLegacyReview.id}` : '/admin/finance/legacy-refund-reviews', enabled: Boolean(selectedLegacyReview) },
+  );
+  const legacyDetail = legacyDetailQuery.data?.review ?? null;
   const selectedTerminalReview = terminalPage?.items.find((review) => review.id === selectedTerminalId)
     ?? terminalPage?.items[0]
     ?? null;
@@ -314,6 +339,26 @@ export function AdminRefundAdjustmentsPage() {
     } finally {
       setTerminalActionPending(false);
     }
+  };
+
+  const runLegacyReviewAction = async (action: 'acknowledge' | 'resolve' | 'reopen') => {
+    if (!legacyDetail || legacyActionPending) return;
+    setLegacyActionPending(true);
+    setLegacyActionError(null);
+    const freshness = { expectedStatus: legacyDetail.status, expectedUpdatedAt: legacyDetail.updatedAt, expectedOccurrenceCount: legacyDetail.occurrenceCount, note: legacyActionNote || null };
+    try {
+      if (action === 'acknowledge') await acknowledgeAdminLegacyRefundReview(legacyDetail.id, freshness);
+      if (action === 'reopen') await reopenAdminLegacyRefundReview(legacyDetail.id, freshness);
+      if (action === 'resolve') {
+        if (!legacyResolutionOutcome) { setLegacyActionError('Select a resolution outcome.'); return; }
+        await resolveAdminLegacyRefundReview(legacyDetail.id, { ...freshness, resolutionOutcome: legacyResolutionOutcome });
+      }
+      setLegacyActionNote(''); setLegacyResolutionOutcome('');
+      await Promise.all([reviewQuery.refetch(), legacyDetailQuery.refetch()]);
+    } catch (error) {
+      setLegacyActionError(error instanceof Error ? error.message : 'Legacy refund finance review action failed.');
+      await Promise.all([reviewQuery.refetch(), legacyDetailQuery.refetch()]);
+    } finally { setLegacyActionPending(false); }
   };
 
   const records = query.data?.records ?? [];
@@ -706,7 +751,12 @@ export function AdminRefundAdjustmentsPage() {
       </section>
 
       <section className="settlement-review-queue refund-review-queue" aria-label="Legacy refund finance">
-        <div className="op-page-heading"><div><h2>Legacy refund finance</h2><p className="page-description">Historical finance review — read only. No lifecycle actions are available for records without accepted evidence snapshots.</p></div></div>
+        <div className="op-page-heading"><div><h2>Legacy refund finance</h2><p className="page-description">Reviews persisted historical finance without recalculating or changing it.</p></div><button type="button" onClick={async () => { await syncLegacyRefundReviews(vendorFilter || null); setLegacyOffset(0); setSelectedLegacyId(null); await reviewQuery.refetch(); }}>Sync legacy reviews</button></div>
+        <div className="op-toolbar refund-review-filters" aria-label="Legacy refund finance filters">
+          <label><span>Status</span><select value={legacyStatusFilter} onChange={(event) => { setLegacyStatusFilter(event.target.value as 'all' | LegacyRefundReviewStatus); setLegacyOffset(0); setSelectedLegacyId(null); }}><option value="all">All statuses</option><option value="ACTIVE">Active</option><option value="ACKNOWLEDGED">Acknowledged</option><option value="RESOLVED">Resolved</option></select></label>
+          <label><span>Resolution outcome</span><select value={legacyOutcomeFilter} onChange={(event) => { setLegacyOutcomeFilter(event.target.value as 'all' | LegacyRefundReviewResolutionOutcome); setLegacyOffset(0); setSelectedLegacyId(null); }}><option value="all">All outcomes</option><option value="NO_CORRECTION_NEEDED">No correction needed</option><option value="CORRECTION_REQUIRED">Correction required</option><option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option></select></label>
+          <label><span>Attribution</span><select value={legacyAttributionFilter} onChange={(event) => { setLegacyAttributionFilter(event.target.value as 'all' | 'EXACT' | 'AMBIGUOUS'); setLegacyOffset(0); setSelectedLegacyId(null); }}><option value="all">All attribution</option><option value="EXACT">Exact</option><option value="AMBIGUOUS">Ambiguous</option></select></label>
+        </div>
         {reviewQuery.isLoading ? <p className="page-description">Loading legacy refund finance...</p> : null}
         {reviewQuery.isError || legacyPage?.error ? <SectionErrorRetry
           description={legacyPage?.error ?? reviewQuery.error ?? 'Unable to load legacy refund finance.'}
@@ -719,17 +769,33 @@ export function AdminRefundAdjustmentsPage() {
           <p className="settlement-compact-empty">No legacy refund finance on this page.</p>
         ) : null}
         {!reviewQuery.isLoading && !reviewQuery.isError && !legacyPage?.error && legacyPage?.items.length ? (
-          <OperationalTable columns={['Order / refund', 'Vendor', 'Allocation', 'Source', 'Recorded amount', 'Attribution', 'Recorded']} className="refund-review-table" stickyHeader={false}>
-            {legacyPage.items.map((candidate) => <OperationalTableRow key={`${candidate.artifactType}-${candidate.id}`}>
+          <div className="settlement-review-layout refund-review-layout">
+          <OperationalTable columns={['Order / refund', 'Vendor', 'Allocation', 'Sources', 'Attribution', 'Status', 'Observed']} className="refund-review-table" stickyHeader={false}>
+            {legacyPage.items.map((candidate) => <OperationalTableRow key={candidate.id} selected={candidate.id === selectedLegacyReview?.id} onSelect={() => { setSelectedLegacyId(candidate.id); setLegacyActionNote(''); setLegacyResolutionOutcome(''); setLegacyActionError(null); }}>
               <span><strong>{candidate.sourceShopifyOrderId ?? 'UNKNOWN'}</strong><small>Refund {candidate.sourceShopifyRefundId ?? 'UNKNOWN'}</small></span>
-              <span>{candidate.vendorName ?? candidate.economicVendorId}</span>
+              <span>{candidate.vendorName ?? candidate.observedVendorId ?? 'UNKNOWN'}</span>
               <span>{candidate.vendorAllocationId ?? 'UNKNOWN'}</span>
-              <span><strong>{candidate.artifactType.replaceAll('_', ' ')}</strong><small>{candidate.state ?? 'State UNKNOWN'}</small><small>{candidate.reason}</small></span>
-              <span>{formatRecordedMoney(candidate.recordedAmount, candidate.recordedAmountMinor, candidate.recordedCurrency)}</span>
+              <span><strong>{candidate.sourceCount}</strong><small>{candidate.occurrenceCount} observation(s)</small></span>
               <span><StatusBadge tone={candidate.attribution === 'exact' ? 'neutral' : 'attention'}>{candidate.attribution}</StatusBadge></span>
-              <span>{formatDate(candidate.observedAt)}</span>
+              <span><StatusBadge tone={candidate.status === 'RESOLVED' ? 'neutral' : 'attention'}>{candidate.status}</StatusBadge>{candidate.resolutionOutcome ? <small>{formatReviewOutcome(candidate.resolutionOutcome)}</small> : null}</span>
+              <span><strong>{formatDate(candidate.lastObservedAt)}</strong><small>First {formatDate(candidate.firstObservedAt)}</small></span>
             </OperationalTableRow>)}
           </OperationalTable>
+          <aside className="op-side-panel refund-review-detail-panel" aria-label="Legacy refund finance review detail panel">
+            {legacyDetailQuery.isLoading ? <p className="page-description">Loading legacy review...</p> : null}
+            {legacyDetailQuery.isError ? <SectionErrorRetry description={legacyDetailQuery.error ?? 'Unable to load legacy refund finance review.'} onRetry={() => void legacyDetailQuery.refetch()} /> : null}
+            {legacyDetail ? <>
+              <div className="op-side-panel-heading"><div><p className="eyebrow">LEGACY FINANCE REVIEW</p><h3>{legacyDetail.sourceShopifyRefundId ?? 'UNKNOWN refund'}</h3></div><StatusBadge tone={legacyDetail.status === 'RESOLVED' ? 'neutral' : 'attention'}>{legacyDetail.status}</StatusBadge></div>
+              <p className="page-description">This review records investigation of persisted historical finance. It does not recalculate or change finance.</p>
+              {legacyDetail.resolutionOutcome === 'CORRECTION_REQUIRED' ? <p className="op-alert op-tone-attention">Financial correction required. No financial correction has been applied.</p> : null}
+              <MetadataGroup title="Review"><MetadataRow label="Status" value={legacyDetail.status} /><MetadataRow label="Resolution outcome" value={formatReviewOutcome(legacyDetail.resolutionOutcome)} /><MetadataRow label="Attribution" value={legacyDetail.attribution} /><MetadataRow label="Occurrences" value={legacyDetail.occurrenceCount} /><MetadataRow label="First observed" value={formatDate(legacyDetail.firstObservedAt)} /><MetadataRow label="Last observed" value={formatDate(legacyDetail.lastObservedAt)} /></MetadataGroup>
+              <MetadataGroup title="References"><MetadataRow label="Order" value={legacyDetail.sourceShopifyOrderId ? <Link to={`/admin/orders/${encodeURIComponent(legacyDetail.sourceShopifyOrderId)}`}>{legacyDetail.sourceShopifyOrderId}</Link> : 'UNKNOWN'} /><MetadataRow label="Refund" value={legacyDetail.sourceShopifyRefundId ?? 'UNKNOWN'} /><MetadataRow label="Vendor" value={legacyDetail.vendorName ?? legacyDetail.observedVendorId ?? 'UNKNOWN'} /><MetadataRow label="Allocation" value={legacyDetail.vendorAllocationId ?? 'UNKNOWN'} /></MetadataGroup>
+              <section className="op-panel-section"><h4>Source artifacts</h4><ul className="settlement-review-timeline">{legacyDetail.sources.map((source) => <li key={source.id}><strong>{source.artifactType.replaceAll('_', ' ')}</strong><span>{source.artifactId}</span><small>{formatRecordedMoney(source.recordedAmount, source.recordedAmountMinor, source.currency)}</small><small>{source.sourceState ?? 'State UNKNOWN'} · {formatDate(source.observedAt)}</small>{source.voidedAt ? <small>Voided {formatDate(source.voidedAt)}</small> : null}{source.supersededByLedgerId ? <small>Superseded</small> : null}</li>)}</ul></section>
+              <section className="op-panel-section"><h4>History</h4><ul className="settlement-review-timeline">{legacyDetail.events.map((event) => <li key={event.id}><strong>{event.eventType}</strong><span>{formatDate(event.createdAt)}</span>{event.actorName || event.actorUserId ? <small>{event.actorName ?? event.actorUserId}</small> : null}{event.resolutionOutcome ? <small>{formatReviewOutcome(event.resolutionOutcome)}</small> : null}{event.note ? <small>{event.note}</small> : null}</li>)}</ul></section>
+              <section className="op-panel-section" aria-label="Legacy refund finance review actions"><h4>Review action</h4>{legacyDetail.status === 'ACKNOWLEDGED' ? <label><span>Resolution outcome</span><select value={legacyResolutionOutcome} onChange={(event) => setLegacyResolutionOutcome(event.target.value as LegacyRefundReviewResolutionOutcome)}><option value="">Select outcome</option><option value="NO_CORRECTION_NEEDED">No correction needed</option><option value="CORRECTION_REQUIRED">Correction required</option><option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option></select></label> : null}<label><span>Optional note</span><textarea value={legacyActionNote} onChange={(event) => setLegacyActionNote(event.target.value)} /></label>{legacyActionError ? <p className="op-alert op-tone-danger" role="alert">{legacyActionError}</p> : null}{legacyDetail.status === 'ACTIVE' ? <button type="button" disabled={legacyActionPending} onClick={() => void runLegacyReviewAction('acknowledge')}>Acknowledge</button> : null}{legacyDetail.status === 'ACKNOWLEDGED' ? <button type="button" disabled={legacyActionPending || !legacyResolutionOutcome} onClick={() => void runLegacyReviewAction('resolve')}>Resolve</button> : null}{legacyDetail.status === 'RESOLVED' ? <button type="button" disabled={legacyActionPending} onClick={() => void runLegacyReviewAction('reopen')}>Reopen</button> : null}</section>
+            </> : null}
+          </aside>
+          </div>
         ) : null}
         {legacyPage && !legacyPage.error && (legacyPage.count > REVIEW_PAGE_SIZE || legacyOffset > 0) ? <div className="op-toolbar refund-review-pagination">
           <button type="button" disabled={legacyOffset === 0} onClick={() => setLegacyOffset(Math.max(0, legacyOffset - REVIEW_PAGE_SIZE))}>Previous legacy</button>

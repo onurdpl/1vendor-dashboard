@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const db = vi.hoisted(() => ({
   refundTerminalEvidenceReview: { count: vi.fn(), findMany: vi.fn() },
+  legacyRefundFinanceReview: { count: vi.fn(), findMany: vi.fn() },
   $queryRaw: vi.fn(),
 }));
 vi.mock('../backend/src/db/prisma.js', () => ({ prisma: db }));
 
-const { listAdminRefundReviews } = await import('../backend/src/modules/finance/admin-refund-review-projection.service.js');
+const { listAdminRefundReviews, loadLegacyRefundFinanceCandidates } = await import('../backend/src/modules/finance/admin-refund-review-projection.service.js');
 
 const page = { limit: 2, offset: 0 };
 const request = { vendorId: 'vendor', terminal: page, legacy: page };
@@ -26,6 +27,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   db.refundTerminalEvidenceReview.count.mockResolvedValue(0);
   db.refundTerminalEvidenceReview.findMany.mockResolvedValue([]);
+  db.legacyRefundFinanceReview.count.mockResolvedValue(0);
+  db.legacyRefundFinanceReview.findMany.mockResolvedValue([]);
   db.$queryRaw.mockImplementation((query: { strings: readonly string[] }) =>
     query.strings.join('').includes('COUNT(*)') ? Promise.resolve([{ count: 0n }]) : Promise.resolve([]));
 });
@@ -60,13 +63,36 @@ describe('Admin refund review read-only projection', () => {
         sourceRow({ artifactType: 'settlement_refund_adjustment', artifactId: 'adjustment-1', amount: null, amountMinor: 3000, currency: 'TRY', exactRefundRecordId: 'record-1' }),
         sourceRow({ artifactType: 'vendor_debt_event', artifactId: 'debt-1', amount: null, amountMinor: -900, currency: 'TRY', exactRefundRecordId: 'record-1' }),
       ]));
+    const items = await loadLegacyRefundFinanceCandidates('vendor');
+    expect(items).toHaveLength(5);
+    expect(items[0]).toMatchObject({ artifactId: 'fin-vendor-refund-r1-a1', attribution: 'exact', voidedAt: new Date('2026-07-03T00:00:00Z') });
+    expect(items[1]).toMatchObject({ artifactId: 'legacy-unknown', attribution: 'ambiguous', sourceShopifyRefundId: null, supersededByLedgerId: 'later-ledger' });
+    expect(items[2]).toMatchObject({ artifactId: 'ledger-linked-event', attribution: 'exact' });
+    expect(items[3]).toMatchObject({ artifactType: 'settlement_refund_adjustment', recordedAmountMinor: 3000, attribution: 'exact' });
+    expect(items[4]).toMatchObject({ artifactType: 'vendor_debt_event', recordedAmountMinor: -900, attribution: 'exact' });
+    const sql = db.$queryRaw.mock.calls[0][0].strings.join('');
+    expect(sql).toContain('RefundEvidenceSnapshot');
+    expect(sql).toContain('COUNT(DISTINCT matched."sourceShopifyRefundId") = 1');
+    expect(sql).toContain('VENDOR_DEBT_CREATED');
+    expect(sql).toContain('SettlementRefundAdjustment');
+    expect(sql).toContain('shopify_refund');
+    expect(sql).toContain('ORDER BY "observedAt" ASC, "artifactId" ASC');
+  });
+
+  it('lists only persisted legacy review cases without invoking discovery SQL', async () => {
+    db.legacyRefundFinanceReview.count.mockResolvedValue(1);
+    db.legacyRefundFinanceReview.findMany.mockResolvedValue([{
+      id: 'legacy-1', status: 'ACKNOWLEDGED', resolutionOutcome: null, attribution: 'EXACT',
+      sourceShopifyOrderId: 'order-1', sourceShopifyRefundId: 'refund-1', vendorAllocationId: 'allocation-1',
+      observedVendorId: 'vendor', observedVendor: { name: 'Vendor' }, _count: { sources: 4 },
+      firstObservedAt: new Date('2026-07-01T00:00:00Z'), lastObservedAt: new Date('2026-07-02T00:00:00Z'),
+      occurrenceCount: 3, createdAt: new Date('2026-07-01T00:00:00Z'), updatedAt: new Date('2026-07-02T00:00:00Z'),
+    }]);
     const result = await listAdminRefundReviews(request);
-    expect(result.legacyCandidates.items).toHaveLength(5);
-    expect(result.legacyCandidates.items[0]).toMatchObject({ id: 'fin-vendor-refund-r1-a1', attribution: 'exact', voidedAt: '2026-07-03T00:00:00.000Z' });
-    expect(result.legacyCandidates.items[1]).toMatchObject({ id: 'legacy-unknown', attribution: 'ambiguous', sourceShopifyRefundId: null, supersededByLedgerId: 'later-ledger' });
-    expect(result.legacyCandidates.items[2]).toMatchObject({ id: 'ledger-linked-event', attribution: 'exact' });
-    expect(result.legacyCandidates.items[3]).toMatchObject({ artifactType: 'settlement_refund_adjustment', recordedAmountMinor: 3000, attribution: 'exact' });
-    expect(result.legacyCandidates.items[4]).toMatchObject({ artifactType: 'vendor_debt_event', recordedAmountMinor: -900, attribution: 'exact' });
+    expect(result.legacyCandidates).toMatchObject({ count: 1, items: [{
+      id: 'legacy-1', status: 'ACKNOWLEDGED', attribution: 'exact', sourceCount: 4, occurrenceCount: 3,
+    }] });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 
   it('keeps independent pagination and errors; SQL excludes snapshot-backed evidence', async () => {
@@ -77,12 +103,5 @@ describe('Admin refund review read-only projection', () => {
     expect(result.terminalReviews.error).toBeTruthy();
     expect(result.legacyCandidates.error).toBeNull();
     expect(db.refundTerminalEvidenceReview.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 6, take: 3 }));
-    const queries = db.$queryRaw.mock.calls.map(([query]) => query.strings.join(''));
-    expect(queries.every((sql) => sql.includes('RefundEvidenceSnapshot'))).toBe(true);
-    expect(queries.some((sql) => sql.includes('ORDER BY "observedAt" DESC, "artifactId" DESC'))).toBe(true);
-    expect(queries.every((sql) => sql.includes('COUNT(DISTINCT matched."sourceShopifyRefundId") = 1'))).toBe(true);
-    expect(queries.some((sql) => sql.includes('VENDOR_DEBT_CREATED'))).toBe(true);
-    expect(queries.some((sql) => sql.includes('SettlementRefundAdjustment'))).toBe(true);
-    expect(queries.some((sql) => sql.includes('shopify_refund'))).toBe(true);
   });
 });

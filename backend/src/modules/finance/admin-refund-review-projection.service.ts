@@ -1,4 +1,8 @@
 import {
+  LegacyRefundFinanceArtifactType,
+  type LegacyRefundFinanceAttribution,
+  type LegacyRefundFinanceResolutionOutcome,
+  type LegacyRefundFinanceReviewStatus,
   Prisma,
   type RefundTerminalEvidenceResolutionOutcome,
   type RefundTerminalEvidenceReviewStatus,
@@ -26,7 +30,23 @@ type LegacySourceRow = {
   exactRefundRecordId: string | null;
 };
 
-type CountRow = { count: bigint };
+export type LegacyRefundFinanceCandidate = {
+  artifactType: 'refund_ledger' | 'settlement_refund_adjustment' | 'vendor_debt_event' | 'finance_event';
+  artifactId: string;
+  attribution: 'exact' | 'ambiguous';
+  sourceShopifyOrderId: string | null;
+  sourceShopifyRefundId: string | null;
+  vendorAllocationId: string | null;
+  observedVendorId: string;
+  vendorName: string | null;
+  recordedAmount: string | null;
+  recordedAmountMinor: number | null;
+  recordedCurrency: string | null;
+  observedAt: Date;
+  state: string | null;
+  voidedAt: Date | null;
+  supersededByLedgerId: string | null;
+};
 
 // The branches are exclusive by source artifact: a linked REFUND ledger owns
 // its adjustments, debt events and finance events. Standalone events retain their own IDs.
@@ -125,10 +145,55 @@ function legacySources(vendorId: string | null) {
   `;
 }
 
+function mapLegacySource(row: LegacySourceRow): LegacyRefundFinanceCandidate {
+  const exact = row.sourceShopifyRefundId && row.vendorAllocationId &&
+    (row.exactRefundRecordId || row.artifactType === 'refund_ledger' || row.artifactType === 'finance_event');
+  const classified = exact ? classifyPersistedRefundFinanceEvidence({
+    snapshot: null,
+    ledgers: row.artifactType === 'refund_ledger' ? [{ id: row.artifactId, vendorAllocationId: row.vendorAllocationId }] : [],
+    expectedRefundLedgerId: buildRefundLedgerEntryId({ vendorId: row.vendorId, sourceShopifyRefundId: row.sourceShopifyRefundId!, vendorAllocationId: row.vendorAllocationId! }),
+    legacyRefundLedgerId: buildLegacyRefundLedgerEntryId({ vendorId: row.vendorId, sourceShopifyRefundId: row.sourceShopifyRefundId! }),
+    vendorAllocationId: row.vendorAllocationId!,
+    refundRecord: row.exactRefundRecordId ? { id: row.exactRefundRecordId } : null,
+    adjustment: row.artifactType === 'settlement_refund_adjustment' ? { id: row.artifactId } : null,
+    debtEvent: row.artifactType === 'vendor_debt_event' ? { id: row.artifactId } : null,
+    financeEvents: row.artifactType === 'finance_event' ? [{ financeLedgerEntry: { vendorAllocationId: row.vendorAllocationId! }, metadataJson: null }] : [],
+  }) : null;
+  return {
+    artifactType: row.artifactType,
+    artifactId: row.artifactId,
+    attribution: classified?.kind === 'historical_finance' ? 'exact' : 'ambiguous',
+    sourceShopifyOrderId: row.sourceShopifyOrderId,
+    sourceShopifyRefundId: row.sourceShopifyRefundId,
+    vendorAllocationId: row.vendorAllocationId,
+    observedVendorId: row.vendorId,
+    vendorName: row.vendorName,
+    recordedAmount: row.amount?.toString() ?? null,
+    recordedAmountMinor: row.amountMinor,
+    recordedCurrency: row.currency,
+    observedAt: row.observedAt,
+    state: row.state,
+    voidedAt: row.voidedAt,
+    supersededByLedgerId: row.supersededByLedgerId,
+  };
+}
+
+export async function loadLegacyRefundFinanceCandidates(vendorId: string | null = null) {
+  const rows = await prisma.$queryRaw<LegacySourceRow[]>(Prisma.sql`
+    SELECT * FROM (${legacySources(vendorId)}) candidates
+    ORDER BY "observedAt" ASC, "artifactId" ASC, "artifactType" ASC
+  `);
+  return rows.map(mapLegacySource);
+}
+
 export async function listAdminRefundReviews(input: {
   vendorId: string | null;
   terminalStatus?: RefundTerminalEvidenceReviewStatus | null;
   terminalResolutionOutcome?: RefundTerminalEvidenceResolutionOutcome | null;
+  legacyStatus?: LegacyRefundFinanceReviewStatus | null;
+  legacyResolutionOutcome?: LegacyRefundFinanceResolutionOutcome | null;
+  legacyAttribution?: LegacyRefundFinanceAttribution | null;
+  legacyArtifactType?: LegacyRefundFinanceArtifactType | null;
   terminal: Page;
   legacy: Page;
 }) {
@@ -137,39 +202,54 @@ export async function listAdminRefundReviews(input: {
     ...(input.terminalStatus ? { status: input.terminalStatus } : {}),
     ...(input.terminalResolutionOutcome ? { resolutionOutcome: input.terminalResolutionOutcome } : {}),
   };
+  const legacyWhere: Prisma.LegacyRefundFinanceReviewWhereInput = {
+    ...(input.vendorId ? { observedVendorId: input.vendorId } : {}),
+    ...(input.legacyStatus ? { status: input.legacyStatus } : {}),
+    ...(input.legacyResolutionOutcome ? { resolutionOutcome: input.legacyResolutionOutcome } : {}),
+    ...(input.legacyAttribution ? { attribution: input.legacyAttribution } : {}),
+    ...(input.legacyArtifactType ? { sources: { some: { artifactType: input.legacyArtifactType } } } : {}),
+  };
   const [terminalResult, legacyResult] = await Promise.allSettled([
     Promise.all([
       prisma.refundTerminalEvidenceReview.count({ where: terminalWhere }),
       prisma.refundTerminalEvidenceReview.findMany({
-      where: terminalWhere,
-      orderBy: [{ lastObservedAt: 'desc' }, { id: 'desc' }],
-      skip: input.terminal.offset,
-      take: input.terminal.limit,
-      select: {
-        id: true, status: true, resolutionOutcome: true, sourceShopifyRefundId: true, sourceShopifyOrderId: true,
-        vendorAllocationId: true, economicVendorId: true, economicVendor: { select: { name: true } },
-        terminalRefundFinanceLedgerEntryId: true, storedEvidenceSnapshotId: true,
-        storedEvidenceSnapshot: { select: { currency: true } },
-        conflictCategory: true, storedEvidenceHash: true, incomingEvidenceHash: true,
-        occurrenceCount: true, firstObservedAt: true, lastObservedAt: true, createdAt: true, updatedAt: true,
-        terminalRefundFinanceLedgerEntry: { select: { amount: true } },
-      },
+        where: terminalWhere,
+        orderBy: [{ lastObservedAt: 'desc' }, { id: 'desc' }],
+        skip: input.terminal.offset,
+        take: input.terminal.limit,
+        select: {
+          id: true, status: true, resolutionOutcome: true, sourceShopifyRefundId: true, sourceShopifyOrderId: true,
+          vendorAllocationId: true, economicVendorId: true, economicVendor: { select: { name: true } },
+          terminalRefundFinanceLedgerEntryId: true, storedEvidenceSnapshotId: true,
+          storedEvidenceSnapshot: { select: { currency: true } },
+          conflictCategory: true, storedEvidenceHash: true, incomingEvidenceHash: true,
+          occurrenceCount: true, firstObservedAt: true, lastObservedAt: true, createdAt: true, updatedAt: true,
+          terminalRefundFinanceLedgerEntry: { select: { amount: true } },
+        },
       }),
     ]),
     Promise.all([
-      prisma.$queryRaw<CountRow[]>(Prisma.sql`SELECT COUNT(*)::bigint AS count FROM (${legacySources(input.vendorId)}) candidates`),
-      prisma.$queryRaw<LegacySourceRow[]>(Prisma.sql`
-        SELECT * FROM (${legacySources(input.vendorId)}) candidates
-        ORDER BY "observedAt" DESC, "artifactId" DESC, "artifactType" DESC
-        LIMIT ${input.legacy.limit} OFFSET ${input.legacy.offset}
-      `),
+      prisma.legacyRefundFinanceReview.count({ where: legacyWhere }),
+      prisma.legacyRefundFinanceReview.findMany({
+        where: legacyWhere,
+        orderBy: [{ lastObservedAt: 'desc' }, { id: 'desc' }],
+        skip: input.legacy.offset,
+        take: input.legacy.limit,
+        select: {
+          id: true, status: true, resolutionOutcome: true, attribution: true,
+          sourceShopifyOrderId: true, sourceShopifyRefundId: true, vendorAllocationId: true,
+          observedVendorId: true, observedVendor: { select: { name: true } },
+          firstObservedAt: true, lastObservedAt: true, occurrenceCount: true, createdAt: true, updatedAt: true,
+          _count: { select: { sources: true } },
+        },
+      }),
     ]),
   ]);
 
   const terminalCount = terminalResult.status === 'fulfilled' ? terminalResult.value[0] : 0;
   const reviews = terminalResult.status === 'fulfilled' ? terminalResult.value[1] : [];
-  const legacyCountRows = legacyResult.status === 'fulfilled' ? legacyResult.value[0] : [];
-  const legacyRows = legacyResult.status === 'fulfilled' ? legacyResult.value[1] : [];
+  const legacyCount = legacyResult.status === 'fulfilled' ? legacyResult.value[0] : 0;
+  const legacyReviews = legacyResult.status === 'fulfilled' ? legacyResult.value[1] : [];
 
   return {
     ok: true as const,
@@ -205,47 +285,24 @@ export async function listAdminRefundReviews(input: {
     },
     legacyCandidates: {
       error: legacyResult.status === 'rejected' ? 'Unable to load legacy refund finance.' : null,
-      count: Number(legacyCountRows[0]?.count ?? 0),
+      count: legacyCount,
       limit: input.legacy.limit,
       offset: input.legacy.offset,
-      items: legacyRows.map((row) => {
-        const exact = row.sourceShopifyRefundId && row.vendorAllocationId &&
-          (row.exactRefundRecordId || row.artifactType === 'refund_ledger' || row.artifactType === 'finance_event');
-        const classified = exact ? classifyPersistedRefundFinanceEvidence({
-          snapshot: null,
-          ledgers: row.artifactType === 'refund_ledger' ? [{ id: row.artifactId, vendorAllocationId: row.vendorAllocationId }] : [],
-          expectedRefundLedgerId: buildRefundLedgerEntryId({ vendorId: row.vendorId, sourceShopifyRefundId: row.sourceShopifyRefundId!, vendorAllocationId: row.vendorAllocationId! }),
-          legacyRefundLedgerId: buildLegacyRefundLedgerEntryId({ vendorId: row.vendorId, sourceShopifyRefundId: row.sourceShopifyRefundId! }),
-          vendorAllocationId: row.vendorAllocationId!,
-          refundRecord: row.exactRefundRecordId ? { id: row.exactRefundRecordId } : null,
-          adjustment: row.artifactType === 'settlement_refund_adjustment' ? { id: row.artifactId } : null,
-          debtEvent: row.artifactType === 'vendor_debt_event' ? { id: row.artifactId } : null,
-          financeEvents: row.artifactType === 'finance_event' ? [{ financeLedgerEntry: { vendorAllocationId: row.vendorAllocationId! }, metadataJson: null }] : [],
-        }) : null;
-        const attribution = classified?.kind === 'historical_finance' ? 'exact' as const : 'ambiguous' as const;
-        return {
-          type: 'legacy_refund_finance' as const,
-          id: row.artifactId,
-          artifactType: row.artifactType,
-          artifactId: row.artifactId,
-          attribution,
-          sourceShopifyOrderId: row.sourceShopifyOrderId,
-          sourceShopifyRefundId: row.sourceShopifyRefundId,
-          vendorAllocationId: row.vendorAllocationId,
-          economicVendorId: row.vendorId,
-          vendorName: row.vendorName,
-          recordedAmount: row.amount?.toString() ?? null,
-          recordedAmountMinor: row.amountMinor,
-          recordedCurrency: row.currency,
-          observedAt: row.observedAt.toISOString(),
-          state: row.state,
-          voidedAt: row.voidedAt?.toISOString() ?? null,
-          supersededByLedgerId: row.supersededByLedgerId,
-          reason: attribution === 'exact'
-            ? 'Historical refund finance without accepted evidence snapshot.'
-            : 'Ambiguous historical refund evidence without accepted snapshot authority.',
-        };
-      }),
+      items: legacyReviews.map((review) => ({
+        type: 'legacy_refund_finance' as const,
+        id: review.id, status: review.status, resolutionOutcome: review.resolutionOutcome,
+        attribution: review.attribution.toLowerCase() as 'exact' | 'ambiguous',
+        sourceShopifyOrderId: review.sourceShopifyOrderId,
+        sourceShopifyRefundId: review.sourceShopifyRefundId,
+        vendorAllocationId: review.vendorAllocationId,
+        observedVendorId: review.observedVendorId,
+        vendorName: review.observedVendor?.name ?? null,
+        sourceCount: review._count.sources,
+        firstObservedAt: review.firstObservedAt.toISOString(),
+        lastObservedAt: review.lastObservedAt.toISOString(),
+        occurrenceCount: review.occurrenceCount,
+        createdAt: review.createdAt.toISOString(), updatedAt: review.updatedAt.toISOString(),
+      })),
     },
   };
 }

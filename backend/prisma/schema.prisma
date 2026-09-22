@@ -183,6 +183,37 @@ enum RefundTerminalEvidenceResolutionOutcome {
   INSUFFICIENT_EVIDENCE
 }
 
+enum LegacyRefundFinanceReviewStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum LegacyRefundFinanceReviewEventType {
+  DETECTED
+  ACKNOWLEDGED
+  RESOLVED
+  REOPENED
+}
+
+enum LegacyRefundFinanceResolutionOutcome {
+  NO_CORRECTION_NEEDED
+  CORRECTION_REQUIRED
+  INSUFFICIENT_EVIDENCE
+}
+
+enum LegacyRefundFinanceAttribution {
+  EXACT
+  AMBIGUOUS
+}
+
+enum LegacyRefundFinanceArtifactType {
+  REFUND_LEDGER
+  SETTLEMENT_REFUND_ADJUSTMENT
+  VENDOR_DEBT_EVENT
+  FINANCE_EVENT
+}
+
 enum PayoutBatchStatus {
   DRAFT
   REVIEW
@@ -357,6 +388,7 @@ model User {
   supportNotes                         SupportTicketNote[]
   supportReplies                       SupportTicketReply[]
   refundTerminalEvidenceReviewEvents   RefundTerminalEvidenceReviewEvent[] @relation("refundTerminalEvidenceReviewEventActor")
+  legacyRefundFinanceReviewEvents      LegacyRefundFinanceReviewEvent[] @relation("legacyRefundFinanceReviewEventActor")
 }
 
 model Vendor {
@@ -396,6 +428,7 @@ model Vendor {
   ownedReturnRecords           ReturnRecord[]                @relation("returnOwnerVendor")
   refundEvidenceSnapshots       RefundEvidenceSnapshot[]       @relation("refundEvidenceHistoricalEconomicVendor")
   refundTerminalEvidenceReviews RefundTerminalEvidenceReview[] @relation("refundTerminalEvidenceReviewEconomicVendor")
+  legacyRefundFinanceReviews     LegacyRefundFinanceReview[] @relation("legacyRefundFinanceReviewObservedVendor")
 }
 
 model SupportTicket {
@@ -717,6 +750,7 @@ model VendorAllocation {
   fullRefundTerminalFact                 AllocationFullRefundTerminalFact?
   refundEvidenceSnapshots                RefundEvidenceSnapshot[]
   refundTerminalEvidenceReviews          RefundTerminalEvidenceReview[]
+  legacyRefundFinanceReviews             LegacyRefundFinanceReview[]
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -1235,6 +1269,72 @@ model RefundTerminalEvidenceReviewEvent {
   createdAt         DateTime                              @default(now())
   review            RefundTerminalEvidenceReview          @relation(fields: [reviewId], references: [id], onDelete: Restrict)
   actorUser         User?                                 @relation("refundTerminalEvidenceReviewEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([reviewId, createdAt])
+  @@index([eventType, createdAt])
+}
+
+model LegacyRefundFinanceReview {
+  id                      String                               @id
+  caseKey                 String                               @unique
+  status                  LegacyRefundFinanceReviewStatus      @default(ACTIVE)
+  resolutionOutcome       LegacyRefundFinanceResolutionOutcome?
+  attribution             LegacyRefundFinanceAttribution
+  sourceShopifyRefundId   String?
+  sourceShopifyOrderId    String?
+  vendorAllocationId      String?
+  observedVendorId        String?
+  firstObservedAt         DateTime
+  lastObservedAt          DateTime
+  occurrenceCount         Int                                  @default(1)
+  projectionFingerprint   String
+  createdAt               DateTime                             @default(now())
+  updatedAt               DateTime                             @updatedAt
+  vendorAllocation        VendorAllocation?                    @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
+  observedVendor          Vendor?                              @relation("legacyRefundFinanceReviewObservedVendor", fields: [observedVendorId], references: [id], onDelete: SetNull)
+  sources                 LegacyRefundFinanceReviewSource[]
+  events                  LegacyRefundFinanceReviewEvent[]
+
+  @@index([status])
+  @@index([resolutionOutcome])
+  @@index([attribution])
+  @@index([observedVendorId])
+  @@index([vendorAllocationId])
+  @@index([lastObservedAt])
+}
+
+model LegacyRefundFinanceReviewSource {
+  id                    String                          @id
+  reviewId              String
+  artifactType          LegacyRefundFinanceArtifactType
+  artifactId            String
+  observedAt            DateTime
+  sourceState           String?
+  recordedAmount        Decimal?                       @db.Decimal(10, 2)
+  recordedAmountMinor   Int?
+  currency              String?
+  voidedAt              DateTime?
+  supersededByLedgerId  String?
+  sourceFingerprint     String
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+  review                LegacyRefundFinanceReview       @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+
+  @@unique([artifactType, artifactId])
+  @@index([reviewId, observedAt])
+}
+
+model LegacyRefundFinanceReviewEvent {
+  id                String                               @id @default(cuid())
+  reviewId          String
+  eventType         LegacyRefundFinanceReviewEventType
+  actorUserId       String?
+  note              String?
+  resolutionOutcome LegacyRefundFinanceResolutionOutcome?
+  sourceContextJson Json?
+  createdAt         DateTime                             @default(now())
+  review            LegacyRefundFinanceReview            @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  actorUser         User?                                @relation("legacyRefundFinanceReviewEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([reviewId, createdAt])
   @@index([eventType, createdAt])

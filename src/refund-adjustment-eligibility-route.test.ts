@@ -9,6 +9,11 @@ const getAdminRefundReviewDetailMock = vi.hoisted(() => vi.fn());
 const acknowledgeAdminRefundReviewMock = vi.hoisted(() => vi.fn());
 const resolveAdminRefundReviewMock = vi.hoisted(() => vi.fn());
 const reopenAdminRefundReviewMock = vi.hoisted(() => vi.fn());
+const syncLegacyRefundFinanceReviewsMock = vi.hoisted(() => vi.fn());
+const getAdminLegacyRefundReviewDetailMock = vi.hoisted(() => vi.fn());
+const acknowledgeAdminLegacyRefundReviewMock = vi.hoisted(() => vi.fn());
+const resolveAdminLegacyRefundReviewMock = vi.hoisted(() => vi.fn());
+const reopenAdminLegacyRefundReviewMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/admin-refund-review-projection.service.js', () => ({
   listAdminRefundReviews: listAdminRefundReviewsMock,
@@ -20,6 +25,18 @@ vi.mock('../backend/src/modules/finance/admin-refund-review-lifecycle.service.js
   resolveAdminRefundReview: resolveAdminRefundReviewMock,
   reopenAdminRefundReview: reopenAdminRefundReviewMock,
   AdminRefundReviewLifecycleError: class AdminRefundReviewLifecycleError extends Error {
+    statusCode: number;
+    constructor(message: string, statusCode = 409) { super(message); this.statusCode = statusCode; }
+  },
+}));
+
+vi.mock('../backend/src/modules/finance/admin-legacy-refund-review.service.js', () => ({
+  syncLegacyRefundFinanceReviews: syncLegacyRefundFinanceReviewsMock,
+  getAdminLegacyRefundReviewDetail: getAdminLegacyRefundReviewDetailMock,
+  acknowledgeAdminLegacyRefundReview: acknowledgeAdminLegacyRefundReviewMock,
+  resolveAdminLegacyRefundReview: resolveAdminLegacyRefundReviewMock,
+  reopenAdminLegacyRefundReview: reopenAdminLegacyRefundReviewMock,
+  AdminLegacyRefundReviewError: class AdminLegacyRefundReviewError extends Error {
     statusCode: number;
     constructor(message: string, statusCode = 409) { super(message); this.statusCode = statusCode; }
   },
@@ -121,6 +138,11 @@ describe('refund adjustment eligibility preview route', () => {
     backfillPendingRefundAdjustmentsMock.mockReset();
     previewPendingRefundAdjustmentApplicationMock.mockReset();
     getSettlementRefundAdjustmentDetailMock.mockReset();
+    syncLegacyRefundFinanceReviewsMock.mockReset();
+    getAdminLegacyRefundReviewDetailMock.mockReset();
+    acknowledgeAdminLegacyRefundReviewMock.mockReset();
+    resolveAdminLegacyRefundReviewMock.mockReset();
+    reopenAdminLegacyRefundReviewMock.mockReset();
   });
 
   it('keeps the new read-only review projection admin-only with bounded independent pages', async () => {
@@ -141,8 +163,40 @@ describe('refund adjustment eligibility preview route', () => {
     expect(await handler?.({ authUser: { role: 'admin' }, query: { vendorId: 'vendor', terminalLimit: '999', terminalOffset: '3', legacyLimit: '4', legacyOffset: '8' } }, buildReply())).toBe(response);
     expect(listAdminRefundReviewsMock).toHaveBeenCalledWith({
       vendorId: 'vendor', terminalStatus: null, terminalResolutionOutcome: null,
+      legacyStatus: null, legacyResolutionOutcome: null, legacyAttribution: null, legacyArtifactType: null,
       terminal: { limit: 250, offset: 3 }, legacy: { limit: 4, offset: 8 },
     });
+  });
+
+  it('keeps legacy discovery, detail, and lifecycle commands explicitly admin-only', async () => {
+    const gets = new Map<string, (request: any, reply: ReturnType<typeof buildReply>) => unknown>();
+    const posts = new Map<string, (request: any, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: any, reply: ReturnType<typeof buildReply>) => unknown) => gets.set(path, handler)),
+      post: vi.fn((path: string, _options: unknown, handler: (request: any, reply: ReturnType<typeof buildReply>) => unknown) => posts.set(path, handler)),
+      put: vi.fn(), delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+
+    for (const role of ['vendor', 'finance', 'support']) {
+      expect(await posts.get('/admin/finance/legacy-refund-reviews/sync')?.(
+        { authUser: { role }, body: {} }, buildReply(),
+      )).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+      expect(await gets.get('/admin/finance/legacy-refund-reviews/:reviewId')?.(
+        { authUser: { role }, params: { reviewId: 'legacy-1' } }, buildReply(),
+      )).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+      expect(await posts.get('/admin/finance/legacy-refund-reviews/:reviewId/acknowledge')?.(
+        { authUser: { role }, params: { reviewId: 'legacy-1' }, body: {} }, buildReply(),
+      )).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    }
+    expect(syncLegacyRefundFinanceReviewsMock).not.toHaveBeenCalled();
+
+    const syncResult = { ok: true, candidates: 2, createdReviews: 1, updatedReviews: 0, createdSources: 2, updatedSources: 0 };
+    syncLegacyRefundFinanceReviewsMock.mockResolvedValue(syncResult);
+    expect(await posts.get('/admin/finance/legacy-refund-reviews/sync')?.(
+      { authUser: { role: 'admin', id: 'admin-1' }, body: { vendorId: 'vendor' } }, buildReply(),
+    )).toEqual(syncResult);
+    expect(syncLegacyRefundFinanceReviewsMock).toHaveBeenCalledWith({ vendorId: 'vendor' });
   });
 
   it('keeps terminal review detail and lifecycle commands explicitly admin-only', async () => {

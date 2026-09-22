@@ -1,5 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  LegacyRefundFinanceArtifactType,
+  LegacyRefundFinanceAttribution,
+  LegacyRefundFinanceResolutionOutcome,
+  LegacyRefundFinanceReviewStatus,
   RefundTerminalEvidenceResolutionOutcome,
   RefundTerminalEvidenceReviewStatus,
   SettlementCommissionInvoiceProvider,
@@ -93,6 +97,14 @@ import {
   reopenAdminRefundReview,
   resolveAdminRefundReview,
 } from './admin-refund-review-lifecycle.service.js';
+import {
+  acknowledgeAdminLegacyRefundReview,
+  AdminLegacyRefundReviewError,
+  getAdminLegacyRefundReviewDetail,
+  reopenAdminLegacyRefundReview,
+  resolveAdminLegacyRefundReview,
+  syncLegacyRefundFinanceReviews,
+} from './admin-legacy-refund-review.service.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import type {
@@ -116,6 +128,10 @@ const SUPPORTED_REFUND_ADJUSTMENT_RECOMMENDED_ACTIONS = new Set<RefundAdjustment
 ]);
 const REFUND_REVIEW_STATUSES = new Set(Object.values(RefundTerminalEvidenceReviewStatus));
 const REFUND_REVIEW_RESOLUTION_OUTCOMES = new Set(Object.values(RefundTerminalEvidenceResolutionOutcome));
+const LEGACY_REVIEW_STATUSES = new Set(Object.values(LegacyRefundFinanceReviewStatus));
+const LEGACY_REVIEW_RESOLUTION_OUTCOMES = new Set(Object.values(LegacyRefundFinanceResolutionOutcome));
+const LEGACY_REVIEW_ATTRIBUTIONS = new Set(Object.values(LegacyRefundFinanceAttribution));
+const LEGACY_REVIEW_ARTIFACT_TYPES = new Set(Object.values(LegacyRefundFinanceArtifactType));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -231,6 +247,19 @@ function readRefundReviewFreshness(body: unknown) {
     expectedUpdatedAt,
     expectedOccurrenceCount,
   };
+}
+
+function readLegacyReviewFreshness(body: unknown) {
+  const expectedStatus = readOptionalBodyString(body, 'expectedStatus');
+  const expectedUpdatedAt = readOptionalBodyString(body, 'expectedUpdatedAt');
+  const expectedOccurrenceCount = readOptionalBodyNumber(body, 'expectedOccurrenceCount');
+  if (!expectedStatus || !LEGACY_REVIEW_STATUSES.has(expectedStatus as LegacyRefundFinanceReviewStatus)) {
+    throw new AdminLegacyRefundReviewError('A valid expectedStatus value is required.', 400);
+  }
+  if (!expectedUpdatedAt || expectedOccurrenceCount === null) {
+    throw new AdminLegacyRefundReviewError('expectedUpdatedAt and expectedOccurrenceCount are required.', 400);
+  }
+  return { expectedStatus: expectedStatus as LegacyRefundFinanceReviewStatus, expectedUpdatedAt, expectedOccurrenceCount };
 }
 
 function readOptionalBodyStringArray(body: unknown, key: string) {
@@ -1234,6 +1263,10 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         : {};
       const requestedStatus = readOptionalQueryString(request.query, 'terminalStatus');
       const requestedOutcome = readOptionalQueryString(request.query, 'terminalResolutionOutcome');
+      const legacyStatus = readOptionalQueryString(request.query, 'legacyStatus');
+      const legacyOutcome = readOptionalQueryString(request.query, 'legacyResolutionOutcome');
+      const legacyAttribution = readOptionalQueryString(request.query, 'legacyAttribution');
+      const legacyArtifactType = readOptionalQueryString(request.query, 'legacyArtifactType');
       return listAdminRefundReviews({
         vendorId: readOptionalQueryString(request.query, 'vendorId'),
         terminalStatus: requestedStatus && REFUND_REVIEW_STATUSES.has(requestedStatus as RefundTerminalEvidenceReviewStatus)
@@ -1242,6 +1275,10 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         terminalResolutionOutcome: requestedOutcome && REFUND_REVIEW_RESOLUTION_OUTCOMES.has(requestedOutcome as RefundTerminalEvidenceResolutionOutcome)
           ? requestedOutcome as RefundTerminalEvidenceResolutionOutcome
           : null,
+        legacyStatus: legacyStatus && LEGACY_REVIEW_STATUSES.has(legacyStatus as LegacyRefundFinanceReviewStatus) ? legacyStatus as LegacyRefundFinanceReviewStatus : null,
+        legacyResolutionOutcome: legacyOutcome && LEGACY_REVIEW_RESOLUTION_OUTCOMES.has(legacyOutcome as LegacyRefundFinanceResolutionOutcome) ? legacyOutcome as LegacyRefundFinanceResolutionOutcome : null,
+        legacyAttribution: legacyAttribution && LEGACY_REVIEW_ATTRIBUTIONS.has(legacyAttribution as LegacyRefundFinanceAttribution) ? legacyAttribution as LegacyRefundFinanceAttribution : null,
+        legacyArtifactType: legacyArtifactType && LEGACY_REVIEW_ARTIFACT_TYPES.has(legacyArtifactType as LegacyRefundFinanceArtifactType) ? legacyArtifactType as LegacyRefundFinanceArtifactType : null,
         terminal: resolvePagination({ limit: query.terminalLimit, offset: query.terminalOffset }, { limit: 50, offset: 0 }),
         legacy: resolvePagination({ limit: query.legacyLimit, offset: query.legacyOffset }, { limit: 50, offset: 0 }),
       });
@@ -1319,6 +1356,52 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
     { preHandler: [authMiddleware.authenticateRequest] },
     (request, reply) => runRefundReviewAction(request, reply, 'acknowledge'),
   );
+
+  app.post(
+    '/admin/finance/legacy-refund-reviews/sync',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      return syncLegacyRefundFinanceReviews({ vendorId: readOptionalBodyString(request.body, 'vendorId') });
+    },
+  );
+
+  app.get(
+    '/admin/finance/legacy-refund-reviews/:reviewId',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      try {
+        const { reviewId } = request.params as { reviewId: string };
+        return { ok: true as const, review: await getAdminLegacyRefundReviewDetail(reviewId) };
+      } catch (error) {
+        const statusCode = error instanceof AdminLegacyRefundReviewError ? error.statusCode : 400;
+        return reply.code(statusCode).send({ ok: false, message: error instanceof Error ? error.message : 'Legacy refund finance review could not be loaded.' });
+      }
+    },
+  );
+
+  const runLegacyReviewAction = async (request: FastifyRequest, reply: FastifyReply, action: 'acknowledge' | 'resolve' | 'reopen') => {
+    if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+    const actorUserId = request.authUser.id;
+    if (!actorUserId) return reply.code(403).send({ message: 'Authenticated Admin actor is required.' });
+    try {
+      const { reviewId } = request.params as { reviewId: string };
+      const common = { reviewId, actorUserId, note: readOptionalBodyString(request.body, 'note'), freshness: readLegacyReviewFreshness(request.body) };
+      if (action === 'acknowledge') return { ok: true as const, review: await acknowledgeAdminLegacyRefundReview(common) };
+      if (action === 'reopen') return { ok: true as const, review: await reopenAdminLegacyRefundReview(common) };
+      const outcome = readOptionalBodyString(request.body, 'resolutionOutcome');
+      if (!outcome || !LEGACY_REVIEW_RESOLUTION_OUTCOMES.has(outcome as LegacyRefundFinanceResolutionOutcome)) throw new AdminLegacyRefundReviewError('A valid resolutionOutcome is required.', 400);
+      return { ok: true as const, review: await resolveAdminLegacyRefundReview({ ...common, resolutionOutcome: outcome as LegacyRefundFinanceResolutionOutcome }) };
+    } catch (error) {
+      const statusCode = error instanceof AdminLegacyRefundReviewError ? error.statusCode : 400;
+      return reply.code(statusCode).send({ ok: false, message: error instanceof Error ? error.message : 'Legacy refund finance review action failed.' });
+    }
+  };
+
+  app.post('/admin/finance/legacy-refund-reviews/:reviewId/acknowledge', { preHandler: [authMiddleware.authenticateRequest] }, (request, reply) => runLegacyReviewAction(request, reply, 'acknowledge'));
+  app.post('/admin/finance/legacy-refund-reviews/:reviewId/resolve', { preHandler: [authMiddleware.authenticateRequest] }, (request, reply) => runLegacyReviewAction(request, reply, 'resolve'));
+  app.post('/admin/finance/legacy-refund-reviews/:reviewId/reopen', { preHandler: [authMiddleware.authenticateRequest] }, (request, reply) => runLegacyReviewAction(request, reply, 'reopen'));
   app.post(
     '/admin/finance/refund-reviews/:reviewId/resolve',
     { preHandler: [authMiddleware.authenticateRequest] },

@@ -74,6 +74,21 @@ CREATE TYPE "RefundTerminalEvidenceReviewEventType" AS ENUM ('DETECTED', 'ACKNOW
 CREATE TYPE "RefundTerminalEvidenceResolutionOutcome" AS ENUM ('NO_CORRECTION_NEEDED', 'CORRECTION_REQUIRED', 'INSUFFICIENT_EVIDENCE');
 
 -- CreateEnum
+CREATE TYPE "LegacyRefundFinanceReviewStatus" AS ENUM ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED');
+
+-- CreateEnum
+CREATE TYPE "LegacyRefundFinanceReviewEventType" AS ENUM ('DETECTED', 'ACKNOWLEDGED', 'RESOLVED', 'REOPENED');
+
+-- CreateEnum
+CREATE TYPE "LegacyRefundFinanceResolutionOutcome" AS ENUM ('NO_CORRECTION_NEEDED', 'CORRECTION_REQUIRED', 'INSUFFICIENT_EVIDENCE');
+
+-- CreateEnum
+CREATE TYPE "LegacyRefundFinanceAttribution" AS ENUM ('EXACT', 'AMBIGUOUS');
+
+-- CreateEnum
+CREATE TYPE "LegacyRefundFinanceArtifactType" AS ENUM ('REFUND_LEDGER', 'SETTLEMENT_REFUND_ADJUSTMENT', 'VENDOR_DEBT_EVENT', 'FINANCE_EVENT');
+
+-- CreateEnum
 CREATE TYPE "PayoutBatchStatus" AS ENUM ('DRAFT', 'REVIEW', 'APPROVED', 'CANCELLED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER');
 
 -- CreateEnum
@@ -843,6 +858,61 @@ CREATE TABLE "RefundTerminalEvidenceReviewEvent" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "RefundTerminalEvidenceReviewEvent_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "LegacyRefundFinanceReview" (
+    "id" TEXT NOT NULL,
+    "caseKey" TEXT NOT NULL,
+    "status" "LegacyRefundFinanceReviewStatus" NOT NULL DEFAULT 'ACTIVE',
+    "resolutionOutcome" "LegacyRefundFinanceResolutionOutcome",
+    "attribution" "LegacyRefundFinanceAttribution" NOT NULL,
+    "sourceShopifyRefundId" TEXT,
+    "sourceShopifyOrderId" TEXT,
+    "vendorAllocationId" TEXT,
+    "observedVendorId" TEXT,
+    "firstObservedAt" TIMESTAMP(3) NOT NULL,
+    "lastObservedAt" TIMESTAMP(3) NOT NULL,
+    "occurrenceCount" INTEGER NOT NULL DEFAULT 1,
+    "projectionFingerprint" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "LegacyRefundFinanceReview_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "LegacyRefundFinanceReviewSource" (
+    "id" TEXT NOT NULL,
+    "reviewId" TEXT NOT NULL,
+    "artifactType" "LegacyRefundFinanceArtifactType" NOT NULL,
+    "artifactId" TEXT NOT NULL,
+    "observedAt" TIMESTAMP(3) NOT NULL,
+    "sourceState" TEXT,
+    "recordedAmount" DECIMAL(10,2),
+    "recordedAmountMinor" INTEGER,
+    "currency" TEXT,
+    "voidedAt" TIMESTAMP(3),
+    "supersededByLedgerId" TEXT,
+    "sourceFingerprint" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "LegacyRefundFinanceReviewSource_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "LegacyRefundFinanceReviewEvent" (
+    "id" TEXT NOT NULL,
+    "reviewId" TEXT NOT NULL,
+    "eventType" "LegacyRefundFinanceReviewEventType" NOT NULL,
+    "actorUserId" TEXT,
+    "note" TEXT,
+    "resolutionOutcome" "LegacyRefundFinanceResolutionOutcome",
+    "sourceContextJson" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "LegacyRefundFinanceReviewEvent_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -1695,6 +1765,39 @@ CREATE INDEX "RefundTerminalEvidenceReviewEvent_reviewId_createdAt_idx" ON "Refu
 CREATE INDEX "RefundTerminalEvidenceReviewEvent_eventType_createdAt_idx" ON "RefundTerminalEvidenceReviewEvent"("eventType", "createdAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "LegacyRefundFinanceReview_caseKey_key" ON "LegacyRefundFinanceReview"("caseKey");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReview_status_idx" ON "LegacyRefundFinanceReview"("status");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReview_resolutionOutcome_idx" ON "LegacyRefundFinanceReview"("resolutionOutcome");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReview_attribution_idx" ON "LegacyRefundFinanceReview"("attribution");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReview_observedVendorId_idx" ON "LegacyRefundFinanceReview"("observedVendorId");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReview_vendorAllocationId_idx" ON "LegacyRefundFinanceReview"("vendorAllocationId");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReview_lastObservedAt_idx" ON "LegacyRefundFinanceReview"("lastObservedAt");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReviewSource_reviewId_observedAt_idx" ON "LegacyRefundFinanceReviewSource"("reviewId", "observedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "LegacyRefundFinanceReviewSource_artifactType_artifactId_key" ON "LegacyRefundFinanceReviewSource"("artifactType", "artifactId");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReviewEvent_reviewId_createdAt_idx" ON "LegacyRefundFinanceReviewEvent"("reviewId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "LegacyRefundFinanceReviewEvent_eventType_createdAt_idx" ON "LegacyRefundFinanceReviewEvent"("eventType", "createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ShopifyRefund_sourceShopifyRefundId_key" ON "ShopifyRefund"("sourceShopifyRefundId");
 
 -- CreateIndex
@@ -2209,6 +2312,21 @@ ALTER TABLE "RefundTerminalEvidenceReviewEvent" ADD CONSTRAINT "RefundTerminalEv
 
 -- AddForeignKey
 ALTER TABLE "RefundTerminalEvidenceReviewEvent" ADD CONSTRAINT "RefundTerminalEvidenceReviewEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LegacyRefundFinanceReview" ADD CONSTRAINT "LegacyRefundFinanceReview_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LegacyRefundFinanceReview" ADD CONSTRAINT "LegacyRefundFinanceReview_observedVendorId_fkey" FOREIGN KEY ("observedVendorId") REFERENCES "Vendor"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LegacyRefundFinanceReviewSource" ADD CONSTRAINT "LegacyRefundFinanceReviewSource_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "LegacyRefundFinanceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LegacyRefundFinanceReviewEvent" ADD CONSTRAINT "LegacyRefundFinanceReviewEvent_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "LegacyRefundFinanceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LegacyRefundFinanceReviewEvent" ADD CONSTRAINT "LegacyRefundFinanceReviewEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ShopifyRefund" ADD CONSTRAINT "ShopifyRefund_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;

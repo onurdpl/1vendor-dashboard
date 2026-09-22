@@ -122,22 +122,33 @@ export type TerminalRefundReviewDetail = TerminalRefundReview & {
 export type LegacyRefundFinanceCandidate = {
   type: 'legacy_refund_finance';
   id: string;
-  artifactType: 'refund_ledger' | 'settlement_refund_adjustment' | 'vendor_debt_event' | 'finance_event';
-  artifactId: string;
+  status: LegacyRefundReviewStatus;
+  resolutionOutcome: LegacyRefundReviewResolutionOutcome | null;
   attribution: 'exact' | 'ambiguous';
   sourceShopifyOrderId: string | null;
   sourceShopifyRefundId: string | null;
   vendorAllocationId: string | null;
-  economicVendorId: string;
+  observedVendorId: string | null;
   vendorName: string | null;
-  recordedAmount: string | null;
-  recordedAmountMinor: number | null;
-  recordedCurrency: string | null;
-  observedAt: string;
-  state: string | null;
-  voidedAt: string | null;
-  supersededByLedgerId: string | null;
-  reason: string;
+  sourceCount: number;
+  firstObservedAt: string;
+  lastObservedAt: string;
+  occurrenceCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LegacyRefundReviewStatus = 'ACTIVE' | 'ACKNOWLEDGED' | 'RESOLVED';
+export type LegacyRefundReviewResolutionOutcome = TerminalRefundReviewResolutionOutcome;
+export type LegacyRefundReviewSource = {
+  id: string; artifactType: string; artifactId: string; observedAt: string; sourceState: string | null;
+  recordedAmount: string | null; recordedAmountMinor: number | null; currency: string | null;
+  voidedAt: string | null; supersededByLedgerId: string | null;
+};
+export type LegacyRefundReviewEvent = TerminalRefundReviewEvent;
+export type LegacyRefundReviewDetail = Omit<LegacyRefundFinanceCandidate, 'type' | 'sourceCount'> & {
+  sources: LegacyRefundReviewSource[];
+  events: LegacyRefundReviewEvent[];
 };
 
 type ReviewPage<T> = { error: string | null; count: number; limit: number; offset: number; items: T[] };
@@ -157,6 +168,10 @@ export function listAdminRefundReviews(input: {
   legacyOffset?: number;
   terminalStatus?: TerminalRefundReviewStatus | null;
   terminalResolutionOutcome?: TerminalRefundReviewResolutionOutcome | null;
+  legacyStatus?: LegacyRefundReviewStatus | null;
+  legacyResolutionOutcome?: LegacyRefundReviewResolutionOutcome | null;
+  legacyAttribution?: 'EXACT' | 'AMBIGUOUS' | null;
+  legacyArtifactType?: 'REFUND_LEDGER' | 'SETTLEMENT_REFUND_ADJUSTMENT' | 'VENDOR_DEBT_EVENT' | 'FINANCE_EVENT' | null;
   signal?: AbortSignal;
 } = {}) {
   const params = new URLSearchParams();
@@ -167,6 +182,10 @@ export function listAdminRefundReviews(input: {
   params.set('legacyOffset', String(input.legacyOffset ?? 0));
   if (input.terminalStatus) params.set('terminalStatus', input.terminalStatus);
   if (input.terminalResolutionOutcome) params.set('terminalResolutionOutcome', input.terminalResolutionOutcome);
+  if (input.legacyStatus) params.set('legacyStatus', input.legacyStatus);
+  if (input.legacyResolutionOutcome) params.set('legacyResolutionOutcome', input.legacyResolutionOutcome);
+  if (input.legacyAttribution) params.set('legacyAttribution', input.legacyAttribution);
+  if (input.legacyArtifactType) params.set('legacyArtifactType', input.legacyArtifactType);
   return apiClient.get<AdminRefundReviewsResponse>(`/admin/finance/refund-reviews?${params}`, { signal: input.signal });
 }
 
@@ -206,3 +225,35 @@ export function resolveAdminRefundReview(reviewId: string, input: RefundReviewAc
 export function reopenAdminRefundReview(reviewId: string, input: RefundReviewActionInput) {
   return postRefundReviewAction(reviewId, 'reopen', input);
 }
+
+export function syncLegacyRefundReviews(vendorId?: string | null) {
+  return apiClient.post<{ ok: true; candidates: number; createdReviews: number; updatedReviews: number; createdSources: number; updatedSources: number }>(
+    '/admin/finance/legacy-refund-reviews/sync',
+    { vendorId: vendorId?.trim() || null },
+  );
+}
+
+export function getAdminLegacyRefundReview(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; review: LegacyRefundReviewDetail }>(
+    `/admin/finance/legacy-refund-reviews/${encodeURIComponent(reviewId)}`,
+    { signal },
+  );
+}
+
+type LegacyReviewActionInput = {
+  expectedStatus: LegacyRefundReviewStatus;
+  expectedUpdatedAt: string;
+  expectedOccurrenceCount: number;
+  note?: string | null;
+};
+
+function postLegacyReviewAction(reviewId: string, action: 'acknowledge' | 'resolve' | 'reopen', input: LegacyReviewActionInput & { resolutionOutcome?: LegacyRefundReviewResolutionOutcome }) {
+  return apiClient.post<{ ok: true; review: LegacyRefundReviewDetail }>(
+    `/admin/finance/legacy-refund-reviews/${encodeURIComponent(reviewId)}/${action}`,
+    input,
+  );
+}
+
+export function acknowledgeAdminLegacyRefundReview(reviewId: string, input: LegacyReviewActionInput) { return postLegacyReviewAction(reviewId, 'acknowledge', input); }
+export function resolveAdminLegacyRefundReview(reviewId: string, input: LegacyReviewActionInput & { resolutionOutcome: LegacyRefundReviewResolutionOutcome }) { return postLegacyReviewAction(reviewId, 'resolve', input); }
+export function reopenAdminLegacyRefundReview(reviewId: string, input: LegacyReviewActionInput) { return postLegacyReviewAction(reviewId, 'reopen', input); }
