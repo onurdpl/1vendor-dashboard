@@ -172,6 +172,7 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - Full completion requires mutually consistent `REFUNDED` status, equal received/refunded shop money, zero net payment, and zero outstanding shop money. `PARTIALLY_REFUNDED` with positive canonical net payment remains partial. Missing or conflicting evidence fails closed to review and never falls back to local refund records or refunded line items.
 - Fulfillment post-check completion remains independent from customer monetary completion. A selected allocation can require no further fulfillment while the order remains partially refunded.
 - Refund completion does not recalculate historical checkout totals from current shipping fees or free-shipping thresholds.
+- New terminal refund evidence conflicts persist the exact normalized incoming financial evidence observed at conflict time in a write-once record bound to its hash, evidence version, and normalization version. This evidence persistence is forward-only: older terminal reviews are not reconstructed from later Shopify reads, and whether a later read is historically equivalent remains UNKNOWN. Persisted conflict evidence supports future investigation only and does not authorize or apply a financial correction.
 - FIN-VOID-1 prevents future false refund evidence. It does not correct the existing `#1105` production refund/return/ledger records; those remain a separate controlled correction. `#1106` is not repaired by this phase.
 
 ### Order-Level Checkout Shipping Refund Ownership

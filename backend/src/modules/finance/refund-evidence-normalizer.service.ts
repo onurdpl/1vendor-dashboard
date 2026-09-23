@@ -85,6 +85,17 @@ function stableJson(value: unknown): string {
   throw new Error('Invalid refund evidence: non-JSON value.');
 }
 
+export function verifyNormalizedRefundEvidenceHash(input: {
+  normalizedEvidenceJson: unknown;
+  evidenceHash: string;
+  hashAlgorithm: string;
+}): boolean {
+  if (input.hashAlgorithm !== REFUND_EVIDENCE_HASH_ALGORITHM) {
+    return false;
+  }
+  return createHash('sha256').update(stableJson(input.normalizedEvidenceJson), 'utf8').digest('hex') === input.evidenceHash;
+}
+
 /** Pure normalization only: no Shopify selection, ownership resolution, or persistence. */
 export function normalizeRefundEvidence(input: ResolvedRefundEvidenceInput) {
   if (!input || typeof input !== 'object') {

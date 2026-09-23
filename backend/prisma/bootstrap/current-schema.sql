@@ -847,6 +847,28 @@ CREATE TABLE "RefundTerminalEvidenceReview" (
 );
 
 -- CreateTable
+CREATE TABLE "RefundTerminalConflictEvidence" (
+    "id" TEXT NOT NULL,
+    "reviewId" TEXT NOT NULL,
+    "sourceShopifyRefundId" TEXT NOT NULL,
+    "sourceShopifyOrderId" TEXT NOT NULL,
+    "vendorAllocationId" TEXT NOT NULL,
+    "economicVendorId" TEXT NOT NULL,
+    "historicalSaleFinanceLedgerEntryId" TEXT NOT NULL,
+    "supersededSaleLedgerIdsJson" JSONB NOT NULL,
+    "refundTotalAmount" DECIMAL(10,2) NOT NULL,
+    "currency" TEXT NOT NULL,
+    "normalizedEvidenceJson" JSONB NOT NULL,
+    "evidenceHash" TEXT NOT NULL,
+    "hashAlgorithm" TEXT NOT NULL,
+    "evidenceVersion" INTEGER NOT NULL,
+    "normalizationVersion" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RefundTerminalConflictEvidence_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "RefundTerminalEvidenceReviewEvent" (
     "id" TEXT NOT NULL,
     "reviewId" TEXT NOT NULL,
@@ -1759,6 +1781,27 @@ CREATE INDEX "RefundTerminalEvidenceReview_sourceShopifyRefundId_idx" ON "Refund
 CREATE INDEX "RefundTerminalEvidenceReview_firstObservedAt_idx" ON "RefundTerminalEvidenceReview"("firstObservedAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "RefundTerminalConflictEvidence_reviewId_key" ON "RefundTerminalConflictEvidence"("reviewId");
+
+-- CreateIndex
+CREATE INDEX "RefundTerminalConflictEvidence_sourceShopifyRefundId_idx" ON "RefundTerminalConflictEvidence"("sourceShopifyRefundId");
+
+-- CreateIndex
+CREATE INDEX "RefundTerminalConflictEvidence_sourceShopifyOrderId_idx" ON "RefundTerminalConflictEvidence"("sourceShopifyOrderId");
+
+-- CreateIndex
+CREATE INDEX "RefundTerminalConflictEvidence_vendorAllocationId_idx" ON "RefundTerminalConflictEvidence"("vendorAllocationId");
+
+-- CreateIndex
+CREATE INDEX "RefundTerminalConflictEvidence_economicVendorId_idx" ON "RefundTerminalConflictEvidence"("economicVendorId");
+
+-- CreateIndex
+CREATE INDEX "RefundTerminalConflictEvidence_historicalSaleFinanceLedgerE_idx" ON "RefundTerminalConflictEvidence"("historicalSaleFinanceLedgerEntryId");
+
+-- CreateIndex
+CREATE INDEX "RefundTerminalConflictEvidence_evidenceHash_idx" ON "RefundTerminalConflictEvidence"("evidenceHash");
+
+-- CreateIndex
 CREATE INDEX "RefundTerminalEvidenceReviewEvent_reviewId_createdAt_idx" ON "RefundTerminalEvidenceReviewEvent"("reviewId", "createdAt");
 
 -- CreateIndex
@@ -2306,6 +2349,18 @@ ALTER TABLE "RefundTerminalEvidenceReview" ADD CONSTRAINT "RefundTerminalEvidenc
 
 -- AddForeignKey
 ALTER TABLE "RefundTerminalEvidenceReview" ADD CONSTRAINT "RefundTerminalEvidenceReview_storedEvidenceSnapshotId_fkey" FOREIGN KEY ("storedEvidenceSnapshotId") REFERENCES "RefundEvidenceSnapshot"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "RefundTerminalEvidenceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_economicVendorId_fkey" FOREIGN KEY ("economicVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_historicalSaleFinanceLedger_fkey" FOREIGN KEY ("historicalSaleFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RefundTerminalEvidenceReviewEvent" ADD CONSTRAINT "RefundTerminalEvidenceReviewEvent_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "RefundTerminalEvidenceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 import { CustomerCancellationStatus, FinanceEventType, OperationalJobStatus, Prisma } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
-import { normalizeRefundEvidence } from '../finance/refund-evidence-normalizer.service.js';
+import {
+  normalizeRefundEvidence,
+  verifyNormalizedRefundEvidenceHash,
+} from '../finance/refund-evidence-normalizer.service.js';
 import {
   resolveCompleteSaleLineage,
   type CompleteSaleLineage,
@@ -575,6 +578,10 @@ async function persistTerminalRefundEvidenceConflictReview(
     return;
   }
 
+  if (!verifyNormalizedRefundEvidenceHash(input.incoming)) {
+    throw new Error('Incoming terminal refund conflict evidence failed canonical hash verification.');
+  }
+
   const review = await tx.refundTerminalEvidenceReview.create({
     data: {
       sourceShopifyRefundId: input.stored.sourceShopifyRefundId,
@@ -593,6 +600,24 @@ async function persistTerminalRefundEvidenceConflictReview(
       firstObservedAt: observedAt,
       lastObservedAt: observedAt,
       occurrenceCount: 1,
+    },
+  });
+  await tx.refundTerminalConflictEvidence.create({
+    data: {
+      reviewId: review.id,
+      sourceShopifyRefundId: input.incoming.sourceShopifyRefundId,
+      sourceShopifyOrderId: input.incoming.sourceShopifyOrderId,
+      vendorAllocationId: input.incoming.vendorAllocationId,
+      economicVendorId: input.incoming.historicalEconomicVendorId,
+      historicalSaleFinanceLedgerEntryId: input.incoming.historicalSaleFinanceLedgerEntryId,
+      supersededSaleLedgerIdsJson: input.incoming.supersededSaleLedgerIdsJson,
+      refundTotalAmount: input.incoming.refundTotalAmount,
+      currency: input.incoming.currency,
+      normalizedEvidenceJson: input.incoming.normalizedEvidenceJson,
+      evidenceHash: input.incoming.evidenceHash,
+      hashAlgorithm: input.incoming.hashAlgorithm,
+      evidenceVersion: input.incoming.evidenceVersion,
+      normalizationVersion: input.incoming.normalizationVersion,
     },
   });
   await tx.refundTerminalEvidenceReviewEvent.create({

@@ -428,6 +428,7 @@ model Vendor {
   ownedReturnRecords           ReturnRecord[]                @relation("returnOwnerVendor")
   refundEvidenceSnapshots       RefundEvidenceSnapshot[]       @relation("refundEvidenceHistoricalEconomicVendor")
   refundTerminalEvidenceReviews RefundTerminalEvidenceReview[] @relation("refundTerminalEvidenceReviewEconomicVendor")
+  refundTerminalConflictEvidence RefundTerminalConflictEvidence[] @relation("refundTerminalConflictEvidenceEconomicVendor")
   legacyRefundFinanceReviews     LegacyRefundFinanceReview[] @relation("legacyRefundFinanceReviewObservedVendor")
 }
 
@@ -750,6 +751,7 @@ model VendorAllocation {
   fullRefundTerminalFact                 AllocationFullRefundTerminalFact?
   refundEvidenceSnapshots                RefundEvidenceSnapshot[]
   refundTerminalEvidenceReviews          RefundTerminalEvidenceReview[]
+  refundTerminalConflictEvidence         RefundTerminalConflictEvidence[]
   legacyRefundFinanceReviews             LegacyRefundFinanceReview[]
 
   @@index([createdAt])
@@ -1249,6 +1251,7 @@ model RefundTerminalEvidenceReview {
   refundRecord                       RefundRecord?                       @relation(fields: [refundRecordId], references: [id], onDelete: Restrict)
   economicVendor                     Vendor                              @relation("refundTerminalEvidenceReviewEconomicVendor", fields: [economicVendorId], references: [id], onDelete: Restrict)
   storedEvidenceSnapshot             RefundEvidenceSnapshot?             @relation(fields: [storedEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  incomingConflictEvidence           RefundTerminalConflictEvidence?
   events                             RefundTerminalEvidenceReviewEvent[]
 
   @@index([status])
@@ -1256,6 +1259,36 @@ model RefundTerminalEvidenceReview {
   @@index([terminalRefundFinanceLedgerEntryId])
   @@index([sourceShopifyRefundId])
   @@index([firstObservedAt])
+}
+
+model RefundTerminalConflictEvidence {
+  id                                 String                       @id @default(cuid())
+  reviewId                           String                       @unique
+  sourceShopifyRefundId              String
+  sourceShopifyOrderId               String
+  vendorAllocationId                 String
+  economicVendorId                   String
+  historicalSaleFinanceLedgerEntryId String
+  supersededSaleLedgerIdsJson        Json
+  refundTotalAmount                  Decimal                      @db.Decimal(10, 2)
+  currency                           String
+  normalizedEvidenceJson             Json
+  evidenceHash                       String
+  hashAlgorithm                      String
+  evidenceVersion                    Int
+  normalizationVersion               Int
+  createdAt                          DateTime                     @default(now())
+  review                             RefundTerminalEvidenceReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  vendorAllocation                   VendorAllocation             @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
+  economicVendor                     Vendor                       @relation("refundTerminalConflictEvidenceEconomicVendor", fields: [economicVendorId], references: [id], onDelete: Restrict)
+  historicalSaleFinanceLedgerEntry   FinanceLedgerEntry           @relation("refundTerminalConflictEvidenceHistoricalSaleLedger", fields: [historicalSaleFinanceLedgerEntryId], references: [id], onDelete: Restrict)
+
+  @@index([sourceShopifyRefundId])
+  @@index([sourceShopifyOrderId])
+  @@index([vendorAllocationId])
+  @@index([economicVendorId])
+  @@index([historicalSaleFinanceLedgerEntryId])
+  @@index([evidenceHash])
 }
 
 model RefundTerminalEvidenceReviewEvent {
@@ -1426,6 +1459,7 @@ model FinanceLedgerEntry {
   refundEvidenceSnapshot          RefundEvidenceSnapshot?        @relation("refundEvidenceRefundLedger")
   historicalSaleEvidenceSnapshots RefundEvidenceSnapshot[]       @relation("refundEvidenceHistoricalSaleLedger")
   terminalEvidenceReviews         RefundTerminalEvidenceReview[] @relation("refundTerminalEvidenceReviewLedger")
+  terminalConflictEvidence        RefundTerminalConflictEvidence[] @relation("refundTerminalConflictEvidenceHistoricalSaleLedger")
 }
 
 model FinanceEvent {

@@ -85,6 +85,9 @@ const txMock = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
   },
+  refundTerminalConflictEvidence: {
+    create: vi.fn(),
+  },
   refundTerminalEvidenceReviewEvent: {
     create: vi.fn(),
   },
@@ -130,6 +133,20 @@ function canonicalReconciliationEvent() {
     webhookId: 'canonical-refund-reconciliation-shipping-refund-1',
     idempotencyKey: 'canonical_refund_reconciliation:demo.myshopify.com:7621834670417:shipping-refund-1',
   };
+}
+
+function collectJsonKeys(value: unknown, keys = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectJsonKeys(entry, keys));
+    return keys;
+  }
+  if (value && typeof value === 'object') {
+    Object.entries(value).forEach(([key, entry]) => {
+      keys.add(key);
+      collectJsonKeys(entry, keys);
+    });
+  }
+  return keys;
 }
 
 const positiveMonetaryEvidence = {
@@ -667,6 +684,7 @@ describe('Shopify refund return linking', () => {
       ...input.data,
     }));
     txMock.refundTerminalEvidenceReview.update.mockImplementation(async (input: { data: Record<string, unknown> }) => input.data);
+    txMock.refundTerminalConflictEvidence.create.mockImplementation(async (input: { data: Record<string, unknown> }) => input.data);
     txMock.refundTerminalEvidenceReviewEvent.create.mockImplementation(async (input: { data: Record<string, unknown> }) => input.data);
     txMock.financeEvent.findMany.mockResolvedValue([]);
     txMock.settlementRefundAdjustment.findFirst.mockResolvedValue(null);
@@ -835,6 +853,7 @@ describe('Shopify refund return linking', () => {
     expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
     expect(txMock.refundTerminalEvidenceReview.create).not.toHaveBeenCalled();
     expect(txMock.refundTerminalEvidenceReview.update).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalConflictEvidence.create).not.toHaveBeenCalled();
     expect(txMock.refundTerminalEvidenceReviewEvent.create).not.toHaveBeenCalled();
   });
 
@@ -2841,6 +2860,31 @@ describe('Shopify refund return linking', () => {
         eventType: 'DETECTED',
       },
     });
+    expect(txMock.refundTerminalConflictEvidence.create).toHaveBeenCalledWith({
+      data: {
+        reviewId: `terminal-review-${String(review.dedupeKey)}`,
+        sourceShopifyRefundId: accepted.sourceShopifyRefundId,
+        sourceShopifyOrderId: accepted.sourceShopifyOrderId,
+        vendorAllocationId: accepted.vendorAllocationId,
+        economicVendorId: accepted.historicalEconomicVendorId,
+        historicalSaleFinanceLedgerEntryId: accepted.historicalSaleFinanceLedgerEntryId,
+        supersededSaleLedgerIdsJson: accepted.supersededSaleLedgerIdsJson,
+        refundTotalAmount: accepted.refundTotalAmount,
+        currency: accepted.currency,
+        normalizedEvidenceJson: accepted.normalizedEvidenceJson,
+        evidenceHash: accepted.evidenceHash,
+        hashAlgorithm: accepted.hashAlgorithm,
+        evidenceVersion: accepted.evidenceVersion,
+        normalizationVersion: accepted.normalizationVersion,
+      },
+    });
+    const persistedEvidence = txMock.refundTerminalConflictEvidence.create.mock.calls[0]![0].data;
+    const forbiddenEvidenceKeys = [
+      'customerEmail', 'customerPhone', 'shippingAddress', 'billingAddress', 'paymentToken',
+      'gatewaySecret', 'rawWebhookPayload',
+    ];
+    expect([...collectJsonKeys(persistedEvidence.normalizedEvidenceJson)]
+      .filter((key) => forbiddenEvidenceKeys.includes(key))).toEqual([]);
     expect(txMock.refundTerminalEvidenceReview.update).not.toHaveBeenCalled();
     expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
     expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
@@ -2899,6 +2943,7 @@ describe('Shopify refund return linking', () => {
       expect(first).toMatchObject({ ok: false, reasonCode: 'refund_terminal_evidence_conflict' });
       expect(second).toMatchObject({ ok: false, reasonCode: 'refund_terminal_evidence_conflict' });
       expect(txMock.refundTerminalEvidenceReview.create).toHaveBeenCalledTimes(1);
+      expect(txMock.refundTerminalConflictEvidence.create).toHaveBeenCalledTimes(1);
       expect(txMock.refundTerminalEvidenceReview.update).toHaveBeenCalledTimes(1);
       expect(txMock.refundTerminalEvidenceReview.update).toHaveBeenCalledWith({
         where: { dedupeKey: created.dedupeKey },
@@ -2967,6 +3012,7 @@ describe('Shopify refund return linking', () => {
     });
 
     expect(txMock.refundTerminalEvidenceReview.create).toHaveBeenCalledTimes(2);
+    expect(txMock.refundTerminalConflictEvidence.create).toHaveBeenCalledTimes(2);
     const firstReview = txMock.refundTerminalEvidenceReview.create.mock.calls[0]![0].data;
     const secondReview = txMock.refundTerminalEvidenceReview.create.mock.calls[1]![0].data;
     expect(firstReview.dedupeKey).not.toBe(secondReview.dedupeKey);
@@ -3026,6 +3072,7 @@ describe('Shopify refund return linking', () => {
       reasonCode: 'refund_terminal_evidence_conflict',
     });
     expect(txMock.refundTerminalEvidenceReview.create).not.toHaveBeenCalled();
+    expect(txMock.refundTerminalConflictEvidence.create).not.toHaveBeenCalled();
     expect(txMock.refundTerminalEvidenceReview.update).toHaveBeenCalledWith({
       where: { dedupeKey: expect.stringMatching(/^[a-f0-9]{64}$/) },
       data: {
@@ -3034,6 +3081,58 @@ describe('Shopify refund return linking', () => {
       },
     });
     expect(txMock.refundTerminalEvidenceReview.update.mock.calls[0]![0].data).not.toHaveProperty('status');
+    expect(txMock.refundTerminalEvidenceReviewEvent.create).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('fails the terminal conflict transaction before the detection event when incoming evidence persistence fails', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    const payload = refundPayload();
+    const canonicalEvidence = canonicalEvidenceForPayload(payload);
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+    const accepted = txMock.refundEvidenceSnapshot.create.mock.calls[0]![0].data;
+
+    txMock.financeLedgerEntry.create.mockClear();
+    txMock.refundEvidenceSnapshot.create.mockClear();
+    txMock.settlementRefundAdjustment.upsert.mockClear();
+    txMock.vendorBalanceEvent.upsert.mockClear();
+    txMock.financeEvent.createMany.mockClear();
+    txMock.refundTerminalEvidenceReviewEvent.create.mockClear();
+    setupOrder();
+    txMock.refundEvidenceSnapshot.findUnique.mockResolvedValueOnce({
+      id: 'snapshot-1',
+      ...accepted,
+      evidenceHash: '0'.repeat(64),
+    });
+    txMock.refundTerminalConflictEvidence.create.mockRejectedValueOnce(new Error('evidence write failed'));
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalEvidence,
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      error: 'evidence write failed',
+    });
+    expect(prismaMock.$transaction).toHaveBeenCalled();
+    expect(txMock.refundTerminalEvidenceReview.create).toHaveBeenCalledTimes(1);
+    expect(txMock.refundTerminalConflictEvidence.create).toHaveBeenCalledTimes(1);
     expect(txMock.refundTerminalEvidenceReviewEvent.create).not.toHaveBeenCalled();
     expect(txMock.financeLedgerEntry.create).not.toHaveBeenCalled();
     expect(txMock.refundEvidenceSnapshot.create).not.toHaveBeenCalled();

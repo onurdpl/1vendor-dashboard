@@ -7,14 +7,14 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "48e4763214440249138c0db81fafe4dda069cf3dfb27262ac05fe829addca20d"
+    "sha256": "2d5badf4e64d23355606c147ab04296ce9562b68758124bf3835e3ffc3da178a"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "2ec63c68aefbdae2a130751c37ea6f6c0d6d6ccdd098ac0c83f0b355cbe721de"
+    "sha256": "fb71b73859f4c7e062ee85d6eca99c1039c329bc6b0a7332f555b2c24d34dd3d"
   },
-  "migrationCutoff": "20260922170000_add_legacy_refund_finance_review",
-  "baselineMigrationFilesSha256": "0d1f5d2fca3a8df06aece3b094fa96ad2643ea27a6490d3001b4206b9723d16a",
+  "migrationCutoff": "20260923120000_add_terminal_conflict_evidence",
+  "baselineMigrationFilesSha256": "a89e7ed8939a2aef8aad62e660b9781654e126ed5e6d3cda75d2f241ff9182a6",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -108,6 +108,7 @@
     "20260904120000_add_allocation_full_refund_terminal_fact",
     "20260916120000_add_refund_terminal_evidence_foundation",
     "20260922120000_add_refund_terminal_review_lifecycle",
-    "20260922170000_add_legacy_refund_finance_review"
+    "20260922170000_add_legacy_refund_finance_review",
+    "20260923120000_add_terminal_conflict_evidence"
   ]
 }

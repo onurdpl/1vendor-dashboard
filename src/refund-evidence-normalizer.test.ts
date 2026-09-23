@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeRefundEvidence,
   type ResolvedRefundEvidenceInput,
+  verifyNormalizedRefundEvidenceHash,
 } from '../backend/src/modules/finance/refund-evidence-normalizer.service.js';
 
 function evidence(): ResolvedRefundEvidenceInput {
@@ -41,6 +42,16 @@ describe('deterministic refund evidence normalizer', () => {
       hashAlgorithm: 'SHA-256',
       evidenceHash: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
+  });
+
+  it('verifies only the supported hash over the exact normalized JSON', () => {
+    const normalized = normalizeRefundEvidence(evidence());
+    expect(verifyNormalizedRefundEvidenceHash(normalized)).toBe(true);
+    expect(verifyNormalizedRefundEvidenceHash({
+      ...normalized,
+      normalizedEvidenceJson: { ...normalized.normalizedEvidenceJson, refundTotalAmount: '11' },
+    })).toBe(false);
+    expect(verifyNormalizedRefundEvidenceHash({ ...normalized, hashAlgorithm: 'SHA-512' })).toBe(false);
   });
 
   it('normalizes transaction, line, and superseded SALE ordering without deduplication', () => {
