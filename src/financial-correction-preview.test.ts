@@ -28,12 +28,14 @@ function fixture(acceptedAmount = '100.00', correctedAmount = '120.00', commissi
   const incoming = normalized(correctedAmount);
   const sale = {
     id: 'sale-1', entryType: 'sale', vendorId: 'vendor-1', vendorAllocationId: 'allocation-1',
+    amount: new Prisma.Decimal('200.00'), updatedAt: new Date('2026-09-01T00:00:00.000Z'),
     commissionPercentSnapshot: new Prisma.Decimal(commission),
     commissionVatPercentSnapshot: new Prisma.Decimal(commissionVat),
   };
   const refund = {
     id: 'refund-ledger-1', entryType: 'refund', vendorId: 'vendor-1', vendorAllocationId: 'allocation-1',
     amount: new Prisma.Decimal(acceptedAmount), voidedAt: null, supersededByLedgerId: null,
+    payoutStatus: 'PENDING', settlementStatus: 'PENDING', updatedAt: new Date('2026-09-01T00:00:00.000Z'),
     commissionPercentSnapshot: new Prisma.Decimal(commission),
     commissionVatPercentSnapshot: new Prisma.Decimal(commissionVat),
   };
@@ -43,10 +45,11 @@ function fixture(acceptedAmount = '100.00', correctedAmount = '120.00', commissi
     ...accepted,
   };
   const conflict = {
-    ...incoming, economicVendorId: incoming.historicalEconomicVendorId,
+    ...incoming, id: 'incoming-1', economicVendorId: incoming.historicalEconomicVendorId,
   };
   const review = {
     id: 'review-1', status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED',
+    updatedAt: new Date('2026-09-02T00:00:00.000Z'), occurrenceCount: 1,
     sourceShopifyRefundId: 'refund-1', sourceShopifyOrderId: 'order-1',
     vendorAllocationId: 'allocation-1', economicVendorId: 'vendor-1',
     refundRecordId: 'record-1',
@@ -84,7 +87,31 @@ describe('terminal financial correction calculation preview', () => {
     });
     expect(result?.acceptedEvidence.hash).toBe(input.snapshot.evidenceHash);
     expect(result?.incomingEvidence.hash).toBe(input.conflict.evidenceHash);
+    expect(result.previewFingerprint).toMatch(/^financial-correction-preview-v1:[a-f0-9]{64}$/);
     expect(input.findUnique).toHaveBeenCalledTimes(1);
+    expect(input.write).not.toHaveBeenCalled();
+  });
+
+  it('binds the fingerprint to review freshness, evidence, historical SALE, and accepted REFUND authority', async () => {
+    const input = fixture();
+    const initial = await previewTerminalFinancialCorrection('review-1', input.db);
+    expect((await previewTerminalFinancialCorrection('review-1', input.db)).previewFingerprint).toBe(initial.previewFingerprint);
+
+    input.review.occurrenceCount += 1;
+    const afterObservation = await previewTerminalFinancialCorrection('review-1', input.db);
+    expect(afterObservation.previewFingerprint).not.toBe(initial.previewFingerprint);
+
+    input.sale.updatedAt = new Date('2026-09-03T00:00:00.000Z');
+    const afterSaleUpdate = await previewTerminalFinancialCorrection('review-1', input.db);
+    expect(afterSaleUpdate.previewFingerprint).not.toBe(afterObservation.previewFingerprint);
+
+    input.refund.payoutStatus = 'PAID';
+    const afterRefundUpdate = await previewTerminalFinancialCorrection('review-1', input.db);
+    expect(afterRefundUpdate.previewFingerprint).not.toBe(afterSaleUpdate.previewFingerprint);
+
+    input.conflict.id = 'incoming-2';
+    const afterEvidenceReplacement = await previewTerminalFinancialCorrection('review-1', input.db);
+    expect(afterEvidenceReplacement.previewFingerprint).not.toBe(afterRefundUpdate.previewFingerprint);
     expect(input.write).not.toHaveBeenCalled();
   });
 

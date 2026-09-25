@@ -196,6 +196,40 @@ export function getAdminRefundReview(reviewId: string, signal?: AbortSignal) {
   );
 }
 
+export type FinancialCorrectionPreviewState = {
+  refundAmountMinor: number;
+  commissionReversalMinor: number;
+  commissionVatReversalMinor: number;
+  vendorPayableReversalMinor: number;
+};
+
+export type AdminFinancialCorrectionPreview = {
+  previewFingerprint: string;
+  reviewId: string;
+  sourceShopifyRefundId: string;
+  sourceShopifyOrderId: string;
+  vendorAllocationId: string;
+  vendorId: string;
+  historicalSaleFinanceLedgerEntryId: string;
+  acceptedRefundFinanceLedgerEntryId: string;
+  currency: 'TRY';
+  acceptedEvidence: { id: string; hash: string; version: number; normalizationVersion: number };
+  incomingEvidence: { id: string; hash: string; version: number; normalizationVersion: number };
+  commissionPercent: string;
+  commissionVatPercent: string;
+  accepted: FinancialCorrectionPreviewState;
+  corrected: FinancialCorrectionPreviewState;
+  difference: FinancialCorrectionPreviewState;
+  economicDirection: 'VENDOR_DEDUCTION' | 'VENDOR_CREDIT' | 'NONE';
+};
+
+export function getAdminFinancialCorrectionPreview(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; writesPerformed: false; preview: AdminFinancialCorrectionPreview }>(
+    `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-preview`,
+    { signal },
+  );
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;

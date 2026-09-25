@@ -9,6 +9,7 @@ import {
   acknowledgeAdminLegacyRefundReview,
   getAdminLegacyRefundReview,
   getAdminRefundReview,
+  getAdminFinancialCorrectionPreview,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
@@ -23,6 +24,7 @@ import {
   type LegacyRefundReviewDetail,
   type TerminalRefundReview,
   type TerminalRefundReviewDetail,
+  type AdminFinancialCorrectionPreview,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -33,6 +35,7 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     listAdminRefundReviews: vi.fn(),
     listRefundAdjustments: vi.fn(),
     getAdminRefundReview: vi.fn(),
+    getAdminFinancialCorrectionPreview: vi.fn(),
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
@@ -47,6 +50,7 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
 const listRefundAdjustmentsMock = vi.mocked(listRefundAdjustments);
 const listAdminRefundReviewsMock = vi.mocked(listAdminRefundReviews);
 const getAdminRefundReviewMock = vi.mocked(getAdminRefundReview);
+const getAdminFinancialCorrectionPreviewMock = vi.mocked(getAdminFinancialCorrectionPreview);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
@@ -189,6 +193,24 @@ function makeTerminalDetail(overrides: Partial<TerminalRefundReviewDetail> = {})
   };
 }
 
+function makeCorrectionPreview(overrides: Partial<AdminFinancialCorrectionPreview> = {}): AdminFinancialCorrectionPreview {
+  return {
+    previewFingerprint: 'financial-correction-preview-v1:verified',
+    reviewId: 'review-1', sourceShopifyRefundId: 'refund-1', sourceShopifyOrderId: 'order-1',
+    vendorAllocationId: 'allocation-1', vendorId: 'yalispor',
+    historicalSaleFinanceLedgerEntryId: 'sale-1', acceptedRefundFinanceLedgerEntryId: 'ledger-1',
+    currency: 'TRY',
+    acceptedEvidence: { id: 'snapshot-1', hash: 'accepted-hash', version: 1, normalizationVersion: 1 },
+    incomingEvidence: { id: 'incoming-1', hash: 'incoming-hash', version: 1, normalizationVersion: 1 },
+    commissionPercent: '10', commissionVatPercent: '20',
+    accepted: { refundAmountMinor: 10000, commissionReversalMinor: 1000, commissionVatReversalMinor: 200, vendorPayableReversalMinor: 8800 },
+    corrected: { refundAmountMinor: 12000, commissionReversalMinor: 1200, commissionVatReversalMinor: 240, vendorPayableReversalMinor: 10560 },
+    difference: { refundAmountMinor: 2000, commissionReversalMinor: 200, commissionVatReversalMinor: 40, vendorPayableReversalMinor: 1760 },
+    economicDirection: 'VENDOR_DEDUCTION',
+    ...overrides,
+  };
+}
+
 function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
   return {
     type: 'legacy_refund_finance', id: 'legacy-review-1', status: 'ACTIVE', resolutionOutcome: null,
@@ -238,6 +260,7 @@ beforeEach(() => {
   listRefundAdjustmentsMock.mockResolvedValue(response());
   listAdminRefundReviewsMock.mockResolvedValue(reviewResponse());
   getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
+  getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview() });
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
@@ -483,6 +506,78 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(await screen.findByText('Financial correction required. No financial correction has been applied.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reopen' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /apply correction|correct finance/i })).not.toBeInTheDocument();
+  });
+
+  it('shows an allocation-scoped, read-only correction preview with every calculated component', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    renderPage();
+    const preview = await screen.findByLabelText('Financial correction preview');
+    await waitFor(() => expect(within(preview).getByText('Vendor owes Sporgym more')).toBeInTheDocument());
+    for (const [label, amount] of [
+      ['Accepted refund amount', 'TRY 100.00'], ['Corrected refund amount', 'TRY 120.00'], ['Refund difference', '+TRY 20.00'],
+      ['Accepted commission reversal', 'TRY 10.00'], ['Corrected commission reversal', 'TRY 12.00'], ['Commission difference', '+TRY 2.00'],
+      ['Accepted commission VAT reversal', 'TRY 2.00'], ['Corrected commission VAT reversal', 'TRY 2.40'], ['Commission VAT difference', '+TRY 0.40'],
+      ['Accepted vendor-payable effect', 'TRY 88.00'], ['Corrected vendor-payable effect', 'TRY 105.60'], ['Final vendor-payable difference', '+TRY 17.60'],
+    ]) {
+      expect(within(preview).getByText(label).closest('.op-meta-row')).toHaveTextContent(amount);
+    }
+    expect(within(preview).getByText('allocation-1')).toBeInTheDocument();
+    expect(within(preview).getByText('sale-1')).toBeInTheDocument();
+    expect(within(preview).getByText('Accepted and incoming evidence verified')).toBeInTheDocument();
+    expect(getAdminFinancialCorrectionPreviewMock).toHaveBeenCalledWith('review-1', expect.any(AbortSignal));
+    expect(within(preview).queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve & apply correction|create vendor debt|create vendor credit|add to settlement|add to payout|mark paid|cancel payout/i })).not.toBeInTheDocument();
+  });
+
+  it('shows zero vendor effect without hiding component differences or adding a money action', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview({
+      corrected: { refundAmountMinor: 12000, commissionReversalMinor: 3000, commissionVatReversalMinor: 200, vendorPayableReversalMinor: 8800 },
+      difference: { refundAmountMinor: 2000, commissionReversalMinor: 2000, commissionVatReversalMinor: 0, vendorPayableReversalMinor: 0 },
+      economicDirection: 'NONE',
+    }) });
+    renderPage();
+    const preview = await screen.findByLabelText('Financial correction preview');
+    expect(await within(preview).findByText('No vendor monetary effect')).toBeInTheDocument();
+    expect(within(preview).getByText('Refund difference').closest('.op-meta-row')).toHaveTextContent('20.00');
+    expect(within(preview).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('renders vendor credit as a gross correction direction without netting existing debt', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview({
+      corrected: { refundAmountMinor: 8000, commissionReversalMinor: 800, commissionVatReversalMinor: 160, vendorPayableReversalMinor: 7040 },
+      difference: { refundAmountMinor: -2000, commissionReversalMinor: -200, commissionVatReversalMinor: -40, vendorPayableReversalMinor: -1760 },
+      economicDirection: 'VENDOR_CREDIT',
+    }) });
+    renderPage();
+    const preview = await screen.findByLabelText('Financial correction preview');
+    expect(await within(preview).findByText('Sporgym owes vendor more')).toBeInTheDocument();
+    expect(within(preview).getByText('Final vendor-payable difference').closest('.op-meta-row')).toHaveTextContent('-TRY 17.60');
+    expect(within(preview).queryByText(/existing debt|net payable/i)).not.toBeInTheDocument();
+    expect(within(preview).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('reports an unavailable preview without inventing a corrected amount or action', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockRejectedValue(new Error('Financial correction preview unavailable: incoming_evidence_missing.'));
+    renderPage();
+    const preview = await screen.findByLabelText('Financial correction preview');
+    expect(await within(preview).findByRole('status')).toHaveTextContent('incoming_evidence_missing');
+    expect(within(preview).queryByText('Accepted refund amount')).not.toBeInTheDocument();
+    expect(within(preview).queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('shows a stale action error and refetches list and detail', async () => {

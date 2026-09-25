@@ -91,6 +91,10 @@ import {
 import { resolvePagination } from '../../lib/pagination.js';
 import { listAdminRefundReviews } from './admin-refund-review-projection.service.js';
 import {
+  FinancialCorrectionPreviewError,
+  previewTerminalFinancialCorrection,
+} from './financial-correction-preview.service.js';
+import {
   acknowledgeAdminRefundReview,
   AdminRefundReviewLifecycleError,
   getAdminRefundReviewDetail,
@@ -1301,6 +1305,34 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           ok: false,
           message: error instanceof Error ? error.message : 'Refund evidence review could not be loaded.',
         });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-reviews/:reviewId/financial-correction-preview',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+      try {
+        const { reviewId } = request.params as { reviewId: string };
+        return {
+          ok: true as const,
+          writesPerformed: false as const,
+          preview: await previewTerminalFinancialCorrection(reviewId),
+        };
+      } catch (error) {
+        if (error instanceof FinancialCorrectionPreviewError) {
+          return reply.code(error.reasonCode === 'terminal_review_missing' ? 404 : 409).send({
+            ok: false,
+            code: 'FINANCIAL_CORRECTION_PREVIEW_UNAVAILABLE',
+            reasonCode: error.reasonCode,
+            message: error.message,
+          });
+        }
+        throw error;
       }
     },
   );

@@ -6,6 +6,7 @@ const previewPendingRefundAdjustmentApplicationMock = vi.hoisted(() => vi.fn());
 const getSettlementRefundAdjustmentDetailMock = vi.hoisted(() => vi.fn());
 const listAdminRefundReviewsMock = vi.hoisted(() => vi.fn());
 const getAdminRefundReviewDetailMock = vi.hoisted(() => vi.fn());
+const previewTerminalFinancialCorrectionMock = vi.hoisted(() => vi.fn());
 const acknowledgeAdminRefundReviewMock = vi.hoisted(() => vi.fn());
 const resolveAdminRefundReviewMock = vi.hoisted(() => vi.fn());
 const reopenAdminRefundReviewMock = vi.hoisted(() => vi.fn());
@@ -27,6 +28,15 @@ vi.mock('../backend/src/modules/finance/admin-refund-review-lifecycle.service.js
   AdminRefundReviewLifecycleError: class AdminRefundReviewLifecycleError extends Error {
     statusCode: number;
     constructor(message: string, statusCode = 409) { super(message); this.statusCode = statusCode; }
+  },
+}));
+
+vi.mock('../backend/src/modules/finance/financial-correction-preview.service.js', () => ({
+  previewTerminalFinancialCorrection: previewTerminalFinancialCorrectionMock,
+  FinancialCorrectionPreviewError: class FinancialCorrectionPreviewError extends Error {
+    constructor(readonly reasonCode: string) {
+      super(`Financial correction preview unavailable: ${reasonCode}.`);
+    }
   },
 }));
 
@@ -134,6 +144,7 @@ function buildReply() {
 describe('refund adjustment eligibility preview route', () => {
   beforeEach(() => {
     listAdminRefundReviewsMock.mockReset();
+    previewTerminalFinancialCorrectionMock.mockReset();
     previewRefundAdjustmentEligibilityMock.mockReset();
     backfillPendingRefundAdjustmentsMock.mockReset();
     previewPendingRefundAdjustmentApplicationMock.mockReset();
@@ -234,6 +245,43 @@ describe('refund adjustment eligibility preview route', () => {
         expectedStatus: 'ACTIVE', expectedUpdatedAt: '2026-09-20T10:00:00.000Z', expectedOccurrenceCount: 2,
       },
     });
+  });
+
+  it('exposes only the server-calculated, read-only correction preview to Admin', async () => {
+    const gets = new Map<string, (request: any, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: any, reply: ReturnType<typeof buildReply>) => unknown) => gets.set(path, handler)),
+      post: vi.fn(), put: vi.fn(), delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+    const handler = gets.get('/admin/finance/refund-reviews/:reviewId/financial-correction-preview');
+    expect(handler).toBeDefined();
+    for (const role of ['vendor', 'finance', 'support']) {
+      expect(await handler?.({ authUser: { role }, params: { reviewId: 'review-1' } }, buildReply()))
+        .toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    }
+    expect(previewTerminalFinancialCorrectionMock).not.toHaveBeenCalled();
+
+    const preview = { reviewId: 'review-1', previewFingerprint: 'financial-correction-preview-v1:test', accepted: { refundAmountMinor: 10000 } };
+    previewTerminalFinancialCorrectionMock.mockResolvedValue(preview);
+    expect(await handler?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+      body: { refundAmountMinor: 999999, vendorId: 'other-vendor', economicDirection: 'VENDOR_CREDIT' },
+    }, buildReply())).toEqual({ ok: true, writesPerformed: false, preview });
+    expect(previewTerminalFinancialCorrectionMock).toHaveBeenCalledWith('review-1');
+    expect(previewTerminalFinancialCorrectionMock).toHaveBeenCalledTimes(1);
+
+    const { FinancialCorrectionPreviewError } = await import('../backend/src/modules/finance/financial-correction-preview.service.js');
+    previewTerminalFinancialCorrectionMock.mockRejectedValue(new FinancialCorrectionPreviewError('incoming_evidence_missing'));
+    expect(await handler?.({ authUser: { role: 'admin' }, params: { reviewId: 'old-review' } }, buildReply()))
+      .toEqual({ status: 409, body: {
+        ok: false, code: 'FINANCIAL_CORRECTION_PREVIEW_UNAVAILABLE',
+        reasonCode: 'incoming_evidence_missing',
+        message: 'Financial correction preview unavailable: incoming_evidence_missing.',
+      } });
+    previewTerminalFinancialCorrectionMock.mockRejectedValue(new FinancialCorrectionPreviewError('terminal_review_missing'));
+    expect(await handler?.({ authUser: { role: 'admin' }, params: { reviewId: 'legacy-review' } }, buildReply()))
+      .toMatchObject({ status: 404, body: { reasonCode: 'terminal_review_missing' } });
   });
 
   it('requires admin auth', async () => {

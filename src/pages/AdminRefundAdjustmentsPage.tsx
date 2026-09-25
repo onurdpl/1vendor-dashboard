@@ -14,6 +14,7 @@ import {
   listRefundAdjustments,
   acknowledgeAdminRefundReview,
   getAdminRefundReview,
+  getAdminFinancialCorrectionPreview,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
   acknowledgeAdminLegacyRefundReview,
@@ -306,6 +307,24 @@ export function AdminRefundAdjustmentsPage() {
     },
   );
   const terminalDetail = terminalDetailQuery.data?.review ?? null;
+  const eligibleTerminalDetail = terminalDetail && selectedTerminalReview && terminalDetail.id === selectedTerminalReview.id
+    && terminalDetail.status === 'RESOLVED'
+    && terminalDetail.resolutionOutcome === 'CORRECTION_REQUIRED'
+    ? terminalDetail : null;
+  const correctionPreviewQuery = useQueryResource(
+    ['admin', 'finance', 'financial-correction-preview', eligibleTerminalDetail?.id ?? 'none', eligibleTerminalDetail?.updatedAt ?? 'none', eligibleTerminalDetail?.occurrenceCount ?? 0],
+    ({ signal }) => getAdminFinancialCorrectionPreview(eligibleTerminalDetail!.id, signal),
+    {
+      routeName: 'Financial correction preview',
+      endpoint: eligibleTerminalDetail
+        ? `/admin/finance/refund-reviews/${eligibleTerminalDetail.id}/financial-correction-preview`
+        : '/admin/finance/refund-reviews',
+      enabled: Boolean(eligibleTerminalDetail),
+    },
+  );
+  const correctionPreview = eligibleTerminalDetail && !correctionPreviewQuery.isFetching && !correctionPreviewQuery.error
+    && correctionPreviewQuery.data?.preview.reviewId === eligibleTerminalDetail.id
+    ? correctionPreviewQuery.data.preview : null;
 
   const runTerminalReviewAction = async (action: 'acknowledge' | 'resolve' | 'reopen') => {
     if (!terminalDetail || terminalActionPending) return;
@@ -700,6 +719,48 @@ export function AdminRefundAdjustmentsPage() {
                     <MetadataRow label="Normalization version" value={terminalDetail.normalizationVersion ?? 'UNKNOWN'} />
                     <MetadataRow label="Conflict summary" value={<code>{formatReviewJson(terminalDetail.conflictSummary)}</code>} />
                   </MetadataGroup>
+
+                  {eligibleTerminalDetail ? (
+                    <section className="op-panel-section" aria-label="Financial correction preview">
+                      <h4>Financial correction preview</h4>
+                      <p className="page-description">Read-only calculation. No financial correction has been applied.</p>
+                      {correctionPreviewQuery.isFetching ? <p className="page-description">Loading correction preview...</p> : null}
+                      {correctionPreviewQuery.error ? <p className="op-alert op-tone-attention" role="status">Correction preview unavailable: {correctionPreviewQuery.error}</p> : null}
+                      {correctionPreview ? (
+                        <>
+                          <MetadataGroup title="Authority">
+                            <MetadataRow label="Vendor" value={correctionPreview.vendorId} />
+                            <MetadataRow label="Allocation" value={correctionPreview.vendorAllocationId} />
+                            <MetadataRow label="Refund" value={correctionPreview.sourceShopifyRefundId} />
+                            <MetadataRow label="Historical SALE ledger" value={correctionPreview.historicalSaleFinanceLedgerEntryId} />
+                            <MetadataRow label="Accepted REFUND ledger" value={correctionPreview.acceptedRefundFinanceLedgerEntryId} />
+                            <MetadataRow label="Currency" value={correctionPreview.currency} />
+                            <MetadataRow label="Evidence verification" value="Accepted and incoming evidence verified" />
+                            <MetadataRow label="Preview identity" value={correctionPreview.previewFingerprint} />
+                          </MetadataGroup>
+                          <MetadataGroup title="Allocation-scoped refund effect">
+                            <MetadataRow label="Accepted refund amount" value={formatMinor(correctionPreview.accepted.refundAmountMinor)} />
+                            <MetadataRow label="Corrected refund amount" value={formatMinor(correctionPreview.corrected.refundAmountMinor)} />
+                            <MetadataRow label="Refund difference" value={formatSignedMinor(correctionPreview.difference.refundAmountMinor)} />
+                            <MetadataRow label="Accepted commission reversal" value={formatMinor(correctionPreview.accepted.commissionReversalMinor)} />
+                            <MetadataRow label="Corrected commission reversal" value={formatMinor(correctionPreview.corrected.commissionReversalMinor)} />
+                            <MetadataRow label="Commission difference" value={formatSignedMinor(correctionPreview.difference.commissionReversalMinor)} />
+                            <MetadataRow label="Accepted commission VAT reversal" value={formatMinor(correctionPreview.accepted.commissionVatReversalMinor)} />
+                            <MetadataRow label="Corrected commission VAT reversal" value={formatMinor(correctionPreview.corrected.commissionVatReversalMinor)} />
+                            <MetadataRow label="Commission VAT difference" value={formatSignedMinor(correctionPreview.difference.commissionVatReversalMinor)} />
+                            <MetadataRow label="Accepted vendor-payable effect" value={formatMinor(correctionPreview.accepted.vendorPayableReversalMinor)} />
+                            <MetadataRow label="Corrected vendor-payable effect" value={formatMinor(correctionPreview.corrected.vendorPayableReversalMinor)} />
+                            <MetadataRow label="Final vendor-payable difference" value={formatSignedMinor(correctionPreview.difference.vendorPayableReversalMinor)} />
+                            <MetadataRow label="Economic direction" value={correctionPreview.economicDirection === 'VENDOR_DEDUCTION'
+                              ? 'Vendor owes Sporgym more'
+                              : correctionPreview.economicDirection === 'VENDOR_CREDIT'
+                                ? 'Sporgym owes vendor more'
+                                : 'No vendor monetary effect'} />
+                          </MetadataGroup>
+                        </>
+                      ) : null}
+                    </section>
+                  ) : null}
 
                   <section className="op-panel-section">
                     <h4>History</h4>

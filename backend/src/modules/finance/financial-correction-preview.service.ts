@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import {
@@ -205,7 +206,60 @@ export async function previewTerminalFinancialCorrection(
     commissionVatReversalMinor: correctedState.commissionVatReversalMinor - acceptedState.commissionVatReversalMinor,
     vendorPayableReversalMinor: correctedState.vendorPayableReversalMinor - acceptedState.vendorPayableReversalMinor,
   };
+  const economicDirection = difference.vendorPayableReversalMinor > 0 ? 'VENDOR_DEDUCTION' as const
+    : difference.vendorPayableReversalMinor < 0 ? 'VENDOR_CREDIT' as const : 'NONE' as const;
+  // This identifies a displayed calculation for later revalidation; it is not authorization.
+  const previewFingerprint = createHash('sha256').update(JSON.stringify({
+    version: 1,
+    review: {
+      id: review.id,
+      status: review.status,
+      resolutionOutcome: review.resolutionOutcome,
+      updatedAt: review.updatedAt,
+      occurrenceCount: review.occurrenceCount,
+    },
+    identity: {
+      sourceShopifyRefundId: review.sourceShopifyRefundId,
+      sourceShopifyOrderId: review.sourceShopifyOrderId,
+      vendorAllocationId: review.vendorAllocationId,
+      vendorId: review.economicVendorId,
+      historicalSaleFinanceLedgerEntryId: sale.id,
+      acceptedRefundFinanceLedgerEntryId: refund.id,
+      currency: 'TRY',
+    },
+    acceptedEvidence: {
+      id: accepted.id, hash: accepted.evidenceHash,
+      hashAlgorithm: accepted.hashAlgorithm,
+      version: accepted.evidenceVersion,
+      normalizationVersion: accepted.normalizationVersion,
+    },
+    incomingEvidence: {
+      id: incoming.id, hash: incoming.evidenceHash,
+      hashAlgorithm: incoming.hashAlgorithm,
+      version: incoming.evidenceVersion,
+      normalizationVersion: incoming.normalizationVersion,
+    },
+    historicalSale: {
+      updatedAt: sale.updatedAt,
+      amount: sale.amount.toString(),
+      commissionPercent,
+      commissionVatPercent,
+    },
+    acceptedRefundLedger: {
+      updatedAt: refund.updatedAt,
+      amount: refund.amount.toString(),
+      payoutStatus: refund.payoutStatus,
+      settlementStatus: refund.settlementStatus,
+      voidedAt: refund.voidedAt,
+      supersededByLedgerId: refund.supersededByLedgerId,
+    },
+    acceptedState,
+    correctedState,
+    difference,
+    economicDirection,
+  })).digest('hex');
   return {
+    previewFingerprint: `financial-correction-preview-v1:${previewFingerprint}`,
     reviewId: review.id,
     sourceShopifyRefundId: review.sourceShopifyRefundId,
     sourceShopifyOrderId: review.sourceShopifyOrderId,
@@ -214,14 +268,13 @@ export async function previewTerminalFinancialCorrection(
     historicalSaleFinanceLedgerEntryId: sale.id,
     acceptedRefundFinanceLedgerEntryId: refund.id,
     currency: 'TRY' as const,
-    acceptedEvidence: { hash: accepted.evidenceHash, version: accepted.evidenceVersion, normalizationVersion: accepted.normalizationVersion },
-    incomingEvidence: { hash: incoming.evidenceHash, version: incoming.evidenceVersion, normalizationVersion: incoming.normalizationVersion },
+    acceptedEvidence: { id: accepted.id, hash: accepted.evidenceHash, version: accepted.evidenceVersion, normalizationVersion: accepted.normalizationVersion },
+    incomingEvidence: { id: incoming.id, hash: incoming.evidenceHash, version: incoming.evidenceVersion, normalizationVersion: incoming.normalizationVersion },
     commissionPercent,
     commissionVatPercent,
     accepted: acceptedState,
     corrected: correctedState,
     difference,
-    economicDirection: difference.vendorPayableReversalMinor > 0 ? 'VENDOR_DEDUCTION' as const
-      : difference.vendorPayableReversalMinor < 0 ? 'VENDOR_CREDIT' as const : 'NONE' as const,
+    economicDirection,
   };
 }
