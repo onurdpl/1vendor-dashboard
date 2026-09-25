@@ -1370,20 +1370,20 @@ model FinancialCorrectionZeroNetAcknowledgement {
 // A single accepted refund baseline can be consumed by only one supported correction path.
 model FinancialCorrectionBaselineClaim {
   id                         String @id @default(cuid())
-  acceptedEvidenceSnapshotId String @unique
+  acceptedEvidenceSnapshotId String @unique(map: "FinancialCorrectionBaselineClaim_accepted_key")
   consumerType               String
-  consumerId                 String @unique
+  consumerId                 String @unique(map: "FinancialCorrectionBaselineClaim_consumer_key")
   createdAt                  DateTime @default(now())
-  acceptedEvidenceSnapshot   RefundEvidenceSnapshot @relation(fields: [acceptedEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  acceptedEvidenceSnapshot   RefundEvidenceSnapshot @relation(fields: [acceptedEvidenceSnapshotId], references: [id], onDelete: Restrict, map: "FinancialCorrectionBaselineClaim_accepted_fkey")
 }
 
 // Phase 2C: immutable authority for one locally PAID vendor-deduction correction.
 model FinancialCorrectionAuthority {
   id                                 String @id @default(cuid())
-  reviewId                           String @unique
-  resolvedReviewEventId              String @unique
-  acceptedEvidenceSnapshotId         String @unique
-  incomingConflictEvidenceId         String @unique
+  reviewId                           String @unique(map: "FinancialCorrectionAuthority_review_key")
+  resolvedReviewEventId              String @unique(map: "FinancialCorrectionAuthority_event_key")
+  acceptedEvidenceSnapshotId         String @unique(map: "FinancialCorrectionAuthority_accepted_key")
+  incomingConflictEvidenceId         String @unique(map: "FinancialCorrectionAuthority_incoming_key")
   sourceShopifyRefundId              String
   sourceShopifyOrderId               String
   vendorAllocationId                 String
@@ -1420,16 +1420,16 @@ model FinancialCorrectionAuthority {
   reason                             String
   authorizedAt                       DateTime @default(now())
   appliedAt                          DateTime @default(now())
-  review                             RefundTerminalEvidenceReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
-  resolvedReviewEvent                RefundTerminalEvidenceReviewEvent @relation(fields: [resolvedReviewEventId], references: [id], onDelete: Restrict)
-  acceptedEvidenceSnapshot           RefundEvidenceSnapshot @relation(fields: [acceptedEvidenceSnapshotId], references: [id], onDelete: Restrict)
-  incomingConflictEvidence           RefundTerminalConflictEvidence @relation(fields: [incomingConflictEvidenceId], references: [id], onDelete: Restrict)
-  authorizedByUser                   User @relation("paidFinancialCorrectionActor", fields: [authorizedByUserId], references: [id], onDelete: Restrict)
-  historicalPayoutBatch              PayoutBatch @relation(fields: [historicalPayoutBatchId], references: [id], onDelete: Restrict)
+  review                             RefundTerminalEvidenceReview @relation(fields: [reviewId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_review_fkey")
+  resolvedReviewEvent                RefundTerminalEvidenceReviewEvent @relation(fields: [resolvedReviewEventId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_event_fkey")
+  acceptedEvidenceSnapshot           RefundEvidenceSnapshot @relation(fields: [acceptedEvidenceSnapshotId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_accepted_fkey")
+  incomingConflictEvidence           RefundTerminalConflictEvidence @relation(fields: [incomingConflictEvidenceId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_incoming_fkey")
+  authorizedByUser                   User @relation("paidFinancialCorrectionActor", fields: [authorizedByUserId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_actor_fkey")
+  historicalPayoutBatch              PayoutBatch @relation(fields: [historicalPayoutBatchId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_payout_fkey")
   debtEvent                          VendorBalanceEvent? @relation("paidFinancialCorrectionDebt")
 
-  @@unique([acceptedEvidenceSnapshotId, incomingConflictEvidenceId])
-  @@index([vendorId, appliedAt])
+  @@unique([acceptedEvidenceSnapshotId, incomingConflictEvidenceId], map: "FinancialCorrectionAuthority_pair_key")
+  @@index([vendorId, appliedAt], map: "FinancialCorrectionAuthority_vendor_applied_idx")
 }
 
 model LegacyRefundFinanceReview {
@@ -1978,7 +1978,7 @@ model VendorBalanceEvent {
   refundRecord         RefundRecord?          @relation(fields: [refundRecordId], references: [id], onDelete: SetNull)
   payoutBatch          PayoutBatch?           @relation(fields: [payoutBatchId], references: [id], onDelete: SetNull)
   settlementApproval   SettlementApproval?    @relation(fields: [settlementApprovalId], references: [id], onDelete: SetNull)
-  financialCorrectionAuthority FinancialCorrectionAuthority? @relation("paidFinancialCorrectionDebt", fields: [financialCorrectionAuthorityId], references: [id], onDelete: Restrict)
+  financialCorrectionAuthority FinancialCorrectionAuthority? @relation("paidFinancialCorrectionDebt", fields: [financialCorrectionAuthorityId], references: [id], onDelete: Restrict, map: "VendorBalanceEvent_correction_authority_fkey")
 
   @@index([vendorId, createdAt])
   @@index([vendorId, currency])

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:postgres": "vitest run src/shopify-order-advisory-lock.postgres.test.ts",
+    "test:postgres:phase2c": "vitest run src/financial-correction-paid-debt.postgres.test.ts",
     "smoke:browser": "playwright test",
     "test:watch": "vitest",
     "backend:dev": "npm --prefix backend run dev",

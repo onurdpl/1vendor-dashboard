@@ -60,6 +60,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_test?schema=public
 
+      - name: Test Phase 2C PostgreSQL correction concurrency
+        run: npm run test:postgres:phase2c
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_fresh_bootstrap?schema=public
+          PHASE2C_TEST_DATABASE_ISOLATED: '1'
+
       - name: Build
         run: npm run build
 
