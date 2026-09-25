@@ -17,6 +17,13 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
   },
+  financialCorrectionCreditSettlementLine: {
+    findMany: vi.fn(),
+  },
+  financialCorrectionCreditPayoutLine: {
+    findMany: vi.fn(),
+    updateMany: vi.fn(),
+  },
   vendorBalanceEvent: {
     findMany: vi.fn(),
     upsert: vi.fn(),
@@ -239,6 +246,7 @@ function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[], s
     commissionVatAmount: 0,
     shippingDeductionAmount: 0,
     refundAmount: 0,
+    correctionCreditAmount: 0,
     netAmount: lines.reduce((sum, line) => sum + Number(line.amountSnapshot ?? 0), 0),
     currency: 'TRY',
     createdByUserId: 'admin-user',
@@ -249,6 +257,7 @@ function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[], s
     createdAt: new Date('2026-05-13T11:00:00Z'),
     updatedAt: new Date('2026-05-13T11:00:00Z'),
     lines,
+    correctionCreditLines: [],
   };
 }
 
@@ -271,6 +280,7 @@ function mockPreparedBatchResponse(id = 'batch-approved-source') {
     commissionVatAmount: data.commissionVatAmount,
     shippingDeductionAmount: data.shippingDeductionAmount,
     refundAmount: data.refundAmount,
+    correctionCreditAmount: data.correctionCreditAmount,
     netAmount: data.netAmount,
     currency: data.currency,
     createdByUserId: data.createdByUserId,
@@ -286,6 +296,7 @@ function mockPreparedBatchResponse(id = 'batch-approved-source') {
       ...line,
       createdAt: new Date('2026-05-13T11:00:00Z'),
     })),
+    correctionCreditLines: [],
   }));
 }
 
@@ -317,6 +328,12 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatch.findUnique.mockReset();
     prismaMock.payoutBatch.update.mockReset();
     prismaMock.payoutBatch.updateMany.mockReset();
+    prismaMock.financialCorrectionCreditSettlementLine.findMany.mockReset();
+    prismaMock.financialCorrectionCreditSettlementLine.findMany.mockResolvedValue([]);
+    prismaMock.financialCorrectionCreditPayoutLine.findMany.mockReset();
+    prismaMock.financialCorrectionCreditPayoutLine.findMany.mockResolvedValue([]);
+    prismaMock.financialCorrectionCreditPayoutLine.updateMany.mockReset();
+    prismaMock.financialCorrectionCreditPayoutLine.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.vendorBalanceEvent.findMany.mockReset();
     prismaMock.vendorBalanceEvent.upsert.mockReset();
     prismaMock.financeIntegrityAlert.findMany.mockReset();
@@ -854,6 +871,7 @@ describe('payout batch preparation', () => {
         ...line,
         createdAt: new Date('2026-05-13T11:00:00Z'),
       })),
+      correctionCreditLines: [],
     }));
 
     await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
@@ -1378,6 +1396,7 @@ describe('payout batch preparation', () => {
       id: 'batch-after-correction', ...data,
       createdAt: new Date('2026-09-25T12:00:00Z'), updatedAt: new Date('2026-09-25T12:00:00Z'),
       lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({ id: `line-${index}`, ...line, createdAt: new Date('2026-09-25T12:00:00Z') })),
+      correctionCreditLines: [],
     }));
     const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
     expect(batch).toMatchObject({ payableBeforeDebtOffset: '400.00', outstandingDebtAmount: '150.00',

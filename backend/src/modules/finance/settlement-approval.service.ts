@@ -29,6 +29,7 @@ import {
   type RefundOffsetSaleLedgerSnapshot,
 } from './refund-offset.service.js';
 import { calculateVendorDebtOffset, getVendorBalanceSummary } from './vendor-balance.service.js';
+import { assertActiveFinancialCorrectionCreditSettlement, getAvailableFinancialCorrectionCredits } from './financial-correction-credit-consumption.service.js';
 import {
   previewPendingRefundAdjustmentApplication,
   type PendingRefundAdjustmentApplicationPreview,
@@ -239,6 +240,7 @@ export type SettlementApprovalTotalsDto = {
   commissionMinor: number;
   commissionVatMinor: number;
   netPayableMinor: number;
+  correctionCreditMinor: number;
   currency: 'TRY';
 };
 
@@ -272,6 +274,7 @@ export type SettlementApprovalPreviewDto = {
   };
   pendingRefundAdjustments: PendingRefundAdjustmentApplicationPreview;
   lines: SettlementApprovalLineDto[];
+  correctionCredits: Array<{ id: string; authorityId: string; amountMinor: number; currency: 'TRY' }>;
 };
 
 export type SettlementApprovalDto = {
@@ -292,6 +295,7 @@ export type SettlementApprovalDto = {
   commissionMinor: number;
   commissionVatMinor: number;
   netPayableMinor: number;
+  correctionCreditMinor: number;
   approvedBy: string | null;
   approvedAt: string | null;
   cancelledBy: string | null;
@@ -299,6 +303,7 @@ export type SettlementApprovalDto = {
   notes: string | null;
   sourceSnapshotJson: unknown;
   lines: SettlementApprovalLineDto[];
+  correctionCreditLines: Array<{ id: string; creditId: string; amountMinor: number; status: string }>;
 };
 
 export type SettlementApprovalSummaryDto = {
@@ -776,6 +781,7 @@ function summarizeLines(lines: SettlementApprovalLineDraft[]): SettlementApprova
       commissionMinor: 0,
       commissionVatMinor: 0,
       netPayableMinor: 0,
+      correctionCreditMinor: 0,
       currency: 'TRY' as const,
     },
   );
@@ -1992,7 +1998,17 @@ async function buildApprovalPreview(
   }
   const unapprovedRows = integritySafeRows.filter((row) => !rowHasActiveApproval(row));
   const lines = unapprovedRows.map((row) => buildLine(row, input.asOfDate));
-  const totals = summarizeLines(lines);
+  // Explicit order/allocation/date scopes must not silently pull in an unrelated credit.
+  const correctionCredits = candidateSelection.candidateScope === 'vendor_wide'
+    ? await getAvailableFinancialCorrectionCredits(tx, input.vendorId)
+    : [];
+  const correctionCreditMinor = correctionCredits.reduce((sum, credit) => sum + credit.amountMinor, 0);
+  const lineTotals = summarizeLines(lines);
+  const totals = {
+    ...lineTotals,
+    correctionCreditMinor,
+    netPayableMinor: lineTotals.netPayableMinor + correctionCreditMinor,
+  };
   const candidateQualitySummary = buildCandidateQualitySummary(unapprovedRows, input);
   const vendorBalance = await getVendorBalanceSummary(tx, input.vendorId, totals.currency);
   const debtPreview = calculateVendorDebtOffset({
@@ -2037,11 +2053,14 @@ async function buildApprovalPreview(
     },
     pendingRefundAdjustments,
     lines,
+    correctionCredits: correctionCredits.map((credit) => ({
+      id: credit.id, authorityId: credit.authorityId, amountMinor: credit.amountMinor, currency: 'TRY' as const,
+    })),
   };
 }
 
 function mapApproval(
-  approval: SettlementApproval & { lines: SettlementApprovalLine[] },
+  approval: SettlementApproval & { lines: SettlementApprovalLine[]; correctionCreditLines?: Array<{ id: string; creditId: string; amountMinor: number; status: string }> },
   writesPerformed: boolean,
 ): SettlementApprovalDto {
   return {
@@ -2062,6 +2081,7 @@ function mapApproval(
     commissionMinor: approval.commissionMinor,
     commissionVatMinor: approval.commissionVatMinor,
     netPayableMinor: approval.netPayableMinor,
+    correctionCreditMinor: approval.correctionCreditMinor,
     approvedBy: approval.approvedBy,
     approvedAt: toIso(approval.approvedAt),
     cancelledBy: approval.cancelledBy,
@@ -2083,10 +2103,13 @@ function mapApproval(
       sourceSnapshotJson: line.sourceSnapshotJson as Prisma.InputJsonValue,
       ...readLineExplanation(line.sourceSnapshotJson),
     })),
+    correctionCreditLines: (approval.correctionCreditLines ?? []).map((line) => ({
+      id: line.id, creditId: line.creditId, amountMinor: line.amountMinor, status: line.status,
+    })),
   };
 }
 
-function mapApprovalSummary(approval: SettlementApproval & { _count: { lines: number } }): SettlementApprovalSummaryDto {
+function mapApprovalSummary(approval: SettlementApproval & { _count: { lines: number; correctionCreditLines?: number } }): SettlementApprovalSummaryDto {
   return {
     id: approval.id,
     createdAt: approval.createdAt.toISOString(),
@@ -2099,7 +2122,7 @@ function mapApprovalSummary(approval: SettlementApproval & { _count: { lines: nu
     scheduledRunDate: toIso(approval.scheduledRunDate),
     scheduledPeriodEnd: toIso(approval.scheduledPeriodEnd),
     scheduledCycleKey: approval.scheduledCycleKey,
-    lineCount: approval._count.lines,
+    lineCount: approval._count.lines + (approval._count.correctionCreditLines ?? 0),
   };
 }
 
@@ -2156,7 +2179,7 @@ export async function createDraftApproval(
   return prisma.$transaction(
     async (tx) => {
       const preview = await buildApprovalPreview(input, tx);
-      if (preview.lines.length === 0) {
+      if (preview.lines.length === 0 && preview.correctionCredits.length === 0) {
         if (preview.pendingRefundAdjustments.pendingAdjustmentCount > 0) {
           throw new Error('Adjustment-only settlement drafts are not supported yet.');
         }
@@ -2200,7 +2223,12 @@ export async function createDraftApproval(
         buildRefundAdjustmentLine(plan.record, plan.applyAmountMinor),
       );
       const settlementLines = [...preview.lines, ...adjustmentLines];
-      const settlementTotals = summarizeLines(settlementLines);
+      const lineTotals = summarizeLines(settlementLines);
+      const correctionCreditMinor = preview.correctionCredits.reduce((sum, credit) => sum + credit.amountMinor, 0);
+      const settlementTotals = {
+        ...lineTotals, correctionCreditMinor,
+        netPayableMinor: lineTotals.netPayableMinor + correctionCreditMinor,
+      };
 
       const activeLineCount = await tx.settlementApprovalLine.count({
         where: {
@@ -2245,6 +2273,7 @@ export async function createDraftApproval(
           commissionMinor: settlementTotals.commissionMinor,
           commissionVatMinor: settlementTotals.commissionVatMinor,
           netPayableMinor: settlementTotals.netPayableMinor,
+          correctionCreditMinor,
           notes: input.notes ?? null,
           sourceSnapshotJson: {
             vendorId: input.vendorId,
@@ -2287,9 +2316,15 @@ export async function createDraftApproval(
               sourceSnapshotJson: line.sourceSnapshotJson,
             })),
           },
+          correctionCreditLines: {
+            create: preview.correctionCredits.map((credit) => ({
+              creditId: credit.id, amountMinor: credit.amountMinor,
+            })),
+          },
         },
         include: {
           lines: true,
+          correctionCreditLines: true,
         },
       });
 
@@ -2371,7 +2406,7 @@ export async function createDraftApproval(
 
       const refreshedApproval = await tx.settlementApproval.findUnique({
         where: { id: approval.id },
-        include: { lines: true },
+        include: { lines: true, correctionCreditLines: true },
       });
 
       return mapApproval(refreshedApproval ?? approval, true);
@@ -2394,6 +2429,7 @@ export async function approveSettlementApproval(
         },
         include: {
           lines: true,
+          correctionCreditLines: true,
         },
       });
       if (!existing) {
@@ -2407,6 +2443,14 @@ export async function approveSettlementApproval(
       if (!revalidation.ok) {
         throw new SettlementApprovalRevalidationError(revalidation.reasons);
       }
+      const creditMinor = existing.correctionCreditLines.reduce((sum, line) => sum + line.amountMinor, 0);
+      if (creditMinor !== existing.correctionCreditMinor ||
+          (existing.lines.length === 0 && existing.correctionCreditLines.length === 0)) {
+        throw new Error('Financial Correction Credit settlement amount is inconsistent.');
+      }
+      for (const line of existing.correctionCreditLines) {
+        await assertActiveFinancialCorrectionCreditSettlement(tx, line.id, existing.id, existing.vendorId);
+      }
 
       const approved = await tx.settlementApproval.update({
         where: {
@@ -2419,6 +2463,7 @@ export async function approveSettlementApproval(
         },
         include: {
           lines: true,
+          correctionCreditLines: true,
         },
       });
 
@@ -2452,6 +2497,7 @@ export async function cancelSettlementApproval(
             },
           },
           lines: true,
+          correctionCreditLines: { include: { payoutLines: { include: { payoutBatch: true } } } },
         },
       });
       if (!existing) {
@@ -2484,6 +2530,10 @@ export async function cancelSettlementApproval(
       if (linkedPayoutBatches.some((batch) => batch.status === 'PAID' || batch.paidAt)) {
         throw new Error('Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
       }
+      if (existing.correctionCreditLines.some((line) => line.payoutLines.some((payoutLine) =>
+        payoutLine.status !== 'CANCELLED' && payoutLine.payoutBatch.status !== 'CANCELLED'))) {
+        throw new Error('Cancel the unpaid correction-credit payout before cancelling its settlement.');
+      }
 
       const cancelled = await tx.settlementApproval.update({
         where: {
@@ -2496,7 +2546,12 @@ export async function cancelSettlementApproval(
         },
         include: {
           lines: true,
+          correctionCreditLines: true,
         },
+      });
+      await tx.financialCorrectionCreditSettlementLine.updateMany({
+        where: { settlementApprovalId: id, status: 'ACTIVE' },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
 
       const activeApplications = await tx.settlementRefundAdjustmentApplication.findMany({
@@ -2581,7 +2636,9 @@ export async function cancelSettlementApproval(
         });
       }
 
-      return mapApproval(cancelled, true);
+      return mapApproval({ ...cancelled, correctionCreditLines: cancelled.correctionCreditLines.map((line) => ({
+        ...line, status: 'CANCELLED',
+      })) }, true);
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -2596,6 +2653,7 @@ export async function getSettlementApproval(id: string): Promise<SettlementAppro
     },
     include: {
       lines: true,
+      correctionCreditLines: true,
     },
   });
 
@@ -2619,6 +2677,7 @@ export async function listSettlementApprovalsForVendor(vendorId: string): Promis
       _count: {
         select: {
           lines: true,
+          correctionCreditLines: true,
         },
       },
     },
@@ -2647,6 +2706,7 @@ export async function getSettlementApprovalAudit(id: string): Promise<Settlement
       commissionMinor: approval.commissionMinor,
       commissionVatMinor: approval.commissionVatMinor,
       netPayableMinor: approval.netPayableMinor,
+      correctionCreditMinor: approval.correctionCreditMinor,
       currency: 'TRY',
     },
     lines: approval.lines.map((line) => ({

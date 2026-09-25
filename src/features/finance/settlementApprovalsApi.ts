@@ -80,6 +80,7 @@ export type SettlementApprovalPreview = {
     commissionMinor: number;
     commissionVatMinor: number;
     netPayableMinor: number;
+    correctionCreditMinor?: number;
     outstandingVendorDebtMinor?: number;
     debtOffsetPreviewMinor?: number;
     netPayableAfterDebtOffsetMinor?: number;
@@ -139,6 +140,7 @@ export type SettlementApprovalPreview = {
     notes: string[];
   };
   lines: SettlementApprovalLine[];
+  correctionCredits?: Array<{ id: string; authorityId: string; amountMinor: number; currency: 'TRY' }>;
 };
 
 export type SettlementApproval = {
@@ -159,6 +161,7 @@ export type SettlementApproval = {
   commissionMinor: number;
   commissionVatMinor: number;
   netPayableMinor: number;
+  correctionCreditMinor?: number;
   approvedBy: string | null;
   approvedAt: string | null;
   cancelledBy: string | null;
@@ -166,6 +169,7 @@ export type SettlementApproval = {
   notes: string | null;
   sourceSnapshotJson: unknown;
   lines: SettlementApprovalLine[];
+  correctionCreditLines?: Array<{ id: string; creditId: string; amountMinor: number; status: string }>;
 };
 
 export type SettlementApprovalSummary = {

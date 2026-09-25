@@ -1794,6 +1794,7 @@ export type PayoutBatch = {
   commissionVatAmount: string;
   shippingDeductionAmount: string;
   refundAmount: string;
+  correctionCreditAmount?: string;
   payableBeforeDebtOffset?: string;
   outstandingDebtAmount?: string;
   debtOffsetAmount?: string;
@@ -1808,6 +1809,7 @@ export type PayoutBatch = {
   createdAt: string;
   updatedAt: string;
   lineCount: number;
+  correctionCreditLines?: Array<{ id: string; settlementCreditLineId: string; amountMinor: number; status: string }>;
   warning: string | null;
 };
 
@@ -1856,6 +1858,8 @@ export type SettlementRefundAdjustmentReference = {
 
 export type PayoutBatchSummary = {
   eligibleRowCount: number;
+  eligibleCreditCount?: number;
+  eligibleCreditAmount?: string;
   eligibleNetAmount: string;
   blockedRowCount: number;
   outstandingDebtAmount?: string;

@@ -2481,13 +2481,15 @@ export function FinancePage() {
                   <button
                     type="button"
                     className="button button-primary button-compact"
-                    disabled={preparePayoutBatchMutation.isPending || (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) === 0}
+                    disabled={preparePayoutBatchMutation.isPending || ((financeView.payoutBatchSummary?.eligibleRowCount ?? 0) === 0 && (financeView.payoutBatchSummary?.eligibleCreditCount ?? 0) === 0)}
                     onClick={() => preparePayoutBatchMutation.mutate(undefined)}
                   >
                     {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft review'}
                   </button>
-                  <StatusBadge tone={(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'success' : 'neutral'}>
-                    {(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Rows pending review' : 'No review rows'}
+                  <StatusBadge tone={(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 || (financeView.payoutBatchSummary?.eligibleCreditCount ?? 0) > 0 ? 'success' : 'neutral'}>
+                    {(financeView.payoutBatchSummary?.eligibleCreditCount ?? 0) > 0
+                      ? `${financeView.payoutBatchSummary?.eligibleCreditCount} correction credit ready`
+                      : (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Rows pending review' : 'No review rows'}
                   </StatusBadge>
                 </div>
               ) : (

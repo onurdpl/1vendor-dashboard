@@ -7,7 +7,7 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "40c9e24a0fa425175c897ee0b997c7e9b4e8fc94d776c62dab9b83cadf106fa0"
+    "sha256": "04d4c9ae8e5db502b38055a1f3824d05102bd9b8f309c645c93814210a872df3"
   },
   "snapshot": {
     "path": "current-schema.sql",

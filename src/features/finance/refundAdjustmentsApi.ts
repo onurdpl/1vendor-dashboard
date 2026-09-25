@@ -287,6 +287,40 @@ export function applyPaidFinancialCorrectionDebt(reviewId: string, input: { prev
   return apiClient.post<{ ok: true; application: PaidFinancialCorrectionApplication }>(paidCorrectionPath(reviewId), input);
 }
 
+export type PaidFinancialCorrectionCreditApplication = {
+  id: string;
+  reviewId: string;
+  creditId: string;
+  grossCreditMinor: number;
+  currency: 'TRY';
+  status: 'APPLIED';
+  direction: 'VENDOR_CREDIT';
+  authorizedByUserId: string;
+  authorizedAt: string;
+  appliedAt: string;
+  reason: string;
+  previewFingerprint: string;
+  historicalPayoutBatchId: string;
+  historicalPayoutPaidAt: string;
+  settlementApprovalId: string | null;
+  settlementStatus: string | null;
+  payoutBatchId: string | null;
+  payoutStatus: string | null;
+};
+
+const paidCreditPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-paid-credit`;
+
+export function getPaidFinancialCorrectionCreditState(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; writesPerformed: false; application: PaidFinancialCorrectionCreditApplication | null; eligible: boolean; reasonCode: string | null }>(
+    paidCreditPath(reviewId), { signal },
+  );
+}
+
+export function applyPaidFinancialCorrectionCredit(reviewId: string, input: { previewFingerprint: string; reason: string }) {
+  return apiClient.post<{ ok: true; application: PaidFinancialCorrectionCreditApplication }>(paidCreditPath(reviewId), input);
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;

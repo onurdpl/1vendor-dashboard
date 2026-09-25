@@ -173,7 +173,7 @@ function getPaymentLabel(item: PaymentQueueItem) {
   if (item.source === 'ready') {
     return {
       primary: 'Ready payment preparation',
-      secondary: `${item.dashboard.payoutBatchSummary?.eligibleRowCount ?? 0} eligible settlement rows`,
+      secondary: `${item.dashboard.payoutBatchSummary?.eligibleRowCount ?? 0} eligible settlement rows${(item.dashboard.payoutBatchSummary?.eligibleCreditCount ?? 0) > 0 ? ` · ${item.dashboard.payoutBatchSummary?.eligibleCreditCount} correction credit` : ''}`,
     };
   }
   return {
@@ -362,7 +362,7 @@ function buildSearchHaystack(item: PaymentQueueItem, vendorLabel: string) {
 function buildQueueItems(vendorId: string, dashboard: FinanceDashboard | null, batches: PayoutBatch[]) {
   const items: PaymentQueueItem[] = [];
   const summary = dashboard?.payoutBatchSummary;
-  if (vendorId && summary && summary.eligibleRowCount > 0 && !summary.latestBatch) {
+  if (vendorId && summary && ((summary.eligibleCreditCount ?? 0) > 0 || (summary.eligibleRowCount > 0 && !summary.latestBatch))) {
     items.push({
       source: 'ready',
       id: `ready:${vendorId}`,
@@ -796,6 +796,12 @@ export function AdminPaymentPreparationPage() {
                   </MetadataGroup>
 
                   <MetadataGroup title="Payment Impact">
+                    {(selectedItem.source === 'batch' && hasAmount(selectedItem.batch.correctionCreditAmount)) ||
+                      (selectedItem.source === 'ready' && hasAmount(selectedItem.dashboard.payoutBatchSummary?.eligibleCreditAmount)) ? (
+                      <MetadataRow label="Financial correction credit" value={selectedItem.source === 'batch'
+                        ? formatPaymentAmount(selectedItem.batch.correctionCreditAmount ?? '0')
+                        : formatPaymentAmount(selectedItem.dashboard.payoutBatchSummary?.eligibleCreditAmount ?? '0')} />
+                    ) : null}
                     <MetadataRow
                       label="Refund deductions"
                       value={
@@ -833,8 +839,8 @@ export function AdminPaymentPreparationPage() {
                       label="Settlements"
                       value={
                         selectedItem.source === 'batch'
-                          ? `${selectedItem.batch.lineCount} settlement rows`
-                          : `${selectedItem.dashboard.payoutBatchSummary?.eligibleRowCount ?? 0} eligible settlement rows`
+                          ? `${selectedItem.batch.lineCount} ${hasAmount(selectedItem.batch.correctionCreditAmount) ? 'settlement sources' : 'settlement rows'}`
+                          : `${selectedItem.dashboard.payoutBatchSummary?.eligibleRowCount ?? 0} eligible settlement rows${(selectedItem.dashboard.payoutBatchSummary?.eligibleCreditCount ?? 0) > 0 ? ` · ${selectedItem.dashboard.payoutBatchSummary?.eligibleCreditCount} correction credit` : ''}`
                       }
                     />
                     <MetadataRow

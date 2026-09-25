@@ -17,6 +17,9 @@ const prismaMock = vi.hoisted(() => ({
   vendorBalanceEvent: {
     findMany: vi.fn(),
   },
+  financialCorrectionCreditSettlementLine: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -247,6 +250,8 @@ describe('persisted vendor finance calculations', () => {
     prismaMock.vendorProfileAuditLog.createMany.mockResolvedValue({ count: 0 });
     prismaMock.vendorBalanceEvent.findMany.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
+    prismaMock.financialCorrectionCreditSettlementLine.findMany.mockReset();
+    prismaMock.financialCorrectionCreditSettlementLine.findMany.mockResolvedValue([]);
 
     prismaMock.payoutBatch.findFirst.mockResolvedValue(null);
     prismaMock.vendorFinancialProfile.findFirst.mockImplementation(async () => activeProfile);
@@ -700,5 +705,25 @@ describe('persisted vendor finance calculations', () => {
         }),
       }),
     );
+  });
+
+  it('exposes an approved standalone correction credit as payout-ready without a ledger row', async () => {
+    ledgerRows = [];
+    prismaMock.financialCorrectionCreditSettlementLine.findMany.mockResolvedValue([{
+      amountMinor: 10000,
+      credit: { vendorId: 'sporjinal', currency: 'TRY', amountMinor: 10000,
+        authority: { vendorId: 'sporjinal', currency: 'TRY', economicDirection: 'VENDOR_CREDIT',
+          applicationRoute: 'PAID_VENDOR_CREDIT', vendorPayableDifferenceMinor: -10000,
+          appliedAt: new Date('2026-09-01T12:00:00Z') } },
+    }]);
+    const dashboard = await getVendorFinanceDashboard('sporjinal');
+    expect(dashboard.payoutBatchSummary).toMatchObject({
+      eligibleRowCount: 0,
+      eligibleCreditCount: 1,
+      eligibleCreditAmount: '100.00',
+      eligibleNetAmount: '100.00',
+      netEligibleAfterDebtOffset: '100.00',
+    });
+    expect(dashboard.records).toHaveLength(0);
   });
 });

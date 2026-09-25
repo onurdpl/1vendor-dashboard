@@ -20,6 +20,8 @@ const acknowledgeZeroNetMock = vi.hoisted(() => vi.fn());
 const getZeroNetMock = vi.hoisted(() => vi.fn());
 const getPaidCorrectionStateMock = vi.hoisted(() => vi.fn());
 const applyPaidCorrectionMock = vi.hoisted(() => vi.fn());
+const getPaidCreditStateMock = vi.hoisted(() => vi.fn());
+const applyPaidCreditMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -35,6 +37,10 @@ vi.mock('../backend/src/modules/finance/financial-correction-paid-debt.service.j
   PaidFinancialCorrectionError: class PaidFinancialCorrectionError extends Error {
     constructor(readonly code: string, readonly statusCode = 409) { super(code); }
   },
+}));
+vi.mock('../backend/src/modules/finance/financial-correction-paid-credit.service.js', () => ({
+  getPaidFinancialCorrectionCreditState: getPaidCreditStateMock,
+  applyPaidFinancialCorrectionCredit: applyPaidCreditMock,
 }));
 const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
   class FinanceIntegrityScannerValidationError extends Error {
@@ -461,6 +467,32 @@ describe('finance route validation', () => {
     await createRegisteredGetRoutes().get(path)?.({ authUser: { role: 'vendor' }, params: { reviewId: 'review-1' } }, deniedRead);
     expect(deniedRead.statusCode).toBe(403);
     expect(getPaidCorrectionStateMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps paid vendor credit Admin-only and rejects client-supplied monetary authority', async () => {
+    const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-paid-credit';
+    const posts = createRegisteredPostRoutes();
+    for (const role of ['finance', 'vendor', 'support']) {
+      const denied = createReply();
+      await posts.get(path)?.({ authUser: { role, id: `${role}-1` }, params: { reviewId: 'review-1' },
+        body: { previewFingerprint: 'fingerprint', reason: 'Verified' } }, denied);
+      expect(denied.statusCode).toBe(403);
+    }
+    const extra = createReply();
+    await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+      body: { previewFingerprint: 'fingerprint', reason: 'Verified', grossCreditMinor: 10000 } }, extra);
+    expect(extra.statusCode).toBe(400);
+    expect(applyPaidCreditMock).not.toHaveBeenCalled();
+    applyPaidCreditMock.mockResolvedValue({ id: 'credit-correction-1' });
+    const allowed = createReply();
+    expect(await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+      body: { previewFingerprint: 'fingerprint', reason: 'Verified' } }, allowed)).toEqual({ ok: true, application: { id: 'credit-correction-1' } });
+    expect(applyPaidCreditMock).toHaveBeenCalledWith({ reviewId: 'review-1', previewFingerprint: 'fingerprint',
+      reason: 'Verified', actorUserId: 'admin-1' });
+    const deniedRead = createReply();
+    await createRegisteredGetRoutes().get(path)?.({ authUser: { role: 'vendor' }, params: { reviewId: 'review-1' } }, deniedRead);
+    expect(deniedRead.statusCode).toBe(403);
+    expect(getPaidCreditStateMock).not.toHaveBeenCalled();
   });
 
   it('returns only dashboard finance summary fields', async () => {

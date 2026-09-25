@@ -418,6 +418,7 @@ model Vendor {
   settlementCommissionInvoices SettlementCommissionInvoice[]
   settlementRefundAdjustments  SettlementRefundAdjustment[]
   balanceEvents                VendorBalanceEvent[]
+  financialCorrectionCredits   FinancialCorrectionCredit[]
   profileAuditLogs             VendorProfileAuditLog[]
   operationalSignals           OperationalSignal[]
   automationActions            AutomationAction[]
@@ -1427,9 +1428,58 @@ model FinancialCorrectionAuthority {
   authorizedByUser                   User @relation("paidFinancialCorrectionActor", fields: [authorizedByUserId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_actor_fkey")
   historicalPayoutBatch              PayoutBatch @relation(fields: [historicalPayoutBatchId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_payout_fkey")
   debtEvent                          VendorBalanceEvent? @relation("paidFinancialCorrectionDebt")
+  creditEffect                       FinancialCorrectionCredit?
 
   @@unique([acceptedEvidenceSnapshotId, incomingConflictEvidenceId], map: "FinancialCorrectionAuthority_pair_key")
   @@index([vendorId, appliedAt], map: "FinancialCorrectionAuthority_vendor_applied_idx")
+}
+
+// One gross future payable created by a locally PAID vendor-credit correction.
+model FinancialCorrectionCredit {
+  id                   String @id @default(cuid())
+  authorityId          String @unique
+  vendorId             String
+  amountMinor          Int
+  currency             String @default("TRY")
+  createdAt            DateTime @default(now())
+  authority            FinancialCorrectionAuthority @relation(fields: [authorityId], references: [id], onDelete: Restrict)
+  vendor               Vendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  settlementLines      FinancialCorrectionCreditSettlementLine[]
+
+  @@index([vendorId, currency, createdAt])
+}
+
+// Historical gross consumption; cancelled lines remain auditable and release the source.
+model FinancialCorrectionCreditSettlementLine {
+  id                   String @id @default(cuid())
+  creditId             String
+  settlementApprovalId String
+  amountMinor          Int
+  status               String @default("ACTIVE")
+  createdAt            DateTime @default(now())
+  cancelledAt          DateTime?
+  credit               FinancialCorrectionCredit @relation(fields: [creditId], references: [id], onDelete: Restrict)
+  settlementApproval   SettlementApproval @relation(fields: [settlementApprovalId], references: [id], onDelete: Restrict)
+  payoutLines          FinancialCorrectionCreditPayoutLine[]
+
+  @@unique([creditId, settlementApprovalId])
+  @@index([settlementApprovalId])
+}
+
+model FinancialCorrectionCreditPayoutLine {
+  id                         String @id @default(cuid())
+  settlementCreditLineId     String
+  payoutBatchId              String
+  amountMinor                Int
+  status                     String @default("ACTIVE")
+  createdAt                  DateTime @default(now())
+  cancelledAt                DateTime?
+  paidAt                     DateTime?
+  settlementCreditLine       FinancialCorrectionCreditSettlementLine @relation(fields: [settlementCreditLineId], references: [id], onDelete: Restrict)
+  payoutBatch                PayoutBatch @relation(fields: [payoutBatchId], references: [id], onDelete: Restrict)
+
+  @@unique([settlementCreditLineId, payoutBatchId])
+  @@index([payoutBatchId])
 }
 
 model LegacyRefundFinanceReview {
@@ -1626,6 +1676,7 @@ model SettlementApproval {
   commissionMinor              Int
   commissionVatMinor           Int
   netPayableMinor              Int
+  correctionCreditMinor        Int @default(0)
   approvedBy                   String?
   approvedAt                   DateTime?
   cancelledBy                  String?
@@ -1637,6 +1688,7 @@ model SettlementApproval {
   sourceSnapshotJson           Json
   vendor                       Vendor                                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines                        SettlementApprovalLine[]
+  correctionCreditLines        FinancialCorrectionCreditSettlementLine[]
   refundAdjustmentApplications SettlementRefundAdjustmentApplication[]
   commissionInvoices           SettlementCommissionInvoice[]
   originalRefundAdjustments    SettlementRefundAdjustment[]            @relation("OriginalSettlementApprovalRefundAdjustments")
@@ -1922,6 +1974,7 @@ model PayoutBatch {
   shippingDeductionAmount Decimal              @default(0.00) @db.Decimal(10, 2)
   refundAmount            Decimal              @default(0.00) @db.Decimal(10, 2)
   netAmount               Decimal              @default(0.00) @db.Decimal(10, 2)
+  correctionCreditAmount  Decimal              @default(0.00) @db.Decimal(10, 2)
   currency                String               @default("TRY")
   createdByUserId         String?
   paidAt                  DateTime?
@@ -1932,6 +1985,7 @@ model PayoutBatch {
   updatedAt               DateTime             @updatedAt
   vendor                  Vendor               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines                   PayoutBatchLine[]
+  correctionCreditLines   FinancialCorrectionCreditPayoutLine[]
   vendorBalanceEvents     VendorBalanceEvent[]
   paidFinancialCorrections FinancialCorrectionAuthority[]
   operationalSignals      OperationalSignal[]

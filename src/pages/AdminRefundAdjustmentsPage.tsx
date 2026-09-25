@@ -19,6 +19,8 @@ import {
   acknowledgeZeroNetReconciliation,
   getPaidFinancialCorrectionState,
   applyPaidFinancialCorrectionDebt,
+  getPaidFinancialCorrectionCreditState,
+  applyPaidFinancialCorrectionCredit,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
   acknowledgeAdminLegacyRefundReview,
@@ -268,6 +270,8 @@ export function AdminRefundAdjustmentsPage() {
   const [paidCorrectionReason, setPaidCorrectionReason] = useState<{ reviewId: string; value: string }>({ reviewId: '', value: '' });
   const [paidCorrectionPending, setPaidCorrectionPending] = useState(false);
   const [paidCorrectionError, setPaidCorrectionError] = useState<string | null>(null);
+  const [paidCreditPending, setPaidCreditPending] = useState(false);
+  const [paidCreditError, setPaidCreditError] = useState<string | null>(null);
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -360,6 +364,19 @@ export function AdminRefundAdjustmentsPage() {
     ? paidCorrectionQuery.data : null;
   const paidCorrectionApplication = paidCorrectionState?.application?.reviewId === terminalDetail?.id
     ? paidCorrectionState?.application ?? null : null;
+  const paidCreditQuery = useQueryResource(
+    ['admin', 'finance', 'paid-financial-correction-credit', terminalDetail?.id ?? 'none', terminalDetail?.updatedAt ?? 'none'],
+    ({ signal }) => getPaidFinancialCorrectionCreditState(terminalDetail!.id, signal),
+    {
+      routeName: 'Paid financial correction credit',
+      endpoint: terminalDetail ? `/admin/finance/refund-reviews/${terminalDetail.id}/financial-correction-paid-credit` : '/admin/finance/refund-reviews',
+      enabled: Boolean(terminalDetail),
+    },
+  );
+  const paidCreditState = terminalDetail && !paidCreditQuery.isFetching && !paidCreditQuery.error
+    ? paidCreditQuery.data : null;
+  const paidCreditApplication = paidCreditState && paidCreditState.application?.reviewId === terminalDetail?.id
+    ? paidCreditState.application : null;
   const currentPaidReason = paidCorrectionReason.reviewId === terminalDetail?.id ? paidCorrectionReason.value : '';
 
   const runPaidCorrection = async () => {
@@ -381,6 +398,28 @@ export function AdminRefundAdjustmentsPage() {
       await Promise.all([correctionPreviewQuery.refetch(), paidCorrectionQuery.refetch(), terminalDetailQuery.refetch()]);
     } finally {
       setPaidCorrectionPending(false);
+    }
+  };
+
+  const runPaidCredit = async () => {
+    if (!eligibleTerminalDetail || !correctionPreview || !paidCreditState?.eligible || paidCreditApplication ||
+        paidCreditPending || !currentPaidReason.trim() || currentPaidReason.trim().length > 500 ||
+        correctionPreview.economicDirection !== 'VENDOR_CREDIT' ||
+        correctionPreview.difference.vendorPayableReversalMinor >= 0) return;
+    setPaidCreditPending(true);
+    setPaidCreditError(null);
+    try {
+      await applyPaidFinancialCorrectionCredit(eligibleTerminalDetail.id, {
+        previewFingerprint: correctionPreview.previewFingerprint,
+        reason: currentPaidReason.trim(),
+      });
+      setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: '' });
+      await Promise.all([paidCreditQuery.refetch(), paidCorrectionQuery.refetch()]);
+    } catch (error) {
+      setPaidCreditError(error instanceof Error ? error.message : 'Financial correction credit could not be applied.');
+      await Promise.all([correctionPreviewQuery.refetch(), paidCreditQuery.refetch(), terminalDetailQuery.refetch()]);
+    } finally {
+      setPaidCreditPending(false);
     }
   };
 
@@ -801,9 +840,9 @@ export function AdminRefundAdjustmentsPage() {
                   {eligibleTerminalDetail ? (
                     <section className="op-panel-section" aria-label="Financial correction preview">
                       <h4>Financial correction preview</h4>
-                      <p className="page-description">{paidCorrectionApplication
+                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication
                         ? 'Read-only calculation. Applied correction is shown below.'
-                        : paidCorrectionState
+                        : paidCorrectionState && paidCreditState
                           ? 'Read-only calculation. No financial correction has been applied.'
                           : 'Read-only calculation. Checking correction history...'}</p>
                       {correctionPreviewQuery.isFetching ? <p className="page-description">Loading correction preview...</p> : null}
@@ -864,7 +903,19 @@ export function AdminRefundAdjustmentsPage() {
                                 </button>
                               </section>
                             ) : null}
-                          {correctionPreview.economicDirection === 'VENDOR_CREDIT' ? <p className="op-alert op-tone-attention">Vendor credit correction is not supported yet. This preview is read-only.</p> : null}
+                          {correctionPreview.economicDirection === 'VENDOR_CREDIT' &&
+                            correctionPreview.difference.vendorPayableReversalMinor < 0 && paidCreditState?.eligible &&
+                            !paidCreditApplication ? (
+                              <section className="op-panel-section" aria-label="Paid correction credit application">
+                                <h5>Paid payout vendor credit</h5>
+                                <p className="page-description">Applying {formatMinor(-correctionPreview.difference.vendorPayableReversalMinor)} creates a standalone future vendor payable credit. The historical PAID payout remains unchanged.</p>
+                                <label><span>Required Admin reason</span><textarea maxLength={500} value={currentPaidReason} onChange={(event) => setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: event.target.value })} /></label>
+                                <button type="button" disabled={paidCreditPending || !currentPaidReason.trim()} onClick={() => void runPaidCredit()}>
+                                  {paidCreditPending ? 'Applying...' : 'Approve & Apply Credit'}
+                                </button>
+                              </section>
+                            ) : null}
+                          {correctionPreview.economicDirection === 'VENDOR_CREDIT' && !paidCreditState?.eligible && !paidCreditApplication && !paidCreditQuery.isFetching ? <p className="op-alert op-tone-attention">Vendor credit application is unavailable for this review.</p> : null}
                         </>
                       ) : null}
                     </section>
@@ -884,6 +935,25 @@ export function AdminRefundAdjustmentsPage() {
                       <MetadataRow label="Historical payout paid at" value={formatDate(paidCorrectionApplication.historicalPayoutPaidAt)} />
                       <MetadataRow label="Reason" value={paidCorrectionApplication.reason} />
                       <p className="page-description">The historical PAID payout was not modified. This debt affects future payout balance.</p>
+                    </MetadataGroup>
+                  ) : null}
+                  {paidCreditError ? <p className="op-alert op-tone-danger" role="alert">{paidCreditError}</p> : null}
+                  {paidCreditQuery.error ? <p className="op-alert op-tone-attention" role="status">Paid credit history unavailable: {paidCreditQuery.error}</p> : null}
+                  {paidCreditApplication ? (
+                    <MetadataGroup title="Applied financial correction credit">
+                      <MetadataRow label="Status" value="Applied" />
+                      <MetadataRow label="Direction" value="Vendor credit" />
+                      <MetadataRow label="Gross credit" value={formatMinor(paidCreditApplication.grossCreditMinor)} />
+                      <MetadataRow label="Admin actor" value={paidCreditApplication.authorizedByUserId} />
+                      <MetadataRow label="Applied at" value={formatDate(paidCreditApplication.appliedAt)} />
+                      <MetadataRow label="Correction authority" value={paidCreditApplication.id} />
+                      <MetadataRow label="Credit source" value={paidCreditApplication.creditId} />
+                      <MetadataRow label="Historical PAID payout" value={paidCreditApplication.historicalPayoutBatchId} />
+                      <MetadataRow label="Historical payout paid at" value={formatDate(paidCreditApplication.historicalPayoutPaidAt)} />
+                      <MetadataRow label="Settlement" value={paidCreditApplication.settlementApprovalId ?? 'Not yet settled'} />
+                      <MetadataRow label="Payout" value={paidCreditApplication.payoutBatchId ?? 'Not yet paid'} />
+                      <MetadataRow label="Reason" value={paidCreditApplication.reason} />
+                      <p className="page-description">The historical PAID payout was not modified. This separate gross credit can enter a future settlement and payout.</p>
                     </MetadataGroup>
                   ) : null}
                   {zeroNetQuery.error ? <p className="op-alert op-tone-attention" role="status">Zero-net acknowledgement history unavailable: {zeroNetQuery.error}</p> : null}

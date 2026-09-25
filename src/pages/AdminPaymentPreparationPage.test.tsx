@@ -395,6 +395,27 @@ describe('AdminPaymentPreparationPage', () => {
     await waitFor(() => expect(getPaymentPreparationReadinessMock.mock.calls.length).toBeGreaterThan(initialReadinessCalls));
   });
 
+  it('keeps a standalone correction credit ready after a historical paid payout', async () => {
+    const paidBatch = makeBatch({ id: 'historical-paid-batch', status: 'paid', paidAt: '2026-09-01T12:00:00.000Z' });
+    listPayoutBatchesMock.mockResolvedValue([paidBatch]);
+    getPaymentPreparationReadinessMock.mockResolvedValue({
+      ...financeDashboard,
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary,
+        eligibleRowCount: 0,
+        eligibleCreditCount: 1,
+        eligibleCreditAmount: '100.00',
+        eligibleNetAmount: '100.00',
+        latestBatch: paidBatch,
+      },
+    });
+    renderPage();
+    expect(await screen.findByText('Ready payment preparation')).toBeInTheDocument();
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getByText('Financial correction credit').closest('.op-meta-row')).toHaveTextContent('100.00');
+    expect(within(panel).getByRole('button', { name: 'Prepare Batch' })).toBeEnabled();
+  });
+
   it('marks a draft payment batch for review with confirmation', async () => {
     const user = userEvent.setup();
     renderPage();

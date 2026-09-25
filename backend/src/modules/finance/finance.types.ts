@@ -56,6 +56,8 @@ export type AllocationFinanceSummaryDto = {
 
 export type PayoutBatchSummaryDto = {
   eligibleRowCount: number;
+  eligibleCreditCount: number;
+  eligibleCreditAmount: string;
   eligibleNetAmount: string;
   blockedRowCount: number;
   outstandingDebtAmount: string;
@@ -360,6 +362,7 @@ export type PayoutBatchDto = {
   commissionVatAmount: string;
   shippingDeductionAmount: string;
   refundAmount: string;
+  correctionCreditAmount: string;
   payableBeforeDebtOffset: string;
   outstandingDebtAmount: string;
   debtOffsetAmount: string;
@@ -376,6 +379,7 @@ export type PayoutBatchDto = {
   lineCount: number;
   warning: string | null;
   lines?: PayoutBatchLineDto[];
+  correctionCreditLines?: Array<{ id: string; settlementCreditLineId: string; amountMinor: number; status: string }>;
 };
 
 export type PreparePayoutBatchDto = {

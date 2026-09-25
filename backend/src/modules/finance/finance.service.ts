@@ -28,6 +28,7 @@ import type {
   ShippingCostInputDto,
 } from './finance.types.js';
 import { createEventsIdempotently, type CreateFinanceEventInput } from './finance-event.service.js';
+import { assertFinancialCorrectionCreditSource } from './financial-correction-credit-consumption.service.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { hasApprovedOpenReturnHold } from './settlement-return-hold.service.js';
 import {
@@ -84,7 +85,7 @@ const SUPPORTED_SETTLEMENT_WEEKDAYS = new Set(['MONDAY', 'TUESDAY', 'WEDNESDAY',
 
 type FinanceDbClient = Pick<
   Prisma.TransactionClient,
-  'payoutBatch' | 'vendorBalanceEvent' | 'financeIntegrityAlert'
+  'payoutBatch' | 'vendorBalanceEvent' | 'financeIntegrityAlert' | 'financialCorrectionCreditPayoutLine'
 >;
 type SettlementCommissionInvoiceReviewSnapshot = {
   id?: string | null;
@@ -147,6 +148,8 @@ export type PayoutBatchTransitionBlockerCode =
   | 'settlement_approval_scope_mismatch'
   | 'settlement_approval_line_ledger_mismatch'
   | 'settlement_approval_line_membership_conflict'
+  | 'correction_credit_source_changed'
+  | 'correction_credit_membership_conflict'
   | 'ledger_row_no_longer_eligible'
   | 'ledger_row_missing';
 
@@ -1198,6 +1201,7 @@ function mapPayoutBatch(batch: {
   commissionVatAmount: unknown;
   shippingDeductionAmount: unknown;
   refundAmount: unknown;
+  correctionCreditAmount: unknown;
   netAmount: unknown;
   currency: string;
   createdByUserId: string | null;
@@ -1218,9 +1222,11 @@ function mapPayoutBatch(batch: {
     amountSnapshot: unknown;
     createdAt: Date;
   }>;
-  _count?: { lines: number };
+  correctionCreditLines?: Array<{ id: string; settlementCreditLineId: string; amountMinor: number; status: string }>;
+  _count?: { lines: number; correctionCreditLines?: number };
 }): PayoutBatchDto {
-  const lineCount = batch._count?.lines ?? batch.lines?.length ?? 0;
+  const lineCount = (batch._count?.lines ?? batch.lines?.length ?? 0) +
+    (batch._count?.correctionCreditLines ?? batch.correctionCreditLines?.length ?? 0);
   const debtOffsetEvents = (batch.vendorBalanceEvents ?? []).filter((event) =>
     event.type === 'VENDOR_DEBT_OFFSET'
   );
@@ -1250,6 +1256,7 @@ function mapPayoutBatch(batch: {
     commissionVatAmount: toAmountString(toNumber(batch.commissionVatAmount)),
     shippingDeductionAmount: toAmountString(toNumber(batch.shippingDeductionAmount)),
     refundAmount: toAmountString(toNumber(batch.refundAmount)),
+    correctionCreditAmount: toAmountString(toNumber(batch.correctionCreditAmount)),
     payableBeforeDebtOffset: toAmountString(payableBeforeDebtOffsetMinor / 100),
     outstandingDebtAmount: toAmountString(outstandingDebtMinor / 100),
     debtOffsetAmount: toAmountString(debtOffsetMinor / 100),
@@ -1275,6 +1282,10 @@ function mapPayoutBatch(batch: {
       financeLedgerEntryId: line.financeLedgerEntryId,
       amountSnapshot: toAmountString(toNumber(line.amountSnapshot)),
       createdAt: line.createdAt.toISOString(),
+    })),
+    correctionCreditLines: batch.correctionCreditLines?.map((line) => ({
+      id: line.id, settlementCreditLineId: line.settlementCreditLineId,
+      amountMinor: line.amountMinor, status: line.status,
     })),
   };
 }
@@ -1307,7 +1318,7 @@ export async function getVendorFinanceDashboard(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<FinanceDashboardDto> {
-  const [summaryEntries, entries, storedProfile, latestBatch, vendorBalance] = await Promise.all([
+  const [summaryEntries, entries, storedProfile, latestBatch, vendorBalance, eligibleCreditLines] = await Promise.all([
     withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
@@ -1777,12 +1788,26 @@ export async function getVendorFinanceDashboard(
         _count: {
           select: {
             lines: true,
+            correctionCreditLines: true,
           },
         },
         vendorBalanceEvents: true,
+        correctionCreditLines: true,
       },
     })),
     withDashboardTiming('finance.vendor_balance_fetch', () => getVendorBalanceSummary(prisma, vendorId, 'TRY')),
+    prisma.financialCorrectionCreditSettlementLine.findMany({
+      where: {
+        status: 'ACTIVE',
+        credit: { vendorId, currency: 'TRY' },
+        settlementApproval: { vendorId, currency: 'TRY', status: 'APPROVED' },
+        payoutLines: { none: { status: { in: ['ACTIVE', 'PAID'] } } },
+      },
+      select: { amountMinor: true,
+        credit: { select: { vendorId: true, currency: true, amountMinor: true,
+          authority: { select: { vendorId: true, currency: true, economicDirection: true,
+            applicationRoute: true, vendorPayableDifferenceMinor: true, appliedAt: true } } } } },
+    }),
   ]);
   const aggregationStartedAt = startDashboardTimer();
   const profile = mapProfile(storedProfile, vendorId);
@@ -1895,8 +1920,14 @@ export async function getVendorFinanceDashboard(
       blockedRowCount: 0,
     },
   );
+  for (const line of eligibleCreditLines) {
+    assertFinancialCorrectionCreditSource(line.credit);
+    if (line.amountMinor !== line.credit.amountMinor) throw new Error('Financial Correction Credit settlement source is inconsistent.');
+  }
+  const eligibleCreditMinor = eligibleCreditLines.reduce((sum, line) => sum + line.amountMinor, 0);
+  const eligibleNetTotalMinor = toMinorUnits(payoutBatchEligibility.eligibleNetAmount) + eligibleCreditMinor;
   const debtPreview = calculateVendorDebtOffset({
-    grossPayableMinor: Math.max(toMinorUnits(payoutBatchEligibility.eligibleNetAmount), 0),
+    grossPayableMinor: Math.max(eligibleNetTotalMinor, 0),
     outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
   });
 
@@ -1955,22 +1986,24 @@ export async function getVendorFinanceDashboard(
       vendorBalance: toAmountString(vendorBalance.balanceMinor / 100),
       outstandingVendorDebt: toAmountString(vendorBalance.outstandingDebtMinor / 100),
       netPayableAfterDebt: toAmountString(
-        (payoutBatchEligibility.eligibleNetAmount > 0
+        (eligibleNetTotalMinor > 0
           ? debtPreview.netPayableMinor
-          : toMinorUnits(payoutBatchEligibility.eligibleNetAmount)) / 100,
+          : eligibleNetTotalMinor) / 100,
       ),
     },
     profile,
     payoutBatchSummary: {
       eligibleRowCount: payoutBatchEligibility.eligibleRowCount,
-      eligibleNetAmount: toAmountString(payoutBatchEligibility.eligibleNetAmount),
+      eligibleCreditCount: eligibleCreditLines.length,
+      eligibleCreditAmount: toAmountString(eligibleCreditMinor / 100),
+      eligibleNetAmount: toAmountString(eligibleNetTotalMinor / 100),
       blockedRowCount: payoutBatchEligibility.blockedRowCount,
       outstandingDebtAmount: toAmountString(vendorBalance.outstandingDebtMinor / 100),
       debtOffsetPreviewAmount: toAmountString(debtPreview.debtOffsetMinor / 100),
       netEligibleAfterDebtOffset: toAmountString(
-        (payoutBatchEligibility.eligibleNetAmount > 0
+        (eligibleNetTotalMinor > 0
           ? debtPreview.netPayableMinor
-          : toMinorUnits(payoutBatchEligibility.eligibleNetAmount)) / 100,
+          : eligibleNetTotalMinor) / 100,
       ),
       remainingDebtAfterPreview: toAmountString(debtPreview.remainingDebtMinor / 100),
       latestBatch: latestBatch ? mapPayoutBatch(latestBatch) : null,
@@ -2347,9 +2380,11 @@ export async function listPayoutBatches(vendorId?: string): Promise<PayoutBatchD
       _count: {
         select: {
           lines: true,
+          correctionCreditLines: true,
         },
       },
       vendorBalanceEvents: true,
+      correctionCreditLines: true,
     },
   });
 
@@ -2363,6 +2398,7 @@ export async function getPayoutBatch(batchId: string): Promise<PayoutBatchDto | 
     },
     include: {
       vendorBalanceEvents: true,
+      correctionCreditLines: true,
       lines: {
         orderBy: {
           createdAt: 'asc',
@@ -2536,6 +2572,23 @@ export async function preparePayoutBatch(
     const eligibleCandidates = approvedCandidates.filter(({ entry, settlementLine }) =>
       isApprovedSettlementLineEligibleForPayout(settlementLine, entry)
     );
+    const creditCandidates = await tx.financialCorrectionCreditSettlementLine.findMany({
+      where: {
+        status: 'ACTIVE',
+        credit: { vendorId: input.vendorId, currency: 'TRY' },
+        settlementApproval: { vendorId: input.vendorId, currency: 'TRY', status: 'APPROVED' },
+        payoutLines: { none: { status: { in: ['ACTIVE', 'PAID'] } } },
+      },
+      include: { credit: { include: { authority: true } }, settlementApproval: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    for (const line of creditCandidates) {
+      assertFinancialCorrectionCreditSource(line.credit);
+      if (line.cancelledAt || line.amountMinor <= 0 || line.amountMinor !== line.credit.amountMinor ||
+          line.settlementApproval.correctionCreditMinor < line.amountMinor) {
+        throw new Error('Financial Correction Credit settlement source is inconsistent.');
+      }
+    }
     const approvedSettlementRequiredEntries = entries.filter(
       (entry) =>
         !hasApprovedSettlementSnapshot(entry) &&
@@ -2545,7 +2598,7 @@ export async function preparePayoutBatch(
       (entry) => getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required',
     );
 
-    if (eligibleCandidates.length === 0) {
+    if (eligibleCandidates.length === 0 && creditCandidates.length === 0) {
       if (fullOrderCancelledEntries.length > 0) {
         throw new Error(FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE);
       }
@@ -2562,7 +2615,8 @@ export async function preparePayoutBatch(
     }
 
     const currencies = new Set(
-      eligibleCandidates.map(({ settlementLine }) => settlementLine.settlementApproval.currency),
+      [...eligibleCandidates.map(({ settlementLine }) => settlementLine.settlementApproval.currency),
+        ...creditCandidates.map((line) => line.settlementApproval.currency)],
     );
     if (currencies.size !== 1) {
       throw new Error('Approved settlement lines with different currencies cannot share one payout batch.');
@@ -2572,7 +2626,7 @@ export async function preparePayoutBatch(
       throw new Error('Approved settlement currency is required for payout preparation.');
     }
     const vendorBalance = await getVendorBalanceSummary(tx, input.vendorId, currency);
-    const totalsMinor = eligibleCandidates.reduce(
+    const ordinaryTotalsMinor = eligibleCandidates.reduce(
       (summary, { settlementLine }) => {
         const amounts = approvedPayoutLineAmounts(settlementLine);
         return {
@@ -2594,6 +2648,9 @@ export async function preparePayoutBatch(
         netAmountMinor: 0,
       },
     );
+    const correctionCreditMinor = creditCandidates.reduce((sum, line) => sum + line.amountMinor, 0);
+    const totalsMinor = { ...ordinaryTotalsMinor,
+      netAmountMinor: ordinaryTotalsMinor.netAmountMinor + correctionCreditMinor };
     const debtOffset = calculateVendorDebtOffset({
       grossPayableMinor: Math.max(totalsMinor.netAmountMinor, 0),
       outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
@@ -2612,6 +2669,7 @@ export async function preparePayoutBatch(
         commissionVatAmount: totalsMinor.commissionVatAmountMinor / 100,
         shippingDeductionAmount: totalsMinor.shippingDeductionAmountMinor / 100,
         refundAmount: totalsMinor.refundAmountMinor / 100,
+        correctionCreditAmount: correctionCreditMinor / 100,
         netAmount: netAmountAfterDebtOffsetMinor / 100,
         currency,
         createdByUserId,
@@ -2622,9 +2680,15 @@ export async function preparePayoutBatch(
             amountSnapshot: settlementLine.payableImpactMinor / 100,
           })),
         },
+        correctionCreditLines: {
+          create: creditCandidates.map((line) => ({
+            settlementCreditLineId: line.id, amountMinor: line.amountMinor,
+          })),
+        },
       },
       include: {
         vendorBalanceEvents: true,
+        correctionCreditLines: true,
         lines: {
           orderBy: {
             createdAt: 'asc',
@@ -3177,6 +3241,43 @@ async function validatePayoutBatchBeforeTransitionWithClient(
 
   }
 
+  const creditLines = await db.financialCorrectionCreditPayoutLine.findMany({
+    where: { payoutBatchId },
+    include: {
+      settlementCreditLine: {
+        include: { credit: { include: { authority: true } }, settlementApproval: true,
+          payoutLines: { where: { status: { in: ['ACTIVE', 'PAID'] } }, select: { id: true, payoutBatchId: true } } },
+      },
+    },
+  });
+  const creditMinor = creditLines.reduce((sum, line) => sum + line.amountMinor, 0);
+  if (creditMinor !== toMinorUnits(batch.correctionCreditAmount)) {
+    blockers.push(buildPayoutBatchTransitionBlocker({
+      code: 'correction_credit_source_changed', reason: 'Correction credit payout total differs from its frozen sources.',
+      payoutBatchLineId: creditLines[0]?.id ?? payoutBatchId, financeLedgerEntryId: null,
+    }));
+  }
+  for (const line of creditLines) {
+    const source = line.settlementCreditLine;
+    assertFinancialCorrectionCreditSource(source.credit);
+    if (line.status !== 'ACTIVE' || line.cancelledAt || line.paidAt || line.amountMinor <= 0 ||
+        source.status !== 'ACTIVE' || source.cancelledAt || source.amountMinor !== line.amountMinor ||
+        source.credit.amountMinor !== line.amountMinor || source.credit.vendorId !== batch.vendorId ||
+        source.credit.currency !== batch.currency || source.settlementApproval.status !== 'APPROVED' ||
+        source.settlementApproval.vendorId !== batch.vendorId || source.settlementApproval.currency !== batch.currency) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'correction_credit_source_changed', reason: 'Correction credit source is no longer payable.',
+        payoutBatchLineId: line.id, financeLedgerEntryId: null,
+      }));
+    }
+    if (source.payoutLines.some((other) => other.id !== line.id)) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'correction_credit_membership_conflict', reason: 'Correction credit belongs to another active payout.',
+        payoutBatchLineId: line.id, financeLedgerEntryId: null,
+      }));
+    }
+  }
+
   if (blockers.length > 0) {
     throw new PayoutBatchTransitionRevalidationError(blockers);
   }
@@ -3222,11 +3323,17 @@ export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto
       throw new Error('Payout batch could not be cancelled because its status changed.');
     }
 
+    await tx.financialCorrectionCreditPayoutLine.updateMany({
+      where: { payoutBatchId: batchId, status: 'ACTIVE' },
+      data: { status: 'CANCELLED', cancelledAt: new Date() },
+    });
+
     const batch = await tx.payoutBatch.findUnique({
       where: {
         id: batchId,
       },
       include: {
+        correctionCreditLines: true,
         lines: {
           orderBy: {
             createdAt: 'asc',
@@ -3327,6 +3434,7 @@ export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatc
         status: 'REVIEW',
       },
       include: {
+        correctionCreditLines: true,
         lines: {
           orderBy: {
             createdAt: 'asc',
@@ -3359,6 +3467,7 @@ export async function markPayoutBatchPaid(
         id: batchId,
       },
       include: {
+        correctionCreditLines: true,
         lines: {
           orderBy: {
             createdAt: 'asc',
@@ -3379,7 +3488,7 @@ export async function markPayoutBatchPaid(
     if (batch.status !== 'REVIEW') {
       throw new Error('Only review payout batches can be marked paid.');
     }
-    if (batch.lines.length === 0) {
+    if (batch.lines.length === 0 && batch.correctionCreditLines.length === 0) {
       throw new Error('Payout batch has no lines to mark paid.');
     }
 
@@ -3419,6 +3528,14 @@ export async function markPayoutBatchPaid(
       throw new Error('Every payout batch ledger row must be updated before marking paid.');
     }
 
+    const creditUpdate = await tx.financialCorrectionCreditPayoutLine.updateMany({
+      where: { payoutBatchId: batchId, status: 'ACTIVE' },
+      data: { status: 'PAID', paidAt: paymentEvidence.paidAt },
+    });
+    if (creditUpdate.count !== batch.correctionCreditLines.length) {
+      throw new Error('Every correction-credit payout line must be marked paid atomically.');
+    }
+
     await createEventsIdempotently(
       buildPayoutPaidEvents({
         batch,
@@ -3429,6 +3546,22 @@ export async function markPayoutBatchPaid(
       }),
       tx,
     );
+    await createEventsIdempotently(batch.correctionCreditLines.map((line) => ({
+      vendorId: batch.vendorId,
+      eventType: FinanceEventType.PAYOUT_PAID,
+      amountMinor: line.amountMinor,
+      currency: batch.currency,
+      referenceType: 'payout_batch',
+      referenceId: batch.id,
+      metadataJson: {
+        paymentSource: 'manual_eft', payoutBatchId: batch.id,
+        financialCorrectionCreditPayoutLineId: line.id,
+        settlementCreditLineId: line.settlementCreditLineId,
+        paidAt: paymentEvidence.paidAt.toISOString(), paidByUserId,
+      },
+      createdBy: paidByUserId,
+      idempotencyKey: `payout-batch:${batch.id}:mark-paid:correction-credit:${line.settlementCreditLineId}`,
+    })), tx);
 
     const paidBatch = await tx.payoutBatch.findUnique({
       where: {
@@ -3436,6 +3569,7 @@ export async function markPayoutBatchPaid(
       },
       include: {
         vendorBalanceEvents: true,
+        correctionCreditLines: true,
         lines: {
           orderBy: {
             createdAt: 'asc',

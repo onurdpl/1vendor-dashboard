@@ -14,6 +14,8 @@ import {
   acknowledgeZeroNetReconciliation,
   getPaidFinancialCorrectionState,
   applyPaidFinancialCorrectionDebt,
+  getPaidFinancialCorrectionCreditState,
+  applyPaidFinancialCorrectionCredit,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
@@ -31,6 +33,7 @@ import {
   type AdminFinancialCorrectionPreview,
   type ZeroNetReconciliationAcknowledgement,
   type PaidFinancialCorrectionApplication,
+  type PaidFinancialCorrectionCreditApplication,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -46,6 +49,8 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     acknowledgeZeroNetReconciliation: vi.fn(),
     getPaidFinancialCorrectionState: vi.fn(),
     applyPaidFinancialCorrectionDebt: vi.fn(),
+    getPaidFinancialCorrectionCreditState: vi.fn(),
+    applyPaidFinancialCorrectionCredit: vi.fn(),
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
@@ -65,6 +70,8 @@ const getZeroNetAcknowledgementMock = vi.mocked(getZeroNetReconciliationAcknowle
 const acknowledgeZeroNetMock = vi.mocked(acknowledgeZeroNetReconciliation);
 const getPaidCorrectionStateMock = vi.mocked(getPaidFinancialCorrectionState);
 const applyPaidCorrectionMock = vi.mocked(applyPaidFinancialCorrectionDebt);
+const getPaidCreditStateMock = vi.mocked(getPaidFinancialCorrectionCreditState);
+const applyPaidCreditMock = vi.mocked(applyPaidFinancialCorrectionCredit);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
@@ -241,6 +248,15 @@ const appliedPaidCorrection: PaidFinancialCorrectionApplication = {
   historicalPayoutPaidAt: '2026-09-20T12:00:00Z', vendorBalanceEventId: 'debt-1',
 };
 
+const appliedPaidCredit: PaidFinancialCorrectionCreditApplication = {
+  id: 'correction-credit-1', reviewId: 'review-1', creditId: 'credit-1', grossCreditMinor: 1760,
+  currency: 'TRY', status: 'APPLIED', direction: 'VENDOR_CREDIT', authorizedByUserId: 'admin-1',
+  authorizedAt: '2026-09-25T12:00:00Z', appliedAt: '2026-09-25T12:00:00Z',
+  reason: 'Verified credit evidence', previewFingerprint: 'financial-correction-preview-v1:verified',
+  historicalPayoutBatchId: 'paid-batch-1', historicalPayoutPaidAt: '2026-09-20T12:00:00Z',
+  settlementApprovalId: null, settlementStatus: null, payoutBatchId: null, payoutStatus: null,
+};
+
 function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
   return {
     type: 'legacy_refund_finance', id: 'legacy-review-1', status: 'ACTIVE', resolutionOutcome: null,
@@ -294,6 +310,7 @@ beforeEach(() => {
   getZeroNetAcknowledgementMock.mockResolvedValue({ ok: true, writesPerformed: false, acknowledgement: null });
   acknowledgeZeroNetMock.mockResolvedValue({ ok: true, acknowledgement: zeroNetAcknowledgement });
   getPaidCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'NONZERO_ROUTE_UNSUPPORTED' });
+  getPaidCreditStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'CREDIT_ROUTE_UNSUPPORTED' });
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
@@ -687,6 +704,34 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(within(preview).getByText('Final vendor-payable difference').closest('.op-meta-row')).toHaveTextContent('-TRY 17.60');
     expect(within(preview).queryByText(/existing debt|net payable/i)).not.toBeInTheDocument();
     expect(within(preview).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('requires a reason and submits only the shown fingerprint for backend-eligible paid vendor credit', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview({
+      corrected: { refundAmountMinor: 8000, commissionReversalMinor: 800, commissionVatReversalMinor: 160, vendorPayableReversalMinor: 7040 },
+      difference: { refundAmountMinor: -2000, commissionReversalMinor: -200, commissionVatReversalMinor: -40, vendorPayableReversalMinor: -1760 },
+      economicDirection: 'VENDOR_CREDIT',
+    }) });
+    getPaidCreditStateMock.mockResolvedValueOnce({ ok: true, writesPerformed: false, application: null, eligible: true, reasonCode: null })
+      .mockResolvedValue({ ok: true, writesPerformed: false, application: appliedPaidCredit, eligible: false, reasonCode: 'CREDIT_EFFECT_ALREADY_EXISTS' });
+    applyPaidCreditMock.mockResolvedValue({ ok: true, application: appliedPaidCredit });
+    renderPage();
+    const apply = await screen.findByRole('button', { name: 'Approve & Apply Credit' });
+    expect(apply).toBeDisabled();
+    expect(screen.getByText(/creates a standalone future vendor payable credit/)).toHaveTextContent('TRY 17.60');
+    await user.type(screen.getByRole('textbox', { name: 'Required Admin reason' }), 'Verified credit evidence');
+    await user.click(apply);
+    await waitFor(() => expect(applyPaidCreditMock).toHaveBeenCalledWith('review-1', {
+      previewFingerprint: 'financial-correction-preview-v1:verified', reason: 'Verified credit evidence',
+    }));
+    expect(await screen.findByText('credit-1')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve & Apply Credit' })).not.toBeInTheDocument();
+    expect(applyPaidCorrectionMock).not.toHaveBeenCalled();
   });
 
   it('reports an unavailable preview without inventing a corrected amount or action', async () => {

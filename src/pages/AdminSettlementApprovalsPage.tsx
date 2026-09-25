@@ -1158,12 +1158,21 @@ function SettlementDecisionWorkspace({
 
 function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
   return (
-    <SettlementDecisionWorkspace
-      vendorId={approval.vendorId}
-      lines={safeArray(approval.lines)}
-      currency={approval.currency}
-      netPayableMinor={approval.netPayableMinor}
-    />
+    <>
+      <SettlementDecisionWorkspace
+        vendorId={approval.vendorId}
+        lines={safeArray(approval.lines)}
+        currency={approval.currency}
+        netPayableMinor={approval.netPayableMinor}
+      />
+      {(approval.correctionCreditLines?.length ?? 0) > 0 ? (
+        <MetadataGroup title="Financial correction credits">
+          {approval.correctionCreditLines?.map((line) => (
+            <MetadataRow key={line.id} label={`Credit ${line.creditId}`} value={`${formatMinor(line.amountMinor, approval.currency)} · ${line.status}`} />
+          ))}
+        </MetadataGroup>
+      ) : null}
+    </>
   );
 }
 
@@ -2007,6 +2016,7 @@ export function AdminSettlementApprovalsPage() {
     !approval &&
     preview &&
     preview.summary.eligibleRowCount === 0 &&
+    (preview.correctionCredits?.length ?? 0) === 0 &&
     preview.summary.excludedActiveApprovalRowCount > 0,
   );
   const candidateQualityWarnings = safeArray<string>(preview?.summary.candidateQualityWarnings);
@@ -2051,7 +2061,7 @@ export function AdminSettlementApprovalsPage() {
     ? 'NOT READY'
     : selectedOrderNoMatch
       ? 'NO MATCH'
-      : preview.candidateSelectionSummary.candidateRowCount === 0 || preview.summary.eligibleRowCount === 0
+      : preview.summary.eligibleRowCount === 0 && (preview.correctionCredits?.length ?? 0) === 0
         ? 'EMPTY'
         : preview.summary.mixedCommissionVatRate
           ? 'BLOCKED'
@@ -2066,7 +2076,7 @@ export function AdminSettlementApprovalsPage() {
       return ['Selected orders did not match finance ledger rows for this candidate scope.'];
     }
     if (candidateQualityClassification === 'EMPTY') {
-      return ['No candidate rows are available for this preview.'];
+      return ['No candidate rows or correction credits are available for this preview.'];
     }
     const reasons: string[] = [];
     if (preview.summary.mixedCommissionVatRate) {
@@ -2078,7 +2088,7 @@ export function AdminSettlementApprovalsPage() {
     if (preview.summary.detectedFinancialProfileSnapshotIds.length > 1) {
       reasons.push('Multiple financial profile snapshot groups are included.');
     }
-    return reasons.length || preview.summary.eligibleRowCount === 0
+    return reasons.length || (preview.summary.eligibleRowCount === 0 && (preview.correctionCredits?.length ?? 0) === 0)
       ? reasons
       : ['Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.'];
   })();
@@ -2086,7 +2096,7 @@ export function AdminSettlementApprovalsPage() {
   const draftBlockedByAcknowledgement = candidateQualityClassification === 'BLOCKED' && !mixedVatAcknowledged;
   const draftStepStatus: WorkflowStepStatus = approval
     ? 'Completed'
-    : draftBlockedByAcknowledgement || (preview ? preview.summary.eligibleRowCount === 0 : false)
+    : draftBlockedByAcknowledgement || (preview ? preview.summary.eligibleRowCount === 0 && (preview.correctionCredits?.length ?? 0) === 0 : false)
       ? 'Blocked'
       : preview
         ? 'Ready'
@@ -2450,7 +2460,7 @@ export function AdminSettlementApprovalsPage() {
         scheduledRunDate: nextApproval.scheduledRunDate ?? existingSummary?.scheduledRunDate,
         scheduledPeriodEnd: nextApproval.scheduledPeriodEnd ?? existingSummary?.scheduledPeriodEnd,
         scheduledCycleKey: nextApproval.scheduledCycleKey ?? existingSummary?.scheduledCycleKey,
-        lineCount: existingSummary?.lineCount ?? nextApproval.lines.length,
+        lineCount: existingSummary?.lineCount ?? nextApproval.lines.length + (nextApproval.correctionCreditLines?.length ?? 0),
       };
       return [summary, ...current.filter((item) => item.id !== summary.id)]
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
@@ -3065,7 +3075,7 @@ export function AdminSettlementApprovalsPage() {
                   <p className="eyebrow">Loaded approval snapshot</p>
                   <h2>Loaded Approval Snapshot</h2>
                   <p className="page-description">
-                    These totals and rows come from SettlementApprovalLine snapshots. Current candidate preview does not recalculate this saved approval truth.
+                    These totals and rows come from saved settlement sources. Current candidate preview does not recalculate this saved approval truth.
                   </p>
                 </div>
                 <StatusBadge status={approval.status}>{safeStatusLabel(approval.status)}</StatusBadge>
@@ -3074,6 +3084,7 @@ export function AdminSettlementApprovalsPage() {
                 <KPIStatCard label="Gross sales" value={formatMinor(approval.grossSalesMinor, approval.currency)} tone="info" />
                 <KPIStatCard label="Commission" value={formatMinor(approval.commissionMinor, approval.currency)} tone="info" />
                 <KPIStatCard label="Commission VAT" value={formatMinor(approval.commissionVatMinor, approval.currency)} tone="info" />
+                {(approval.correctionCreditMinor ?? 0) > 0 ? <KPIStatCard label="Financial correction credit" value={formatMinor(approval.correctionCreditMinor ?? 0, approval.currency)} tone="info" /> : null}
                 <KPIStatCard label="Net payable" value={formatMinor(approval.netPayableMinor, approval.currency)} tone={approval.netPayableMinor > 0 ? 'success' : 'neutral'} />
               </div>
               <ApprovalSnapshotLines approval={approval} />
@@ -3094,6 +3105,13 @@ export function AdminSettlementApprovalsPage() {
                   currency={preview.summary.currency}
                   netPayableMinor={preview.summary.netPayableMinor}
                 />
+                {(preview.correctionCredits?.length ?? 0) > 0 ? (
+                  <MetadataGroup title="Financial correction credits">
+                    {preview.correctionCredits?.map((credit) => (
+                      <MetadataRow key={credit.id} label={`Credit ${credit.id}`} value={formatMinor(credit.amountMinor, preview.summary.currency)} />
+                    ))}
+                  </MetadataGroup>
+                ) : null}
                 <div>
                   <h3>Operational totals</h3>
                   <p className="page-description">Saved approval math is unchanged; these preview totals remain available after the decision summary.</p>
@@ -3102,6 +3120,7 @@ export function AdminSettlementApprovalsPage() {
                   <KPIStatCard label="Gross sales" value={formatMinor(preview.summary.grossSalesMinor, preview.summary.currency)} tone="info" />
                   <KPIStatCard label="Commission" value={formatMinor(preview.summary.commissionMinor, preview.summary.currency)} tone="info" />
                   <KPIStatCard label="Commission VAT" value={formatMinor(preview.summary.commissionVatMinor, preview.summary.currency)} tone="info" />
+                  {(preview.summary.correctionCreditMinor ?? 0) > 0 ? <KPIStatCard label="Financial correction credit" value={formatMinor(preview.summary.correctionCreditMinor ?? 0, preview.summary.currency)} tone="info" /> : null}
                   <KPIStatCard label="Net payable" value={formatMinor(preview.summary.netPayableMinor, preview.summary.currency)} tone={preview.summary.netPayableMinor > 0 ? 'success' : 'neutral'} />
                   <KPIStatCard label="Outstanding debt" value={formatMinor(previewDebtProjection?.outstandingVendorDebtMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.outstandingVendorDebtMinor ?? 0) > 0 ? 'danger' : 'neutral'} />
                   <KPIStatCard label="Debt offset" value={formatMinor(previewDebtProjection?.debtOffsetPreviewMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.debtOffsetPreviewMinor ?? 0) > 0 ? 'warning' : 'neutral'} />
