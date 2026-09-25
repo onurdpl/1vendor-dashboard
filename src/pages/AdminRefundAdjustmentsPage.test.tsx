@@ -10,6 +10,8 @@ import {
   getAdminLegacyRefundReview,
   getAdminRefundReview,
   getAdminFinancialCorrectionPreview,
+  getZeroNetReconciliationAcknowledgement,
+  acknowledgeZeroNetReconciliation,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
@@ -25,6 +27,7 @@ import {
   type TerminalRefundReview,
   type TerminalRefundReviewDetail,
   type AdminFinancialCorrectionPreview,
+  type ZeroNetReconciliationAcknowledgement,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -36,6 +39,8 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     listRefundAdjustments: vi.fn(),
     getAdminRefundReview: vi.fn(),
     getAdminFinancialCorrectionPreview: vi.fn(),
+    getZeroNetReconciliationAcknowledgement: vi.fn(),
+    acknowledgeZeroNetReconciliation: vi.fn(),
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
@@ -51,6 +56,8 @@ const listRefundAdjustmentsMock = vi.mocked(listRefundAdjustments);
 const listAdminRefundReviewsMock = vi.mocked(listAdminRefundReviews);
 const getAdminRefundReviewMock = vi.mocked(getAdminRefundReview);
 const getAdminFinancialCorrectionPreviewMock = vi.mocked(getAdminFinancialCorrectionPreview);
+const getZeroNetAcknowledgementMock = vi.mocked(getZeroNetReconciliationAcknowledgement);
+const acknowledgeZeroNetMock = vi.mocked(acknowledgeZeroNetReconciliation);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
@@ -211,6 +218,14 @@ function makeCorrectionPreview(overrides: Partial<AdminFinancialCorrectionPrevie
   };
 }
 
+const zeroNetAcknowledgement: ZeroNetReconciliationAcknowledgement = {
+  id: 'zero-net-1', reviewId: 'review-1', resolvedReviewEventId: 'event-resolved',
+  acceptedEvidenceSnapshotId: 'snapshot-1', incomingConflictEvidenceId: 'incoming-1',
+  previewFingerprint: 'financial-correction-preview-v1:verified', economicDirection: 'NONE',
+  vendorPayableDifferenceMinor: 0, acknowledgedByUserId: 'admin-1',
+  acknowledgedAt: '2026-09-25T12:00:00.000Z', note: null,
+};
+
 function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
   return {
     type: 'legacy_refund_finance', id: 'legacy-review-1', status: 'ACTIVE', resolutionOutcome: null,
@@ -261,6 +276,8 @@ beforeEach(() => {
   listAdminRefundReviewsMock.mockResolvedValue(reviewResponse());
   getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
   getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview() });
+  getZeroNetAcknowledgementMock.mockResolvedValue({ ok: true, writesPerformed: false, acknowledgement: null });
+  acknowledgeZeroNetMock.mockResolvedValue({ ok: true, acknowledgement: zeroNetAcknowledgement });
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
@@ -532,7 +549,7 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.queryByRole('button', { name: /approve & apply correction|create vendor debt|create vendor credit|add to settlement|add to payout|mark paid|cancel payout/i })).not.toBeInTheDocument();
   });
 
-  it('shows zero vendor effect without hiding component differences or adding a money action', async () => {
+  it('shows a zero-net acknowledgement without hiding component differences or adding a money action', async () => {
     listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
       terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
     }));
@@ -546,7 +563,61 @@ describe('AdminRefundAdjustmentsPage', () => {
     const preview = await screen.findByLabelText('Financial correction preview');
     expect(await within(preview).findByText('No vendor monetary effect')).toBeInTheDocument();
     expect(within(preview).getByText('Refund difference').closest('.op-meta-row')).toHaveTextContent('20.00');
-    expect(within(preview).queryByRole('button')).not.toBeInTheDocument();
+    expect(await within(preview).findByRole('button', { name: 'Acknowledge zero-net reconciliation' })).toBeInTheDocument();
+    expect(within(preview).getByText('It does not move money.', { exact: false })).toBeInTheDocument();
+    expect(within(preview).queryByRole('button', { name: /approve|apply|debt|credit|payout/i })).not.toBeInTheDocument();
+  });
+
+  it('submits only the current zero-net fingerprint and displays the persisted acknowledgement', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview({
+      difference: { refundAmountMinor: 2000, commissionReversalMinor: 2000, commissionVatReversalMinor: 0, vendorPayableReversalMinor: 0 },
+      economicDirection: 'NONE',
+    }) });
+    getZeroNetAcknowledgementMock.mockResolvedValueOnce({ ok: true, writesPerformed: false, acknowledgement: null })
+      .mockResolvedValue({ ok: true, writesPerformed: false, acknowledgement: zeroNetAcknowledgement });
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Acknowledge zero-net reconciliation' }));
+    await waitFor(() => expect(acknowledgeZeroNetMock).toHaveBeenCalledWith('review-1', {
+      previewFingerprint: 'financial-correction-preview-v1:verified',
+    }));
+    expect(await screen.findByText('Acknowledged — no vendor monetary effect')).toBeInTheDocument();
+    expect(screen.getByText('admin-1')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acknowledge zero-net reconciliation' })).not.toBeInTheDocument();
+  });
+
+  it('refreshes the preview and history after a stale zero-net acknowledgement response', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview({
+      difference: { refundAmountMinor: 2000, commissionReversalMinor: 2000, commissionVatReversalMinor: 0, vendorPayableReversalMinor: 0 },
+      economicDirection: 'NONE',
+    }) });
+    acknowledgeZeroNetMock.mockRejectedValueOnce(new Error('PREVIEW_STALE'));
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Acknowledge zero-net reconciliation' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('PREVIEW_STALE');
+    await waitFor(() => expect(getAdminFinancialCorrectionPreviewMock.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(getZeroNetAcknowledgementMock.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it('shows a prior zero-net acknowledgement after review Reopen without another action', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'ACTIVE', resolutionOutcome: null })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACTIVE', resolutionOutcome: null }) });
+    getZeroNetAcknowledgementMock.mockResolvedValue({ ok: true, writesPerformed: false, acknowledgement: zeroNetAcknowledgement });
+    renderPage();
+    expect(await screen.findByText('Acknowledged — no vendor monetary effect')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acknowledge zero-net reconciliation' })).not.toBeInTheDocument();
+    expect(getAdminFinancialCorrectionPreviewMock).not.toHaveBeenCalled();
   });
 
   it('renders vendor credit as a gross correction direction without netting existing debt', async () => {

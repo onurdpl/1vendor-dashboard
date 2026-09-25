@@ -6,6 +6,10 @@ import {
   FinancialCorrectionPreviewError,
   previewTerminalFinancialCorrection,
 } from '../backend/src/modules/finance/financial-correction-preview.service.js';
+import {
+  acknowledgeZeroNetReconciliation,
+  getZeroNetAcknowledgement,
+} from '../backend/src/modules/finance/financial-correction-zero-net-acknowledgement.service.js';
 import { normalizeRefundEvidence } from '../backend/src/modules/finance/refund-evidence-normalizer.service.js';
 
 function fixture(acceptedAmount = '100.00', correctedAmount = '120.00', commission = '10.00', commissionVat = '20.00') {
@@ -172,5 +176,119 @@ describe('terminal financial correction calculation preview', () => {
     const input = fixture();
     mutate(input);
     await rejectReason(input, reason);
+  });
+});
+
+function zeroNetAcknowledgementFixture() {
+  const input = fixture('100.00', '120.00', '100.00', '0.00');
+  let saved: Record<string, unknown> | null = null;
+  const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    saved = { id: 'zero-net-1', acknowledgedAt: new Date('2026-09-25T12:00:00.000Z'), ...data };
+    return saved;
+  });
+  const findUnique = vi.fn(async ({ where }: { where: { reviewId?: string; acceptedEvidenceSnapshotId?: string } }) => {
+    if (!saved) return null;
+    if (where.reviewId && saved.reviewId === where.reviewId) return saved;
+    if (where.acceptedEvidenceSnapshotId && saved.acceptedEvidenceSnapshotId === where.acceptedEvidenceSnapshotId) return saved;
+    return null;
+  });
+  const findFirstEvent = vi.fn().mockResolvedValue({
+    id: 'event-resolved', eventType: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED',
+  });
+  const tx = {
+    refundTerminalEvidenceReview: input.db.refundTerminalEvidenceReview,
+    refundTerminalEvidenceReviewEvent: { findFirst: findFirstEvent },
+    financialCorrectionZeroNetAcknowledgement: { findUnique, create },
+    $queryRaw: vi.fn().mockResolvedValue([{ id: 'review-1' }]),
+  };
+  const db = {
+    $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
+    financialCorrectionZeroNetAcknowledgement: tx.financialCorrectionZeroNetAcknowledgement,
+  } as unknown as typeof prisma;
+  return { input, tx, db, create, findUnique, findFirstEvent, get saved() { return saved; } };
+}
+
+describe('zero-net correction reconciliation acknowledgement', () => {
+  it('freezes the exact server preview, Admin actor and resolved event without a financial write', async () => {
+    const test = zeroNetAcknowledgementFixture();
+    const preview = await previewTerminalFinancialCorrection('review-1', test.input.db);
+    const result = await acknowledgeZeroNetReconciliation({
+      reviewId: 'review-1', previewFingerprint: preview.previewFingerprint, actorUserId: 'admin-1', note: '  Reconciled  ',
+    }, test.db);
+    expect(result).toMatchObject({ reviewId: 'review-1', resolvedReviewEventId: 'event-resolved',
+      acknowledgedByUserId: 'admin-1', vendorPayableDifferenceMinor: 0, economicDirection: 'NONE', note: 'Reconciled' });
+    expect(test.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      acceptedEvidenceSnapshotId: 'snapshot-1', incomingConflictEvidenceId: 'incoming-1',
+      acceptedEvidenceHash: test.input.snapshot.evidenceHash, incomingEvidenceHash: test.input.conflict.evidenceHash,
+      historicalSaleFinanceLedgerEntryId: 'sale-1', acceptedRefundFinanceLedgerEntryId: 'refund-ledger-1',
+      acceptedRefundAmountMinor: 10000, correctedRefundAmountMinor: 12000,
+      refundDifferenceMinor: 2000, commissionDifferenceMinor: 2000,
+      vendorPayableDifferenceMinor: 0, previewFingerprint: preview.previewFingerprint,
+    }) });
+    expect(await getZeroNetAcknowledgement('review-1', test.db)).toMatchObject({ id: 'zero-net-1' });
+    expect(test.input.write).not.toHaveBeenCalled();
+  });
+
+  it('returns the same historical record on an exact retry, including after Reopen', async () => {
+    const test = zeroNetAcknowledgementFixture();
+    const preview = await previewTerminalFinancialCorrection('review-1', test.input.db);
+    const request = { reviewId: 'review-1', previewFingerprint: preview.previewFingerprint, actorUserId: 'admin-1' };
+    const first = await acknowledgeZeroNetReconciliation(request, test.db);
+    test.input.review.status = 'ACTIVE';
+    const second = await acknowledgeZeroNetReconciliation(request, test.db);
+    expect(second).toEqual(first);
+    expect(test.create).toHaveBeenCalledTimes(1);
+    await expect(acknowledgeZeroNetReconciliation({ ...request, previewFingerprint: `financial-correction-preview-v1:${'0'.repeat(64)}` }, test.db))
+      .rejects.toMatchObject({ code: 'ALREADY_ACKNOWLEDGED' });
+  });
+
+  it('rejects stale, nonzero, invalid and missing authority without persistence', async () => {
+    const stale = zeroNetAcknowledgementFixture();
+    await expect(acknowledgeZeroNetReconciliation({ reviewId: 'review-1', previewFingerprint: `financial-correction-preview-v1:${'0'.repeat(64)}`, actorUserId: 'admin-1' }, stale.db))
+      .rejects.toMatchObject({ code: 'PREVIEW_STALE' });
+    expect(stale.create).not.toHaveBeenCalled();
+
+    const observed = zeroNetAcknowledgementFixture();
+    const observedPreview = await previewTerminalFinancialCorrection('review-1', observed.input.db);
+    observed.input.review.occurrenceCount += 1;
+    await expect(acknowledgeZeroNetReconciliation({ reviewId: 'review-1', previewFingerprint: observedPreview.previewFingerprint, actorUserId: 'admin-1' }, observed.db))
+      .rejects.toMatchObject({ code: 'PREVIEW_STALE' });
+    expect(observed.create).not.toHaveBeenCalled();
+
+    const changedRate = zeroNetAcknowledgementFixture();
+    const changedPreview = await previewTerminalFinancialCorrection('review-1', changedRate.input.db);
+    changedRate.input.sale.commissionPercentSnapshot = new Prisma.Decimal('99.00');
+    await expect(acknowledgeZeroNetReconciliation({ reviewId: 'review-1', previewFingerprint: changedPreview.previewFingerprint, actorUserId: 'admin-1' }, changedRate.db))
+      .rejects.toMatchObject({ code: 'AUTHORITY_INVALID_REFUND_COMMISSION_SNAPSHOT_MISMATCH' });
+    expect(changedRate.create).not.toHaveBeenCalled();
+
+    const nonzero = zeroNetAcknowledgementFixture();
+    nonzero.input.sale.commissionPercentSnapshot = new Prisma.Decimal('10.00');
+    nonzero.input.refund.commissionPercentSnapshot = new Prisma.Decimal('10.00');
+    const nonzeroPreview = await previewTerminalFinancialCorrection('review-1', nonzero.input.db);
+    await expect(acknowledgeZeroNetReconciliation({ reviewId: 'review-1', previewFingerprint: nonzeroPreview.previewFingerprint, actorUserId: 'admin-1' }, nonzero.db))
+      .rejects.toMatchObject({ code: 'NONZERO_CORRECTION_NOT_SUPPORTED' });
+    expect(nonzero.create).not.toHaveBeenCalled();
+
+    const invalid = zeroNetAcknowledgementFixture();
+    invalid.input.review.incomingConflictEvidence = null as never;
+    await expect(acknowledgeZeroNetReconciliation({ reviewId: 'review-1', previewFingerprint: `financial-correction-preview-v1:${'0'.repeat(64)}`, actorUserId: 'admin-1' }, invalid.db))
+      .rejects.toMatchObject({ code: 'AUTHORITY_INVALID_INCOMING_EVIDENCE_MISSING' });
+    expect(invalid.create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the historical RESOLVED event is missing or persistence fails', async () => {
+    const missingEvent = zeroNetAcknowledgementFixture();
+    const preview = await previewTerminalFinancialCorrection('review-1', missingEvent.input.db);
+    missingEvent.findFirstEvent.mockResolvedValue(null);
+    await expect(acknowledgeZeroNetReconciliation({ reviewId: 'review-1', previewFingerprint: preview.previewFingerprint, actorUserId: 'admin-1' }, missingEvent.db))
+      .rejects.toMatchObject({ code: 'REVIEW_NOT_ELIGIBLE' });
+    expect(missingEvent.create).not.toHaveBeenCalled();
+
+    const failure = zeroNetAcknowledgementFixture();
+    failure.create.mockRejectedValue(new Error('database write failed'));
+    await expect(acknowledgeZeroNetReconciliation({ reviewId: 'review-1', previewFingerprint: preview.previewFingerprint, actorUserId: 'admin-1' }, failure.db))
+      .rejects.toThrow('database write failed');
+    expect(failure.saved).toBeNull();
   });
 });

@@ -388,6 +388,7 @@ model User {
   supportNotes                         SupportTicketNote[]
   supportReplies                       SupportTicketReply[]
   refundTerminalEvidenceReviewEvents   RefundTerminalEvidenceReviewEvent[] @relation("refundTerminalEvidenceReviewEventActor")
+  zeroNetCorrectionAcknowledgements    FinancialCorrectionZeroNetAcknowledgement[] @relation("zeroNetCorrectionAcknowledgementActor")
   legacyRefundFinanceReviewEvents      LegacyRefundFinanceReviewEvent[] @relation("legacyRefundFinanceReviewEventActor")
 }
 
@@ -1214,6 +1215,7 @@ model RefundEvidenceSnapshot {
   historicalEconomicVendor           Vendor                         @relation("refundEvidenceHistoricalEconomicVendor", fields: [historicalEconomicVendorId], references: [id], onDelete: Restrict)
   historicalSaleFinanceLedgerEntry   FinanceLedgerEntry             @relation("refundEvidenceHistoricalSaleLedger", fields: [historicalSaleFinanceLedgerEntryId], references: [id], onDelete: Restrict)
   terminalEvidenceReviews            RefundTerminalEvidenceReview[]
+  zeroNetCorrectionAcknowledgement   FinancialCorrectionZeroNetAcknowledgement?
 
   @@unique([sourceShopifyRefundId, vendorAllocationId])
   @@index([sourceShopifyOrderId])
@@ -1252,6 +1254,7 @@ model RefundTerminalEvidenceReview {
   economicVendor                     Vendor                              @relation("refundTerminalEvidenceReviewEconomicVendor", fields: [economicVendorId], references: [id], onDelete: Restrict)
   storedEvidenceSnapshot             RefundEvidenceSnapshot?             @relation(fields: [storedEvidenceSnapshotId], references: [id], onDelete: Restrict)
   incomingConflictEvidence           RefundTerminalConflictEvidence?
+  zeroNetCorrectionAcknowledgement    FinancialCorrectionZeroNetAcknowledgement?
   events                             RefundTerminalEvidenceReviewEvent[]
 
   @@index([status])
@@ -1279,6 +1282,7 @@ model RefundTerminalConflictEvidence {
   normalizationVersion               Int
   createdAt                          DateTime                     @default(now())
   review                             RefundTerminalEvidenceReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  zeroNetCorrectionAcknowledgement   FinancialCorrectionZeroNetAcknowledgement?
   vendorAllocation                   VendorAllocation             @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
   economicVendor                     Vendor                       @relation("refundTerminalConflictEvidenceEconomicVendor", fields: [economicVendorId], references: [id], onDelete: Restrict)
   historicalSaleFinanceLedgerEntry   FinanceLedgerEntry           @relation("refundTerminalConflictEvidenceHistoricalSaleLedger", fields: [historicalSaleFinanceLedgerEntryId], references: [id], onDelete: Restrict)
@@ -1302,9 +1306,59 @@ model RefundTerminalEvidenceReviewEvent {
   createdAt         DateTime                              @default(now())
   review            RefundTerminalEvidenceReview          @relation(fields: [reviewId], references: [id], onDelete: Restrict)
   actorUser         User?                                 @relation("refundTerminalEvidenceReviewEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  zeroNetCorrectionAcknowledgement FinancialCorrectionZeroNetAcknowledgement?
 
   @@index([reviewId, createdAt])
   @@index([eventType, createdAt])
+}
+
+model FinancialCorrectionZeroNetAcknowledgement {
+  id                                  String   @id @default(cuid())
+  reviewId                            String   @unique(map: "ZeroNetAck_review_key")
+  resolvedReviewEventId               String   @unique(map: "ZeroNetAck_event_key")
+  sourceShopifyRefundId               String
+  sourceShopifyOrderId                String
+  vendorAllocationId                  String
+  vendorId                            String
+  acceptedEvidenceSnapshotId          String   @unique(map: "ZeroNetAck_accepted_key")
+  incomingConflictEvidenceId          String   @unique(map: "ZeroNetAck_incoming_key")
+  acceptedEvidenceHash                String
+  incomingEvidenceHash                String
+  acceptedEvidenceVersion             Int
+  acceptedNormalizationVersion        Int
+  incomingEvidenceVersion             Int
+  incomingNormalizationVersion        Int
+  historicalSaleFinanceLedgerEntryId  String
+  acceptedRefundFinanceLedgerEntryId  String
+  commissionPercent                    Decimal  @db.Decimal(5, 2)
+  commissionVatPercent                 Decimal  @db.Decimal(5, 2)
+  currency                             String
+  acceptedRefundAmountMinor            Int
+  acceptedCommissionReversalMinor      Int
+  acceptedCommissionVatReversalMinor   Int
+  acceptedVendorPayableReversalMinor   Int
+  correctedRefundAmountMinor           Int
+  correctedCommissionReversalMinor     Int
+  correctedCommissionVatReversalMinor  Int
+  correctedVendorPayableReversalMinor  Int
+  refundDifferenceMinor                Int
+  commissionDifferenceMinor            Int
+  commissionVatDifferenceMinor         Int
+  vendorPayableDifferenceMinor         Int
+  economicDirection                    String
+  previewFingerprint                   String
+  acknowledgedByUserId                 String
+  note                                 String?
+  acknowledgedAt                       DateTime @default(now())
+  review                               RefundTerminalEvidenceReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  resolvedReviewEvent                  RefundTerminalEvidenceReviewEvent @relation(fields: [resolvedReviewEventId], references: [id], onDelete: Restrict)
+  acceptedEvidenceSnapshot            RefundEvidenceSnapshot @relation(fields: [acceptedEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  incomingConflictEvidence            RefundTerminalConflictEvidence @relation(fields: [incomingConflictEvidenceId], references: [id], onDelete: Restrict)
+  acknowledgedByUser                   User @relation("zeroNetCorrectionAcknowledgementActor", fields: [acknowledgedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([acceptedEvidenceSnapshotId, incomingConflictEvidenceId], map: "ZeroNetAck_evidence_pair_key")
+  @@index([vendorAllocationId], map: "ZeroNetAck_allocation_idx")
+  @@index([vendorId], map: "ZeroNetAck_vendor_idx")
 }
 
 model LegacyRefundFinanceReview {

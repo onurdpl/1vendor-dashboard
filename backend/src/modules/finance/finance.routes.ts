@@ -95,6 +95,11 @@ import {
   previewTerminalFinancialCorrection,
 } from './financial-correction-preview.service.js';
 import {
+  acknowledgeZeroNetReconciliation,
+  getZeroNetAcknowledgement,
+  ZeroNetAcknowledgementError,
+} from './financial-correction-zero-net-acknowledgement.service.js';
+import {
   acknowledgeAdminRefundReview,
   AdminRefundReviewLifecycleError,
   getAdminRefundReviewDetail,
@@ -1331,6 +1336,45 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
             reasonCode: error.reasonCode,
             message: error.message,
           });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-reviews/:reviewId/financial-correction-zero-net-acknowledgement',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      const { reviewId } = request.params as { reviewId: string };
+      return { ok: true as const, writesPerformed: false as const, acknowledgement: await getZeroNetAcknowledgement(reviewId) };
+    },
+  );
+
+  app.post(
+    '/admin/finance/refund-reviews/:reviewId/financial-correction-zero-net-acknowledgement',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      const actorUserId = request.authUser.id;
+      if (!actorUserId) return reply.code(403).send({ message: 'Authenticated Admin actor is required.' });
+      try {
+        const { reviewId } = request.params as { reviewId: string };
+        const previewFingerprint = readOptionalBodyString(request.body, 'previewFingerprint');
+        if (!previewFingerprint) throw new ZeroNetAcknowledgementError('PREVIEW_FINGERPRINT_REQUIRED', 400);
+        return {
+          ok: true as const,
+          acknowledgement: await acknowledgeZeroNetReconciliation({
+            reviewId,
+            previewFingerprint,
+            actorUserId,
+            note: readOptionalBodyString(request.body, 'note'),
+          }),
+        };
+      } catch (error) {
+        if (error instanceof ZeroNetAcknowledgementError) {
+          return reply.code(error.statusCode).send({ ok: false, code: error.code, message: error.message });
         }
         throw error;
       }

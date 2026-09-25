@@ -230,6 +230,33 @@ export function getAdminFinancialCorrectionPreview(reviewId: string, signal?: Ab
   );
 }
 
+export type ZeroNetReconciliationAcknowledgement = {
+  id: string;
+  reviewId: string;
+  resolvedReviewEventId: string;
+  acceptedEvidenceSnapshotId: string;
+  incomingConflictEvidenceId: string;
+  previewFingerprint: string;
+  economicDirection: 'NONE';
+  vendorPayableDifferenceMinor: 0;
+  acknowledgedByUserId: string;
+  acknowledgedAt: string;
+  note: string | null;
+};
+
+const zeroNetPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-zero-net-acknowledgement`;
+
+export function getZeroNetReconciliationAcknowledgement(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; writesPerformed: false; acknowledgement: ZeroNetReconciliationAcknowledgement | null }>(
+    zeroNetPath(reviewId), { signal },
+  );
+}
+
+export function acknowledgeZeroNetReconciliation(reviewId: string, input: { previewFingerprint: string; note?: string | null }) {
+  return apiClient.post<{ ok: true; acknowledgement: ZeroNetReconciliationAcknowledgement }>(zeroNetPath(reviewId), input);
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;

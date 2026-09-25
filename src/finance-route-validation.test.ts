@@ -16,6 +16,17 @@ const resolveFinanceIntegrityAlertWithScannerValidationMock = vi.hoisted(() => v
 const acknowledgeFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
 const getTransferRecoveryDiagnosticsMock = vi.hoisted(() => vi.fn());
 const retryFailedEconomicTransferMock = vi.hoisted(() => vi.fn());
+const acknowledgeZeroNetMock = vi.hoisted(() => vi.fn());
+const getZeroNetMock = vi.hoisted(() => vi.fn());
+const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
+  constructor(readonly code: string, readonly statusCode = 409) { super(code); }
+});
+
+vi.mock('../backend/src/modules/finance/financial-correction-zero-net-acknowledgement.service.js', () => ({
+  acknowledgeZeroNetReconciliation: acknowledgeZeroNetMock,
+  getZeroNetAcknowledgement: getZeroNetMock,
+  ZeroNetAcknowledgementError: ZeroNetAcknowledgementErrorMock,
+}));
 const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
   class FinanceIntegrityScannerValidationError extends Error {
     statusCode: number;
@@ -236,6 +247,8 @@ async function updateFinancialProfile(body: unknown) {
 describe('finance route validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    acknowledgeZeroNetMock.mockReset();
+    getZeroNetMock.mockReset();
     runFinanceIntegrityScannerDiagnosticsMock.mockReset();
     rescanFinanceIntegrityAlertMock.mockReset();
     resolveFinanceIntegrityAlertWithScannerValidationMock.mockReset();
@@ -382,6 +395,36 @@ describe('finance route validation', () => {
       notes: ['No settlement drafts were created.'],
       jobRun: null,
     });
+  });
+
+  it('keeps zero-net acknowledgement Admin-only and derives the actor from authentication', async () => {
+    const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-zero-net-acknowledgement';
+    const posts = createRegisteredPostRoutes();
+    for (const role of ['finance', 'vendor', 'support']) {
+      const denied = createReply();
+      await posts.get(path)?.({ authUser: { role, id: `${role}-1` }, params: { reviewId: 'review-1' }, body: { previewFingerprint: 'fingerprint' } }, denied);
+      expect(denied.statusCode).toBe(403);
+    }
+    expect(acknowledgeZeroNetMock).not.toHaveBeenCalled();
+
+    acknowledgeZeroNetMock.mockResolvedValue({ id: 'ack-1' });
+    const allowed = createReply();
+    const result = await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' }, body: { previewFingerprint: 'fingerprint', note: 'Reviewed', actorUserId: 'forged' } }, allowed);
+    expect(result).toEqual({ ok: true, acknowledgement: { id: 'ack-1' } });
+    expect(acknowledgeZeroNetMock).toHaveBeenCalledWith({ reviewId: 'review-1', previewFingerprint: 'fingerprint', actorUserId: 'admin-1', note: 'Reviewed' });
+    const deniedRead = createReply();
+    await createRegisteredGetRoutes().get(path)?.({ authUser: { role: 'vendor' }, params: { reviewId: 'review-1' } }, deniedRead);
+    expect(deniedRead.statusCode).toBe(403);
+    expect(getZeroNetMock).not.toHaveBeenCalled();
+  });
+
+  it('returns structured zero-net failures without converting them into success', async () => {
+    const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-zero-net-acknowledgement';
+    acknowledgeZeroNetMock.mockRejectedValue(new ZeroNetAcknowledgementErrorMock('NONZERO_CORRECTION_NOT_SUPPORTED'));
+    const reply = createReply();
+    await createRegisteredPostRoutes().get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' }, body: { previewFingerprint: 'fingerprint' } }, reply);
+    expect(reply.statusCode).toBe(409);
+    expect(reply.payload).toMatchObject({ ok: false, code: 'NONZERO_CORRECTION_NOT_SUPPORTED' });
   });
 
   it('returns only dashboard finance summary fields', async () => {

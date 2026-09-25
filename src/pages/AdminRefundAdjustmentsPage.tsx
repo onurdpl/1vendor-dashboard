@@ -15,6 +15,8 @@ import {
   acknowledgeAdminRefundReview,
   getAdminRefundReview,
   getAdminFinancialCorrectionPreview,
+  getZeroNetReconciliationAcknowledgement,
+  acknowledgeZeroNetReconciliation,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
   acknowledgeAdminLegacyRefundReview,
@@ -259,6 +261,8 @@ export function AdminRefundAdjustmentsPage() {
   const [terminalResolutionOutcome, setTerminalResolutionOutcome] = useState<TerminalRefundReviewResolutionOutcome | ''>('');
   const [terminalActionPending, setTerminalActionPending] = useState(false);
   const [terminalActionError, setTerminalActionError] = useState<string | null>(null);
+  const [zeroNetPending, setZeroNetPending] = useState(false);
+  const [zeroNetError, setZeroNetError] = useState<string | null>(null);
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -325,6 +329,39 @@ export function AdminRefundAdjustmentsPage() {
   const correctionPreview = eligibleTerminalDetail && !correctionPreviewQuery.isFetching && !correctionPreviewQuery.error
     && correctionPreviewQuery.data?.preview.reviewId === eligibleTerminalDetail.id
     ? correctionPreviewQuery.data.preview : null;
+  const zeroNetQuery = useQueryResource(
+    ['admin', 'finance', 'zero-net-reconciliation-acknowledgement', terminalDetail?.id ?? 'none'],
+    ({ signal }) => getZeroNetReconciliationAcknowledgement(terminalDetail!.id, signal),
+    {
+      routeName: 'Zero-net reconciliation acknowledgement',
+      endpoint: terminalDetail
+        ? `/admin/finance/refund-reviews/${terminalDetail.id}/financial-correction-zero-net-acknowledgement`
+        : '/admin/finance/refund-reviews',
+      enabled: Boolean(terminalDetail),
+    },
+  );
+  const zeroNetAcknowledgement = terminalDetail && zeroNetQuery.data?.acknowledgement?.reviewId === terminalDetail.id
+    ? zeroNetQuery.data.acknowledgement : null;
+
+  const runZeroNetAcknowledgement = async () => {
+    if (!correctionPreview || !eligibleTerminalDetail || zeroNetPending || zeroNetQuery.isFetching ||
+        zeroNetQuery.error || zeroNetAcknowledgement || correctionPreview.currency !== 'TRY' ||
+        correctionPreview.economicDirection !== 'NONE' ||
+        correctionPreview.difference.vendorPayableReversalMinor !== 0) return;
+    setZeroNetPending(true);
+    setZeroNetError(null);
+    try {
+      await acknowledgeZeroNetReconciliation(eligibleTerminalDetail.id, {
+        previewFingerprint: correctionPreview.previewFingerprint,
+      });
+      await zeroNetQuery.refetch();
+    } catch (error) {
+      setZeroNetError(error instanceof Error ? error.message : 'Zero-net reconciliation acknowledgement failed.');
+      await Promise.all([correctionPreviewQuery.refetch(), zeroNetQuery.refetch(), terminalDetailQuery.refetch()]);
+    } finally {
+      setZeroNetPending(false);
+    }
+  };
 
   const runTerminalReviewAction = async (action: 'acknowledge' | 'resolve' | 'reopen') => {
     if (!terminalDetail || terminalActionPending) return;
@@ -757,9 +794,31 @@ export function AdminRefundAdjustmentsPage() {
                                 ? 'Sporgym owes vendor more'
                                 : 'No vendor monetary effect'} />
                           </MetadataGroup>
+                          {correctionPreview.currency === 'TRY' && correctionPreview.economicDirection === 'NONE'
+                            && correctionPreview.difference.vendorPayableReversalMinor === 0 ? (
+                              <section className="op-panel-section" aria-label="Zero-net reconciliation">
+                                <h5>Zero-net reconciliation</h5>
+                                <p className="page-description">Acknowledgement records review of this calculation. It does not move money.</p>
+                                {!zeroNetAcknowledgement && !zeroNetQuery.isFetching && !zeroNetQuery.error ? (
+                                  <button type="button" disabled={zeroNetPending} onClick={() => void runZeroNetAcknowledgement()}>
+                                    {zeroNetPending ? 'Acknowledging...' : 'Acknowledge zero-net reconciliation'}
+                                  </button>
+                                ) : null}
+                                {zeroNetError ? <p className="op-alert op-tone-danger" role="alert">{zeroNetError}</p> : null}
+                              </section>
+                            ) : null}
                         </>
                       ) : null}
                     </section>
+                  ) : null}
+                  {zeroNetQuery.error ? <p className="op-alert op-tone-attention" role="status">Zero-net acknowledgement history unavailable: {zeroNetQuery.error}</p> : null}
+                  {zeroNetAcknowledgement ? (
+                    <MetadataGroup title="Zero-net reconciliation acknowledgement">
+                      <MetadataRow label="Status" value="Acknowledged — no vendor monetary effect" />
+                      <MetadataRow label="Admin actor" value={zeroNetAcknowledgement.acknowledgedByUserId} />
+                      <MetadataRow label="Acknowledged at" value={formatDate(zeroNetAcknowledgement.acknowledgedAt)} />
+                      {zeroNetAcknowledgement.note ? <MetadataRow label="Note" value={zeroNetAcknowledgement.note} /> : null}
+                    </MetadataGroup>
                   ) : null}
 
                   <section className="op-panel-section">
