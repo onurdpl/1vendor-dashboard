@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 import {
   FinancialCorrectionPreviewError,
@@ -88,6 +89,10 @@ export async function acknowledgeZeroNetReconciliation(input: {
         where: { acceptedEvidenceSnapshotId: preview.acceptedEvidence.id },
       });
       if (otherBaseline) return fail('ACCEPTED_BASELINE_ALREADY_ACKNOWLEDGED');
+      const paidCorrection = await tx.financialCorrectionAuthority.findUnique({
+        where: { acceptedEvidenceSnapshotId: preview.acceptedEvidence.id },
+      });
+      if (paidCorrection) return fail('ACCEPTED_BASELINE_ALREADY_CONSUMED');
 
       const resolvedEvent = await tx.refundTerminalEvidenceReviewEvent.findFirst({
         where: { reviewId: input.reviewId },
@@ -96,8 +101,17 @@ export async function acknowledgeZeroNetReconciliation(input: {
       if (resolvedEvent?.eventType !== 'RESOLVED' ||
           resolvedEvent.resolutionOutcome !== 'CORRECTION_REQUIRED') return fail('REVIEW_NOT_ELIGIBLE');
 
+      const acknowledgementId = randomUUID();
+      await tx.financialCorrectionBaselineClaim.create({
+        data: {
+          acceptedEvidenceSnapshotId: preview.acceptedEvidence.id,
+          consumerType: 'zero_net_acknowledgement',
+          consumerId: acknowledgementId,
+        },
+      });
       const record = await tx.financialCorrectionZeroNetAcknowledgement.create({
         data: {
+          id: acknowledgementId,
           reviewId: input.reviewId,
           resolvedReviewEventId: resolvedEvent.id,
           sourceShopifyRefundId: preview.sourceShopifyRefundId,

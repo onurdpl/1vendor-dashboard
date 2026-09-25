@@ -1367,6 +1367,29 @@ describe('payout batch preparation', () => {
     });
   });
 
+  it('consumes correction debt through existing payout preparation without merging its source event', async () => {
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([
+      { type: 'VENDOR_DEBT_CREATED', amountMinor: -15000, sourceType: 'financial_correction', sourceId: 'correction-1', payoutBatch: null },
+    ]);
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({ id: 'sale-after-correction', entryType: 'sale', amount: 444.44, activeSettlementApproval: true }),
+    ]);
+    prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+      id: 'batch-after-correction', ...data,
+      createdAt: new Date('2026-09-25T12:00:00Z'), updatedAt: new Date('2026-09-25T12:00:00Z'),
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({ id: `line-${index}`, ...line, createdAt: new Date('2026-09-25T12:00:00Z') })),
+    }));
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+    expect(batch).toMatchObject({ payableBeforeDebtOffset: '400.00', outstandingDebtAmount: '150.00',
+      debtOffsetAmount: '150.00', netAmount: '250.00', remainingDebtAmount: '0.00' });
+    expect(prismaMock.vendorBalanceEvent.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ type: 'VENDOR_DEBT_OFFSET', amountMinor: 15000, payoutBatchId: 'batch-after-correction' }),
+    }));
+    expect(prismaMock.vendorBalanceEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { vendorId: 'demo-vendor-a', currency: 'TRY' },
+    }));
+  });
+
   it('offsets debt and clears it when payable is larger than outstanding debt', async () => {
     prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([
       {

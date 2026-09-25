@@ -14,6 +14,7 @@ const {
   calculateVendorDebtMinorForRefund,
   calculateVendorDebtOffset,
   createVendorDebtForPaidRefund,
+  createVendorDebtForPaidFinancialCorrection,
   getVendorDebtHistory,
   getVendorBalanceSummary,
 } = await import('../backend/src/modules/finance/vendor-balance.service.js');
@@ -115,6 +116,62 @@ describe('vendor balance events', () => {
       },
       update: {},
     }));
+  });
+
+  it('writes the exact correction delta as a separately sourced, negative vendor debt', async () => {
+    const create = vi.fn().mockImplementation(async ({ data }) => ({ id: 'correction-debt-1', ...data }));
+    const event = await createVendorDebtForPaidFinancialCorrection({ vendorBalanceEvent: { create } } as never, {
+      authorityId: 'correction-1', vendorId: 'vendor-a', authorizedDebtMinor: 15000,
+      currency: 'TRY', sourceShopifyRefundId: 'refund-1', sourceShopifyOrderId: 'order-1',
+      vendorAllocationId: 'allocation-1',
+    });
+    expect(event).toMatchObject({ id: 'correction-debt-1', amountMinor: -15000 });
+    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      type: 'VENDOR_DEBT_CREATED', amountMinor: -15000, sourceType: 'financial_correction',
+      sourceId: 'correction-1', financialCorrectionAuthorityId: 'correction-1',
+      idempotencyKey: 'financial-correction:correction-1:vendor-debt',
+    }) });
+    await expect(createVendorDebtForPaidFinancialCorrection({ vendorBalanceEvent: { create } } as never, {
+      authorityId: 'correction-1', vendorId: 'vendor-a', authorizedDebtMinor: 0,
+      currency: 'TRY', sourceShopifyRefundId: 'refund-1', sourceShopifyOrderId: 'order-1',
+      vendorAllocationId: 'allocation-1',
+    })).rejects.toThrow('positive exact delta');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('identifies correction debt separately in Admin debt history', async () => {
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([{
+      id: 'correction-debt-1', vendorId: 'vendor-a', type: 'VENDOR_DEBT_CREATED',
+      amountMinor: -15000, currency: 'TRY', sourceType: 'financial_correction', sourceId: 'correction-1',
+      financeLedgerEntryId: null, refundRecordId: null, payoutBatchId: null,
+      metadataJson: { sourceShopifyRefundId: 'refund-1', sourceShopifyOrderId: 'order-1', vendorDebtMinor: 15000 },
+      createdAt: new Date('2026-09-25T12:00:00Z'), vendor: { id: 'vendor-a', name: 'Vendor A' },
+      refundRecord: null, financeLedgerEntry: null, payoutBatch: null,
+    }]);
+    const history = await getVendorDebtHistory('vendor-a', 'TRY');
+    expect(history.events[0]).toMatchObject({
+      label: 'Financial Correction Debt', sourceReference: 'correction-1',
+      refundReference: 'refund-1', debtAmountMinor: 15000,
+    });
+  });
+
+  it('keeps refund and correction gross debts separate while future aggregate offsets carry and clear debt', async () => {
+    const db = { vendorBalanceEvent: { findMany: vi.fn().mockResolvedValue([
+      { type: 'VENDOR_DEBT_CREATED', sourceType: 'shopify_refund', amountMinor: -10000, payoutBatch: null },
+      { type: 'VENDOR_DEBT_CREATED', sourceType: 'financial_correction', amountMinor: -15000, payoutBatch: null },
+      { type: 'VENDOR_DEBT_OFFSET', amountMinor: 18000, payoutBatch: { status: 'PAID' } },
+      { type: 'VENDOR_DEBT_OFFSET', amountMinor: 3000, payoutBatch: { status: 'CANCELLED' } },
+    ]) } };
+    expect(await getVendorBalanceSummary(db as never, 'vendor-a', 'TRY')).toMatchObject({
+      balanceMinor: -7000, outstandingDebtMinor: 7000,
+    });
+    expect(db.vendorBalanceEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { vendorId: 'vendor-a', currency: 'TRY' },
+    }));
+    const first = calculateVendorDebtOffset({ grossPayableMinor: 6000, outstandingDebtMinor: 10000 });
+    expect(first).toMatchObject({ debtOffsetMinor: 6000, netPayableMinor: 0, remainingDebtMinor: 4000 });
+    const next = calculateVendorDebtOffset({ grossPayableMinor: 10000, outstandingDebtMinor: first.remainingDebtMinor });
+    expect(next).toMatchObject({ debtOffsetMinor: 4000, netPayableMinor: 6000, remainingDebtMinor: 0 });
   });
 
   it('builds an auditable vendor debt history with order, refund, products, and offsets', async () => {

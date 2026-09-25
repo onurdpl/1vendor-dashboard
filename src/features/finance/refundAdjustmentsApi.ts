@@ -257,6 +257,36 @@ export function acknowledgeZeroNetReconciliation(reviewId: string, input: { prev
   return apiClient.post<{ ok: true; acknowledgement: ZeroNetReconciliationAcknowledgement }>(zeroNetPath(reviewId), input);
 }
 
+export type PaidFinancialCorrectionApplication = {
+  id: string;
+  reviewId: string;
+  status: 'APPLIED';
+  economicDirection: 'VENDOR_DEDUCTION';
+  authorizedDebtMinor: number;
+  currency: 'TRY';
+  authorizedByUserId: string;
+  reason: string;
+  authorizedAt: string;
+  appliedAt: string;
+  previewFingerprint: string;
+  historicalPayoutBatchId: string;
+  historicalPayoutPaidAt: string;
+  vendorBalanceEventId: string;
+};
+
+const paidCorrectionPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-paid-debt`;
+
+export function getPaidFinancialCorrectionState(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; writesPerformed: false; application: PaidFinancialCorrectionApplication | null; eligible: boolean; reasonCode: string | null }>(
+    paidCorrectionPath(reviewId), { signal },
+  );
+}
+
+export function applyPaidFinancialCorrectionDebt(reviewId: string, input: { previewFingerprint: string; reason: string }) {
+  return apiClient.post<{ ok: true; application: PaidFinancialCorrectionApplication }>(paidCorrectionPath(reviewId), input);
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;

@@ -212,6 +212,44 @@ export async function createVendorDebtForPaidRefund(
   });
 }
 
+/** Exact signed correction delta, never a second run of the normal refund formula. */
+export async function createVendorDebtForPaidFinancialCorrection(
+  db: VendorBalanceDbClient,
+  input: {
+    authorityId: string;
+    vendorId: string;
+    authorizedDebtMinor: number;
+    currency: 'TRY';
+    sourceShopifyRefundId: string;
+    sourceShopifyOrderId: string;
+    vendorAllocationId: string;
+  },
+) {
+  if (!input.authorityId || !input.vendorId ||
+      !Number.isSafeInteger(input.authorizedDebtMinor) || input.authorizedDebtMinor <= 0) {
+    throw new Error('Valid financial correction debt authority and positive exact delta are required.');
+  }
+  const currency = resolveSupportedCurrency(input.currency);
+  return db.vendorBalanceEvent.create({
+    data: {
+      vendorId: input.vendorId,
+      type: VendorBalanceEventType.VENDOR_DEBT_CREATED,
+      amountMinor: -input.authorizedDebtMinor,
+      currency,
+      sourceType: 'financial_correction',
+      sourceId: input.authorityId,
+      financialCorrectionAuthorityId: input.authorityId,
+      idempotencyKey: `financial-correction:${input.authorityId}:vendor-debt`,
+      metadataJson: safeMetadata({
+        sourceShopifyRefundId: input.sourceShopifyRefundId,
+        sourceShopifyOrderId: input.sourceShopifyOrderId,
+        vendorAllocationId: input.vendorAllocationId,
+        vendorDebtMinor: input.authorizedDebtMinor,
+      }),
+    },
+  });
+}
+
 export async function createVendorDebtOffsetForPayoutBatch(
   db: VendorBalanceDbClient,
   input: {
@@ -411,7 +449,7 @@ export async function getVendorDebtHistory(
       readMetadataString(metadata, 'sourceShopifyRefundId');
     const payoutBatchId = event.payoutBatch?.id ?? event.payoutBatchId;
     const sourceReference =
-      refundReference ??
+      (event.sourceType === 'financial_correction' ? event.sourceId : refundReference) ??
       payoutBatchId ??
       event.sourceId;
     const remainingDebtAfterEventMinor = balanceMinor < 0 ? Math.abs(balanceMinor) : 0;
@@ -420,7 +458,7 @@ export async function getVendorDebtHistory(
       id: event.id,
       createdAt: event.createdAt.toISOString(),
       type: event.type,
-      label: formatEventLabel(event.type),
+      label: event.sourceType === 'financial_correction' ? 'Financial Correction Debt' : formatEventLabel(event.type),
       vendorId: event.vendorId,
       vendorName: event.vendor?.name ?? null,
       orderNumber,
