@@ -34,9 +34,9 @@ test.describe('operational browser smoke', () => {
     await login(page);
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole('link', { name: /Orders/ })).toBeVisible();
-    await expect(page.getByRole('heading', { name: /Dashboard|overview|command/i })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Operational priority queue' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Orders', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Today, Demo Vendor A' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Needs Attention Today' })).toBeVisible();
     await expectNoOperationalAuthError(page);
   });
 
@@ -44,16 +44,17 @@ test.describe('operational browser smoke', () => {
     await login(page);
     await page.goto('/finance');
 
-    const linkedOrder = page.locator('a[href^="/orders"]').filter({ hasText: /Order #\d+/ }).first();
+    await page.getByRole('tab', { name: 'Transactions' }).click();
+    await page.getByRole('button', { name: /Sale estimate.*#1001.*View details/ }).click();
+    const transactionDetail = page.getByRole('complementary');
+    await expect(transactionDetail.getByRole('heading', { name: 'Order #1001' })).toBeVisible();
+    const linkedOrder = transactionDetail.getByRole('link', { name: 'Open' });
     await expect(linkedOrder).toBeVisible();
-    const orderLabel = (await linkedOrder.textContent())?.match(/#\d+/)?.[0];
-    expect(orderLabel).toBeTruthy();
-
     await linkedOrder.click();
 
     await expect(page).toHaveURL(/\/orders(?:\?|$)/);
     await expect(page.getByRole('heading', { name: 'Orders' })).toBeVisible();
-    await expect(page.getByText(`Shopify ${orderLabel}`)).toBeVisible();
+    await expect(page.getByRole('heading', { name: '#1001', exact: true })).toBeVisible();
     await expect(page.getByText('Linked order unavailable')).toHaveCount(0);
   });
 
@@ -73,8 +74,8 @@ test.describe('operational browser smoke', () => {
     await login(page, 'vendor-b@demo.com');
     await page.goto('/orders?order=2001');
 
-    await expect(page.getByRole('heading', { name: 'Shopify #2001' })).toBeVisible();
-    await page.getByRole('link', { name: 'Open' }).first().click();
+    await expect(page.getByRole('heading', { name: '#2001', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'View details' }).click();
     await expect(page.getByRole('heading', { name: 'Order #2001' })).toBeVisible();
     await page.getByRole('button', { name: 'Create shipment' }).click();
 
@@ -92,10 +93,10 @@ test.describe('operational browser smoke', () => {
     await page.getByLabel('Message').fill('Browser smoke needs support context.');
     await page.getByRole('button', { name: 'Create ticket' }).click();
     await expect(page.getByText('Support ticket created.').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Contact support' })).toHaveCount(0);
 
     await page.getByRole('link', { name: 'Support', exact: true }).click();
-    await page.getByRole('link', { name: /mock-support-|TICKET-|SUP-/ }).first().click();
+    await page.getByRole('link', { name: 'Smoke support request' }).click();
     await page.getByPlaceholder('Write a public reply...').fill('Smoke reply from vendor.');
     await page.getByRole('button', { name: 'Post reply' }).click();
 
@@ -130,15 +131,16 @@ test.describe('operational browser smoke', () => {
     await login(page);
     await page.goto('/orders?order=1001');
 
-    await expect(page.getByText('Shopify #1001')).toBeVisible();
-    await page.getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await expect(page.getByRole('heading', { name: '#1001', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
 
-    await expect(page.locator('.vendor-card .session-state')).toHaveText('Demo Vendor B');
-    await expect(page.getByText('Shopify #1001')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Demo Vendor B Admin view/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '#1001', exact: true })).toBeVisible();
     await page.goto('/orders?order=1002');
 
     await expect(page.getByText('Linked order unavailable')).toBeVisible();
-    await expect(page.getByText('Shopify #1002')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: '#1002', exact: true })).toHaveCount(0);
   });
 
   test('expired session redirect preserves destination and message', async ({ page }) => {
