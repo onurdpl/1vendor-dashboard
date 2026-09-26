@@ -36,8 +36,9 @@ Covered flows:
 
 ## Real-backend Financial Correction smokes
 
-The REVIEW vendor-credit and DRAFT vendor-deduction smokes use normal Admin login, a built
-Vite frontend, a real local backend, and separate disposable PostgreSQL 16 databases.
+The REVIEW vendor-credit, DRAFT vendor-deduction, and PAID vendor-deduction smokes use
+normal Admin login, a built Vite frontend, a real local backend, and separate disposable
+PostgreSQL 16 databases.
 They are separate from the
 mock-backed `npm run smoke:browser` command.
 
@@ -53,7 +54,7 @@ The runner connects to the local `postgres` maintenance database (override only 
 credentials if needed; the hostname must be `localhost`), creates a uniquely named
 `vendor_dashboard_browser_smoke_*` database for each scenario, runs the canonical fresh
 bootstrap, seeds a real Argon2id Admin and the scenario's persisted finance fixture,
-and verifies canonical eligibility before opening Chromium. REVIEW and DRAFT run
+and verifies canonical eligibility before opening Chromium. REVIEW, DRAFT, and PAID run
 sequentially, never sharing a database. For each scenario the runner starts backend and
 frontend with explicit local-only integration settings, verifies the applied result,
 and drops only the database it created even if the test fails.
@@ -72,8 +73,14 @@ The DRAFT browser test covers an eligible `VENDOR_DEDUCTION`: it requires an Adm
 but explicitly verifies that no EFT-not-sent attestation appears. It observes the real
 DRAFT correction POST and verifies that the original unpaid DRAFT payout is cancelled,
 one deduction with approved coverage is created, no correction-linked vendor debt is
-created, and no replacement payout is created automatically. PAID, zero-net,
-approved/no-payout, DRAFT credit, and REVIEW deduction routes are not covered here.
+created, and no replacement payout is created automatically.
+
+The PAID browser test covers an eligible `VENDOR_DEDUCTION`: it requires an Admin reason
+but no EFT-not-sent attestation. It observes the real PAID correction POST and verifies
+that the historical PAID payout and approved settlement remain unchanged, a separate
+correction-linked vendor debt is created, the payout is not cancelled, and no replacement
+payout is created automatically. PAID credit, zero-net, approved/no-payout, DRAFT credit,
+and REVIEW deduction routes are not covered here.
 
 GitHub CI installs Chromium with the repository Playwright CLI and runs
 `npm run smoke:browser:real` as a required step in the existing `build-and-test` job.

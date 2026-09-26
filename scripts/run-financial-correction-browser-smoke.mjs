@@ -27,10 +27,17 @@ const scenarios = [
     spec: 'financial-correction-draft-deduction.real.spec.ts',
     verify: 'tests/e2e/fixtures/verify-draft-deduction.ts',
   },
+  {
+    name: 'paid-deduction',
+    fixture: 'tests/e2e/fixtures/paid-deduction.ts',
+    reviewId: 'browser-smoke-paid-deduction-review',
+    spec: 'financial-correction-paid-deduction.real.spec.ts',
+    verify: 'tests/e2e/fixtures/verify-paid-deduction.ts',
+  },
 ];
 const requested = process.argv.slice(2);
-if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction)$/.test(requested[0]))) {
-  throw new Error('Use no arguments for both smokes, or --scenario=review-credit|draft-deduction.');
+if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction)$/.test(requested[0]))) {
+  throw new Error('Use no arguments for all smokes, or --scenario=review-credit|draft-deduction|paid-deduction.');
 }
 const selectedScenarios = requested.length
   ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])

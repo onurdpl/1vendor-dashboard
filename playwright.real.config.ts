@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 const allowedSpecs = [
   'financial-correction-review-credit.real.spec.ts',
   'financial-correction-draft-deduction.real.spec.ts',
+  'financial-correction-paid-deduction.real.spec.ts',
 ];
 const selectedSpec = process.env.BROWSER_SMOKE_REAL_SPEC ?? allowedSpecs[0];
 if (!allowedSpecs.includes(selectedSpec)) {
