@@ -1,20 +1,24 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "provider": "postgresql",
   "generatedBy": {
     "prismaVersion": "6.19.3",
-    "command": "prisma migrate diff --from-empty --to-schema-datamodel backend/prisma/schema.prisma --script --output backend/prisma/bootstrap/current-schema.sql"
+    "postgresMajor": 16,
+    "command": "npm run backend:db:bootstrap:refresh (PostgreSQL 16 pg_dump --schema-only)"
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "e2ce32771498facdadec5f0964037627aeedce62ccc0cf40627f3cb65bec28a8"
+    "sha256": "a209f3af708b644fa80ad6806eed39a6551c25e9f616f1d15cc0734cf492eda4"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "fb71b73859f4c7e062ee85d6eca99c1039c329bc6b0a7332f555b2c24d34dd3d"
+    "sha256": "903c3d650b7f2e9a00bdb90bc87d7a0fd4a315eb58e21b473a57924c3e7c051c"
   },
-  "migrationCutoff": "20260923120000_add_terminal_conflict_evidence",
-  "baselineMigrationFilesSha256": "a89e7ed8939a2aef8aad62e660b9781654e126ed5e6d3cda75d2f241ff9182a6",
+  "catalog": {
+    "sha256": "7b2f3ece52462e8c2f5951b077e6e46ab5cc665cbb217008caa7d7f2b85e0404"
+  },
+  "migrationCutoff": "20261003120000_add_review_payout_correction_evidence",
+  "baselineMigrationFilesSha256": "c781a49f21187b671d2226526755eeab78944ae8ae7f5e44ba2cbd8e86ae75fc",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -109,6 +113,15 @@
     "20260916120000_add_refund_terminal_evidence_foundation",
     "20260922120000_add_refund_terminal_review_lifecycle",
     "20260922170000_add_legacy_refund_finance_review",
-    "20260923120000_add_terminal_conflict_evidence"
+    "20260923120000_add_terminal_conflict_evidence",
+    "20260925120000_add_zero_net_correction_acknowledgement",
+    "20260926120000_add_paid_financial_correction_debt",
+    "20260927120000_add_paid_financial_correction_credit",
+    "20260928120000_add_before_settlement_correction_credit",
+    "20260929120000_add_before_settlement_correction_deduction",
+    "20260930120000_add_approved_settlement_correction_credit",
+    "20261001120000_add_approved_settlement_correction_deduction",
+    "20261002120000_add_draft_payout_correction_evidence",
+    "20261003120000_add_review_payout_correction_evidence"
   ]
 }

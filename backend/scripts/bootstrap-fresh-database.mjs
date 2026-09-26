@@ -4,6 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
+import { assertRequiredSafeguards, catalogFingerprint } from './bootstrap-catalog.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const backendDirectory = path.resolve(scriptDirectory, '..');
@@ -79,8 +80,11 @@ async function hashMigrationFiles(migrationNames) {
 
 async function validateBaseline() {
   const manifest = await readJson(manifestPath, 'Baseline manifest');
-  if (manifest.formatVersion !== 1 || manifest.provider !== 'postgresql') {
+  if (manifest.formatVersion !== 2 || manifest.provider !== 'postgresql') {
     throw new Error('Baseline manifest format or provider is unsupported.');
+  }
+  if (manifest.generatedBy?.postgresMajor !== 16) {
+    throw new Error('Baseline requires PostgreSQL 16 provenance.');
   }
   if (!Array.isArray(manifest.baselineMigrations) || manifest.baselineMigrations.length === 0) {
     throw new Error('Baseline manifest must list at least one migration.');
@@ -99,6 +103,7 @@ async function validateBaseline() {
   assertHexChecksum(manifest.snapshot?.sha256, 'Snapshot');
   assertHexChecksum(manifest.schema?.sha256, 'Schema');
   assertHexChecksum(manifest.baselineMigrationFilesSha256, 'Baseline migration files');
+  assertHexChecksum(manifest.catalog?.sha256, 'Catalog');
 
   const snapshotPath = resolveBootstrapPath(manifest.snapshot?.path, 'Snapshot');
   const schemaPath = resolveBootstrapPath(manifest.schema?.path, 'Schema');
@@ -217,6 +222,11 @@ try {
     },
   });
   await prisma.$connect();
+  const [serverVersion] = await prisma.$queryRawUnsafe('SHOW server_version_num');
+  const postgresVersion = Number(serverVersion?.server_version_num);
+  if (postgresVersion < 160000 || postgresVersion >= 170000) {
+    throw new Error(`Fresh database bootstrap requires PostgreSQL 16; found ${postgresVersion}.`);
+  }
   const [lockResult] = await prisma.$queryRawUnsafe(
     `SELECT pg_try_advisory_lock(${bootstrapLockKeys[0]}, ${bootstrapLockKeys[1]}) AS "acquired"`,
   );
@@ -245,6 +255,12 @@ try {
     );
   }
   runPrisma(['migrate', 'deploy', '--schema', baseline.schemaPath], 'Forward migration deployment');
+
+  const catalog = await catalogFingerprint(prisma);
+  assertRequiredSafeguards(catalog.inventory);
+  if (catalog.sha256 !== baseline.manifest.catalog.sha256) {
+    throw new Error('Bootstrapped PostgreSQL catalog does not match the verified baseline manifest.');
+  }
 
   console.log(
     `Fresh database bootstrap completed: snapshot applied, ${baseline.manifest.baselineMigrations.length} migrations baselined through ${baseline.manifest.migrationCutoff}, and forward migrations deployed.`,

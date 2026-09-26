@@ -12,6 +12,8 @@
     "db:generate": "prisma generate",
     "db:deploy": "prisma migrate deploy",
     "db:bootstrap:fresh": "node scripts/bootstrap-fresh-database.mjs",
+    "db:bootstrap:refresh": "node scripts/refresh-fresh-database-baseline.mjs --refresh",
+    "db:bootstrap:check": "node scripts/refresh-fresh-database-baseline.mjs --check",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",

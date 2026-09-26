@@ -1,2576 +1,6303 @@
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
+--
+-- PostgreSQL database dump
+--
 
--- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'VENDOR', 'SUPPORT', 'FINANCE');
 
--- CreateEnum
-CREATE TYPE "AllocationStatus" AS ENUM ('ACTIVE', 'VENDOR_BLOCKED', 'PENDING_REASSIGNMENT', 'REASSIGNED', 'FULFILLED');
 
--- CreateEnum
-CREATE TYPE "CancellationReason" AS ENUM ('OUT_OF_STOCK', 'VENDOR_CANCELLED', 'DAMAGED_INVENTORY', 'FULFILLMENT_ISSUE');
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
 
--- CreateEnum
-CREATE TYPE "CustomerCancellationStatus" AS ENUM ('PENDING', 'PARTIALLY_RESOLVED', 'APPROVED_FOR_REFUND', 'REFUNDED_AWAITING_ORDER_CANCEL', 'APPROVED', 'DECLINED', 'TOO_LATE', 'CONFLICTED');
+--
+-- Name: AllocationStatus; Type: TYPE; Schema: public; Owner: -
+--
 
--- CreateEnum
-CREATE TYPE "ProductPanelVariantDisableOutboxStatus" AS ENUM ('CREATED', 'RESOLVED', 'RESOLVED_DRY_RUN', 'FAILED');
-
--- CreateEnum
-CREATE TYPE "WebhookStatus" AS ENUM ('RECEIVED', 'PROCESSING', 'PROCESSED', 'FAILED');
-
--- CreateEnum
-CREATE TYPE "PayoutStatus" AS ENUM ('PENDING', 'APPROVED', 'PAID', 'HOLD');
-
--- CreateEnum
-CREATE TYPE "OperationalJobStatus" AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'RETRY_SCHEDULED', 'RETRYING', 'DEAD_LETTER_READY', 'PERMANENTLY_FAILED');
-
--- CreateEnum
-CREATE TYPE "OperationalJobType" AS ENUM ('WEBHOOK_PROCESSING', 'RECONCILIATION', 'REPLAY', 'RECOVERY', 'FULFILLMENT_SYNC', 'REFUND_SYNC', 'RETURN_SYNC');
-
--- CreateEnum
-CREATE TYPE "ShippingDeductionMode" AS ENUM ('DISABLED', 'FIXED', 'EXTERNAL_PROVIDER');
-
--- CreateEnum
-CREATE TYPE "SettlementFrequencyType" AS ENUM ('WEEKLY', 'BIWEEKLY');
-
--- CreateEnum
-CREATE TYPE "SettlementWeekday" AS ENUM ('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY');
-
--- CreateEnum
-CREATE TYPE "SettlementScheduleJobRunStatus" AS ENUM ('PROCESSING', 'DRY_RUN', 'COMPLETED', 'BLOCKED', 'FAILED');
-
--- CreateEnum
-CREATE TYPE "SettlementStatus" AS ENUM ('PENDING', 'ACCRUING', 'PAYABLE', 'PARTIALLY_REFUNDED', 'HELD', 'SETTLED', 'DISPUTED');
-
--- CreateEnum
-CREATE TYPE "SettlementApprovalStatus" AS ENUM ('DRAFT', 'APPROVED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "SettlementApprovalLineType" AS ENUM ('SALE', 'REFUND', 'REFUND_ADJUSTMENT');
-
--- CreateEnum
-CREATE TYPE "SettlementCommissionInvoiceProvider" AS ENUM ('LOGO_ISBASI');
-
--- CreateEnum
-CREATE TYPE "SettlementCommissionInvoiceStatus" AS ENUM ('PENDING', 'CREATED', 'FAILED', 'CANCELLED', 'UNKNOWN');
-
--- CreateEnum
-CREATE TYPE "SettlementRefundAdjustmentStatus" AS ENUM ('PENDING', 'PARTIALLY_APPLIED', 'APPLIED', 'BLOCKED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "SettlementRefundAdjustmentApplicationStatus" AS ENUM ('ACTIVE', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "SettlementRefundAdjustmentEventType" AS ENUM ('CREATED', 'PARTIALLY_APPLIED', 'APPLIED', 'APPLICATION_CANCELLED', 'ADJUSTMENT_CANCELLED');
-
--- CreateEnum
-CREATE TYPE "RefundTerminalEvidenceReviewStatus" AS ENUM ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED');
-
--- CreateEnum
-CREATE TYPE "RefundTerminalEvidenceReviewEventType" AS ENUM ('DETECTED', 'ACKNOWLEDGED', 'RESOLVED', 'REOPENED');
-
--- CreateEnum
-CREATE TYPE "RefundTerminalEvidenceResolutionOutcome" AS ENUM ('NO_CORRECTION_NEEDED', 'CORRECTION_REQUIRED', 'INSUFFICIENT_EVIDENCE');
-
--- CreateEnum
-CREATE TYPE "LegacyRefundFinanceReviewStatus" AS ENUM ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED');
-
--- CreateEnum
-CREATE TYPE "LegacyRefundFinanceReviewEventType" AS ENUM ('DETECTED', 'ACKNOWLEDGED', 'RESOLVED', 'REOPENED');
-
--- CreateEnum
-CREATE TYPE "LegacyRefundFinanceResolutionOutcome" AS ENUM ('NO_CORRECTION_NEEDED', 'CORRECTION_REQUIRED', 'INSUFFICIENT_EVIDENCE');
-
--- CreateEnum
-CREATE TYPE "LegacyRefundFinanceAttribution" AS ENUM ('EXACT', 'AMBIGUOUS');
-
--- CreateEnum
-CREATE TYPE "LegacyRefundFinanceArtifactType" AS ENUM ('REFUND_LEDGER', 'SETTLEMENT_REFUND_ADJUSTMENT', 'VENDOR_DEBT_EVENT', 'FINANCE_EVENT');
-
--- CreateEnum
-CREATE TYPE "PayoutBatchStatus" AS ENUM ('DRAFT', 'REVIEW', 'APPROVED', 'CANCELLED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER');
-
--- CreateEnum
-CREATE TYPE "VendorBalanceEventType" AS ENUM ('PAYABLE_EARNED', 'VENDOR_DEBT_CREATED', 'VENDOR_DEBT_OFFSET', 'MANUAL_ADJUSTMENT', 'DEBT_WAIVED');
-
--- CreateEnum
-CREATE TYPE "FinanceEventType" AS ENUM ('SALE_RECORDED', 'COMMISSION_RESERVED', 'COMMISSION_VAT_RESERVED', 'VENDOR_PAYABLE_RESERVED', 'REFUND_RECORDED', 'COMMISSION_REVERSED', 'COMMISSION_VAT_REVERSED', 'VENDOR_PAYABLE_REVERSED', 'MANUAL_ADJUSTMENT', 'PAYOUT_PAID');
-
--- CreateEnum
-CREATE TYPE "ShippingCostSourceType" AS ENUM ('MANUAL', 'IMPORTED', 'EXTERNAL_PROVIDER');
-
--- CreateEnum
-CREATE TYPE "ShippingCostStatus" AS ENUM ('PENDING', 'CONFIRMED', 'DISPUTED', 'IGNORED');
-
--- CreateEnum
-CREATE TYPE "ShippingProvider" AS ENUM ('HEPSIJET', 'KARGO_ENTEGRATOR', 'TRY_OTO', 'KARGONOMI', 'NAVLUNGO', 'MNG', 'YURTICI', 'ARAS');
-
--- CreateEnum
-CREATE TYPE "ShipmentExecutionStatus" AS ENUM ('PENDING', 'CREATED', 'FAILED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "OperationalSignalSeverity" AS ENUM ('INFO', 'WARNING', 'HIGH', 'CRITICAL');
-
--- CreateEnum
-CREATE TYPE "OperationalSignalStatus" AS ENUM ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED', 'IGNORED');
-
--- CreateEnum
-CREATE TYPE "OperationalSignalSourceArea" AS ENUM ('PAYOUT', 'REFUND', 'FULFILLMENT', 'DIAGNOSTICS', 'RECONCILIATION', 'SHIPPING_COST', 'SETTLEMENT');
-
--- CreateEnum
-CREATE TYPE "NotificationChannel" AS ENUM ('IN_APP', 'EMAIL_PLACEHOLDER', 'SLACK_PLACEHOLDER');
-
--- CreateEnum
-CREATE TYPE "NotificationStatus" AS ENUM ('PENDING', 'DELIVERED', 'READ', 'DISMISSED', 'SKIPPED', 'FAILED');
-
--- CreateEnum
-CREATE TYPE "NotificationRecipientRole" AS ENUM ('ADMIN', 'VENDOR');
-
--- CreateEnum
-CREATE TYPE "AutomationActionStatus" AS ENUM ('PENDING', 'SUGGESTED', 'EXECUTED', 'SKIPPED', 'FAILED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "AutomationExecutionMode" AS ENUM ('MANUAL', 'ASSISTED', 'AUTO_SAFE');
-
--- CreateEnum
-CREATE TYPE "AutomationActionType" AS ENUM ('SUGGEST_REPLAY_WEBHOOK', 'SUGGEST_RECONCILIATION', 'SUGGEST_PAYOUT_BATCH_REVIEW', 'SUGGEST_SHIPPING_COST_ATTACHMENT', 'SUGGEST_STALE_FULFILLMENT_REVIEW', 'SUGGEST_PAYOUT_REVIEW', 'SUGGEST_NEGATIVE_PAYOUT_INVESTIGATION', 'SUGGEST_DEAD_LETTER_INVESTIGATION', 'AUTO_CREATE_RECONCILIATION_CANDIDATE', 'AUTO_GENERATE_REMINDER_NOTIFICATION', 'AUTO_PRIORITIZE_STALE_QUEUE_ITEM');
-
--- CreateEnum
-CREATE TYPE "VendorProfileSnapshotImpact" AS ENUM ('FUTURE_LEDGER_ROWS_ONLY', 'FUTURE_SETTLEMENT_APPROVALS_ONLY', 'FUTURE_COMMISSION_INVOICES_ONLY', 'FUTURE_SHIPMENTS_ONLY', 'FUTURE_RETURNS_ONLY', 'FUTURE_SHIPMENTS_AND_RETURNS_ONLY', 'EXISTING_SETTLEMENTS_UNCHANGED', 'PROVIDER_REBIND_REQUIRED', 'FUTURE_PAYOUT_RELEVANT', 'DIAGNOSTIC_ONLY', 'UNKNOWN');
-
--- CreateTable
-CREATE TABLE "User" (
-    "id" TEXT NOT NULL,
-    "email" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "role" "UserRole" NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'active',
-    "passwordHash" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+CREATE TYPE public."AllocationStatus" AS ENUM (
+    'ACTIVE',
+    'VENDOR_BLOCKED',
+    'PENDING_REASSIGNMENT',
+    'REASSIGNED',
+    'FULFILLED'
 );
 
--- CreateTable
-CREATE TABLE "Vendor" (
-    "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'active',
-    "restrictionReason" TEXT,
-    "restrictedByUserId" TEXT,
-    "restrictedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Vendor_pkey" PRIMARY KEY ("id")
+--
+-- Name: AutomationActionStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."AutomationActionStatus" AS ENUM (
+    'PENDING',
+    'SUGGESTED',
+    'EXECUTED',
+    'SKIPPED',
+    'FAILED',
+    'CANCELLED'
 );
 
--- CreateTable
-CREATE TABLE "SupportTicket" (
-    "id" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "createdByUserId" TEXT NOT NULL,
-    "createdByRole" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "subject" TEXT NOT NULL,
-    "message" TEXT NOT NULL,
-    "priority" TEXT NOT NULL DEFAULT 'normal',
-    "status" TEXT NOT NULL DEFAULT 'OPEN',
-    "category" TEXT NOT NULL DEFAULT 'OTHER',
-    "assigneeUserId" TEXT,
-    "assigneeName" TEXT,
-    "vendorUnreadCount" INTEGER NOT NULL DEFAULT 0,
-    "adminUnreadCount" INTEGER NOT NULL DEFAULT 0,
-    "lastReplyAt" TIMESTAMP(3),
-    "lastReplyByRole" TEXT,
-    "firstResponseDueAt" TIMESTAMP(3),
-    "nextResponseDueAt" TIMESTAMP(3),
-    "escalatedAt" TIMESTAMP(3),
-    "escalationReason" TEXT,
-    "contextType" TEXT NOT NULL,
-    "contextId" TEXT,
-    "contextSnapshot" JSONB,
-    "resolvedAt" TIMESTAMP(3),
-    "closedAt" TIMESTAMP(3),
 
-    CONSTRAINT "SupportTicket_pkey" PRIMARY KEY ("id")
+--
+-- Name: AutomationActionType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."AutomationActionType" AS ENUM (
+    'SUGGEST_REPLAY_WEBHOOK',
+    'SUGGEST_RECONCILIATION',
+    'SUGGEST_PAYOUT_BATCH_REVIEW',
+    'SUGGEST_SHIPPING_COST_ATTACHMENT',
+    'SUGGEST_STALE_FULFILLMENT_REVIEW',
+    'SUGGEST_PAYOUT_REVIEW',
+    'SUGGEST_NEGATIVE_PAYOUT_INVESTIGATION',
+    'SUGGEST_DEAD_LETTER_INVESTIGATION',
+    'AUTO_CREATE_RECONCILIATION_CANDIDATE',
+    'AUTO_GENERATE_REMINDER_NOTIFICATION',
+    'AUTO_PRIORITIZE_STALE_QUEUE_ITEM'
 );
 
--- CreateTable
-CREATE TABLE "SupportTicketNote" (
-    "id" TEXT NOT NULL,
-    "supportTicketId" TEXT NOT NULL,
-    "authorUserId" TEXT NOT NULL,
-    "authorName" TEXT NOT NULL,
-    "authorRole" TEXT NOT NULL,
-    "content" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "SupportTicketNote_pkey" PRIMARY KEY ("id")
+--
+-- Name: AutomationExecutionMode; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."AutomationExecutionMode" AS ENUM (
+    'MANUAL',
+    'ASSISTED',
+    'AUTO_SAFE'
 );
 
--- CreateTable
-CREATE TABLE "SupportTicketReply" (
-    "id" TEXT NOT NULL,
-    "supportTicketId" TEXT NOT NULL,
-    "authorUserId" TEXT NOT NULL,
-    "authorName" TEXT NOT NULL,
-    "authorRole" TEXT NOT NULL,
-    "message" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "SupportTicketReply_pkey" PRIMARY KEY ("id")
+--
+-- Name: CancellationReason; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."CancellationReason" AS ENUM (
+    'OUT_OF_STOCK',
+    'VENDOR_CANCELLED',
+    'DAMAGED_INVENTORY',
+    'FULFILLMENT_ISSUE'
 );
 
--- CreateTable
-CREATE TABLE "VendorFinancialProfile" (
-    "id" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "commissionPercent" DECIMAL(5,2) NOT NULL DEFAULT 10.00,
-    "commissionVatPercent" DECIMAL(5,2) NOT NULL DEFAULT 0.00,
-    "deductShippingEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "shippingMode" "ShippingDeductionMode" NOT NULL DEFAULT 'DISABLED',
-    "fixedShippingFee" DECIMAL(10,2),
-    "settlementDelayDays" INTEGER NOT NULL DEFAULT 21,
-    "settlementFrequencyType" "SettlementFrequencyType" NOT NULL DEFAULT 'WEEKLY',
-    "weeklySettlementDay" "SettlementWeekday" NOT NULL DEFAULT 'WEDNESDAY',
-    "autoSettlementDraftEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "autoSettlementApproveEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "autoSettlementInvoiceEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "VendorFinancialProfile_pkey" PRIMARY KEY ("id")
+--
+-- Name: CustomerCancellationStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."CustomerCancellationStatus" AS ENUM (
+    'PENDING',
+    'PARTIALLY_RESOLVED',
+    'APPROVED_FOR_REFUND',
+    'REFUNDED_AWAITING_ORDER_CANCEL',
+    'APPROVED',
+    'DECLINED',
+    'TOO_LATE',
+    'CONFLICTED'
 );
 
--- CreateTable
-CREATE TABLE "VendorBillingProfile" (
-    "id" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "legalCompanyName" TEXT,
-    "taxNumber" TEXT,
-    "taxOffice" TEXT,
-    "billingAddress" TEXT,
-    "billingCity" TEXT,
-    "billingDistrict" TEXT,
-    "iban" TEXT,
-    "authorizedPerson" TEXT,
-    "billingEmail" TEXT,
-    "billingPhone" TEXT,
-    "legalEntityType" TEXT,
-    "logoIsbasiCustomerCode" TEXT,
-    "logoIsbasiCustomerId" TEXT,
-    "logoIsbasiEinvoiceEligible" BOOLEAN,
-    "logoIsbasiLastCheckedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "VendorBillingProfile_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinanceEventType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."FinanceEventType" AS ENUM (
+    'SALE_RECORDED',
+    'COMMISSION_RESERVED',
+    'COMMISSION_VAT_RESERVED',
+    'VENDOR_PAYABLE_RESERVED',
+    'REFUND_RECORDED',
+    'COMMISSION_REVERSED',
+    'COMMISSION_VAT_REVERSED',
+    'VENDOR_PAYABLE_REVERSED',
+    'MANUAL_ADJUSTMENT',
+    'PAYOUT_PAID'
 );
 
--- CreateTable
-CREATE TABLE "VendorProfileAuditLog" (
-    "id" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "section" TEXT NOT NULL,
-    "fieldName" TEXT NOT NULL,
-    "oldValue" JSONB,
-    "newValue" JSONB,
-    "changedByUserId" TEXT,
-    "changedByEmail" TEXT,
-    "changedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "reason" TEXT,
-    "snapshotImpact" "VendorProfileSnapshotImpact" NOT NULL,
-    "source" TEXT NOT NULL,
 
-    CONSTRAINT "VendorProfileAuditLog_pkey" PRIMARY KEY ("id")
+--
+-- Name: LegacyRefundFinanceArtifactType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."LegacyRefundFinanceArtifactType" AS ENUM (
+    'REFUND_LEDGER',
+    'SETTLEMENT_REFUND_ADJUSTMENT',
+    'VENDOR_DEBT_EVENT',
+    'FINANCE_EVENT'
 );
 
--- CreateTable
-CREATE TABLE "UserVendorAccess" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "UserVendorAccess_pkey" PRIMARY KEY ("id")
+--
+-- Name: LegacyRefundFinanceAttribution; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."LegacyRefundFinanceAttribution" AS ENUM (
+    'EXACT',
+    'AMBIGUOUS'
 );
 
--- CreateTable
-CREATE TABLE "VendorIntegrationClient" (
-    "id" TEXT NOT NULL,
-    "vendorIdentifier" TEXT NOT NULL,
-    "providerName" TEXT NOT NULL,
-    "tokenHash" TEXT NOT NULL,
-    "enabled" BOOLEAN NOT NULL DEFAULT true,
-    "scopes" TEXT[],
-    "lastUsedAt" TIMESTAMP(3),
-    "revokedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "VendorIntegrationClient_pkey" PRIMARY KEY ("id")
+--
+-- Name: LegacyRefundFinanceResolutionOutcome; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."LegacyRefundFinanceResolutionOutcome" AS ENUM (
+    'NO_CORRECTION_NEEDED',
+    'CORRECTION_REQUIRED',
+    'INSUFFICIENT_EVIDENCE'
 );
 
--- CreateTable
-CREATE TABLE "VendorIntegrationAuditLog" (
-    "id" TEXT NOT NULL,
-    "clientId" TEXT NOT NULL,
-    "vendorIdentifier" TEXT NOT NULL,
-    "method" TEXT NOT NULL,
-    "path" TEXT NOT NULL,
-    "statusCode" INTEGER NOT NULL,
-    "requestId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "VendorIntegrationAuditLog_pkey" PRIMARY KEY ("id")
+--
+-- Name: LegacyRefundFinanceReviewEventType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."LegacyRefundFinanceReviewEventType" AS ENUM (
+    'DETECTED',
+    'ACKNOWLEDGED',
+    'RESOLVED',
+    'REOPENED'
 );
 
--- CreateTable
-CREATE TABLE "ShopifyOrder" (
-    "id" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "sourceShopifyOrderNumber" TEXT NOT NULL,
-    "shopifyCreatedAt" TIMESTAMP(3),
-    "currency" TEXT,
-    "financialStatus" TEXT,
-    "cancelledAt" TIMESTAMP(3),
-    "cancelReason" TEXT,
-    "paymentGatewayName" TEXT,
-    "taxesIncluded" BOOLEAN,
-    "orderTaxAmount" DECIMAL(10,2),
-    "shippingAmount" DECIMAL(10,2),
-    "discountAmount" DECIMAL(10,2),
-    "orderNote" TEXT,
-    "orderTags" TEXT[] DEFAULT ARRAY[]::TEXT[],
-    "customerName" TEXT,
-    "customerEmail" TEXT,
-    "customerPhone" TEXT,
-    "billingFullName" TEXT,
-    "billingCompany" TEXT,
-    "billingPhone" TEXT,
-    "billingCity" TEXT,
-    "billingDistrict" TEXT,
-    "billingAddress1" TEXT,
-    "billingAddress2" TEXT,
-    "billingPostcode" TEXT,
-    "shippingCountry" TEXT,
-    "shippingPostcode" TEXT,
-    "shippingCity" TEXT,
-    "shippingDistrict" TEXT,
-    "shippingAddress" TEXT,
-    "totalPrice" DECIMAL(10,2),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ShopifyOrder_pkey" PRIMARY KEY ("id")
+--
+-- Name: LegacyRefundFinanceReviewStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."LegacyRefundFinanceReviewStatus" AS ENUM (
+    'ACTIVE',
+    'ACKNOWLEDGED',
+    'RESOLVED'
 );
 
--- CreateTable
-CREATE TABLE "ShopifyOrderLineItem" (
-    "id" TEXT NOT NULL,
-    "shopifyOrderId" TEXT NOT NULL,
-    "sourceLineItemId" TEXT NOT NULL,
-    "shopifyProductId" TEXT,
-    "sourceVariantId" TEXT,
-    "sku" TEXT,
-    "title" TEXT,
-    "imageUrl" TEXT,
-    "quantity" INTEGER NOT NULL DEFAULT 1,
-    "unitPrice" DECIMAL(10,2),
-    "unitPriceVatIncluded" DECIMAL(10,2),
-    "lineTotalVatIncluded" DECIMAL(10,2),
-    "lineTaxAmount" DECIMAL(10,2),
-    "vatRate" DECIMAL(5,2),
-    "originalVendorId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ShopifyOrderLineItem_pkey" PRIMARY KEY ("id")
+--
+-- Name: NotificationChannel; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."NotificationChannel" AS ENUM (
+    'IN_APP',
+    'EMAIL_PLACEHOLDER',
+    'SLACK_PLACEHOLDER'
 );
 
--- CreateTable
-CREATE TABLE "VendorAllocation" (
-    "id" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "sourceShopifyOrderNumber" TEXT NOT NULL,
-    "originalVendorId" TEXT NOT NULL,
-    "assignedVendorId" TEXT NOT NULL,
-    "allocationStatus" "AllocationStatus" NOT NULL DEFAULT 'ACTIVE',
-    "cancellationReason" "CancellationReason",
-    "reassignmentRequired" BOOLEAN NOT NULL DEFAULT false,
-    "cancelRefundReviewStatus" TEXT,
-    "cancelRefundReviewReason" TEXT,
-    "cancelRefundReviewNote" TEXT,
-    "cancelRefundReviewRequestedAt" TIMESTAMP(3),
-    "cancelRefundReviewRequestedByUserId" TEXT,
-    "fulfillmentStatus" TEXT NOT NULL DEFAULT 'Pending',
-    "shippingStatus" TEXT NOT NULL DEFAULT 'Awaiting Shipment',
-    "trackingNumber" TEXT,
-    "carrier" TEXT,
-    "vendorIntegrationTrackingUrl" TEXT,
-    "vendorIntegrationShippedAt" TIMESTAMP(3),
-    "odooSaleOrderId" TEXT,
-    "odooSaleOrderName" TEXT,
-    "odooSaleOrderSyncedAt" TIMESTAMP(3),
-    "vendorIntegrationStatus" TEXT,
-    "vendorIntegrationStatusMessage" TEXT,
-    "vendorIntegrationStatusUpdatedAt" TIMESTAMP(3),
-    "vendorIntegrationProvider" TEXT,
-    "lastVendorIntegrationRequestId" TEXT,
-    "lastVendorIntegrationShipmentRequestId" TEXT,
-    "vendorInvoiceNumber" TEXT,
-    "vendorInvoiceDate" TIMESTAMP(3),
-    "vendorInvoiceUrl" TEXT,
-    "vendorInvoiceAmount" DECIMAL(10,2),
-    "vendorInvoiceReceivedAt" TIMESTAMP(3),
-    "lastVendorIntegrationInvoiceRequestId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "VendorAllocation_pkey" PRIMARY KEY ("id")
+--
+-- Name: NotificationRecipientRole; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."NotificationRecipientRole" AS ENUM (
+    'ADMIN',
+    'VENDOR'
 );
 
--- CreateTable
-CREATE TABLE "AllocationFullRefundTerminalFact" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "shopifyOrderGid" TEXT NOT NULL,
-    "verificationSource" TEXT NOT NULL,
-    "shopifyApiVersion" TEXT NOT NULL,
-    "verifiedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "evidenceJson" JSONB NOT NULL,
 
-    CONSTRAINT "AllocationFullRefundTerminalFact_pkey" PRIMARY KEY ("id")
+--
+-- Name: NotificationStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."NotificationStatus" AS ENUM (
+    'PENDING',
+    'DELIVERED',
+    'READ',
+    'DISMISSED',
+    'SKIPPED',
+    'FAILED'
 );
 
--- CreateTable
-CREATE TABLE "CustomerCancellationRequest" (
-    "id" TEXT NOT NULL,
-    "shopifyOrderId" TEXT NOT NULL,
-    "shopDomain" TEXT NOT NULL,
-    "shopifyCustomerId" TEXT NOT NULL,
-    "status" "CustomerCancellationStatus" NOT NULL DEFAULT 'PENDING',
-    "reasonCode" TEXT NOT NULL,
-    "customerNote" TEXT,
-    "idempotencyKey" TEXT NOT NULL,
-    "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "resolvedAt" TIMESTAMP(3),
-    "reviewedByUserId" TEXT,
-    "reviewReason" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "CustomerCancellationRequest_pkey" PRIMARY KEY ("id")
+--
+-- Name: OperationalJobStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."OperationalJobStatus" AS ENUM (
+    'PENDING',
+    'PROCESSING',
+    'COMPLETED',
+    'FAILED',
+    'RETRY_SCHEDULED',
+    'RETRYING',
+    'DEAD_LETTER_READY',
+    'PERMANENTLY_FAILED'
 );
 
--- CreateTable
-CREATE TABLE "CustomerCancellationRequestItem" (
-    "id" TEXT NOT NULL,
-    "requestId" TEXT NOT NULL,
-    "shopifyOrderLineItemId" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "requestedQuantity" INTEGER NOT NULL,
-    "resolvedQuantity" INTEGER,
-    "status" "CustomerCancellationStatus" NOT NULL DEFAULT 'PENDING',
-    "reviewedByUserId" TEXT,
-    "reviewReason" TEXT,
-    "reviewedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "CustomerCancellationRequestItem_pkey" PRIMARY KEY ("id")
+--
+-- Name: OperationalJobType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."OperationalJobType" AS ENUM (
+    'WEBHOOK_PROCESSING',
+    'RECONCILIATION',
+    'REPLAY',
+    'RECOVERY',
+    'FULFILLMENT_SYNC',
+    'REFUND_SYNC',
+    'RETURN_SYNC'
 );
 
--- CreateTable
-CREATE TABLE "OutboundShopifyRefundAttempt" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "shopifyOrderId" TEXT NOT NULL,
-    "customerCancellationRequestItemId" TEXT,
-    "status" TEXT NOT NULL,
-    "restockType" TEXT NOT NULL,
-    "refundShipping" BOOLEAN NOT NULL DEFAULT false,
-    "notifyCustomer" BOOLEAN NOT NULL DEFAULT false,
-    "note" TEXT,
-    "requestedByUserId" TEXT,
-    "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "refundLineItemsJson" JSONB,
-    "suggestedTransactionsJson" JSONB,
-    "fulfillmentOrderCancellationJson" JSONB,
-    "blockersJson" JSONB,
-    "warningsJson" JSONB,
-    "previewHash" TEXT,
-    "previewedAt" TIMESTAMP(3),
-    "shopifyRefundId" TEXT,
-    "shopifyUserErrorsJson" JSONB,
-    "mutationResponseJson" JSONB,
-    "submittedAt" TIMESTAMP(3),
-    "resolvedAt" TIMESTAMP(3),
-    "failedAt" TIMESTAMP(3),
-    "failureReason" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "OutboundShopifyRefundAttempt_pkey" PRIMARY KEY ("id")
+--
+-- Name: OperationalSignalSeverity; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."OperationalSignalSeverity" AS ENUM (
+    'INFO',
+    'WARNING',
+    'HIGH',
+    'CRITICAL'
 );
 
--- CreateTable
-CREATE TABLE "OrderShippingRefundClaim" (
-    "id" TEXT NOT NULL,
-    "shopifyOrderId" TEXT NOT NULL,
-    "ownerAttemptId" TEXT NOT NULL,
-    "activeOrderKey" TEXT,
-    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-    "acquiredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "releasedAt" TIMESTAMP(3),
-    "releaseReason" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "OrderShippingRefundClaim_pkey" PRIMARY KEY ("id")
+--
+-- Name: OperationalSignalSourceArea; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."OperationalSignalSourceArea" AS ENUM (
+    'PAYOUT',
+    'REFUND',
+    'FULFILLMENT',
+    'DIAGNOSTICS',
+    'RECONCILIATION',
+    'SHIPPING_COST',
+    'SETTLEMENT'
 );
 
--- CreateTable
-CREATE TABLE "VendorIntegrationInvoiceEvent" (
-    "id" TEXT NOT NULL,
-    "clientId" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "vendorIdentifier" TEXT NOT NULL,
-    "providerName" TEXT,
-    "invoiceNumber" TEXT NOT NULL,
-    "invoiceDate" TIMESTAMP(3) NOT NULL,
-    "invoiceUrl" TEXT,
-    "invoiceAmount" DECIMAL(10,2) NOT NULL,
-    "idempotencyKey" TEXT NOT NULL,
-    "requestId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "VendorIntegrationInvoiceEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: OperationalSignalStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."OperationalSignalStatus" AS ENUM (
+    'ACTIVE',
+    'ACKNOWLEDGED',
+    'RESOLVED',
+    'IGNORED'
 );
 
--- CreateTable
-CREATE TABLE "VendorIntegrationShipmentEvent" (
-    "id" TEXT NOT NULL,
-    "clientId" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "vendorIdentifier" TEXT NOT NULL,
-    "providerName" TEXT,
-    "carrier" TEXT NOT NULL,
-    "trackingNumber" TEXT NOT NULL,
-    "trackingUrl" TEXT,
-    "shippedAt" TIMESTAMP(3),
-    "idempotencyKey" TEXT NOT NULL,
-    "requestId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "VendorIntegrationShipmentEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: PayoutBatchStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."PayoutBatchStatus" AS ENUM (
+    'DRAFT',
+    'REVIEW',
+    'APPROVED',
+    'CANCELLED',
+    'EXECUTION_PENDING',
+    'PAID',
+    'PAID_PLACEHOLDER'
 );
 
--- CreateTable
-CREATE TABLE "VendorIntegrationStatusEvent" (
-    "id" TEXT NOT NULL,
-    "clientId" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "vendorIdentifier" TEXT NOT NULL,
-    "providerName" TEXT,
-    "status" TEXT NOT NULL,
-    "message" TEXT,
-    "idempotencyKey" TEXT NOT NULL,
-    "requestId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "VendorIntegrationStatusEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: PayoutStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."PayoutStatus" AS ENUM (
+    'PENDING',
+    'APPROVED',
+    'PAID',
+    'HOLD'
 );
 
--- CreateTable
-CREATE TABLE "VendorAllocationLineItem" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "shopifyLineItemId" TEXT NOT NULL,
-    "quantity" INTEGER NOT NULL DEFAULT 1,
-    "lineAmount" DECIMAL(10,2),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "VendorAllocationLineItem_pkey" PRIMARY KEY ("id")
+--
+-- Name: ProductPanelVariantDisableOutboxStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ProductPanelVariantDisableOutboxStatus" AS ENUM (
+    'CREATED',
+    'RESOLVED',
+    'RESOLVED_DRY_RUN',
+    'FAILED'
 );
 
--- CreateTable
-CREATE TABLE "ProductPanelVariantDisableOutboxEvent" (
-    "id" TEXT NOT NULL,
-    "allocationId" TEXT NOT NULL,
-    "vendorAllocationLineItemId" TEXT NOT NULL,
-    "shopifyVariantId" TEXT,
-    "shopifyLineItemId" TEXT NOT NULL,
-    "variantSku" TEXT,
-    "vendorId" TEXT NOT NULL,
-    "vendorName" TEXT,
-    "shopifyOrderId" TEXT NOT NULL,
-    "shopifyOrderName" TEXT,
-    "reasonCode" TEXT NOT NULL,
-    "reasonText" TEXT,
-    "quantity" INTEGER NOT NULL,
-    "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "environment" TEXT NOT NULL,
-    "dryRun" BOOLEAN NOT NULL DEFAULT true,
-    "attemptCount" INTEGER NOT NULL DEFAULT 0,
-    "status" "ProductPanelVariantDisableOutboxStatus" NOT NULL DEFAULT 'CREATED',
-    "error" TEXT,
-    "idempotencyKey" TEXT NOT NULL,
-    "requestPayloadJson" JSONB,
-    "responseJson" JSONB,
-    "resolvedAt" TIMESTAMP(3),
-    "failedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ProductPanelVariantDisableOutboxEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: RefundTerminalEvidenceResolutionOutcome; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."RefundTerminalEvidenceResolutionOutcome" AS ENUM (
+    'NO_CORRECTION_NEEDED',
+    'CORRECTION_REQUIRED',
+    'INSUFFICIENT_EVIDENCE'
 );
 
--- CreateTable
-CREATE TABLE "AllocationAssignmentHistory" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "action" TEXT NOT NULL,
-    "fromVendorId" TEXT,
-    "toVendorId" TEXT NOT NULL,
-    "reason" TEXT,
-    "actorUserId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "AllocationAssignmentHistory_pkey" PRIMARY KEY ("id")
+--
+-- Name: RefundTerminalEvidenceReviewEventType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."RefundTerminalEvidenceReviewEventType" AS ENUM (
+    'DETECTED',
+    'ACKNOWLEDGED',
+    'RESOLVED',
+    'REOPENED'
 );
 
--- CreateTable
-CREATE TABLE "AllocationSplitEvent" (
-    "id" TEXT NOT NULL,
-    "sourceAllocationId" TEXT NOT NULL,
-    "childAllocationId" TEXT NOT NULL,
-    "reason" TEXT NOT NULL,
-    "note" TEXT,
-    "actorUserId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "movedVendorAllocationLineItemIdsJson" JSONB,
-    "movedShopifyLineItemIdsJson" JSONB,
-    "sourceFinanceLedgerEntryId" TEXT,
-    "remainingFinanceLedgerEntryId" TEXT,
-    "childFinanceLedgerEntryId" TEXT,
-    "metadataJson" JSONB,
 
-    CONSTRAINT "AllocationSplitEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: RefundTerminalEvidenceReviewStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."RefundTerminalEvidenceReviewStatus" AS ENUM (
+    'ACTIVE',
+    'ACKNOWLEDGED',
+    'RESOLVED'
 );
 
--- CreateTable
-CREATE TABLE "AllocationEconomicTransfer" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "fromVendorId" TEXT NOT NULL,
-    "toVendorId" TEXT NOT NULL,
-    "fromFinanceLedgerEntryId" TEXT,
-    "toFinanceLedgerEntryId" TEXT,
-    "status" TEXT NOT NULL,
-    "reason" TEXT,
-    "adminActorUserId" TEXT,
-    "pricingSnapshotJson" JSONB,
-    "idempotencyKey" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "completedAt" TIMESTAMP(3),
-    "failedAt" TIMESTAMP(3),
-    "failureReason" TEXT,
 
-    CONSTRAINT "AllocationEconomicTransfer_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementApprovalLineType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementApprovalLineType" AS ENUM (
+    'SALE',
+    'REFUND',
+    'REFUND_ADJUSTMENT'
 );
 
--- CreateTable
-CREATE TABLE "FinanceIntegrityAlert" (
-    "id" TEXT NOT NULL,
-    "dedupeKey" TEXT NOT NULL,
-    "severity" TEXT NOT NULL,
-    "category" TEXT NOT NULL,
-    "vendorAllocationId" TEXT,
-    "allocationEconomicTransferId" TEXT,
-    "affectedLedgerIds" JSONB,
-    "affectedFinanceEventIds" JSONB,
-    "reason" TEXT NOT NULL,
-    "status" TEXT NOT NULL,
-    "acknowledgedAt" TIMESTAMP(3),
-    "acknowledgedByUserId" TEXT,
-    "acknowledgmentNote" TEXT,
-    "resolutionNote" TEXT,
-    "resolutionValidationJson" JSONB,
-    "resolutionType" TEXT,
-    "detectedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "resolvedAt" TIMESTAMP(3),
-    "resolvedByUserId" TEXT,
-    "metadataJson" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "FinanceIntegrityAlert_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementApprovalStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementApprovalStatus" AS ENUM (
+    'DRAFT',
+    'APPROVED',
+    'CANCELLED'
 );
 
--- CreateTable
-CREATE TABLE "Fulfillment" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "fulfillmentStatus" TEXT NOT NULL,
-    "trackingNumber" TEXT,
-    "carrier" TEXT,
-    "trackingUrl" TEXT,
-    "notifyCustomer" BOOLEAN NOT NULL DEFAULT true,
-    "shopifyFulfillmentId" TEXT,
-    "shopifyFulfillmentOrderId" TEXT,
-    "fulfilledAt" TIMESTAMP(3),
-    "shipmentCreatedAt" TIMESTAMP(3),
-    "shipmentUpdatedAt" TIMESTAMP(3),
-    "syncStatus" TEXT,
-    "errorMessage" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Fulfillment_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementCommissionInvoiceProvider; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementCommissionInvoiceProvider" AS ENUM (
+    'LOGO_ISBASI'
 );
 
--- CreateTable
-CREATE TABLE "ReturnRecord" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "ownerVendorId" TEXT,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "sourceShopifyOrderNumber" TEXT NOT NULL,
-    "sourceShopifyRefundId" TEXT,
-    "sourceShopifyReturnId" TEXT,
-    "sourceShopifyReturnGid" TEXT,
-    "sourceShopifyLineItemId" TEXT,
-    "returnLifecycleStatus" TEXT,
-    "returnRequestSource" TEXT,
-    "requestCreatedAt" TIMESTAMP(3),
-    "requestUpdatedAt" TIMESTAMP(3),
-    "status" TEXT NOT NULL,
-    "reason" TEXT,
-    "returnReasonNote" TEXT,
-    "returnProvider" TEXT,
-    "returnProviderShipmentId" TEXT,
-    "returnLabel" TEXT,
-    "returnReferenceId" TEXT,
-    "navlungoReturnCreatedAt" TIMESTAMP(3),
-    "returnProviderSnapshot" JSONB,
-    "returnCarrierName" TEXT,
-    "returnTrackingNumber" TEXT,
-    "returnTrackingUrl" TEXT,
-    "vendorReceivedAt" TIMESTAMP(3),
-    "vendorReviewedAt" TIMESTAMP(3),
-    "vendorDecision" TEXT,
-    "vendorDecisionReason" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ReturnRecord_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementCommissionInvoiceStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementCommissionInvoiceStatus" AS ENUM (
+    'PENDING',
+    'CREATED',
+    'FAILED',
+    'CANCELLED',
+    'UNKNOWN'
 );
 
--- CreateTable
-CREATE TABLE "RefundRecord" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "sourceShopifyOrderNumber" TEXT NOT NULL,
-    "sourceShopifyRefundId" TEXT NOT NULL,
-    "amount" DECIMAL(10,2),
-    "status" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "RefundRecord_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementFrequencyType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementFrequencyType" AS ENUM (
+    'WEEKLY',
+    'BIWEEKLY'
 );
 
--- CreateTable
-CREATE TABLE "RefundEvidenceSnapshot" (
-    "id" TEXT NOT NULL,
-    "sourceShopifyRefundId" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "refundRecordId" TEXT NOT NULL,
-    "refundFinanceLedgerEntryId" TEXT NOT NULL,
-    "historicalEconomicVendorId" TEXT NOT NULL,
-    "historicalSaleFinanceLedgerEntryId" TEXT NOT NULL,
-    "monetaryClassification" TEXT NOT NULL,
-    "refundTotalAmount" DECIMAL(10,2) NOT NULL,
-    "currency" TEXT NOT NULL,
-    "normalizedTransactionsJson" JSONB NOT NULL,
-    "normalizedRefundLinesJson" JSONB NOT NULL,
-    "normalizedOwnershipJson" JSONB NOT NULL,
-    "normalizedEvidenceJson" JSONB NOT NULL,
-    "supersededSaleLedgerIdsJson" JSONB NOT NULL,
-    "evidenceHash" TEXT NOT NULL,
-    "hashAlgorithm" TEXT NOT NULL,
-    "evidenceVersion" INTEGER NOT NULL,
-    "normalizationVersion" INTEGER NOT NULL,
-    "evidenceSource" TEXT NOT NULL,
-    "capturedAt" TIMESTAMP(3) NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "RefundEvidenceSnapshot_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementRefundAdjustmentApplicationStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementRefundAdjustmentApplicationStatus" AS ENUM (
+    'ACTIVE',
+    'CANCELLED'
 );
 
--- CreateTable
-CREATE TABLE "RefundTerminalEvidenceReview" (
-    "id" TEXT NOT NULL,
-    "sourceShopifyRefundId" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "terminalRefundFinanceLedgerEntryId" TEXT NOT NULL,
-    "refundRecordId" TEXT,
-    "economicVendorId" TEXT NOT NULL,
-    "storedEvidenceSnapshotId" TEXT,
-    "dedupeKey" TEXT NOT NULL,
-    "conflictCategory" TEXT NOT NULL,
-    "storedEvidenceHash" TEXT,
-    "incomingEvidenceHash" TEXT,
-    "storedEvidenceSummaryJson" JSONB,
-    "incomingEvidenceSummaryJson" JSONB,
-    "conflictSummaryJson" JSONB NOT NULL,
-    "sourceContextJson" JSONB,
-    "status" "RefundTerminalEvidenceReviewStatus" NOT NULL DEFAULT 'ACTIVE',
-    "resolutionOutcome" "RefundTerminalEvidenceResolutionOutcome",
-    "firstObservedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "lastObservedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "occurrenceCount" INTEGER NOT NULL DEFAULT 1,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "RefundTerminalEvidenceReview_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementRefundAdjustmentEventType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementRefundAdjustmentEventType" AS ENUM (
+    'CREATED',
+    'PARTIALLY_APPLIED',
+    'APPLIED',
+    'APPLICATION_CANCELLED',
+    'ADJUSTMENT_CANCELLED'
 );
 
--- CreateTable
-CREATE TABLE "RefundTerminalConflictEvidence" (
-    "id" TEXT NOT NULL,
-    "reviewId" TEXT NOT NULL,
-    "sourceShopifyRefundId" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "vendorAllocationId" TEXT NOT NULL,
-    "economicVendorId" TEXT NOT NULL,
-    "historicalSaleFinanceLedgerEntryId" TEXT NOT NULL,
-    "supersededSaleLedgerIdsJson" JSONB NOT NULL,
-    "refundTotalAmount" DECIMAL(10,2) NOT NULL,
-    "currency" TEXT NOT NULL,
-    "normalizedEvidenceJson" JSONB NOT NULL,
-    "evidenceHash" TEXT NOT NULL,
-    "hashAlgorithm" TEXT NOT NULL,
-    "evidenceVersion" INTEGER NOT NULL,
-    "normalizationVersion" INTEGER NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "RefundTerminalConflictEvidence_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementRefundAdjustmentStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementRefundAdjustmentStatus" AS ENUM (
+    'PENDING',
+    'PARTIALLY_APPLIED',
+    'APPLIED',
+    'BLOCKED',
+    'CANCELLED'
 );
 
--- CreateTable
-CREATE TABLE "RefundTerminalEvidenceReviewEvent" (
-    "id" TEXT NOT NULL,
-    "reviewId" TEXT NOT NULL,
-    "eventType" "RefundTerminalEvidenceReviewEventType" NOT NULL,
-    "actorUserId" TEXT,
-    "note" TEXT,
-    "resolutionOutcome" "RefundTerminalEvidenceResolutionOutcome",
-    "sourceContextJson" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "RefundTerminalEvidenceReviewEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementScheduleJobRunStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementScheduleJobRunStatus" AS ENUM (
+    'PROCESSING',
+    'DRY_RUN',
+    'COMPLETED',
+    'BLOCKED',
+    'FAILED'
 );
 
--- CreateTable
-CREATE TABLE "LegacyRefundFinanceReview" (
-    "id" TEXT NOT NULL,
-    "caseKey" TEXT NOT NULL,
-    "status" "LegacyRefundFinanceReviewStatus" NOT NULL DEFAULT 'ACTIVE',
-    "resolutionOutcome" "LegacyRefundFinanceResolutionOutcome",
-    "attribution" "LegacyRefundFinanceAttribution" NOT NULL,
-    "sourceShopifyRefundId" TEXT,
-    "sourceShopifyOrderId" TEXT,
-    "vendorAllocationId" TEXT,
-    "observedVendorId" TEXT,
-    "firstObservedAt" TIMESTAMP(3) NOT NULL,
-    "lastObservedAt" TIMESTAMP(3) NOT NULL,
-    "occurrenceCount" INTEGER NOT NULL DEFAULT 1,
-    "projectionFingerprint" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "LegacyRefundFinanceReview_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementStatus" AS ENUM (
+    'PENDING',
+    'ACCRUING',
+    'PAYABLE',
+    'PARTIALLY_REFUNDED',
+    'HELD',
+    'SETTLED',
+    'DISPUTED'
 );
 
--- CreateTable
-CREATE TABLE "LegacyRefundFinanceReviewSource" (
-    "id" TEXT NOT NULL,
-    "reviewId" TEXT NOT NULL,
-    "artifactType" "LegacyRefundFinanceArtifactType" NOT NULL,
-    "artifactId" TEXT NOT NULL,
-    "observedAt" TIMESTAMP(3) NOT NULL,
-    "sourceState" TEXT,
-    "recordedAmount" DECIMAL(10,2),
-    "recordedAmountMinor" INTEGER,
-    "currency" TEXT,
-    "voidedAt" TIMESTAMP(3),
-    "supersededByLedgerId" TEXT,
-    "sourceFingerprint" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "LegacyRefundFinanceReviewSource_pkey" PRIMARY KEY ("id")
+--
+-- Name: SettlementWeekday; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementWeekday" AS ENUM (
+    'MONDAY',
+    'TUESDAY',
+    'WEDNESDAY',
+    'THURSDAY',
+    'FRIDAY'
 );
 
--- CreateTable
-CREATE TABLE "LegacyRefundFinanceReviewEvent" (
-    "id" TEXT NOT NULL,
-    "reviewId" TEXT NOT NULL,
-    "eventType" "LegacyRefundFinanceReviewEventType" NOT NULL,
-    "actorUserId" TEXT,
-    "note" TEXT,
-    "resolutionOutcome" "LegacyRefundFinanceResolutionOutcome",
-    "sourceContextJson" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "LegacyRefundFinanceReviewEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: ShipmentExecutionStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ShipmentExecutionStatus" AS ENUM (
+    'PENDING',
+    'CREATED',
+    'FAILED',
+    'IN_TRANSIT',
+    'DELIVERED',
+    'RETURNED',
+    'CANCELLED'
 );
 
--- CreateTable
-CREATE TABLE "ShopifyRefund" (
-    "id" TEXT NOT NULL,
-    "shopifyOrderId" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "sourceShopifyOrderNumber" TEXT NOT NULL,
-    "sourceShopifyRefundId" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ShopifyRefund_pkey" PRIMARY KEY ("id")
+--
+-- Name: ShippingCostSourceType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ShippingCostSourceType" AS ENUM (
+    'MANUAL',
+    'IMPORTED',
+    'EXTERNAL_PROVIDER'
 );
 
--- CreateTable
-CREATE TABLE "ShopifyRefundLineItem" (
-    "id" TEXT NOT NULL,
-    "shopifyRefundId" TEXT NOT NULL,
-    "refundRecordId" TEXT,
-    "shopifyOrderLineItemId" TEXT NOT NULL,
-    "sourceRefundLineItemId" TEXT NOT NULL,
-    "sourceLineItemId" TEXT NOT NULL,
-    "sku" TEXT,
-    "title" TEXT,
-    "quantity" INTEGER NOT NULL DEFAULT 1,
-    "subtotal" DECIMAL(10,2),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ShopifyRefundLineItem_pkey" PRIMARY KEY ("id")
+--
+-- Name: ShippingCostStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ShippingCostStatus" AS ENUM (
+    'PENDING',
+    'CONFIRMED',
+    'DISPUTED',
+    'IGNORED'
 );
 
--- CreateTable
-CREATE TABLE "FinanceLedgerEntry" (
-    "id" TEXT NOT NULL,
-    "vendorAllocationId" TEXT,
-    "vendorId" TEXT NOT NULL,
-    "entryType" TEXT NOT NULL,
-    "amount" DECIMAL(10,2) NOT NULL,
-    "payoutStatus" "PayoutStatus" NOT NULL DEFAULT 'PENDING',
-    "description" TEXT,
-    "commissionPercentSnapshot" DECIMAL(5,2),
-    "commissionVatPercentSnapshot" DECIMAL(5,2),
-    "deductShippingEnabledSnapshot" BOOLEAN,
-    "shippingModeSnapshot" "ShippingDeductionMode",
-    "fixedShippingFeeSnapshot" DECIMAL(10,2),
-    "shippingCostSnapshot" DECIMAL(10,2),
-    "shippingVatAmountSnapshot" DECIMAL(10,2),
-    "shippingCostSourceSnapshot" TEXT,
-    "shippingCostProviderSnapshot" TEXT,
-    "shippingCostIdSnapshot" TEXT,
-    "financialProfileIdSnapshot" TEXT,
-    "settlementDelayDaysSnapshot" INTEGER NOT NULL DEFAULT 21,
-    "settlementStatus" "SettlementStatus" NOT NULL DEFAULT 'PENDING',
-    "settlementEligibleAt" TIMESTAMP(3),
-    "accruedAt" TIMESTAMP(3),
-    "payableAt" TIMESTAMP(3),
-    "settledAt" TIMESTAMP(3),
-    "settlementHoldReason" TEXT,
-    "voidedAt" TIMESTAMP(3),
-    "voidReason" TEXT,
-    "supersededByLedgerId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "FinanceLedgerEntry_pkey" PRIMARY KEY ("id")
+--
+-- Name: ShippingDeductionMode; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ShippingDeductionMode" AS ENUM (
+    'DISABLED',
+    'FIXED',
+    'EXTERNAL_PROVIDER'
 );
 
--- CreateTable
-CREATE TABLE "FinanceEvent" (
-    "id" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "vendorId" TEXT NOT NULL,
-    "shopifyOrderId" TEXT,
-    "financeLedgerEntryId" TEXT,
-    "eventType" "FinanceEventType" NOT NULL,
-    "amountMinor" INTEGER NOT NULL,
-    "currency" TEXT NOT NULL DEFAULT 'TRY',
-    "referenceType" TEXT NOT NULL,
-    "referenceId" TEXT NOT NULL,
-    "metadataJson" JSONB,
-    "createdBy" TEXT NOT NULL,
-    "idempotencyKey" TEXT NOT NULL,
 
-    CONSTRAINT "FinanceEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: ShippingProvider; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ShippingProvider" AS ENUM (
+    'HEPSIJET',
+    'KARGO_ENTEGRATOR',
+    'TRY_OTO',
+    'KARGONOMI',
+    'NAVLUNGO',
+    'MNG',
+    'YURTICI',
+    'ARAS'
 );
 
--- CreateTable
-CREATE TABLE "SettlementApproval" (
-    "id" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "periodStart" TIMESTAMP(3),
-    "periodEnd" TIMESTAMP(3),
-    "status" "SettlementApprovalStatus" NOT NULL DEFAULT 'DRAFT',
-    "currency" TEXT NOT NULL DEFAULT 'TRY',
-    "grossSalesMinor" INTEGER NOT NULL,
-    "refundTotalMinor" INTEGER NOT NULL,
-    "commissionMinor" INTEGER NOT NULL,
-    "commissionVatMinor" INTEGER NOT NULL,
-    "netPayableMinor" INTEGER NOT NULL,
-    "approvedBy" TEXT,
-    "approvedAt" TIMESTAMP(3),
-    "cancelledBy" TEXT,
-    "cancelledAt" TIMESTAMP(3),
-    "notes" TEXT,
-    "scheduledRunDate" TIMESTAMP(3),
-    "scheduledPeriodEnd" TIMESTAMP(3),
-    "scheduledCycleKey" TEXT,
-    "sourceSnapshotJson" JSONB NOT NULL,
 
-    CONSTRAINT "SettlementApproval_pkey" PRIMARY KEY ("id")
+--
+-- Name: UserRole; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."UserRole" AS ENUM (
+    'ADMIN',
+    'VENDOR',
+    'SUPPORT',
+    'FINANCE'
 );
 
--- CreateTable
-CREATE TABLE "SettlementScheduleJobRun" (
-    "id" TEXT NOT NULL,
-    "runDate" TIMESTAMP(3) NOT NULL,
-    "status" "SettlementScheduleJobRunStatus" NOT NULL DEFAULT 'PROCESSING',
-    "writesPerformed" BOOLEAN NOT NULL DEFAULT false,
-    "createdDraftCount" INTEGER NOT NULL DEFAULT 0,
-    "skippedCount" INTEGER NOT NULL DEFAULT 0,
-    "blockedCount" INTEGER NOT NULL DEFAULT 0,
-    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "finishedAt" TIMESTAMP(3),
-    "metadataJson" JSONB,
 
-    CONSTRAINT "SettlementScheduleJobRun_pkey" PRIMARY KEY ("id")
+--
+-- Name: VendorBalanceEventType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."VendorBalanceEventType" AS ENUM (
+    'PAYABLE_EARNED',
+    'VENDOR_DEBT_CREATED',
+    'VENDOR_DEBT_OFFSET',
+    'MANUAL_ADJUSTMENT',
+    'DEBT_WAIVED'
 );
 
--- CreateTable
-CREATE TABLE "SettlementApprovalLine" (
-    "id" TEXT NOT NULL,
-    "settlementApprovalId" TEXT NOT NULL,
-    "financeLedgerEntryId" TEXT NOT NULL,
-    "settlementRefundAdjustmentId" TEXT,
-    "settlementRefundAdjustmentApplicationId" TEXT,
-    "lineType" "SettlementApprovalLineType" NOT NULL,
-    "amountMinor" INTEGER NOT NULL,
-    "commissionMinor" INTEGER NOT NULL,
-    "commissionVatMinor" INTEGER NOT NULL,
-    "payableImpactMinor" INTEGER NOT NULL,
-    "sourceSnapshotJson" JSONB NOT NULL,
 
-    CONSTRAINT "SettlementApprovalLine_pkey" PRIMARY KEY ("id")
+--
+-- Name: VendorProfileSnapshotImpact; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."VendorProfileSnapshotImpact" AS ENUM (
+    'FUTURE_LEDGER_ROWS_ONLY',
+    'FUTURE_SETTLEMENT_APPROVALS_ONLY',
+    'FUTURE_COMMISSION_INVOICES_ONLY',
+    'FUTURE_SHIPMENTS_ONLY',
+    'FUTURE_RETURNS_ONLY',
+    'FUTURE_SHIPMENTS_AND_RETURNS_ONLY',
+    'EXISTING_SETTLEMENTS_UNCHANGED',
+    'PROVIDER_REBIND_REQUIRED',
+    'FUTURE_PAYOUT_RELEVANT',
+    'DIAGNOSTIC_ONLY',
+    'UNKNOWN'
 );
 
--- CreateTable
-CREATE TABLE "SettlementCommissionInvoice" (
-    "id" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "settlementApprovalId" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "provider" "SettlementCommissionInvoiceProvider" NOT NULL,
-    "status" "SettlementCommissionInvoiceStatus" NOT NULL DEFAULT 'PENDING',
-    "providerInvoiceId" TEXT,
-    "providerUuid" TEXT,
-    "providerEttn" TEXT,
-    "invoiceNo" TEXT,
-    "invoiceDate" TIMESTAMP(3),
-    "invoiceTotalMinor" INTEGER,
-    "invoiceCurrency" TEXT,
-    "gibStatus" TEXT,
-    "gibStatusCode" TEXT,
-    "documentStatus" TEXT,
-    "documentStatusCode" TEXT,
-    "documentType" TEXT,
-    "documentContentType" TEXT,
-    "documentSize" INTEGER,
-    "documentFetchedAt" TIMESTAMP(3),
-    "lastProviderSyncedAt" TIMESTAMP(3),
-    "documentSnapshotJson" JSONB,
-    "requestSnapshotJson" JSONB,
-    "responseSnapshotJson" JSONB,
-    "failureCode" TEXT,
-    "failureMessage" TEXT,
-    "failedAt" TIMESTAMP(3),
-    "unknownReason" TEXT,
-    "unknownAt" TIMESTAMP(3),
-    "reconciliationStatus" TEXT,
-    "reconciliationEvidenceJson" JSONB,
-    "reconciledAt" TIMESTAMP(3),
-    "reconciledBy" TEXT,
-    "retryCount" INTEGER NOT NULL DEFAULT 0,
-    "lastRetriedAt" TIMESTAMP(3),
-    "createdBy" TEXT,
-    "cancelledBy" TEXT,
-    "cancelledAt" TIMESTAMP(3),
 
-    CONSTRAINT "SettlementCommissionInvoice_pkey" PRIMARY KEY ("id")
+--
+-- Name: WebhookStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."WebhookStatus" AS ENUM (
+    'RECEIVED',
+    'PROCESSING',
+    'PROCESSED',
+    'FAILED'
 );
 
--- CreateTable
-CREATE TABLE "SettlementRefundAdjustment" (
-    "id" TEXT NOT NULL,
-    "refundRecordId" TEXT NOT NULL,
-    "refundFinanceLedgerEntryId" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "originalOrderId" TEXT NOT NULL,
-    "originalSettlementApprovalId" TEXT,
-    "originalSettlementApprovalLineId" TEXT,
-    "originalSettlementCommissionInvoiceId" TEXT,
-    "status" "SettlementRefundAdjustmentStatus" NOT NULL DEFAULT 'PENDING',
-    "amountMinor" INTEGER NOT NULL,
-    "currencyCode" TEXT NOT NULL DEFAULT 'TRY',
-    "reason" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "originalAmountMinor" INTEGER NOT NULL DEFAULT 0,
-    "appliedAmountMinor" INTEGER NOT NULL DEFAULT 0,
-    "remainingAmountMinor" INTEGER NOT NULL DEFAULT 0,
-    "appliedSettlementApprovalId" TEXT,
-    "appliedSettlementApprovalLineId" TEXT,
-    "blockedReason" TEXT,
-    "createdBy" TEXT,
 
-    CONSTRAINT "SettlementRefundAdjustment_pkey" PRIMARY KEY ("id")
+--
+-- Name: checkApprovedDeductionCoverage(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."checkApprovedDeductionCoverage"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE source_vendor TEXT; source_currency TEXT; source_amount INTEGER;
+DECLARE source_route TEXT; source_approval TEXT; approval_vendor TEXT; approval_currency TEXT;
+BEGIN
+  SELECT d."vendorId", d."currency", d."amountMinor", a."applicationRoute", a."historicalApprovedSettlementId"
+    INTO source_vendor, source_currency, source_amount, source_route, source_approval
+    FROM "FinancialCorrectionDeduction" d JOIN "FinancialCorrectionAuthority" a ON a."id" = d."authorityId"
+    WHERE d."id" = NEW."deductionId";
+  SELECT "vendorId", "currency" INTO approval_vendor, approval_currency
+    FROM "SettlementApproval" WHERE "id" = NEW."settlementApprovalId";
+  IF source_route NOT IN ('APPROVED_SETTLEMENT_VENDOR_DEDUCTION', 'DRAFT_PAYOUT_VENDOR_DEDUCTION', 'REVIEW_PAYOUT_VENDOR_DEDUCTION') OR
+     source_approval IS DISTINCT FROM NEW."settlementApprovalId" OR
+     source_vendor IS DISTINCT FROM NEW."vendorId" OR source_currency IS DISTINCT FROM NEW."currency" OR
+     source_amount IS DISTINCT FROM NEW."amountMinor" OR
+     approval_vendor IS DISTINCT FROM NEW."vendorId" OR approval_currency IS DISTINCT FROM NEW."currency" THEN
+    RAISE EXCEPTION 'Approved deduction coverage must match its source and origin approval';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: checkFinancialCorrectionDebtDirection(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."checkFinancialCorrectionDebtDirection"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE direction TEXT;
+DECLARE route TEXT;
+BEGIN
+  IF NEW."financialCorrectionAuthorityId" IS NULL THEN RETURN NEW; END IF;
+  SELECT "economicDirection", "applicationRoute" INTO direction, route FROM "FinancialCorrectionAuthority" WHERE "id" = NEW."financialCorrectionAuthorityId";
+  IF direction IS DISTINCT FROM 'VENDOR_DEDUCTION' OR route IS DISTINCT FROM 'PAID_VENDOR_DEBT' THEN
+    RAISE EXCEPTION 'Financial correction debt requires PAID_VENDOR_DEBT authority';
+  END IF;
+  IF EXISTS (SELECT 1 FROM "FinancialCorrectionCredit" WHERE "authorityId" = NEW."financialCorrectionAuthorityId") OR
+     EXISTS (SELECT 1 FROM "FinancialCorrectionDeduction" WHERE "authorityId" = NEW."financialCorrectionAuthorityId") THEN
+    RAISE EXCEPTION 'Financial correction cannot have multiple economic effects';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: checkFinancialCorrectionDeductionDirection(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."checkFinancialCorrectionDeductionDirection"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE authority_route TEXT; authority_direction TEXT; authority_vendor TEXT;
+DECLARE authority_currency TEXT; authority_delta INTEGER;
+BEGIN
+  SELECT "applicationRoute", "economicDirection", "vendorId", "currency", "vendorPayableDifferenceMinor"
+    INTO authority_route, authority_direction, authority_vendor, authority_currency, authority_delta
+    FROM "FinancialCorrectionAuthority" WHERE "id" = NEW."authorityId";
+  IF authority_route NOT IN ('BEFORE_SETTLEMENT_VENDOR_DEDUCTION', 'APPROVED_SETTLEMENT_VENDOR_DEDUCTION', 'DRAFT_PAYOUT_VENDOR_DEDUCTION', 'REVIEW_PAYOUT_VENDOR_DEDUCTION') OR
+     authority_direction IS DISTINCT FROM 'VENDOR_DEDUCTION' OR
+     authority_vendor IS DISTINCT FROM NEW."vendorId" OR
+     authority_currency IS DISTINCT FROM NEW."currency" OR
+     authority_delta IS DISTINCT FROM NEW."amountMinor" THEN
+    RAISE EXCEPTION 'Financial correction deduction requires matching deduction authority';
+  END IF;
+  IF EXISTS (SELECT 1 FROM "VendorBalanceEvent" WHERE "financialCorrectionAuthorityId" = NEW."authorityId") OR
+     EXISTS (SELECT 1 FROM "FinancialCorrectionCredit" WHERE "authorityId" = NEW."authorityId") THEN
+    RAISE EXCEPTION 'Financial correction cannot have multiple economic effects';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: checkFinancialCorrectionEffectDirection(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."checkFinancialCorrectionEffectDirection"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE direction TEXT; route TEXT; authority_vendor_id TEXT; authority_currency TEXT;
+DECLARE authority_difference_minor INTEGER; payout_id TEXT; payout_paid_at TIMESTAMP(3); approval_id TEXT;
+BEGIN
+  SELECT "economicDirection", "applicationRoute", "vendorId", "currency", "vendorPayableDifferenceMinor",
+         "historicalPayoutBatchId", "historicalPayoutPaidAt", "historicalApprovedSettlementId"
+  INTO direction, route, authority_vendor_id, authority_currency, authority_difference_minor,
+       payout_id, payout_paid_at, approval_id
+  FROM "FinancialCorrectionAuthority" WHERE "id" = NEW."authorityId";
+  IF direction IS DISTINCT FROM 'VENDOR_CREDIT' OR
+     NOT ((route = 'PAID_VENDOR_CREDIT' AND payout_id IS NOT NULL AND payout_paid_at IS NOT NULL AND approval_id IS NULL) OR
+          (route = 'BEFORE_SETTLEMENT_VENDOR_CREDIT' AND payout_id IS NULL AND payout_paid_at IS NULL AND approval_id IS NULL) OR
+          (route = 'APPROVED_SETTLEMENT_VENDOR_CREDIT' AND payout_id IS NULL AND payout_paid_at IS NULL AND approval_id IS NOT NULL) OR
+          (route IN ('DRAFT_PAYOUT_VENDOR_CREDIT', 'REVIEW_PAYOUT_VENDOR_CREDIT') AND payout_id IS NOT NULL AND payout_paid_at IS NULL AND approval_id IS NOT NULL)) OR
+     authority_vendor_id IS DISTINCT FROM NEW."vendorId" OR authority_currency IS DISTINCT FROM NEW."currency" OR
+     authority_difference_minor IS DISTINCT FROM -NEW."amountMinor" THEN
+    RAISE EXCEPTION 'Financial correction credit requires eligible VENDOR_CREDIT authority';
+  END IF;
+  IF EXISTS (SELECT 1 FROM "VendorBalanceEvent" WHERE "financialCorrectionAuthorityId" = NEW."authorityId") OR
+     EXISTS (SELECT 1 FROM "FinancialCorrectionDeduction" WHERE "authorityId" = NEW."authorityId") THEN
+    RAISE EXCEPTION 'Financial correction cannot have multiple economic effects';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+SET default_table_access_method = heap;
+
+--
+-- Name: AllocationAssignmentHistory; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."AllocationAssignmentHistory" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    action text NOT NULL,
+    "fromVendorId" text,
+    "toVendorId" text NOT NULL,
+    reason text,
+    "actorUserId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "SettlementRefundAdjustmentEvent" (
-    "id" TEXT NOT NULL,
-    "settlementRefundAdjustmentId" TEXT NOT NULL,
-    "eventType" "SettlementRefundAdjustmentEventType" NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "metadataJson" JSONB,
 
-    CONSTRAINT "SettlementRefundAdjustmentEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: AllocationEconomicTransfer; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."AllocationEconomicTransfer" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "fromVendorId" text NOT NULL,
+    "toVendorId" text NOT NULL,
+    "fromFinanceLedgerEntryId" text,
+    "toFinanceLedgerEntryId" text,
+    status text NOT NULL,
+    reason text,
+    "adminActorUserId" text,
+    "pricingSnapshotJson" jsonb,
+    "idempotencyKey" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "completedAt" timestamp(3) without time zone,
+    "failedAt" timestamp(3) without time zone,
+    "failureReason" text
 );
 
--- CreateTable
-CREATE TABLE "SettlementRefundAdjustmentApplication" (
-    "id" TEXT NOT NULL,
-    "settlementRefundAdjustmentId" TEXT NOT NULL,
-    "settlementApprovalId" TEXT NOT NULL,
-    "settlementApprovalLineId" TEXT NOT NULL,
-    "amountMinor" INTEGER NOT NULL,
-    "currencyCode" TEXT NOT NULL DEFAULT 'TRY',
-    "status" "SettlementRefundAdjustmentApplicationStatus" NOT NULL DEFAULT 'ACTIVE',
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "SettlementRefundAdjustmentApplication_pkey" PRIMARY KEY ("id")
+--
+-- Name: AllocationFullRefundTerminalFact; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."AllocationFullRefundTerminalFact" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "shopifyOrderGid" text NOT NULL,
+    "verificationSource" text NOT NULL,
+    "shopifyApiVersion" text NOT NULL,
+    "verifiedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "evidenceJson" jsonb NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "ShipmentShippingCost" (
-    "id" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "allocationId" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT NOT NULL,
-    "sourceShopifyFulfillmentId" TEXT,
-    "providerName" TEXT NOT NULL,
-    "providerReference" TEXT,
-    "shippingCost" DECIMAL(10,2) NOT NULL,
-    "shippingVatAmount" DECIMAL(10,2),
-    "currency" TEXT NOT NULL DEFAULT 'TRY',
-    "status" "ShippingCostStatus" NOT NULL DEFAULT 'PENDING',
-    "sourceType" "ShippingCostSourceType" NOT NULL DEFAULT 'MANUAL',
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ShipmentShippingCost_pkey" PRIMARY KEY ("id")
+--
+-- Name: AllocationSplitEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."AllocationSplitEvent" (
+    id text NOT NULL,
+    "sourceAllocationId" text NOT NULL,
+    "childAllocationId" text NOT NULL,
+    reason text NOT NULL,
+    note text,
+    "actorUserId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "movedVendorAllocationLineItemIdsJson" jsonb,
+    "movedShopifyLineItemIdsJson" jsonb,
+    "sourceFinanceLedgerEntryId" text,
+    "remainingFinanceLedgerEntryId" text,
+    "childFinanceLedgerEntryId" text,
+    "metadataJson" jsonb
 );
 
--- CreateTable
-CREATE TABLE "VendorShippingConfig" (
-    "id" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "preferredProvider" "ShippingProvider" NOT NULL DEFAULT 'HEPSIJET',
-    "shippingEnabled" BOOLEAN NOT NULL DEFAULT true,
-    "defaultDesi" DECIMAL(10,2) NOT NULL DEFAULT 3.00,
-    "cargoIntegrationId" TEXT,
-    "defaultWarehouseId" TEXT,
-    "shippingVatPercent" DECIMAL(5,2) NOT NULL DEFAULT 18.00,
-    "providerMetadata" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "VendorShippingConfig_pkey" PRIMARY KEY ("id")
+--
+-- Name: AutomationAction; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."AutomationAction" (
+    id text NOT NULL,
+    "signalId" text,
+    type public."AutomationActionType" NOT NULL,
+    status public."AutomationActionStatus" DEFAULT 'SUGGESTED'::public."AutomationActionStatus" NOT NULL,
+    "executionMode" public."AutomationExecutionMode" DEFAULT 'MANUAL'::public."AutomationExecutionMode" NOT NULL,
+    "vendorId" text,
+    "allocationId" text,
+    "financeLedgerEntryId" text,
+    "payoutBatchId" text,
+    "operationalJobId" text,
+    title text NOT NULL,
+    description text NOT NULL,
+    "resultSummary" text,
+    "executedAt" timestamp(3) without time zone,
+    metadata jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "VendorShippingWarehouse" (
-    "id" TEXT NOT NULL,
-    "configId" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "provider" "ShippingProvider" NOT NULL,
-    "warehouseId" TEXT NOT NULL,
-    "name" TEXT,
-    "address" TEXT,
-    "isDefault" BOOLEAN NOT NULL DEFAULT false,
-    "metadata" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "VendorShippingWarehouse_pkey" PRIMARY KEY ("id")
+--
+-- Name: CanonicalReconciliationRun; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."CanonicalReconciliationRun" (
+    id text NOT NULL,
+    mode text NOT NULL,
+    status text NOT NULL,
+    "startedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "finishedAt" timestamp(3) without time zone,
+    "durationMs" integer,
+    "lookbackDays" integer NOT NULL,
+    "orderLimit" integer NOT NULL,
+    "ordersScanned" integer DEFAULT 0 NOT NULL,
+    "repairOpportunities" integer DEFAULT 0 NOT NULL,
+    "wouldRepairOrders" integer DEFAULT 0 NOT NULL,
+    "wouldRepairFulfillment" integer DEFAULT 0 NOT NULL,
+    "wouldRepairRefunds" integer DEFAULT 0 NOT NULL,
+    "wouldRepairReturns" integer DEFAULT 0 NOT NULL,
+    "wouldRepairCancellations" integer DEFAULT 0 NOT NULL,
+    "wouldCreateSignals" integer DEFAULT 0 NOT NULL,
+    "wouldRepairLedgers" integer DEFAULT 0 NOT NULL,
+    "wouldRepairFinanceEvents" integer DEFAULT 0 NOT NULL,
+    "errorsJson" jsonb,
+    "perOrderDetailsJson" jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "ShipmentExecution" (
-    "id" TEXT NOT NULL,
-    "allocationId" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "sourceShopifyOrderId" TEXT,
-    "sourceShopifyOrderNumber" TEXT,
-    "sourceShopifyFulfillmentId" TEXT,
-    "provider" "ShippingProvider" NOT NULL,
-    "providerShipmentId" TEXT,
-    "trackingNumber" TEXT,
-    "trackingUrl" TEXT,
-    "labelUrl" TEXT,
-    "shipmentStatus" "ShipmentExecutionStatus" NOT NULL DEFAULT 'PENDING',
-    "desi" DECIMAL(10,2) NOT NULL DEFAULT 3.00,
-    "cargoIntegrationId" TEXT,
-    "warehouseId" TEXT,
-    "shippingCost" DECIMAL(10,2),
-    "shippingVat" DECIMAL(10,2),
-    "currency" TEXT NOT NULL DEFAULT 'TRY',
-    "requestSnapshot" JSONB NOT NULL,
-    "responseSnapshot" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "ShipmentExecution_pkey" PRIMARY KEY ("id")
+--
+-- Name: CustomerCancellationRequest; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."CustomerCancellationRequest" (
+    id text NOT NULL,
+    "shopifyOrderId" text NOT NULL,
+    "shopDomain" text NOT NULL,
+    "shopifyCustomerId" text NOT NULL,
+    status public."CustomerCancellationStatus" DEFAULT 'PENDING'::public."CustomerCancellationStatus" NOT NULL,
+    "reasonCode" text NOT NULL,
+    "customerNote" text,
+    "idempotencyKey" text NOT NULL,
+    "requestedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "resolvedAt" timestamp(3) without time zone,
+    "reviewedByUserId" text,
+    "reviewReason" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "PayoutBatch" (
-    "id" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "status" "PayoutBatchStatus" NOT NULL DEFAULT 'DRAFT',
-    "grossAmount" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    "commissionAmount" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    "commissionVatAmount" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    "shippingDeductionAmount" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    "refundAmount" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    "netAmount" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    "currency" TEXT NOT NULL DEFAULT 'TRY',
-    "createdByUserId" TEXT,
-    "paidAt" TIMESTAMP(3),
-    "paidByUserId" TEXT,
-    "paymentReference" TEXT,
-    "internalNote" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "PayoutBatch_pkey" PRIMARY KEY ("id")
+--
+-- Name: CustomerCancellationRequestItem; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."CustomerCancellationRequestItem" (
+    id text NOT NULL,
+    "requestId" text NOT NULL,
+    "shopifyOrderLineItemId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "requestedQuantity" integer NOT NULL,
+    "resolvedQuantity" integer,
+    status public."CustomerCancellationStatus" DEFAULT 'PENDING'::public."CustomerCancellationStatus" NOT NULL,
+    "reviewedByUserId" text,
+    "reviewReason" text,
+    "reviewedAt" timestamp(3) without time zone,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "PayoutBatchLine" (
-    "id" TEXT NOT NULL,
-    "payoutBatchId" TEXT NOT NULL,
-    "financeLedgerEntryId" TEXT NOT NULL,
-    "settlementApprovalLineId" TEXT,
-    "amountSnapshot" DECIMAL(10,2) NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "PayoutBatchLine_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinanceEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinanceEvent" (
+    id text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "vendorId" text NOT NULL,
+    "shopifyOrderId" text,
+    "financeLedgerEntryId" text,
+    "eventType" public."FinanceEventType" NOT NULL,
+    "amountMinor" integer NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    "referenceType" text NOT NULL,
+    "referenceId" text NOT NULL,
+    "metadataJson" jsonb,
+    "createdBy" text NOT NULL,
+    "idempotencyKey" text NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "VendorBalanceEvent" (
-    "id" TEXT NOT NULL,
-    "vendorId" TEXT NOT NULL,
-    "type" "VendorBalanceEventType" NOT NULL,
-    "amountMinor" INTEGER NOT NULL,
-    "currency" TEXT NOT NULL DEFAULT 'TRY',
-    "sourceType" TEXT NOT NULL,
-    "sourceId" TEXT NOT NULL,
-    "financeLedgerEntryId" TEXT,
-    "refundRecordId" TEXT,
-    "payoutBatchId" TEXT,
-    "settlementApprovalId" TEXT,
-    "metadataJson" JSONB,
-    "idempotencyKey" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "VendorBalanceEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinanceIntegrityAlert; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinanceIntegrityAlert" (
+    id text NOT NULL,
+    "dedupeKey" text NOT NULL,
+    severity text NOT NULL,
+    category text NOT NULL,
+    "vendorAllocationId" text,
+    "allocationEconomicTransferId" text,
+    "affectedLedgerIds" jsonb,
+    "affectedFinanceEventIds" jsonb,
+    reason text NOT NULL,
+    status text NOT NULL,
+    "acknowledgedAt" timestamp(3) without time zone,
+    "acknowledgedByUserId" text,
+    "acknowledgmentNote" text,
+    "resolutionNote" text,
+    "resolutionValidationJson" jsonb,
+    "resolutionType" text,
+    "detectedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "resolvedAt" timestamp(3) without time zone,
+    "resolvedByUserId" text,
+    "metadataJson" jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "WebhookEvent" (
-    "id" TEXT NOT NULL,
-    "sourceShopDomain" TEXT NOT NULL,
-    "topic" TEXT NOT NULL,
-    "webhookId" TEXT,
-    "idempotencyKey" TEXT,
-    "payloadHash" TEXT,
-    "rawPayload" TEXT,
-    "status" "WebhookStatus" NOT NULL DEFAULT 'RECEIVED',
-    "receivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "processedAt" TIMESTAMP(3),
-    "errorMessage" TEXT,
-    "shopifyOrderId" TEXT,
-    "sourceShopifyOrderId" TEXT,
-    "executionAvailableAt" TIMESTAMP(3),
-    "executionAttemptCount" INTEGER NOT NULL DEFAULT 0,
-    "executionMaxAttempts" INTEGER NOT NULL DEFAULT 3,
-    "processingGeneration" INTEGER NOT NULL DEFAULT 0,
-    "processingLeaseExpiresAt" TIMESTAMP(3),
 
-    CONSTRAINT "WebhookEvent_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinanceLedgerEntry; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinanceLedgerEntry" (
+    id text NOT NULL,
+    "vendorAllocationId" text,
+    "vendorId" text NOT NULL,
+    "entryType" text NOT NULL,
+    amount numeric(10,2) NOT NULL,
+    "payoutStatus" public."PayoutStatus" DEFAULT 'PENDING'::public."PayoutStatus" NOT NULL,
+    description text,
+    "commissionPercentSnapshot" numeric(5,2),
+    "commissionVatPercentSnapshot" numeric(5,2),
+    "deductShippingEnabledSnapshot" boolean,
+    "shippingModeSnapshot" public."ShippingDeductionMode",
+    "fixedShippingFeeSnapshot" numeric(10,2),
+    "shippingCostSnapshot" numeric(10,2),
+    "shippingVatAmountSnapshot" numeric(10,2),
+    "shippingCostSourceSnapshot" text,
+    "shippingCostProviderSnapshot" text,
+    "shippingCostIdSnapshot" text,
+    "financialProfileIdSnapshot" text,
+    "settlementDelayDaysSnapshot" integer DEFAULT 21 NOT NULL,
+    "settlementStatus" public."SettlementStatus" DEFAULT 'PENDING'::public."SettlementStatus" NOT NULL,
+    "settlementEligibleAt" timestamp(3) without time zone,
+    "accruedAt" timestamp(3) without time zone,
+    "payableAt" timestamp(3) without time zone,
+    "settledAt" timestamp(3) without time zone,
+    "settlementHoldReason" text,
+    "voidedAt" timestamp(3) without time zone,
+    "voidReason" text,
+    "supersededByLedgerId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "OperationalJob" (
-    "id" TEXT NOT NULL,
-    "jobType" "OperationalJobType" NOT NULL,
-    "status" "OperationalJobStatus" NOT NULL DEFAULT 'PENDING',
-    "priority" INTEGER NOT NULL DEFAULT 0,
-    "payload" JSONB,
-    "payloadRef" TEXT,
-    "webhookEventId" TEXT,
-    "sourceShopifyOrderId" TEXT,
-    "vendorAllocationId" TEXT,
-    "refundRecordId" TEXT,
-    "returnRecordId" TEXT,
-    "customerCancellationRequestItemId" TEXT,
-    "retryCount" INTEGER NOT NULL DEFAULT 0,
-    "maxRetries" INTEGER NOT NULL DEFAULT 3,
-    "scheduledAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "nextRetryAt" TIMESTAMP(3),
-    "lastAttemptAt" TIMESTAMP(3),
-    "retryBackoffMs" INTEGER,
-    "startedAt" TIMESTAMP(3),
-    "completedAt" TIMESTAMP(3),
-    "failedAt" TIMESTAMP(3),
-    "errorSummary" TEXT,
-    "failureCategory" TEXT,
-    "escalationReason" TEXT,
-    "processingGeneration" INTEGER NOT NULL DEFAULT 0,
-    "processingLeaseExpiresAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "OperationalJob_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionApprovedDeductionCoverage" (
+    id text NOT NULL,
+    "deductionId" text NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    status text DEFAULT 'ACTIVE'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "releasedAt" timestamp(3) without time zone,
+    CONSTRAINT "FinancialCorrectionApprovedDeductionCoverage_state_check" CHECK ((("amountMinor" > 0) AND (currency = 'TRY'::text) AND (((status = 'ACTIVE'::text) AND ("releasedAt" IS NULL)) OR ((status = 'RELEASED'::text) AND ("releasedAt" IS NOT NULL)))))
 );
 
--- CreateTable
-CREATE TABLE "CanonicalReconciliationRun" (
-    "id" TEXT NOT NULL,
-    "mode" TEXT NOT NULL,
-    "status" TEXT NOT NULL,
-    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "finishedAt" TIMESTAMP(3),
-    "durationMs" INTEGER,
-    "lookbackDays" INTEGER NOT NULL,
-    "orderLimit" INTEGER NOT NULL,
-    "ordersScanned" INTEGER NOT NULL DEFAULT 0,
-    "repairOpportunities" INTEGER NOT NULL DEFAULT 0,
-    "wouldRepairOrders" INTEGER NOT NULL DEFAULT 0,
-    "wouldRepairFulfillment" INTEGER NOT NULL DEFAULT 0,
-    "wouldRepairRefunds" INTEGER NOT NULL DEFAULT 0,
-    "wouldRepairReturns" INTEGER NOT NULL DEFAULT 0,
-    "wouldRepairCancellations" INTEGER NOT NULL DEFAULT 0,
-    "wouldCreateSignals" INTEGER NOT NULL DEFAULT 0,
-    "wouldRepairLedgers" INTEGER NOT NULL DEFAULT 0,
-    "wouldRepairFinanceEvents" INTEGER NOT NULL DEFAULT 0,
-    "errorsJson" JSONB,
-    "perOrderDetailsJson" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "CanonicalReconciliationRun_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinancialCorrectionApprovedDeductionPayoutLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionApprovedDeductionPayoutLine" (
+    id text NOT NULL,
+    "coverageId" text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    status text DEFAULT 'ACTIVE'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "cancelledAt" timestamp(3) without time zone,
+    "paidAt" timestamp(3) without time zone,
+    CONSTRAINT "FinancialCorrectionApprovedDeductionPayoutLine_state_check" CHECK ((("amountMinor" > 0) AND (((status = 'ACTIVE'::text) AND ("cancelledAt" IS NULL) AND ("paidAt" IS NULL)) OR ((status = 'CANCELLED'::text) AND ("cancelledAt" IS NOT NULL) AND ("paidAt" IS NULL)) OR ((status = 'PAID'::text) AND ("cancelledAt" IS NULL) AND ("paidAt" IS NOT NULL)))))
 );
 
--- CreateTable
-CREATE TABLE "OperationalSignal" (
-    "id" TEXT NOT NULL,
-    "type" TEXT NOT NULL,
-    "severity" "OperationalSignalSeverity" NOT NULL,
-    "sourceArea" "OperationalSignalSourceArea" NOT NULL,
-    "vendorId" TEXT,
-    "allocationId" TEXT,
-    "financeLedgerEntryId" TEXT,
-    "payoutBatchId" TEXT,
-    "operationalJobId" TEXT,
-    "title" TEXT NOT NULL,
-    "description" TEXT NOT NULL,
-    "suggestedAction" TEXT,
-    "status" "OperationalSignalStatus" NOT NULL DEFAULT 'ACTIVE',
-    "ruleKey" TEXT NOT NULL,
-    "triggeredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "resolvedAt" TIMESTAMP(3),
-    "metadata" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "OperationalSignal_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinancialCorrectionAuthority; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionAuthority" (
+    id text NOT NULL,
+    "reviewId" text NOT NULL,
+    "resolvedReviewEventId" text NOT NULL,
+    "acceptedEvidenceSnapshotId" text NOT NULL,
+    "incomingConflictEvidenceId" text NOT NULL,
+    "sourceShopifyRefundId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "historicalSaleFinanceLedgerEntryId" text NOT NULL,
+    "acceptedRefundFinanceLedgerEntryId" text NOT NULL,
+    "acceptedEvidenceHash" text NOT NULL,
+    "incomingEvidenceHash" text NOT NULL,
+    "acceptedEvidenceVersion" integer NOT NULL,
+    "acceptedNormalizationVersion" integer NOT NULL,
+    "incomingEvidenceVersion" integer NOT NULL,
+    "incomingNormalizationVersion" integer NOT NULL,
+    "commissionPercent" numeric(5,2) NOT NULL,
+    "commissionVatPercent" numeric(5,2) NOT NULL,
+    currency text NOT NULL,
+    "acceptedRefundAmountMinor" integer NOT NULL,
+    "acceptedCommissionReversalMinor" integer NOT NULL,
+    "acceptedCommissionVatReversalMinor" integer NOT NULL,
+    "acceptedVendorPayableReversalMinor" integer NOT NULL,
+    "correctedRefundAmountMinor" integer NOT NULL,
+    "correctedCommissionReversalMinor" integer NOT NULL,
+    "correctedCommissionVatReversalMinor" integer NOT NULL,
+    "correctedVendorPayableReversalMinor" integer NOT NULL,
+    "refundDifferenceMinor" integer NOT NULL,
+    "commissionDifferenceMinor" integer NOT NULL,
+    "commissionVatDifferenceMinor" integer NOT NULL,
+    "vendorPayableDifferenceMinor" integer NOT NULL,
+    "economicDirection" text NOT NULL,
+    "previewFingerprint" text NOT NULL,
+    "historicalPayoutBatchId" text,
+    "historicalPayoutPaidAt" timestamp(3) without time zone,
+    "applicationRoute" text NOT NULL,
+    "authorizedByUserId" text NOT NULL,
+    reason text NOT NULL,
+    "authorizedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "appliedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "historicalApprovedSettlementId" text,
+    "historicalApprovedSettlementAt" timestamp(3) without time zone,
+    "historicalApprovedSettlementNetMinor" integer,
+    "historicalDraftPayoutGrossMinor" integer,
+    "historicalDraftPayoutNetMinor" integer,
+    "historicalDraftPayoutDebtOffsetMinor" integer,
+    "historicalDraftPayoutSourceFingerprint" text,
+    "historicalDraftPayoutCancelledAt" timestamp(3) without time zone,
+    "historicalReviewPayoutGrossMinor" integer,
+    "historicalReviewPayoutNetMinor" integer,
+    "historicalReviewPayoutDebtOffsetMinor" integer,
+    "historicalReviewPayoutSourceFingerprint" text,
+    "historicalReviewPayoutCancelledAt" timestamp(3) without time zone,
+    "reviewEftNotSentConfirmedAt" timestamp(3) without time zone,
+    "reviewEftNotSentConfirmationVersion" text,
+    "reviewPayoutObservedStatus" text,
+    CONSTRAINT "FinancialCorrectionAuthority_review_attestation_check" CHECK ((("applicationRoute" = ANY (ARRAY['REVIEW_PAYOUT_VENDOR_CREDIT'::text, 'REVIEW_PAYOUT_VENDOR_DEDUCTION'::text])) OR (("historicalReviewPayoutGrossMinor" IS NULL) AND ("historicalReviewPayoutNetMinor" IS NULL) AND ("historicalReviewPayoutDebtOffsetMinor" IS NULL) AND ("historicalReviewPayoutSourceFingerprint" IS NULL) AND ("historicalReviewPayoutCancelledAt" IS NULL) AND ("reviewEftNotSentConfirmedAt" IS NULL) AND ("reviewEftNotSentConfirmationVersion" IS NULL) AND ("reviewPayoutObservedStatus" IS NULL)))),
+    CONSTRAINT "FinancialCorrectionAuthority_route_check" CHECK (((currency = 'TRY'::text) AND ((length(TRIM(BOTH FROM reason)) >= 1) AND (length(TRIM(BOTH FROM reason)) <= 500)) AND ((("economicDirection" = 'VENDOR_DEDUCTION'::text) AND ("vendorPayableDifferenceMinor" > 0) AND ("applicationRoute" = 'PAID_VENDOR_DEBT'::text) AND ("historicalPayoutBatchId" IS NOT NULL) AND ("historicalPayoutPaidAt" IS NOT NULL) AND ("historicalApprovedSettlementId" IS NULL) AND ("historicalApprovedSettlementAt" IS NULL) AND ("historicalApprovedSettlementNetMinor" IS NULL)) OR (("economicDirection" = 'VENDOR_CREDIT'::text) AND ("vendorPayableDifferenceMinor" < 0) AND ("applicationRoute" = 'PAID_VENDOR_CREDIT'::text) AND ("historicalPayoutBatchId" IS NOT NULL) AND ("historicalPayoutPaidAt" IS NOT NULL) AND ("historicalApprovedSettlementId" IS NULL) AND ("historicalApprovedSettlementAt" IS NULL) AND ("historicalApprovedSettlementNetMinor" IS NULL)) OR (("economicDirection" = 'VENDOR_CREDIT'::text) AND ("vendorPayableDifferenceMinor" < 0) AND ("applicationRoute" = 'BEFORE_SETTLEMENT_VENDOR_CREDIT'::text) AND ("historicalPayoutBatchId" IS NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NULL) AND ("historicalApprovedSettlementAt" IS NULL) AND ("historicalApprovedSettlementNetMinor" IS NULL)) OR (("economicDirection" = 'VENDOR_DEDUCTION'::text) AND ("vendorPayableDifferenceMinor" > 0) AND ("applicationRoute" = 'BEFORE_SETTLEMENT_VENDOR_DEDUCTION'::text) AND ("historicalPayoutBatchId" IS NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NULL) AND ("historicalApprovedSettlementAt" IS NULL) AND ("historicalApprovedSettlementNetMinor" IS NULL)) OR (("economicDirection" = 'VENDOR_CREDIT'::text) AND ("vendorPayableDifferenceMinor" < 0) AND ("applicationRoute" = 'APPROVED_SETTLEMENT_VENDOR_CREDIT'::text) AND ("historicalPayoutBatchId" IS NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NOT NULL) AND ("historicalApprovedSettlementAt" IS NOT NULL) AND ("historicalApprovedSettlementNetMinor" IS NOT NULL)) OR (("economicDirection" = 'VENDOR_DEDUCTION'::text) AND ("vendorPayableDifferenceMinor" > 0) AND ("applicationRoute" = 'APPROVED_SETTLEMENT_VENDOR_DEDUCTION'::text) AND ("historicalPayoutBatchId" IS NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NOT NULL) AND ("historicalApprovedSettlementAt" IS NOT NULL) AND ("historicalApprovedSettlementNetMinor" IS NOT NULL)) OR (("economicDirection" = 'VENDOR_CREDIT'::text) AND ("vendorPayableDifferenceMinor" < 0) AND ("applicationRoute" = 'DRAFT_PAYOUT_VENDOR_CREDIT'::text) AND ("historicalPayoutBatchId" IS NOT NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NOT NULL) AND ("historicalApprovedSettlementAt" IS NOT NULL) AND ("historicalApprovedSettlementNetMinor" IS NOT NULL) AND ("historicalDraftPayoutGrossMinor" IS NOT NULL) AND ("historicalDraftPayoutNetMinor" IS NOT NULL) AND ("historicalDraftPayoutDebtOffsetMinor" IS NOT NULL) AND ("historicalDraftPayoutSourceFingerprint" IS NOT NULL) AND ("historicalDraftPayoutCancelledAt" IS NOT NULL)) OR (("economicDirection" = 'VENDOR_DEDUCTION'::text) AND ("vendorPayableDifferenceMinor" > 0) AND ("applicationRoute" = 'DRAFT_PAYOUT_VENDOR_DEDUCTION'::text) AND ("historicalPayoutBatchId" IS NOT NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NOT NULL) AND ("historicalApprovedSettlementAt" IS NOT NULL) AND ("historicalApprovedSettlementNetMinor" IS NOT NULL) AND ("historicalDraftPayoutGrossMinor" IS NOT NULL) AND ("historicalDraftPayoutNetMinor" IS NOT NULL) AND ("historicalDraftPayoutDebtOffsetMinor" IS NOT NULL) AND ("historicalDraftPayoutSourceFingerprint" IS NOT NULL) AND ("historicalDraftPayoutCancelledAt" IS NOT NULL)) OR (("economicDirection" = 'VENDOR_CREDIT'::text) AND ("vendorPayableDifferenceMinor" < 0) AND ("applicationRoute" = 'REVIEW_PAYOUT_VENDOR_CREDIT'::text) AND ("historicalPayoutBatchId" IS NOT NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NOT NULL) AND ("historicalApprovedSettlementAt" IS NOT NULL) AND ("historicalApprovedSettlementNetMinor" IS NOT NULL) AND ("historicalReviewPayoutGrossMinor" IS NOT NULL) AND ("historicalReviewPayoutNetMinor" IS NOT NULL) AND ("historicalReviewPayoutDebtOffsetMinor" IS NOT NULL) AND ("historicalReviewPayoutSourceFingerprint" IS NOT NULL) AND ("historicalReviewPayoutCancelledAt" IS NOT NULL) AND ("reviewEftNotSentConfirmedAt" IS NOT NULL) AND ("reviewEftNotSentConfirmationVersion" = 'review-eft-not-sent-v1'::text) AND ("reviewPayoutObservedStatus" = 'REVIEW'::text)) OR (("economicDirection" = 'VENDOR_DEDUCTION'::text) AND ("vendorPayableDifferenceMinor" > 0) AND ("applicationRoute" = 'REVIEW_PAYOUT_VENDOR_DEDUCTION'::text) AND ("historicalPayoutBatchId" IS NOT NULL) AND ("historicalPayoutPaidAt" IS NULL) AND ("historicalApprovedSettlementId" IS NOT NULL) AND ("historicalApprovedSettlementAt" IS NOT NULL) AND ("historicalApprovedSettlementNetMinor" IS NOT NULL) AND ("historicalReviewPayoutGrossMinor" IS NOT NULL) AND ("historicalReviewPayoutNetMinor" IS NOT NULL) AND ("historicalReviewPayoutDebtOffsetMinor" IS NOT NULL) AND ("historicalReviewPayoutSourceFingerprint" IS NOT NULL) AND ("historicalReviewPayoutCancelledAt" IS NOT NULL) AND ("reviewEftNotSentConfirmedAt" IS NOT NULL) AND ("reviewEftNotSentConfirmationVersion" = 'review-eft-not-sent-v1'::text) AND ("reviewPayoutObservedStatus" = 'REVIEW'::text)))))
 );
 
--- CreateTable
-CREATE TABLE "NotificationIntent" (
-    "id" TEXT NOT NULL,
-    "signalId" TEXT,
-    "vendorId" TEXT,
-    "recipientRole" "NotificationRecipientRole" NOT NULL,
-    "channel" "NotificationChannel" NOT NULL DEFAULT 'IN_APP',
-    "status" "NotificationStatus" NOT NULL DEFAULT 'PENDING',
-    "title" TEXT NOT NULL,
-    "message" TEXT NOT NULL,
-    "severity" "OperationalSignalSeverity" NOT NULL,
-    "deliveredAt" TIMESTAMP(3),
-    "readAt" TIMESTAMP(3),
-    "metadata" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "NotificationIntent_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinancialCorrectionBaselineClaim; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionBaselineClaim" (
+    id text NOT NULL,
+    "acceptedEvidenceSnapshotId" text NOT NULL,
+    "consumerType" text NOT NULL,
+    "consumerId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "FinancialCorrectionBaselineClaim_type_check" CHECK (("consumerType" = ANY (ARRAY['zero_net_acknowledgement'::text, 'paid_vendor_debt'::text, 'paid_vendor_credit'::text, 'before_settlement_vendor_credit'::text, 'before_settlement_vendor_deduction'::text, 'approved_settlement_vendor_credit'::text, 'approved_settlement_vendor_deduction'::text, 'draft_payout_vendor_credit'::text, 'draft_payout_vendor_deduction'::text, 'review_payout_vendor_credit'::text, 'review_payout_vendor_deduction'::text])))
 );
 
--- CreateTable
-CREATE TABLE "AutomationAction" (
-    "id" TEXT NOT NULL,
-    "signalId" TEXT,
-    "type" "AutomationActionType" NOT NULL,
-    "status" "AutomationActionStatus" NOT NULL DEFAULT 'SUGGESTED',
-    "executionMode" "AutomationExecutionMode" NOT NULL DEFAULT 'MANUAL',
-    "vendorId" TEXT,
-    "allocationId" TEXT,
-    "financeLedgerEntryId" TEXT,
-    "payoutBatchId" TEXT,
-    "operationalJobId" TEXT,
-    "title" TEXT NOT NULL,
-    "description" TEXT NOT NULL,
-    "resultSummary" TEXT,
-    "executedAt" TIMESTAMP(3),
-    "metadata" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "AutomationAction_pkey" PRIMARY KEY ("id")
+--
+-- Name: FinancialCorrectionCredit; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionCredit" (
+    id text NOT NULL,
+    "authorityId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "FinancialCorrectionCredit_amount_check" CHECK ((("amountMinor" > 0) AND (currency = 'TRY'::text)))
 );
 
--- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_vendorId_status_createdAt_idx" ON "SupportTicket"("vendorId", "status", "createdAt");
+--
+-- Name: FinancialCorrectionCreditPayoutLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionCreditPayoutLine" (
+    id text NOT NULL,
+    "settlementCreditLineId" text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    status text DEFAULT 'ACTIVE'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "cancelledAt" timestamp(3) without time zone,
+    "paidAt" timestamp(3) without time zone,
+    CONSTRAINT "FinancialCorrectionCreditPayoutLine_state_check" CHECK ((("amountMinor" > 0) AND (((status = 'ACTIVE'::text) AND ("cancelledAt" IS NULL) AND ("paidAt" IS NULL)) OR ((status = 'CANCELLED'::text) AND ("cancelledAt" IS NOT NULL) AND ("paidAt" IS NULL)) OR ((status = 'PAID'::text) AND ("cancelledAt" IS NULL) AND ("paidAt" IS NOT NULL)))))
+);
+
+
+--
+-- Name: FinancialCorrectionCreditSettlementLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionCreditSettlementLine" (
+    id text NOT NULL,
+    "creditId" text NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    status text DEFAULT 'ACTIVE'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "cancelledAt" timestamp(3) without time zone,
+    CONSTRAINT "FinancialCorrectionCreditSettlementLine_state_check" CHECK ((("amountMinor" > 0) AND (((status = 'ACTIVE'::text) AND ("cancelledAt" IS NULL)) OR ((status = 'CANCELLED'::text) AND ("cancelledAt" IS NOT NULL)))))
+);
+
+
+--
+-- Name: FinancialCorrectionDeduction; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionDeduction" (
+    id text NOT NULL,
+    "authorityId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "FinancialCorrectionDeduction_amount_check" CHECK ((("amountMinor" > 0) AND (currency = 'TRY'::text)))
+);
+
+
+--
+-- Name: FinancialCorrectionDeductionPayoutLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionDeductionPayoutLine" (
+    id text NOT NULL,
+    "settlementDeductionLineId" text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    status text DEFAULT 'ACTIVE'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "cancelledAt" timestamp(3) without time zone,
+    "paidAt" timestamp(3) without time zone,
+    CONSTRAINT "FinancialCorrectionDeductionPayoutLine_state_check" CHECK ((("amountMinor" > 0) AND (((status = 'ACTIVE'::text) AND ("cancelledAt" IS NULL) AND ("paidAt" IS NULL)) OR ((status = 'CANCELLED'::text) AND ("cancelledAt" IS NOT NULL) AND ("paidAt" IS NULL)) OR ((status = 'PAID'::text) AND ("cancelledAt" IS NULL) AND ("paidAt" IS NOT NULL)))))
+);
+
+
+--
+-- Name: FinancialCorrectionDeductionSettlementLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionDeductionSettlementLine" (
+    id text NOT NULL,
+    "deductionId" text NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    status text DEFAULT 'ACTIVE'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "cancelledAt" timestamp(3) without time zone,
+    CONSTRAINT "FinancialCorrectionDeductionSettlementLine_state_check" CHECK ((("amountMinor" > 0) AND (((status = 'ACTIVE'::text) AND ("cancelledAt" IS NULL)) OR ((status = 'CANCELLED'::text) AND ("cancelledAt" IS NOT NULL)))))
+);
+
+
+--
+-- Name: FinancialCorrectionZeroNetAcknowledgement; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."FinancialCorrectionZeroNetAcknowledgement" (
+    id text NOT NULL,
+    "reviewId" text NOT NULL,
+    "resolvedReviewEventId" text NOT NULL,
+    "sourceShopifyRefundId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "acceptedEvidenceSnapshotId" text NOT NULL,
+    "incomingConflictEvidenceId" text NOT NULL,
+    "acceptedEvidenceHash" text NOT NULL,
+    "incomingEvidenceHash" text NOT NULL,
+    "acceptedEvidenceVersion" integer NOT NULL,
+    "acceptedNormalizationVersion" integer NOT NULL,
+    "incomingEvidenceVersion" integer NOT NULL,
+    "incomingNormalizationVersion" integer NOT NULL,
+    "historicalSaleFinanceLedgerEntryId" text NOT NULL,
+    "acceptedRefundFinanceLedgerEntryId" text NOT NULL,
+    "commissionPercent" numeric(5,2) NOT NULL,
+    "commissionVatPercent" numeric(5,2) NOT NULL,
+    currency text NOT NULL,
+    "acceptedRefundAmountMinor" integer NOT NULL,
+    "acceptedCommissionReversalMinor" integer NOT NULL,
+    "acceptedCommissionVatReversalMinor" integer NOT NULL,
+    "acceptedVendorPayableReversalMinor" integer NOT NULL,
+    "correctedRefundAmountMinor" integer NOT NULL,
+    "correctedCommissionReversalMinor" integer NOT NULL,
+    "correctedCommissionVatReversalMinor" integer NOT NULL,
+    "correctedVendorPayableReversalMinor" integer NOT NULL,
+    "refundDifferenceMinor" integer NOT NULL,
+    "commissionDifferenceMinor" integer NOT NULL,
+    "commissionVatDifferenceMinor" integer NOT NULL,
+    "vendorPayableDifferenceMinor" integer NOT NULL,
+    "economicDirection" text NOT NULL,
+    "previewFingerprint" text NOT NULL,
+    "acknowledgedByUserId" text NOT NULL,
+    note text,
+    "acknowledgedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "FinancialCorrectionZeroNetAcknowledgement_zero_effect_check" CHECK ((("vendorPayableDifferenceMinor" = 0) AND ("economicDirection" = 'NONE'::text) AND (currency = 'TRY'::text)))
+);
+
+
+--
+-- Name: Fulfillment; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."Fulfillment" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "fulfillmentStatus" text NOT NULL,
+    "trackingNumber" text,
+    carrier text,
+    "trackingUrl" text,
+    "notifyCustomer" boolean DEFAULT true NOT NULL,
+    "shopifyFulfillmentId" text,
+    "shopifyFulfillmentOrderId" text,
+    "fulfilledAt" timestamp(3) without time zone,
+    "shipmentCreatedAt" timestamp(3) without time zone,
+    "shipmentUpdatedAt" timestamp(3) without time zone,
+    "syncStatus" text,
+    "errorMessage" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: LegacyRefundFinanceReview; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."LegacyRefundFinanceReview" (
+    id text NOT NULL,
+    "caseKey" text NOT NULL,
+    status public."LegacyRefundFinanceReviewStatus" DEFAULT 'ACTIVE'::public."LegacyRefundFinanceReviewStatus" NOT NULL,
+    "resolutionOutcome" public."LegacyRefundFinanceResolutionOutcome",
+    attribution public."LegacyRefundFinanceAttribution" NOT NULL,
+    "sourceShopifyRefundId" text,
+    "sourceShopifyOrderId" text,
+    "vendorAllocationId" text,
+    "observedVendorId" text,
+    "firstObservedAt" timestamp(3) without time zone NOT NULL,
+    "lastObservedAt" timestamp(3) without time zone NOT NULL,
+    "occurrenceCount" integer DEFAULT 1 NOT NULL,
+    "projectionFingerprint" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: LegacyRefundFinanceReviewEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."LegacyRefundFinanceReviewEvent" (
+    id text NOT NULL,
+    "reviewId" text NOT NULL,
+    "eventType" public."LegacyRefundFinanceReviewEventType" NOT NULL,
+    "actorUserId" text,
+    note text,
+    "resolutionOutcome" public."LegacyRefundFinanceResolutionOutcome",
+    "sourceContextJson" jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: LegacyRefundFinanceReviewSource; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."LegacyRefundFinanceReviewSource" (
+    id text NOT NULL,
+    "reviewId" text NOT NULL,
+    "artifactType" public."LegacyRefundFinanceArtifactType" NOT NULL,
+    "artifactId" text NOT NULL,
+    "observedAt" timestamp(3) without time zone NOT NULL,
+    "sourceState" text,
+    "recordedAmount" numeric(10,2),
+    "recordedAmountMinor" integer,
+    currency text,
+    "voidedAt" timestamp(3) without time zone,
+    "supersededByLedgerId" text,
+    "sourceFingerprint" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: NotificationIntent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."NotificationIntent" (
+    id text NOT NULL,
+    "signalId" text,
+    "vendorId" text,
+    "recipientRole" public."NotificationRecipientRole" NOT NULL,
+    channel public."NotificationChannel" DEFAULT 'IN_APP'::public."NotificationChannel" NOT NULL,
+    status public."NotificationStatus" DEFAULT 'PENDING'::public."NotificationStatus" NOT NULL,
+    title text NOT NULL,
+    message text NOT NULL,
+    severity public."OperationalSignalSeverity" NOT NULL,
+    "deliveredAt" timestamp(3) without time zone,
+    "readAt" timestamp(3) without time zone,
+    metadata jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: OperationalJob; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."OperationalJob" (
+    id text NOT NULL,
+    "jobType" public."OperationalJobType" NOT NULL,
+    status public."OperationalJobStatus" DEFAULT 'PENDING'::public."OperationalJobStatus" NOT NULL,
+    priority integer DEFAULT 0 NOT NULL,
+    payload jsonb,
+    "payloadRef" text,
+    "webhookEventId" text,
+    "sourceShopifyOrderId" text,
+    "vendorAllocationId" text,
+    "refundRecordId" text,
+    "returnRecordId" text,
+    "customerCancellationRequestItemId" text,
+    "retryCount" integer DEFAULT 0 NOT NULL,
+    "maxRetries" integer DEFAULT 3 NOT NULL,
+    "scheduledAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "nextRetryAt" timestamp(3) without time zone,
+    "lastAttemptAt" timestamp(3) without time zone,
+    "retryBackoffMs" integer,
+    "startedAt" timestamp(3) without time zone,
+    "completedAt" timestamp(3) without time zone,
+    "failedAt" timestamp(3) without time zone,
+    "errorSummary" text,
+    "failureCategory" text,
+    "escalationReason" text,
+    "processingGeneration" integer DEFAULT 0 NOT NULL,
+    "processingLeaseExpiresAt" timestamp(3) without time zone,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: OperationalSignal; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."OperationalSignal" (
+    id text NOT NULL,
+    type text NOT NULL,
+    severity public."OperationalSignalSeverity" NOT NULL,
+    "sourceArea" public."OperationalSignalSourceArea" NOT NULL,
+    "vendorId" text,
+    "allocationId" text,
+    "financeLedgerEntryId" text,
+    "payoutBatchId" text,
+    "operationalJobId" text,
+    title text NOT NULL,
+    description text NOT NULL,
+    "suggestedAction" text,
+    status public."OperationalSignalStatus" DEFAULT 'ACTIVE'::public."OperationalSignalStatus" NOT NULL,
+    "ruleKey" text NOT NULL,
+    "triggeredAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "resolvedAt" timestamp(3) without time zone,
+    metadata jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: OrderShippingRefundClaim; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."OrderShippingRefundClaim" (
+    id text NOT NULL,
+    "shopifyOrderId" text NOT NULL,
+    "ownerAttemptId" text NOT NULL,
+    "activeOrderKey" text,
+    status text DEFAULT 'ACTIVE'::text NOT NULL,
+    "acquiredAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "releasedAt" timestamp(3) without time zone,
+    "releaseReason" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: OutboundShopifyRefundAttempt; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."OutboundShopifyRefundAttempt" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "shopifyOrderId" text NOT NULL,
+    "customerCancellationRequestItemId" text,
+    status text NOT NULL,
+    "restockType" text NOT NULL,
+    "refundShipping" boolean DEFAULT false NOT NULL,
+    "notifyCustomer" boolean DEFAULT false NOT NULL,
+    note text,
+    "requestedByUserId" text,
+    "requestedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "refundLineItemsJson" jsonb,
+    "suggestedTransactionsJson" jsonb,
+    "fulfillmentOrderCancellationJson" jsonb,
+    "blockersJson" jsonb,
+    "warningsJson" jsonb,
+    "previewHash" text,
+    "previewedAt" timestamp(3) without time zone,
+    "shopifyRefundId" text,
+    "shopifyUserErrorsJson" jsonb,
+    "mutationResponseJson" jsonb,
+    "submittedAt" timestamp(3) without time zone,
+    "resolvedAt" timestamp(3) without time zone,
+    "failedAt" timestamp(3) without time zone,
+    "failureReason" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: PayoutBatch; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutBatch" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    status public."PayoutBatchStatus" DEFAULT 'DRAFT'::public."PayoutBatchStatus" NOT NULL,
+    "grossAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    "commissionAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    "commissionVatAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    "shippingDeductionAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    "refundAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    "netAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    "createdByUserId" text,
+    "paidAt" timestamp(3) without time zone,
+    "paidByUserId" text,
+    "paymentReference" text,
+    "internalNote" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "correctionCreditAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    "correctionDeductionAmount" numeric(10,2) DEFAULT 0.00 NOT NULL
+);
+
+
+--
+-- Name: PayoutBatchLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutBatchLine" (
+    id text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "financeLedgerEntryId" text NOT NULL,
+    "settlementApprovalLineId" text,
+    "amountSnapshot" numeric(10,2) NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: ProductPanelVariantDisableOutboxEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ProductPanelVariantDisableOutboxEvent" (
+    id text NOT NULL,
+    "allocationId" text NOT NULL,
+    "vendorAllocationLineItemId" text NOT NULL,
+    "shopifyVariantId" text,
+    "shopifyLineItemId" text NOT NULL,
+    "variantSku" text,
+    "vendorId" text NOT NULL,
+    "vendorName" text,
+    "shopifyOrderId" text NOT NULL,
+    "shopifyOrderName" text,
+    "reasonCode" text NOT NULL,
+    "reasonText" text,
+    quantity integer NOT NULL,
+    "requestedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    environment text NOT NULL,
+    "dryRun" boolean DEFAULT true NOT NULL,
+    "attemptCount" integer DEFAULT 0 NOT NULL,
+    status public."ProductPanelVariantDisableOutboxStatus" DEFAULT 'CREATED'::public."ProductPanelVariantDisableOutboxStatus" NOT NULL,
+    error text,
+    "idempotencyKey" text NOT NULL,
+    "requestPayloadJson" jsonb,
+    "responseJson" jsonb,
+    "resolvedAt" timestamp(3) without time zone,
+    "failedAt" timestamp(3) without time zone,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: RefundEvidenceSnapshot; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."RefundEvidenceSnapshot" (
+    id text NOT NULL,
+    "sourceShopifyRefundId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "refundRecordId" text NOT NULL,
+    "refundFinanceLedgerEntryId" text NOT NULL,
+    "historicalEconomicVendorId" text NOT NULL,
+    "historicalSaleFinanceLedgerEntryId" text NOT NULL,
+    "monetaryClassification" text NOT NULL,
+    "refundTotalAmount" numeric(10,2) NOT NULL,
+    currency text NOT NULL,
+    "normalizedTransactionsJson" jsonb NOT NULL,
+    "normalizedRefundLinesJson" jsonb NOT NULL,
+    "normalizedOwnershipJson" jsonb NOT NULL,
+    "normalizedEvidenceJson" jsonb NOT NULL,
+    "supersededSaleLedgerIdsJson" jsonb NOT NULL,
+    "evidenceHash" text NOT NULL,
+    "hashAlgorithm" text NOT NULL,
+    "evidenceVersion" integer NOT NULL,
+    "normalizationVersion" integer NOT NULL,
+    "evidenceSource" text NOT NULL,
+    "capturedAt" timestamp(3) without time zone NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: RefundRecord; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."RefundRecord" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "sourceShopifyOrderNumber" text NOT NULL,
+    "sourceShopifyRefundId" text NOT NULL,
+    amount numeric(10,2),
+    status text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: RefundTerminalConflictEvidence; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."RefundTerminalConflictEvidence" (
+    id text NOT NULL,
+    "reviewId" text NOT NULL,
+    "sourceShopifyRefundId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "economicVendorId" text NOT NULL,
+    "historicalSaleFinanceLedgerEntryId" text NOT NULL,
+    "supersededSaleLedgerIdsJson" jsonb NOT NULL,
+    "refundTotalAmount" numeric(10,2) NOT NULL,
+    currency text NOT NULL,
+    "normalizedEvidenceJson" jsonb NOT NULL,
+    "evidenceHash" text NOT NULL,
+    "hashAlgorithm" text NOT NULL,
+    "evidenceVersion" integer NOT NULL,
+    "normalizationVersion" integer NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: RefundTerminalEvidenceReview; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."RefundTerminalEvidenceReview" (
+    id text NOT NULL,
+    "sourceShopifyRefundId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "terminalRefundFinanceLedgerEntryId" text NOT NULL,
+    "refundRecordId" text,
+    "economicVendorId" text NOT NULL,
+    "storedEvidenceSnapshotId" text,
+    "dedupeKey" text NOT NULL,
+    "conflictCategory" text NOT NULL,
+    "storedEvidenceHash" text,
+    "incomingEvidenceHash" text,
+    "storedEvidenceSummaryJson" jsonb,
+    "incomingEvidenceSummaryJson" jsonb,
+    "conflictSummaryJson" jsonb NOT NULL,
+    "sourceContextJson" jsonb,
+    status public."RefundTerminalEvidenceReviewStatus" DEFAULT 'ACTIVE'::public."RefundTerminalEvidenceReviewStatus" NOT NULL,
+    "resolutionOutcome" public."RefundTerminalEvidenceResolutionOutcome",
+    "firstObservedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "lastObservedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "occurrenceCount" integer DEFAULT 1 NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: RefundTerminalEvidenceReviewEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."RefundTerminalEvidenceReviewEvent" (
+    id text NOT NULL,
+    "reviewId" text NOT NULL,
+    "eventType" public."RefundTerminalEvidenceReviewEventType" NOT NULL,
+    "actorUserId" text,
+    note text,
+    "resolutionOutcome" public."RefundTerminalEvidenceResolutionOutcome",
+    "sourceContextJson" jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: ReturnRecord; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ReturnRecord" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "ownerVendorId" text,
+    "sourceShopifyOrderId" text NOT NULL,
+    "sourceShopifyOrderNumber" text NOT NULL,
+    "sourceShopifyRefundId" text,
+    "sourceShopifyReturnId" text,
+    "sourceShopifyReturnGid" text,
+    "sourceShopifyLineItemId" text,
+    "returnLifecycleStatus" text,
+    "returnRequestSource" text,
+    "requestCreatedAt" timestamp(3) without time zone,
+    "requestUpdatedAt" timestamp(3) without time zone,
+    status text NOT NULL,
+    reason text,
+    "returnReasonNote" text,
+    "returnProvider" text,
+    "returnProviderShipmentId" text,
+    "returnLabel" text,
+    "returnReferenceId" text,
+    "navlungoReturnCreatedAt" timestamp(3) without time zone,
+    "returnProviderSnapshot" jsonb,
+    "returnCarrierName" text,
+    "returnTrackingNumber" text,
+    "returnTrackingUrl" text,
+    "vendorReceivedAt" timestamp(3) without time zone,
+    "vendorReviewedAt" timestamp(3) without time zone,
+    "vendorDecision" text,
+    "vendorDecisionReason" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: SettlementApproval; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementApproval" (
+    id text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "vendorId" text NOT NULL,
+    "periodStart" timestamp(3) without time zone,
+    "periodEnd" timestamp(3) without time zone,
+    status public."SettlementApprovalStatus" DEFAULT 'DRAFT'::public."SettlementApprovalStatus" NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    "grossSalesMinor" integer NOT NULL,
+    "refundTotalMinor" integer NOT NULL,
+    "commissionMinor" integer NOT NULL,
+    "commissionVatMinor" integer NOT NULL,
+    "netPayableMinor" integer NOT NULL,
+    "approvedBy" text,
+    "approvedAt" timestamp(3) without time zone,
+    "cancelledBy" text,
+    "cancelledAt" timestamp(3) without time zone,
+    notes text,
+    "scheduledRunDate" timestamp(3) without time zone,
+    "scheduledPeriodEnd" timestamp(3) without time zone,
+    "scheduledCycleKey" text,
+    "sourceSnapshotJson" jsonb NOT NULL,
+    "correctionCreditMinor" integer DEFAULT 0 NOT NULL,
+    "correctionDeductionMinor" integer DEFAULT 0 NOT NULL
+);
+
+
+--
+-- Name: SettlementApprovalLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementApprovalLine" (
+    id text NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "financeLedgerEntryId" text NOT NULL,
+    "settlementRefundAdjustmentId" text,
+    "settlementRefundAdjustmentApplicationId" text,
+    "lineType" public."SettlementApprovalLineType" NOT NULL,
+    "amountMinor" integer NOT NULL,
+    "commissionMinor" integer NOT NULL,
+    "commissionVatMinor" integer NOT NULL,
+    "payableImpactMinor" integer NOT NULL,
+    "sourceSnapshotJson" jsonb NOT NULL
+);
+
+
+--
+-- Name: SettlementCommissionInvoice; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementCommissionInvoice" (
+    id text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    provider public."SettlementCommissionInvoiceProvider" NOT NULL,
+    status public."SettlementCommissionInvoiceStatus" DEFAULT 'PENDING'::public."SettlementCommissionInvoiceStatus" NOT NULL,
+    "providerInvoiceId" text,
+    "providerUuid" text,
+    "providerEttn" text,
+    "invoiceNo" text,
+    "invoiceDate" timestamp(3) without time zone,
+    "invoiceTotalMinor" integer,
+    "invoiceCurrency" text,
+    "gibStatus" text,
+    "gibStatusCode" text,
+    "documentStatus" text,
+    "documentStatusCode" text,
+    "documentType" text,
+    "documentContentType" text,
+    "documentSize" integer,
+    "documentFetchedAt" timestamp(3) without time zone,
+    "lastProviderSyncedAt" timestamp(3) without time zone,
+    "documentSnapshotJson" jsonb,
+    "requestSnapshotJson" jsonb,
+    "responseSnapshotJson" jsonb,
+    "failureCode" text,
+    "failureMessage" text,
+    "failedAt" timestamp(3) without time zone,
+    "unknownReason" text,
+    "unknownAt" timestamp(3) without time zone,
+    "reconciliationStatus" text,
+    "reconciliationEvidenceJson" jsonb,
+    "reconciledAt" timestamp(3) without time zone,
+    "reconciledBy" text,
+    "retryCount" integer DEFAULT 0 NOT NULL,
+    "lastRetriedAt" timestamp(3) without time zone,
+    "createdBy" text,
+    "cancelledBy" text,
+    "cancelledAt" timestamp(3) without time zone
+);
+
+
+--
+-- Name: SettlementRefundAdjustment; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementRefundAdjustment" (
+    id text NOT NULL,
+    "refundRecordId" text NOT NULL,
+    "refundFinanceLedgerEntryId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "originalOrderId" text NOT NULL,
+    "originalSettlementApprovalId" text,
+    "originalSettlementApprovalLineId" text,
+    "originalSettlementCommissionInvoiceId" text,
+    status public."SettlementRefundAdjustmentStatus" DEFAULT 'PENDING'::public."SettlementRefundAdjustmentStatus" NOT NULL,
+    "amountMinor" integer NOT NULL,
+    "currencyCode" text DEFAULT 'TRY'::text NOT NULL,
+    reason text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "originalAmountMinor" integer DEFAULT 0 NOT NULL,
+    "appliedAmountMinor" integer DEFAULT 0 NOT NULL,
+    "remainingAmountMinor" integer DEFAULT 0 NOT NULL,
+    "appliedSettlementApprovalId" text,
+    "appliedSettlementApprovalLineId" text,
+    "blockedReason" text,
+    "createdBy" text
+);
+
+
+--
+-- Name: SettlementRefundAdjustmentApplication; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementRefundAdjustmentApplication" (
+    id text NOT NULL,
+    "settlementRefundAdjustmentId" text NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "settlementApprovalLineId" text NOT NULL,
+    "amountMinor" integer NOT NULL,
+    "currencyCode" text DEFAULT 'TRY'::text NOT NULL,
+    status public."SettlementRefundAdjustmentApplicationStatus" DEFAULT 'ACTIVE'::public."SettlementRefundAdjustmentApplicationStatus" NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: SettlementRefundAdjustmentEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementRefundAdjustmentEvent" (
+    id text NOT NULL,
+    "settlementRefundAdjustmentId" text NOT NULL,
+    "eventType" public."SettlementRefundAdjustmentEventType" NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "metadataJson" jsonb
+);
+
+
+--
+-- Name: SettlementScheduleJobRun; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementScheduleJobRun" (
+    id text NOT NULL,
+    "runDate" timestamp(3) without time zone NOT NULL,
+    status public."SettlementScheduleJobRunStatus" DEFAULT 'PROCESSING'::public."SettlementScheduleJobRunStatus" NOT NULL,
+    "writesPerformed" boolean DEFAULT false NOT NULL,
+    "createdDraftCount" integer DEFAULT 0 NOT NULL,
+    "skippedCount" integer DEFAULT 0 NOT NULL,
+    "blockedCount" integer DEFAULT 0 NOT NULL,
+    "startedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "finishedAt" timestamp(3) without time zone,
+    "metadataJson" jsonb
+);
+
+
+--
+-- Name: ShipmentExecution; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ShipmentExecution" (
+    id text NOT NULL,
+    "allocationId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "sourceShopifyOrderId" text,
+    "sourceShopifyOrderNumber" text,
+    "sourceShopifyFulfillmentId" text,
+    provider public."ShippingProvider" NOT NULL,
+    "providerShipmentId" text,
+    "trackingNumber" text,
+    "trackingUrl" text,
+    "labelUrl" text,
+    "shipmentStatus" public."ShipmentExecutionStatus" DEFAULT 'PENDING'::public."ShipmentExecutionStatus" NOT NULL,
+    desi numeric(10,2) DEFAULT 3.00 NOT NULL,
+    "cargoIntegrationId" text,
+    "warehouseId" text,
+    "shippingCost" numeric(10,2),
+    "shippingVat" numeric(10,2),
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    "requestSnapshot" jsonb NOT NULL,
+    "responseSnapshot" jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: ShipmentShippingCost; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ShipmentShippingCost" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    "allocationId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "sourceShopifyFulfillmentId" text,
+    "providerName" text NOT NULL,
+    "providerReference" text,
+    "shippingCost" numeric(10,2) NOT NULL,
+    "shippingVatAmount" numeric(10,2),
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    status public."ShippingCostStatus" DEFAULT 'PENDING'::public."ShippingCostStatus" NOT NULL,
+    "sourceType" public."ShippingCostSourceType" DEFAULT 'MANUAL'::public."ShippingCostSourceType" NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: ShopifyOrder; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ShopifyOrder" (
+    id text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "sourceShopifyOrderNumber" text NOT NULL,
+    "shopifyCreatedAt" timestamp(3) without time zone,
+    currency text,
+    "financialStatus" text,
+    "cancelledAt" timestamp(3) without time zone,
+    "cancelReason" text,
+    "paymentGatewayName" text,
+    "taxesIncluded" boolean,
+    "orderTaxAmount" numeric(10,2),
+    "shippingAmount" numeric(10,2),
+    "discountAmount" numeric(10,2),
+    "orderNote" text,
+    "orderTags" text[] DEFAULT ARRAY[]::text[],
+    "customerName" text,
+    "customerEmail" text,
+    "customerPhone" text,
+    "billingFullName" text,
+    "billingCompany" text,
+    "billingPhone" text,
+    "billingCity" text,
+    "billingDistrict" text,
+    "billingAddress1" text,
+    "billingAddress2" text,
+    "billingPostcode" text,
+    "shippingCountry" text,
+    "shippingPostcode" text,
+    "shippingCity" text,
+    "shippingDistrict" text,
+    "shippingAddress" text,
+    "totalPrice" numeric(10,2),
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: ShopifyOrderLineItem; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ShopifyOrderLineItem" (
+    id text NOT NULL,
+    "shopifyOrderId" text NOT NULL,
+    "sourceLineItemId" text NOT NULL,
+    "shopifyProductId" text,
+    "sourceVariantId" text,
+    sku text,
+    title text,
+    "imageUrl" text,
+    quantity integer DEFAULT 1 NOT NULL,
+    "unitPrice" numeric(10,2),
+    "unitPriceVatIncluded" numeric(10,2),
+    "lineTotalVatIncluded" numeric(10,2),
+    "lineTaxAmount" numeric(10,2),
+    "vatRate" numeric(5,2),
+    "originalVendorId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: ShopifyRefund; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ShopifyRefund" (
+    id text NOT NULL,
+    "shopifyOrderId" text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "sourceShopifyOrderNumber" text NOT NULL,
+    "sourceShopifyRefundId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: ShopifyRefundLineItem; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."ShopifyRefundLineItem" (
+    id text NOT NULL,
+    "shopifyRefundId" text NOT NULL,
+    "refundRecordId" text,
+    "shopifyOrderLineItemId" text NOT NULL,
+    "sourceRefundLineItemId" text NOT NULL,
+    "sourceLineItemId" text NOT NULL,
+    sku text,
+    title text,
+    quantity integer DEFAULT 1 NOT NULL,
+    subtotal numeric(10,2),
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: SupportTicket; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SupportTicket" (
+    id text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "createdByUserId" text NOT NULL,
+    "createdByRole" text NOT NULL,
+    "vendorId" text NOT NULL,
+    subject text NOT NULL,
+    message text NOT NULL,
+    priority text DEFAULT 'normal'::text NOT NULL,
+    status text DEFAULT 'OPEN'::text NOT NULL,
+    category text DEFAULT 'OTHER'::text NOT NULL,
+    "assigneeUserId" text,
+    "assigneeName" text,
+    "vendorUnreadCount" integer DEFAULT 0 NOT NULL,
+    "adminUnreadCount" integer DEFAULT 0 NOT NULL,
+    "lastReplyAt" timestamp(3) without time zone,
+    "lastReplyByRole" text,
+    "firstResponseDueAt" timestamp(3) without time zone,
+    "nextResponseDueAt" timestamp(3) without time zone,
+    "escalatedAt" timestamp(3) without time zone,
+    "escalationReason" text,
+    "contextType" text NOT NULL,
+    "contextId" text,
+    "contextSnapshot" jsonb,
+    "resolvedAt" timestamp(3) without time zone,
+    "closedAt" timestamp(3) without time zone
+);
+
+
+--
+-- Name: SupportTicketNote; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SupportTicketNote" (
+    id text NOT NULL,
+    "supportTicketId" text NOT NULL,
+    "authorUserId" text NOT NULL,
+    "authorName" text NOT NULL,
+    "authorRole" text NOT NULL,
+    content text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: SupportTicketReply; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SupportTicketReply" (
+    id text NOT NULL,
+    "supportTicketId" text NOT NULL,
+    "authorUserId" text NOT NULL,
+    "authorName" text NOT NULL,
+    "authorRole" text NOT NULL,
+    message text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: User; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."User" (
+    id text NOT NULL,
+    email text NOT NULL,
+    name text NOT NULL,
+    role public."UserRole" NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    "passwordHash" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: UserVendorAccess; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."UserVendorAccess" (
+    id text NOT NULL,
+    "userId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: Vendor; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."Vendor" (
+    id text NOT NULL,
+    name text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    "restrictionReason" text,
+    "restrictedByUserId" text,
+    "restrictedAt" timestamp(3) without time zone,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: VendorAllocation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorAllocation" (
+    id text NOT NULL,
+    "sourceShopifyOrderId" text NOT NULL,
+    "sourceShopifyOrderNumber" text NOT NULL,
+    "originalVendorId" text NOT NULL,
+    "assignedVendorId" text NOT NULL,
+    "allocationStatus" public."AllocationStatus" DEFAULT 'ACTIVE'::public."AllocationStatus" NOT NULL,
+    "cancellationReason" public."CancellationReason",
+    "reassignmentRequired" boolean DEFAULT false NOT NULL,
+    "cancelRefundReviewStatus" text,
+    "cancelRefundReviewReason" text,
+    "cancelRefundReviewNote" text,
+    "cancelRefundReviewRequestedAt" timestamp(3) without time zone,
+    "cancelRefundReviewRequestedByUserId" text,
+    "fulfillmentStatus" text DEFAULT 'Pending'::text NOT NULL,
+    "shippingStatus" text DEFAULT 'Awaiting Shipment'::text NOT NULL,
+    "trackingNumber" text,
+    carrier text,
+    "vendorIntegrationTrackingUrl" text,
+    "vendorIntegrationShippedAt" timestamp(3) without time zone,
+    "odooSaleOrderId" text,
+    "odooSaleOrderName" text,
+    "odooSaleOrderSyncedAt" timestamp(3) without time zone,
+    "vendorIntegrationStatus" text,
+    "vendorIntegrationStatusMessage" text,
+    "vendorIntegrationStatusUpdatedAt" timestamp(3) without time zone,
+    "vendorIntegrationProvider" text,
+    "lastVendorIntegrationRequestId" text,
+    "lastVendorIntegrationShipmentRequestId" text,
+    "vendorInvoiceNumber" text,
+    "vendorInvoiceDate" timestamp(3) without time zone,
+    "vendorInvoiceUrl" text,
+    "vendorInvoiceAmount" numeric(10,2),
+    "vendorInvoiceReceivedAt" timestamp(3) without time zone,
+    "lastVendorIntegrationInvoiceRequestId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: VendorAllocationLineItem; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorAllocationLineItem" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "shopifyLineItemId" text NOT NULL,
+    quantity integer DEFAULT 1 NOT NULL,
+    "lineAmount" numeric(10,2),
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: VendorBalanceEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorBalanceEvent" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    type public."VendorBalanceEventType" NOT NULL,
+    "amountMinor" integer NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    "sourceType" text NOT NULL,
+    "sourceId" text NOT NULL,
+    "financeLedgerEntryId" text,
+    "refundRecordId" text,
+    "payoutBatchId" text,
+    "settlementApprovalId" text,
+    "metadataJson" jsonb,
+    "idempotencyKey" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "financialCorrectionAuthorityId" text,
+    CONSTRAINT "VendorBalanceEvent_correction_source_check" CHECK ((("sourceType" <> 'financial_correction'::text) OR (("financialCorrectionAuthorityId" IS NOT NULL) AND ("sourceId" = "financialCorrectionAuthorityId") AND (type = 'VENDOR_DEBT_CREATED'::public."VendorBalanceEventType") AND ("amountMinor" < 0) AND (currency = 'TRY'::text))))
+);
+
+
+--
+-- Name: VendorBillingProfile; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorBillingProfile" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    "legalCompanyName" text,
+    "taxNumber" text,
+    "taxOffice" text,
+    "billingAddress" text,
+    "billingCity" text,
+    "billingDistrict" text,
+    iban text,
+    "authorizedPerson" text,
+    "billingEmail" text,
+    "billingPhone" text,
+    "legalEntityType" text,
+    "logoIsbasiCustomerCode" text,
+    "logoIsbasiCustomerId" text,
+    "logoIsbasiEinvoiceEligible" boolean,
+    "logoIsbasiLastCheckedAt" timestamp(3) without time zone,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: VendorFinancialProfile; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorFinancialProfile" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    "commissionPercent" numeric(5,2) DEFAULT 10.00 NOT NULL,
+    "commissionVatPercent" numeric(5,2) DEFAULT 0.00 NOT NULL,
+    "deductShippingEnabled" boolean DEFAULT false NOT NULL,
+    "shippingMode" public."ShippingDeductionMode" DEFAULT 'DISABLED'::public."ShippingDeductionMode" NOT NULL,
+    "fixedShippingFee" numeric(10,2),
+    "settlementDelayDays" integer DEFAULT 21 NOT NULL,
+    "settlementFrequencyType" public."SettlementFrequencyType" DEFAULT 'WEEKLY'::public."SettlementFrequencyType" NOT NULL,
+    "weeklySettlementDay" public."SettlementWeekday" DEFAULT 'WEDNESDAY'::public."SettlementWeekday" NOT NULL,
+    "autoSettlementDraftEnabled" boolean DEFAULT false NOT NULL,
+    "autoSettlementApproveEnabled" boolean DEFAULT false NOT NULL,
+    "autoSettlementInvoiceEnabled" boolean DEFAULT false NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: VendorIntegrationAuditLog; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorIntegrationAuditLog" (
+    id text NOT NULL,
+    "clientId" text NOT NULL,
+    "vendorIdentifier" text NOT NULL,
+    method text NOT NULL,
+    path text NOT NULL,
+    "statusCode" integer NOT NULL,
+    "requestId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: VendorIntegrationClient; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorIntegrationClient" (
+    id text NOT NULL,
+    "vendorIdentifier" text NOT NULL,
+    "providerName" text NOT NULL,
+    "tokenHash" text NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    scopes text[],
+    "lastUsedAt" timestamp(3) without time zone,
+    "revokedAt" timestamp(3) without time zone,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: VendorIntegrationInvoiceEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorIntegrationInvoiceEvent" (
+    id text NOT NULL,
+    "clientId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "vendorIdentifier" text NOT NULL,
+    "providerName" text,
+    "invoiceNumber" text NOT NULL,
+    "invoiceDate" timestamp(3) without time zone NOT NULL,
+    "invoiceUrl" text,
+    "invoiceAmount" numeric(10,2) NOT NULL,
+    "idempotencyKey" text NOT NULL,
+    "requestId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: VendorIntegrationShipmentEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorIntegrationShipmentEvent" (
+    id text NOT NULL,
+    "clientId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "vendorIdentifier" text NOT NULL,
+    "providerName" text,
+    carrier text NOT NULL,
+    "trackingNumber" text NOT NULL,
+    "trackingUrl" text,
+    "shippedAt" timestamp(3) without time zone,
+    "idempotencyKey" text NOT NULL,
+    "requestId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: VendorIntegrationStatusEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorIntegrationStatusEvent" (
+    id text NOT NULL,
+    "clientId" text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "vendorIdentifier" text NOT NULL,
+    "providerName" text,
+    status text NOT NULL,
+    message text,
+    "idempotencyKey" text NOT NULL,
+    "requestId" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: VendorProfileAuditLog; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorProfileAuditLog" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    section text NOT NULL,
+    "fieldName" text NOT NULL,
+    "oldValue" jsonb,
+    "newValue" jsonb,
+    "changedByUserId" text,
+    "changedByEmail" text,
+    "changedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    reason text,
+    "snapshotImpact" public."VendorProfileSnapshotImpact" NOT NULL,
+    source text NOT NULL
+);
+
+
+--
+-- Name: VendorShippingConfig; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorShippingConfig" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    "preferredProvider" public."ShippingProvider" DEFAULT 'HEPSIJET'::public."ShippingProvider" NOT NULL,
+    "shippingEnabled" boolean DEFAULT true NOT NULL,
+    "defaultDesi" numeric(10,2) DEFAULT 3.00 NOT NULL,
+    "cargoIntegrationId" text,
+    "defaultWarehouseId" text,
+    "shippingVatPercent" numeric(5,2) DEFAULT 18.00 NOT NULL,
+    "providerMetadata" jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: VendorShippingWarehouse; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorShippingWarehouse" (
+    id text NOT NULL,
+    "configId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    provider public."ShippingProvider" NOT NULL,
+    "warehouseId" text NOT NULL,
+    name text,
+    address text,
+    "isDefault" boolean DEFAULT false NOT NULL,
+    metadata jsonb,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
+-- Name: WebhookEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."WebhookEvent" (
+    id text NOT NULL,
+    "sourceShopDomain" text NOT NULL,
+    topic text NOT NULL,
+    "webhookId" text,
+    "idempotencyKey" text,
+    "payloadHash" text,
+    "rawPayload" text,
+    status public."WebhookStatus" DEFAULT 'RECEIVED'::public."WebhookStatus" NOT NULL,
+    "receivedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "processedAt" timestamp(3) without time zone,
+    "errorMessage" text,
+    "shopifyOrderId" text,
+    "sourceShopifyOrderId" text,
+    "executionAvailableAt" timestamp(3) without time zone,
+    "executionAttemptCount" integer DEFAULT 0 NOT NULL,
+    "executionMaxAttempts" integer DEFAULT 3 NOT NULL,
+    "processingGeneration" integer DEFAULT 0 NOT NULL,
+    "processingLeaseExpiresAt" timestamp(3) without time zone
+);
+
+
+--
+-- Name: AllocationAssignmentHistory AllocationAssignmentHistory_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationAssignmentHistory"
+    ADD CONSTRAINT "AllocationAssignmentHistory_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: AllocationEconomicTransfer AllocationEconomicTransfer_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationEconomicTransfer"
+    ADD CONSTRAINT "AllocationEconomicTransfer_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: AllocationFullRefundTerminalFact AllocationFullRefundTerminalFact_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationFullRefundTerminalFact"
+    ADD CONSTRAINT "AllocationFullRefundTerminalFact_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: AllocationSplitEvent AllocationSplitEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationSplitEvent"
+    ADD CONSTRAINT "AllocationSplitEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: AutomationAction AutomationAction_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AutomationAction"
+    ADD CONSTRAINT "AutomationAction_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: CanonicalReconciliationRun CanonicalReconciliationRun_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CanonicalReconciliationRun"
+    ADD CONSTRAINT "CanonicalReconciliationRun_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: CustomerCancellationRequestItem CustomerCancellationRequestItem_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequestItem"
+    ADD CONSTRAINT "CustomerCancellationRequestItem_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: CustomerCancellationRequest CustomerCancellationRequest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequest"
+    ADD CONSTRAINT "CustomerCancellationRequest_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinanceEvent FinanceEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceEvent"
+    ADD CONSTRAINT "FinanceEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinanceIntegrityAlert FinanceIntegrityAlert_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceIntegrityAlert"
+    ADD CONSTRAINT "FinanceIntegrityAlert_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinanceLedgerEntry FinanceLedgerEntry_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceLedgerEntry"
+    ADD CONSTRAINT "FinanceLedgerEntry_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage FinancialCorrectionApprovedDeductionCoverage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionApprovedDeductionCoverage"
+    ADD CONSTRAINT "FinancialCorrectionApprovedDeductionCoverage_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionPayoutLine FinancialCorrectionApprovedDeductionPayoutLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionApprovedDeductionPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionApprovedDeductionPayoutLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionBaselineClaim FinancialCorrectionBaselineClaim_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionBaselineClaim"
+    ADD CONSTRAINT "FinancialCorrectionBaselineClaim_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionCreditPayoutLine FinancialCorrectionCreditPayoutLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCreditPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionCreditPayoutLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionCreditSettlementLine FinancialCorrectionCreditSettlementLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCreditSettlementLine"
+    ADD CONSTRAINT "FinancialCorrectionCreditSettlementLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionCredit FinancialCorrectionCredit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCredit"
+    ADD CONSTRAINT "FinancialCorrectionCredit_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionDeductionPayoutLine FinancialCorrectionDeductionPayoutLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeductionPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionDeductionPayoutLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionDeductionSettlementLine FinancialCorrectionDeductionSettlementLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeductionSettlementLine"
+    ADD CONSTRAINT "FinancialCorrectionDeductionSettlementLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionDeduction FinancialCorrectionDeduction_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeduction"
+    ADD CONSTRAINT "FinancialCorrectionDeduction_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: FinancialCorrectionZeroNetAcknowledgement FinancialCorrectionZeroNetAcknowledgement_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionZeroNetAcknowledgement"
+    ADD CONSTRAINT "FinancialCorrectionZeroNetAcknowledgement_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: Fulfillment Fulfillment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."Fulfillment"
+    ADD CONSTRAINT "Fulfillment_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: LegacyRefundFinanceReviewEvent LegacyRefundFinanceReviewEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReviewEvent"
+    ADD CONSTRAINT "LegacyRefundFinanceReviewEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: LegacyRefundFinanceReviewSource LegacyRefundFinanceReviewSource_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReviewSource"
+    ADD CONSTRAINT "LegacyRefundFinanceReviewSource_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: LegacyRefundFinanceReview LegacyRefundFinanceReview_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReview"
+    ADD CONSTRAINT "LegacyRefundFinanceReview_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: NotificationIntent NotificationIntent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."NotificationIntent"
+    ADD CONSTRAINT "NotificationIntent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: OperationalJob OperationalJob_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalJob"
+    ADD CONSTRAINT "OperationalJob_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: OperationalSignal OperationalSignal_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalSignal"
+    ADD CONSTRAINT "OperationalSignal_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: OrderShippingRefundClaim OrderShippingRefundClaim_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OrderShippingRefundClaim"
+    ADD CONSTRAINT "OrderShippingRefundClaim_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: OutboundShopifyRefundAttempt OutboundShopifyRefundAttempt_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OutboundShopifyRefundAttempt"
+    ADD CONSTRAINT "OutboundShopifyRefundAttempt_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: PayoutBatchLine PayoutBatchLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutBatchLine"
+    ADD CONSTRAINT "PayoutBatchLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: PayoutBatch PayoutBatch_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutBatch"
+    ADD CONSTRAINT "PayoutBatch_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ProductPanelVariantDisableOutboxEvent ProductPanelVariantDisableOutboxEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ProductPanelVariantDisableOutboxEvent"
+    ADD CONSTRAINT "ProductPanelVariantDisableOutboxEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: RefundEvidenceSnapshot RefundEvidenceSnapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundEvidenceSnapshot"
+    ADD CONSTRAINT "RefundEvidenceSnapshot_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: RefundRecord RefundRecord_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundRecord"
+    ADD CONSTRAINT "RefundRecord_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: RefundTerminalConflictEvidence RefundTerminalConflictEvidence_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalConflictEvidence"
+    ADD CONSTRAINT "RefundTerminalConflictEvidence_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: RefundTerminalEvidenceReviewEvent RefundTerminalEvidenceReviewEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReviewEvent"
+    ADD CONSTRAINT "RefundTerminalEvidenceReviewEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: RefundTerminalEvidenceReview RefundTerminalEvidenceReview_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReview"
+    ADD CONSTRAINT "RefundTerminalEvidenceReview_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ReturnRecord ReturnRecord_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ReturnRecord"
+    ADD CONSTRAINT "ReturnRecord_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementApprovalLine SettlementApprovalLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApprovalLine"
+    ADD CONSTRAINT "SettlementApprovalLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementApproval SettlementApproval_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApproval"
+    ADD CONSTRAINT "SettlementApproval_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementCommissionInvoice SettlementCommissionInvoice_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementCommissionInvoice"
+    ADD CONSTRAINT "SettlementCommissionInvoice_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementRefundAdjustmentApplication SettlementRefundAdjustmentApplication_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustmentApplication"
+    ADD CONSTRAINT "SettlementRefundAdjustmentApplication_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementRefundAdjustmentEvent SettlementRefundAdjustmentEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustmentEvent"
+    ADD CONSTRAINT "SettlementRefundAdjustmentEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementScheduleJobRun SettlementScheduleJobRun_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementScheduleJobRun"
+    ADD CONSTRAINT "SettlementScheduleJobRun_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ShipmentExecution ShipmentExecution_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShipmentExecution"
+    ADD CONSTRAINT "ShipmentExecution_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ShipmentShippingCost ShipmentShippingCost_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShipmentShippingCost"
+    ADD CONSTRAINT "ShipmentShippingCost_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ShopifyOrderLineItem ShopifyOrderLineItem_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyOrderLineItem"
+    ADD CONSTRAINT "ShopifyOrderLineItem_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ShopifyOrder ShopifyOrder_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyOrder"
+    ADD CONSTRAINT "ShopifyOrder_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ShopifyRefundLineItem ShopifyRefundLineItem_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyRefundLineItem"
+    ADD CONSTRAINT "ShopifyRefundLineItem_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: ShopifyRefund ShopifyRefund_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyRefund"
+    ADD CONSTRAINT "ShopifyRefund_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SupportTicketNote SupportTicketNote_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicketNote"
+    ADD CONSTRAINT "SupportTicketNote_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SupportTicketReply SupportTicketReply_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicketReply"
+    ADD CONSTRAINT "SupportTicketReply_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SupportTicket SupportTicket_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicket"
+    ADD CONSTRAINT "SupportTicket_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: UserVendorAccess UserVendorAccess_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."UserVendorAccess"
+    ADD CONSTRAINT "UserVendorAccess_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: User User_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."User"
+    ADD CONSTRAINT "User_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorAllocationLineItem VendorAllocationLineItem_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorAllocationLineItem"
+    ADD CONSTRAINT "VendorAllocationLineItem_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorAllocation VendorAllocation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorAllocation"
+    ADD CONSTRAINT "VendorAllocation_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBalanceEvent"
+    ADD CONSTRAINT "VendorBalanceEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorBillingProfile VendorBillingProfile_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBillingProfile"
+    ADD CONSTRAINT "VendorBillingProfile_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorFinancialProfile VendorFinancialProfile_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorFinancialProfile"
+    ADD CONSTRAINT "VendorFinancialProfile_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorIntegrationAuditLog VendorIntegrationAuditLog_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationAuditLog"
+    ADD CONSTRAINT "VendorIntegrationAuditLog_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorIntegrationClient VendorIntegrationClient_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationClient"
+    ADD CONSTRAINT "VendorIntegrationClient_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorIntegrationInvoiceEvent VendorIntegrationInvoiceEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationInvoiceEvent"
+    ADD CONSTRAINT "VendorIntegrationInvoiceEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorIntegrationShipmentEvent VendorIntegrationShipmentEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationShipmentEvent"
+    ADD CONSTRAINT "VendorIntegrationShipmentEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorIntegrationStatusEvent VendorIntegrationStatusEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationStatusEvent"
+    ADD CONSTRAINT "VendorIntegrationStatusEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorProfileAuditLog VendorProfileAuditLog_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorProfileAuditLog"
+    ADD CONSTRAINT "VendorProfileAuditLog_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorShippingConfig VendorShippingConfig_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorShippingConfig"
+    ADD CONSTRAINT "VendorShippingConfig_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorShippingWarehouse VendorShippingWarehouse_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorShippingWarehouse"
+    ADD CONSTRAINT "VendorShippingWarehouse_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: Vendor Vendor_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."Vendor"
+    ADD CONSTRAINT "Vendor_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: WebhookEvent WebhookEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."WebhookEvent"
+    ADD CONSTRAINT "WebhookEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: AllocationEconomicTransfer_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationEconomicTransfer_createdAt_idx" ON public."AllocationEconomicTransfer" USING btree ("createdAt");
+
+
+--
+-- Name: AllocationEconomicTransfer_fromVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationEconomicTransfer_fromVendorId_idx" ON public."AllocationEconomicTransfer" USING btree ("fromVendorId");
+
+
+--
+-- Name: AllocationEconomicTransfer_idempotencyKey_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "AllocationEconomicTransfer_idempotencyKey_key" ON public."AllocationEconomicTransfer" USING btree ("idempotencyKey");
+
+
+--
+-- Name: AllocationEconomicTransfer_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationEconomicTransfer_status_idx" ON public."AllocationEconomicTransfer" USING btree (status);
+
+
+--
+-- Name: AllocationEconomicTransfer_toVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationEconomicTransfer_toVendorId_idx" ON public."AllocationEconomicTransfer" USING btree ("toVendorId");
+
+
+--
+-- Name: AllocationEconomicTransfer_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationEconomicTransfer_vendorAllocationId_idx" ON public."AllocationEconomicTransfer" USING btree ("vendorAllocationId");
+
+
+--
+-- Name: AllocationFullRefundTerminalFact_shopifyOrderGid_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationFullRefundTerminalFact_shopifyOrderGid_idx" ON public."AllocationFullRefundTerminalFact" USING btree ("shopifyOrderGid");
+
+
+--
+-- Name: AllocationFullRefundTerminalFact_vendorAllocationId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "AllocationFullRefundTerminalFact_vendorAllocationId_key" ON public."AllocationFullRefundTerminalFact" USING btree ("vendorAllocationId");
+
+
+--
+-- Name: AllocationSplitEvent_actorUserId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationSplitEvent_actorUserId_idx" ON public."AllocationSplitEvent" USING btree ("actorUserId");
+
+
+--
+-- Name: AllocationSplitEvent_childAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationSplitEvent_childAllocationId_idx" ON public."AllocationSplitEvent" USING btree ("childAllocationId");
+
+
+--
+-- Name: AllocationSplitEvent_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationSplitEvent_createdAt_idx" ON public."AllocationSplitEvent" USING btree ("createdAt");
+
+
+--
+-- Name: AllocationSplitEvent_sourceAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationSplitEvent_sourceAllocationId_idx" ON public."AllocationSplitEvent" USING btree ("sourceAllocationId");
+
+
+--
+-- Name: AutomationAction_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AutomationAction_createdAt_idx" ON public."AutomationAction" USING btree ("createdAt");
+
+
+--
+-- Name: AutomationAction_signalId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AutomationAction_signalId_idx" ON public."AutomationAction" USING btree ("signalId");
+
+
+--
+-- Name: AutomationAction_status_type_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AutomationAction_status_type_idx" ON public."AutomationAction" USING btree (status, type);
+
+
+--
+-- Name: AutomationAction_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AutomationAction_vendorId_status_idx" ON public."AutomationAction" USING btree ("vendorId", status);
+
+
+--
+-- Name: CanonicalReconciliationRun_mode_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "CanonicalReconciliationRun_mode_status_idx" ON public."CanonicalReconciliationRun" USING btree (mode, status);
+
+
+--
+-- Name: CanonicalReconciliationRun_startedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "CanonicalReconciliationRun_startedAt_idx" ON public."CanonicalReconciliationRun" USING btree ("startedAt");
+
+
+--
+-- Name: CustomerCancellationRequestItem_requestId_shopifyOrderLineI_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "CustomerCancellationRequestItem_requestId_shopifyOrderLineI_key" ON public."CustomerCancellationRequestItem" USING btree ("requestId", "shopifyOrderLineItemId", "vendorAllocationId");
+
+
+--
+-- Name: CustomerCancellationRequestItem_shopifyOrderLineItemId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "CustomerCancellationRequestItem_shopifyOrderLineItemId_idx" ON public."CustomerCancellationRequestItem" USING btree ("shopifyOrderLineItemId");
+
+
+--
+-- Name: CustomerCancellationRequestItem_vendorAllocationId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "CustomerCancellationRequestItem_vendorAllocationId_status_idx" ON public."CustomerCancellationRequestItem" USING btree ("vendorAllocationId", status);
+
+
+--
+-- Name: CustomerCancellationRequest_shopDomain_shopifyCustomerId_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "CustomerCancellationRequest_shopDomain_shopifyCustomerId_id_key" ON public."CustomerCancellationRequest" USING btree ("shopDomain", "shopifyCustomerId", "idempotencyKey");
+
+
+--
+-- Name: CustomerCancellationRequest_shopifyCustomerId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "CustomerCancellationRequest_shopifyCustomerId_status_idx" ON public."CustomerCancellationRequest" USING btree ("shopifyCustomerId", status);
+
+
+--
+-- Name: CustomerCancellationRequest_shopifyOrderId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "CustomerCancellationRequest_shopifyOrderId_status_idx" ON public."CustomerCancellationRequest" USING btree ("shopifyOrderId", status);
+
+
+--
+-- Name: FinanceEvent_eventType_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceEvent_eventType_createdAt_idx" ON public."FinanceEvent" USING btree ("eventType", "createdAt");
+
+
+--
+-- Name: FinanceEvent_financeLedgerEntryId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceEvent_financeLedgerEntryId_createdAt_idx" ON public."FinanceEvent" USING btree ("financeLedgerEntryId", "createdAt");
+
+
+--
+-- Name: FinanceEvent_idempotencyKey_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinanceEvent_idempotencyKey_key" ON public."FinanceEvent" USING btree ("idempotencyKey");
+
+
+--
+-- Name: FinanceEvent_referenceType_referenceId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceEvent_referenceType_referenceId_idx" ON public."FinanceEvent" USING btree ("referenceType", "referenceId");
+
+
+--
+-- Name: FinanceEvent_shopifyOrderId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceEvent_shopifyOrderId_createdAt_idx" ON public."FinanceEvent" USING btree ("shopifyOrderId", "createdAt");
+
+
+--
+-- Name: FinanceEvent_vendorId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceEvent_vendorId_createdAt_idx" ON public."FinanceEvent" USING btree ("vendorId", "createdAt");
+
+
+--
+-- Name: FinanceIntegrityAlert_allocationEconomicTransferId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceIntegrityAlert_allocationEconomicTransferId_idx" ON public."FinanceIntegrityAlert" USING btree ("allocationEconomicTransferId");
+
+
+--
+-- Name: FinanceIntegrityAlert_category_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceIntegrityAlert_category_idx" ON public."FinanceIntegrityAlert" USING btree (category);
+
+
+--
+-- Name: FinanceIntegrityAlert_dedupeKey_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinanceIntegrityAlert_dedupeKey_key" ON public."FinanceIntegrityAlert" USING btree ("dedupeKey");
+
+
+--
+-- Name: FinanceIntegrityAlert_detectedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceIntegrityAlert_detectedAt_idx" ON public."FinanceIntegrityAlert" USING btree ("detectedAt");
+
+
+--
+-- Name: FinanceIntegrityAlert_severity_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceIntegrityAlert_severity_idx" ON public."FinanceIntegrityAlert" USING btree (severity);
+
+
+--
+-- Name: FinanceIntegrityAlert_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceIntegrityAlert_status_idx" ON public."FinanceIntegrityAlert" USING btree (status);
+
+
+--
+-- Name: FinanceIntegrityAlert_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceIntegrityAlert_vendorAllocationId_idx" ON public."FinanceIntegrityAlert" USING btree ("vendorAllocationId");
+
+
+--
+-- Name: FinanceLedgerEntry_supersededByLedgerId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceLedgerEntry_supersededByLedgerId_idx" ON public."FinanceLedgerEntry" USING btree ("supersededByLedgerId");
+
+
+--
+-- Name: FinanceLedgerEntry_vendorId_entryType_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceLedgerEntry_vendorId_entryType_idx" ON public."FinanceLedgerEntry" USING btree ("vendorId", "entryType");
+
+
+--
+-- Name: FinanceLedgerEntry_vendorId_settlementStatus_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinanceLedgerEntry_vendorId_settlementStatus_idx" ON public."FinanceLedgerEntry" USING btree ("vendorId", "settlementStatus");
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage_approval_status_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinancialCorrectionApprovedDeductionCoverage_approval_status_id" ON public."FinancialCorrectionApprovedDeductionCoverage" USING btree ("settlementApprovalId", status);
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage_deductionId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinancialCorrectionApprovedDeductionCoverage_deductionId_key" ON public."FinancialCorrectionApprovedDeductionCoverage" USING btree ("deductionId");
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage_vendor_currency_st; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinancialCorrectionApprovedDeductionCoverage_vendor_currency_st" ON public."FinancialCorrectionApprovedDeductionCoverage" USING btree ("vendorId", currency, status);
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionPayoutLine_batch_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinancialCorrectionApprovedDeductionPayoutLine_batch_idx" ON public."FinancialCorrectionApprovedDeductionPayoutLine" USING btree ("payoutBatchId");
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionPayoutLine_non_cancelled_so; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinancialCorrectionApprovedDeductionPayoutLine_non_cancelled_so" ON public."FinancialCorrectionApprovedDeductionPayoutLine" USING btree ("coverageId") WHERE (status <> 'CANCELLED'::text);
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionPayoutLine_source_batch_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinancialCorrectionApprovedDeductionPayoutLine_source_batch_key" ON public."FinancialCorrectionApprovedDeductionPayoutLine" USING btree ("coverageId", "payoutBatchId");
+
+
+--
+-- Name: FinancialCorrectionAuthority_accepted_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinancialCorrectionAuthority_accepted_key" ON public."FinancialCorrectionAuthority" USING btree ("acceptedEvidenceSnapshotId");
+
+
+--
+-- Name: FinancialCorrectionAuthority_approved_settlement_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "FinancialCorrectionAuthority_approved_settlement_idx" ON public."FinancialCorrectionAuthority" USING btree ("historicalApprovedSettlementId");
+
+
+--
+-- Name: FinancialCorrectionAuthority_event_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinancialCorrectionAuthority_event_key" ON public."FinancialCorrectionAuthority" USING btree ("resolvedReviewEventId");
+
+
+--
+-- Name: FinancialCorrectionAuthority_incoming_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinancialCorrectionAuthority_incoming_key" ON public."FinancialCorrectionAuthority" USING btree ("incomingConflictEvidenceId");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_category_status_idx" ON "SupportTicket"("category", "status");
+
+--
+-- Name: FinancialCorrectionAuthority_pair_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "FinancialCorrectionAuthority_pair_key" ON public."FinancialCorrectionAuthority" USING btree ("acceptedEvidenceSnapshotId", "incomingConflictEvidenceId");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_assigneeUserId_idx" ON "SupportTicket"("assigneeUserId");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_adminUnreadCount_idx" ON "SupportTicket"("adminUnreadCount");
+--
+-- Name: FinancialCorrectionAuthority_review_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SupportTicket_vendorUnreadCount_idx" ON "SupportTicket"("vendorUnreadCount");
+CREATE UNIQUE INDEX "FinancialCorrectionAuthority_review_key" ON public."FinancialCorrectionAuthority" USING btree ("reviewId");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_firstResponseDueAt_idx" ON "SupportTicket"("firstResponseDueAt");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_nextResponseDueAt_idx" ON "SupportTicket"("nextResponseDueAt");
+--
+-- Name: FinancialCorrectionAuthority_vendor_applied_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SupportTicket_escalatedAt_idx" ON "SupportTicket"("escalatedAt");
+CREATE INDEX "FinancialCorrectionAuthority_vendor_applied_idx" ON public."FinancialCorrectionAuthority" USING btree ("vendorId", "appliedAt");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_contextType_contextId_idx" ON "SupportTicket"("contextType", "contextId");
 
--- CreateIndex
-CREATE INDEX "SupportTicket_createdAt_idx" ON "SupportTicket"("createdAt");
+--
+-- Name: FinancialCorrectionBaselineClaim_accepted_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SupportTicketNote_supportTicketId_createdAt_idx" ON "SupportTicketNote"("supportTicketId", "createdAt");
+CREATE UNIQUE INDEX "FinancialCorrectionBaselineClaim_accepted_key" ON public."FinancialCorrectionBaselineClaim" USING btree ("acceptedEvidenceSnapshotId");
 
--- CreateIndex
-CREATE INDEX "SupportTicketReply_supportTicketId_createdAt_idx" ON "SupportTicketReply"("supportTicketId", "createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorFinancialProfile_vendorId_key" ON "VendorFinancialProfile"("vendorId");
+--
+-- Name: FinancialCorrectionBaselineClaim_consumer_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorFinancialProfile_vendorId_active_idx" ON "VendorFinancialProfile"("vendorId", "active");
+CREATE UNIQUE INDEX "FinancialCorrectionBaselineClaim_consumer_key" ON public."FinancialCorrectionBaselineClaim" USING btree ("consumerId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorBillingProfile_vendorId_key" ON "VendorBillingProfile"("vendorId");
 
--- CreateIndex
-CREATE INDEX "VendorBillingProfile_vendorId_idx" ON "VendorBillingProfile"("vendorId");
+--
+-- Name: FinancialCorrectionCreditPayoutLine_non_cancelled_source_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorProfileAuditLog_vendorId_changedAt_idx" ON "VendorProfileAuditLog"("vendorId", "changedAt");
+CREATE UNIQUE INDEX "FinancialCorrectionCreditPayoutLine_non_cancelled_source_key" ON public."FinancialCorrectionCreditPayoutLine" USING btree ("settlementCreditLineId") WHERE (status <> 'CANCELLED'::text);
 
--- CreateIndex
-CREATE INDEX "VendorProfileAuditLog_vendorId_section_idx" ON "VendorProfileAuditLog"("vendorId", "section");
 
--- CreateIndex
-CREATE INDEX "VendorProfileAuditLog_fieldName_idx" ON "VendorProfileAuditLog"("fieldName");
+--
+-- Name: FinancialCorrectionCreditPayoutLine_payoutBatchId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "UserVendorAccess_userId_vendorId_key" ON "UserVendorAccess"("userId", "vendorId");
+CREATE INDEX "FinancialCorrectionCreditPayoutLine_payoutBatchId_idx" ON public."FinancialCorrectionCreditPayoutLine" USING btree ("payoutBatchId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorIntegrationClient_tokenHash_key" ON "VendorIntegrationClient"("tokenHash");
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationClient_vendorIdentifier_idx" ON "VendorIntegrationClient"("vendorIdentifier");
+--
+-- Name: FinancialCorrectionCreditPayoutLine_settlementCreditLineId__key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationClient_enabled_revokedAt_idx" ON "VendorIntegrationClient"("enabled", "revokedAt");
+CREATE UNIQUE INDEX "FinancialCorrectionCreditPayoutLine_settlementCreditLineId__key" ON public."FinancialCorrectionCreditPayoutLine" USING btree ("settlementCreditLineId", "payoutBatchId");
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationAuditLog_clientId_createdAt_idx" ON "VendorIntegrationAuditLog"("clientId", "createdAt");
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationAuditLog_vendorIdentifier_createdAt_idx" ON "VendorIntegrationAuditLog"("vendorIdentifier", "createdAt");
+--
+-- Name: FinancialCorrectionCreditSettlementLine_active_credit_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "ShopifyOrder_sourceShopifyOrderId_key" ON "ShopifyOrder"("sourceShopifyOrderId");
+CREATE UNIQUE INDEX "FinancialCorrectionCreditSettlementLine_active_credit_key" ON public."FinancialCorrectionCreditSettlementLine" USING btree ("creditId") WHERE (status = 'ACTIVE'::text);
 
--- CreateIndex
-CREATE UNIQUE INDEX "ShopifyOrderLineItem_shopifyOrderId_sourceLineItemId_key" ON "ShopifyOrderLineItem"("shopifyOrderId", "sourceLineItemId");
 
--- CreateIndex
-CREATE INDEX "VendorAllocation_createdAt_idx" ON "VendorAllocation"("createdAt");
+--
+-- Name: FinancialCorrectionCreditSettlementLine_creditId_settlement_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorAllocation_odooSaleOrderId_idx" ON "VendorAllocation"("odooSaleOrderId");
+CREATE UNIQUE INDEX "FinancialCorrectionCreditSettlementLine_creditId_settlement_key" ON public."FinancialCorrectionCreditSettlementLine" USING btree ("creditId", "settlementApprovalId");
 
--- CreateIndex
-CREATE INDEX "VendorAllocation_vendorIntegrationStatus_idx" ON "VendorAllocation"("vendorIntegrationStatus");
 
--- CreateIndex
-CREATE INDEX "VendorAllocation_cancelRefundReviewStatus_idx" ON "VendorAllocation"("cancelRefundReviewStatus");
+--
+-- Name: FinancialCorrectionCreditSettlementLine_settlementApprovalI_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "AllocationFullRefundTerminalFact_vendorAllocationId_key" ON "AllocationFullRefundTerminalFact"("vendorAllocationId");
+CREATE INDEX "FinancialCorrectionCreditSettlementLine_settlementApprovalI_idx" ON public."FinancialCorrectionCreditSettlementLine" USING btree ("settlementApprovalId");
 
--- CreateIndex
-CREATE INDEX "AllocationFullRefundTerminalFact_shopifyOrderGid_idx" ON "AllocationFullRefundTerminalFact"("shopifyOrderGid");
 
--- CreateIndex
-CREATE INDEX "CustomerCancellationRequest_shopifyOrderId_status_idx" ON "CustomerCancellationRequest"("shopifyOrderId", "status");
+--
+-- Name: FinancialCorrectionCredit_authorityId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "CustomerCancellationRequest_shopifyCustomerId_status_idx" ON "CustomerCancellationRequest"("shopifyCustomerId", "status");
+CREATE UNIQUE INDEX "FinancialCorrectionCredit_authorityId_key" ON public."FinancialCorrectionCredit" USING btree ("authorityId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "CustomerCancellationRequest_shopDomain_shopifyCustomerId_id_key" ON "CustomerCancellationRequest"("shopDomain", "shopifyCustomerId", "idempotencyKey");
 
--- CreateIndex
-CREATE INDEX "CustomerCancellationRequestItem_vendorAllocationId_status_idx" ON "CustomerCancellationRequestItem"("vendorAllocationId", "status");
+--
+-- Name: FinancialCorrectionCredit_vendorId_currency_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "CustomerCancellationRequestItem_shopifyOrderLineItemId_idx" ON "CustomerCancellationRequestItem"("shopifyOrderLineItemId");
+CREATE INDEX "FinancialCorrectionCredit_vendorId_currency_createdAt_idx" ON public."FinancialCorrectionCredit" USING btree ("vendorId", currency, "createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "CustomerCancellationRequestItem_requestId_shopifyOrderLineI_key" ON "CustomerCancellationRequestItem"("requestId", "shopifyOrderLineItemId", "vendorAllocationId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "OutboundShopifyRefundAttempt_customerCancellationRequestIte_key" ON "OutboundShopifyRefundAttempt"("customerCancellationRequestItemId");
+--
+-- Name: FinancialCorrectionDeductionPayoutLine_batch_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "OutboundShopifyRefundAttempt_vendorAllocationId_idx" ON "OutboundShopifyRefundAttempt"("vendorAllocationId");
+CREATE INDEX "FinancialCorrectionDeductionPayoutLine_batch_idx" ON public."FinancialCorrectionDeductionPayoutLine" USING btree ("payoutBatchId");
 
--- CreateIndex
-CREATE INDEX "OutboundShopifyRefundAttempt_shopifyOrderId_idx" ON "OutboundShopifyRefundAttempt"("shopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "OutboundShopifyRefundAttempt_status_idx" ON "OutboundShopifyRefundAttempt"("status");
+--
+-- Name: FinancialCorrectionDeductionPayoutLine_non_cancelled_source_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "OutboundShopifyRefundAttempt_shopifyRefundId_idx" ON "OutboundShopifyRefundAttempt"("shopifyRefundId");
+CREATE UNIQUE INDEX "FinancialCorrectionDeductionPayoutLine_non_cancelled_source_key" ON public."FinancialCorrectionDeductionPayoutLine" USING btree ("settlementDeductionLineId") WHERE (status <> 'CANCELLED'::text);
 
--- CreateIndex
-CREATE INDEX "OutboundShopifyRefundAttempt_previewHash_idx" ON "OutboundShopifyRefundAttempt"("previewHash");
 
--- CreateIndex
-CREATE UNIQUE INDEX "OrderShippingRefundClaim_ownerAttemptId_key" ON "OrderShippingRefundClaim"("ownerAttemptId");
+--
+-- Name: FinancialCorrectionDeductionPayoutLine_source_batch_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "OrderShippingRefundClaim_activeOrderKey_key" ON "OrderShippingRefundClaim"("activeOrderKey");
+CREATE UNIQUE INDEX "FinancialCorrectionDeductionPayoutLine_source_batch_key" ON public."FinancialCorrectionDeductionPayoutLine" USING btree ("settlementDeductionLineId", "payoutBatchId");
 
--- CreateIndex
-CREATE INDEX "OrderShippingRefundClaim_shopifyOrderId_idx" ON "OrderShippingRefundClaim"("shopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "OrderShippingRefundClaim_status_idx" ON "OrderShippingRefundClaim"("status");
+--
+-- Name: FinancialCorrectionDeductionSettlementLine_active_source_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationInvoiceEvent_vendorAllocationId_createdAt_idx" ON "VendorIntegrationInvoiceEvent"("vendorAllocationId", "createdAt");
+CREATE UNIQUE INDEX "FinancialCorrectionDeductionSettlementLine_active_source_key" ON public."FinancialCorrectionDeductionSettlementLine" USING btree ("deductionId") WHERE (status = 'ACTIVE'::text);
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationInvoiceEvent_vendorIdentifier_createdAt_idx" ON "VendorIntegrationInvoiceEvent"("vendorIdentifier", "createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorIntegrationInvoiceEvent_clientId_vendorAllocationId_i_key" ON "VendorIntegrationInvoiceEvent"("clientId", "vendorAllocationId", "idempotencyKey");
+--
+-- Name: FinancialCorrectionDeductionSettlementLine_settlement_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationShipmentEvent_vendorAllocationId_createdAt_idx" ON "VendorIntegrationShipmentEvent"("vendorAllocationId", "createdAt");
+CREATE INDEX "FinancialCorrectionDeductionSettlementLine_settlement_idx" ON public."FinancialCorrectionDeductionSettlementLine" USING btree ("settlementApprovalId");
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationShipmentEvent_vendorIdentifier_createdAt_idx" ON "VendorIntegrationShipmentEvent"("vendorIdentifier", "createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorIntegrationShipmentEvent_clientId_vendorAllocationId__key" ON "VendorIntegrationShipmentEvent"("clientId", "vendorAllocationId", "idempotencyKey");
+--
+-- Name: FinancialCorrectionDeductionSettlementLine_source_settlement_ke; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationStatusEvent_vendorAllocationId_createdAt_idx" ON "VendorIntegrationStatusEvent"("vendorAllocationId", "createdAt");
+CREATE UNIQUE INDEX "FinancialCorrectionDeductionSettlementLine_source_settlement_ke" ON public."FinancialCorrectionDeductionSettlementLine" USING btree ("deductionId", "settlementApprovalId");
 
--- CreateIndex
-CREATE INDEX "VendorIntegrationStatusEvent_vendorIdentifier_createdAt_idx" ON "VendorIntegrationStatusEvent"("vendorIdentifier", "createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorIntegrationStatusEvent_clientId_vendorAllocationId_id_key" ON "VendorIntegrationStatusEvent"("clientId", "vendorAllocationId", "idempotencyKey");
+--
+-- Name: FinancialCorrectionDeduction_authorityId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorAllocationLineItem_vendorAllocationId_shopifyLineItem_key" ON "VendorAllocationLineItem"("vendorAllocationId", "shopifyLineItemId");
+CREATE UNIQUE INDEX "FinancialCorrectionDeduction_authorityId_key" ON public."FinancialCorrectionDeduction" USING btree ("authorityId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "ProductPanelVariantDisableOutboxEvent_idempotencyKey_key" ON "ProductPanelVariantDisableOutboxEvent"("idempotencyKey");
 
--- CreateIndex
-CREATE INDEX "ProductPanelVariantDisableOutboxEvent_allocationId_idx" ON "ProductPanelVariantDisableOutboxEvent"("allocationId");
+--
+-- Name: FinancialCorrectionDeduction_vendorId_currency_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "ProductPanelVariantDisableOutboxEvent_vendorAllocationLineI_idx" ON "ProductPanelVariantDisableOutboxEvent"("vendorAllocationLineItemId");
+CREATE INDEX "FinancialCorrectionDeduction_vendorId_currency_createdAt_idx" ON public."FinancialCorrectionDeduction" USING btree ("vendorId", currency, "createdAt");
 
--- CreateIndex
-CREATE INDEX "ProductPanelVariantDisableOutboxEvent_vendorId_idx" ON "ProductPanelVariantDisableOutboxEvent"("vendorId");
 
--- CreateIndex
-CREATE INDEX "ProductPanelVariantDisableOutboxEvent_shopifyOrderId_idx" ON "ProductPanelVariantDisableOutboxEvent"("shopifyOrderId");
+--
+-- Name: Fulfillment_vendorAllocationId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "ProductPanelVariantDisableOutboxEvent_status_requestedAt_idx" ON "ProductPanelVariantDisableOutboxEvent"("status", "requestedAt");
+CREATE UNIQUE INDEX "Fulfillment_vendorAllocationId_key" ON public."Fulfillment" USING btree ("vendorAllocationId");
 
--- CreateIndex
-CREATE INDEX "AllocationSplitEvent_sourceAllocationId_idx" ON "AllocationSplitEvent"("sourceAllocationId");
 
--- CreateIndex
-CREATE INDEX "AllocationSplitEvent_childAllocationId_idx" ON "AllocationSplitEvent"("childAllocationId");
+--
+-- Name: LegacyRefundFinanceReviewEvent_eventType_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "AllocationSplitEvent_actorUserId_idx" ON "AllocationSplitEvent"("actorUserId");
+CREATE INDEX "LegacyRefundFinanceReviewEvent_eventType_createdAt_idx" ON public."LegacyRefundFinanceReviewEvent" USING btree ("eventType", "createdAt");
 
--- CreateIndex
-CREATE INDEX "AllocationSplitEvent_createdAt_idx" ON "AllocationSplitEvent"("createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "AllocationEconomicTransfer_idempotencyKey_key" ON "AllocationEconomicTransfer"("idempotencyKey");
+--
+-- Name: LegacyRefundFinanceReviewEvent_reviewId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "AllocationEconomicTransfer_vendorAllocationId_idx" ON "AllocationEconomicTransfer"("vendorAllocationId");
+CREATE INDEX "LegacyRefundFinanceReviewEvent_reviewId_createdAt_idx" ON public."LegacyRefundFinanceReviewEvent" USING btree ("reviewId", "createdAt");
 
--- CreateIndex
-CREATE INDEX "AllocationEconomicTransfer_fromVendorId_idx" ON "AllocationEconomicTransfer"("fromVendorId");
 
--- CreateIndex
-CREATE INDEX "AllocationEconomicTransfer_toVendorId_idx" ON "AllocationEconomicTransfer"("toVendorId");
+--
+-- Name: LegacyRefundFinanceReviewSource_artifactType_artifactId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "AllocationEconomicTransfer_status_idx" ON "AllocationEconomicTransfer"("status");
+CREATE UNIQUE INDEX "LegacyRefundFinanceReviewSource_artifactType_artifactId_key" ON public."LegacyRefundFinanceReviewSource" USING btree ("artifactType", "artifactId");
 
--- CreateIndex
-CREATE INDEX "AllocationEconomicTransfer_createdAt_idx" ON "AllocationEconomicTransfer"("createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "FinanceIntegrityAlert_dedupeKey_key" ON "FinanceIntegrityAlert"("dedupeKey");
+--
+-- Name: LegacyRefundFinanceReviewSource_reviewId_observedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "FinanceIntegrityAlert_status_idx" ON "FinanceIntegrityAlert"("status");
+CREATE INDEX "LegacyRefundFinanceReviewSource_reviewId_observedAt_idx" ON public."LegacyRefundFinanceReviewSource" USING btree ("reviewId", "observedAt");
 
--- CreateIndex
-CREATE INDEX "FinanceIntegrityAlert_category_idx" ON "FinanceIntegrityAlert"("category");
 
--- CreateIndex
-CREATE INDEX "FinanceIntegrityAlert_severity_idx" ON "FinanceIntegrityAlert"("severity");
+--
+-- Name: LegacyRefundFinanceReview_attribution_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "FinanceIntegrityAlert_detectedAt_idx" ON "FinanceIntegrityAlert"("detectedAt");
+CREATE INDEX "LegacyRefundFinanceReview_attribution_idx" ON public."LegacyRefundFinanceReview" USING btree (attribution);
 
--- CreateIndex
-CREATE INDEX "FinanceIntegrityAlert_vendorAllocationId_idx" ON "FinanceIntegrityAlert"("vendorAllocationId");
 
--- CreateIndex
-CREATE INDEX "FinanceIntegrityAlert_allocationEconomicTransferId_idx" ON "FinanceIntegrityAlert"("allocationEconomicTransferId");
+--
+-- Name: LegacyRefundFinanceReview_caseKey_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "Fulfillment_vendorAllocationId_key" ON "Fulfillment"("vendorAllocationId");
+CREATE UNIQUE INDEX "LegacyRefundFinanceReview_caseKey_key" ON public."LegacyRefundFinanceReview" USING btree ("caseKey");
 
--- CreateIndex
-CREATE INDEX "ReturnRecord_sourceShopifyReturnGid_idx" ON "ReturnRecord"("sourceShopifyReturnGid");
 
--- CreateIndex
-CREATE INDEX "ReturnRecord_sourceShopifyReturnId_idx" ON "ReturnRecord"("sourceShopifyReturnId");
+--
+-- Name: LegacyRefundFinanceReview_lastObservedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "ReturnRecord_ownerVendorId_idx" ON "ReturnRecord"("ownerVendorId");
+CREATE INDEX "LegacyRefundFinanceReview_lastObservedAt_idx" ON public."LegacyRefundFinanceReview" USING btree ("lastObservedAt");
 
--- CreateIndex
-CREATE INDEX "ReturnRecord_vendorAllocationId_createdAt_idx" ON "ReturnRecord"("vendorAllocationId", "createdAt");
 
--- CreateIndex
-CREATE INDEX "RefundRecord_vendorAllocationId_createdAt_idx" ON "RefundRecord"("vendorAllocationId", "createdAt");
+--
+-- Name: LegacyRefundFinanceReview_observedVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "RefundEvidenceSnapshot_refundRecordId_key" ON "RefundEvidenceSnapshot"("refundRecordId");
+CREATE INDEX "LegacyRefundFinanceReview_observedVendorId_idx" ON public."LegacyRefundFinanceReview" USING btree ("observedVendorId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "RefundEvidenceSnapshot_refundFinanceLedgerEntryId_key" ON "RefundEvidenceSnapshot"("refundFinanceLedgerEntryId");
 
--- CreateIndex
-CREATE INDEX "RefundEvidenceSnapshot_sourceShopifyOrderId_idx" ON "RefundEvidenceSnapshot"("sourceShopifyOrderId");
+--
+-- Name: LegacyRefundFinanceReview_resolutionOutcome_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "RefundEvidenceSnapshot_vendorAllocationId_idx" ON "RefundEvidenceSnapshot"("vendorAllocationId");
+CREATE INDEX "LegacyRefundFinanceReview_resolutionOutcome_idx" ON public."LegacyRefundFinanceReview" USING btree ("resolutionOutcome");
 
--- CreateIndex
-CREATE INDEX "RefundEvidenceSnapshot_historicalEconomicVendorId_idx" ON "RefundEvidenceSnapshot"("historicalEconomicVendorId");
 
--- CreateIndex
-CREATE INDEX "RefundEvidenceSnapshot_evidenceHash_idx" ON "RefundEvidenceSnapshot"("evidenceHash");
+--
+-- Name: LegacyRefundFinanceReview_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "RefundEvidenceSnapshot_sourceShopifyRefundId_vendorAllocati_key" ON "RefundEvidenceSnapshot"("sourceShopifyRefundId", "vendorAllocationId");
+CREATE INDEX "LegacyRefundFinanceReview_status_idx" ON public."LegacyRefundFinanceReview" USING btree (status);
 
--- CreateIndex
-CREATE UNIQUE INDEX "RefundTerminalEvidenceReview_dedupeKey_key" ON "RefundTerminalEvidenceReview"("dedupeKey");
 
--- CreateIndex
-CREATE INDEX "RefundTerminalEvidenceReview_status_idx" ON "RefundTerminalEvidenceReview"("status");
+--
+-- Name: LegacyRefundFinanceReview_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "RefundTerminalEvidenceReview_vendorAllocationId_idx" ON "RefundTerminalEvidenceReview"("vendorAllocationId");
+CREATE INDEX "LegacyRefundFinanceReview_vendorAllocationId_idx" ON public."LegacyRefundFinanceReview" USING btree ("vendorAllocationId");
 
--- CreateIndex
-CREATE INDEX "RefundTerminalEvidenceReview_terminalRefundFinanceLedgerEnt_idx" ON "RefundTerminalEvidenceReview"("terminalRefundFinanceLedgerEntryId");
 
--- CreateIndex
-CREATE INDEX "RefundTerminalEvidenceReview_sourceShopifyRefundId_idx" ON "RefundTerminalEvidenceReview"("sourceShopifyRefundId");
+--
+-- Name: NotificationIntent_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "RefundTerminalEvidenceReview_firstObservedAt_idx" ON "RefundTerminalEvidenceReview"("firstObservedAt");
+CREATE INDEX "NotificationIntent_createdAt_idx" ON public."NotificationIntent" USING btree ("createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "RefundTerminalConflictEvidence_reviewId_key" ON "RefundTerminalConflictEvidence"("reviewId");
 
--- CreateIndex
-CREATE INDEX "RefundTerminalConflictEvidence_sourceShopifyRefundId_idx" ON "RefundTerminalConflictEvidence"("sourceShopifyRefundId");
+--
+-- Name: NotificationIntent_recipientRole_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "RefundTerminalConflictEvidence_sourceShopifyOrderId_idx" ON "RefundTerminalConflictEvidence"("sourceShopifyOrderId");
+CREATE INDEX "NotificationIntent_recipientRole_status_idx" ON public."NotificationIntent" USING btree ("recipientRole", status);
 
--- CreateIndex
-CREATE INDEX "RefundTerminalConflictEvidence_vendorAllocationId_idx" ON "RefundTerminalConflictEvidence"("vendorAllocationId");
 
--- CreateIndex
-CREATE INDEX "RefundTerminalConflictEvidence_economicVendorId_idx" ON "RefundTerminalConflictEvidence"("economicVendorId");
+--
+-- Name: NotificationIntent_signalId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "RefundTerminalConflictEvidence_historicalSaleFinanceLedgerE_idx" ON "RefundTerminalConflictEvidence"("historicalSaleFinanceLedgerEntryId");
+CREATE INDEX "NotificationIntent_signalId_idx" ON public."NotificationIntent" USING btree ("signalId");
 
--- CreateIndex
-CREATE INDEX "RefundTerminalConflictEvidence_evidenceHash_idx" ON "RefundTerminalConflictEvidence"("evidenceHash");
 
--- CreateIndex
-CREATE INDEX "RefundTerminalEvidenceReviewEvent_reviewId_createdAt_idx" ON "RefundTerminalEvidenceReviewEvent"("reviewId", "createdAt");
+--
+-- Name: NotificationIntent_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "RefundTerminalEvidenceReviewEvent_eventType_createdAt_idx" ON "RefundTerminalEvidenceReviewEvent"("eventType", "createdAt");
+CREATE INDEX "NotificationIntent_vendorId_status_idx" ON public."NotificationIntent" USING btree ("vendorId", status);
 
--- CreateIndex
-CREATE UNIQUE INDEX "LegacyRefundFinanceReview_caseKey_key" ON "LegacyRefundFinanceReview"("caseKey");
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReview_status_idx" ON "LegacyRefundFinanceReview"("status");
+--
+-- Name: OperationalJob_customerCancellationRequestItemId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReview_resolutionOutcome_idx" ON "LegacyRefundFinanceReview"("resolutionOutcome");
+CREATE UNIQUE INDEX "OperationalJob_customerCancellationRequestItemId_key" ON public."OperationalJob" USING btree ("customerCancellationRequestItemId");
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReview_attribution_idx" ON "LegacyRefundFinanceReview"("attribution");
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReview_observedVendorId_idx" ON "LegacyRefundFinanceReview"("observedVendorId");
+--
+-- Name: OperationalJob_jobType_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReview_vendorAllocationId_idx" ON "LegacyRefundFinanceReview"("vendorAllocationId");
+CREATE INDEX "OperationalJob_jobType_idx" ON public."OperationalJob" USING btree ("jobType");
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReview_lastObservedAt_idx" ON "LegacyRefundFinanceReview"("lastObservedAt");
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReviewSource_reviewId_observedAt_idx" ON "LegacyRefundFinanceReviewSource"("reviewId", "observedAt");
+--
+-- Name: OperationalJob_sourceShopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "LegacyRefundFinanceReviewSource_artifactType_artifactId_key" ON "LegacyRefundFinanceReviewSource"("artifactType", "artifactId");
+CREATE INDEX "OperationalJob_sourceShopifyOrderId_idx" ON public."OperationalJob" USING btree ("sourceShopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReviewEvent_reviewId_createdAt_idx" ON "LegacyRefundFinanceReviewEvent"("reviewId", "createdAt");
 
--- CreateIndex
-CREATE INDEX "LegacyRefundFinanceReviewEvent_eventType_createdAt_idx" ON "LegacyRefundFinanceReviewEvent"("eventType", "createdAt");
+--
+-- Name: OperationalJob_status_nextRetryAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "ShopifyRefund_sourceShopifyRefundId_key" ON "ShopifyRefund"("sourceShopifyRefundId");
+CREATE INDEX "OperationalJob_status_nextRetryAt_idx" ON public."OperationalJob" USING btree (status, "nextRetryAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "ShopifyRefundLineItem_shopifyRefundId_sourceRefundLineItemI_key" ON "ShopifyRefundLineItem"("shopifyRefundId", "sourceRefundLineItemId");
 
--- CreateIndex
-CREATE INDEX "FinanceLedgerEntry_vendorId_entryType_idx" ON "FinanceLedgerEntry"("vendorId", "entryType");
+--
+-- Name: OperationalJob_status_processingLeaseExpiresAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "FinanceLedgerEntry_vendorId_settlementStatus_idx" ON "FinanceLedgerEntry"("vendorId", "settlementStatus");
+CREATE INDEX "OperationalJob_status_processingLeaseExpiresAt_idx" ON public."OperationalJob" USING btree (status, "processingLeaseExpiresAt");
 
--- CreateIndex
-CREATE INDEX "FinanceLedgerEntry_supersededByLedgerId_idx" ON "FinanceLedgerEntry"("supersededByLedgerId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "FinanceEvent_idempotencyKey_key" ON "FinanceEvent"("idempotencyKey");
+--
+-- Name: OperationalJob_status_scheduledAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "FinanceEvent_vendorId_createdAt_idx" ON "FinanceEvent"("vendorId", "createdAt");
+CREATE INDEX "OperationalJob_status_scheduledAt_idx" ON public."OperationalJob" USING btree (status, "scheduledAt");
 
--- CreateIndex
-CREATE INDEX "FinanceEvent_shopifyOrderId_createdAt_idx" ON "FinanceEvent"("shopifyOrderId", "createdAt");
 
--- CreateIndex
-CREATE INDEX "FinanceEvent_financeLedgerEntryId_createdAt_idx" ON "FinanceEvent"("financeLedgerEntryId", "createdAt");
+--
+-- Name: OperationalJob_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "FinanceEvent_eventType_createdAt_idx" ON "FinanceEvent"("eventType", "createdAt");
+CREATE INDEX "OperationalJob_vendorAllocationId_idx" ON public."OperationalJob" USING btree ("vendorAllocationId");
 
--- CreateIndex
-CREATE INDEX "FinanceEvent_referenceType_referenceId_idx" ON "FinanceEvent"("referenceType", "referenceId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "SettlementApproval_scheduledCycleKey_key" ON "SettlementApproval"("scheduledCycleKey");
+--
+-- Name: OperationalJob_webhookEventId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementApproval_vendorId_status_idx" ON "SettlementApproval"("vendorId", "status");
+CREATE INDEX "OperationalJob_webhookEventId_idx" ON public."OperationalJob" USING btree ("webhookEventId");
 
--- CreateIndex
-CREATE INDEX "SettlementApproval_vendorId_scheduledCycleKey_idx" ON "SettlementApproval"("vendorId", "scheduledCycleKey");
 
--- CreateIndex
-CREATE INDEX "SettlementApproval_periodStart_periodEnd_idx" ON "SettlementApproval"("periodStart", "periodEnd");
+--
+-- Name: OperationalSignal_ruleKey_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementApproval_createdAt_idx" ON "SettlementApproval"("createdAt");
+CREATE INDEX "OperationalSignal_ruleKey_idx" ON public."OperationalSignal" USING btree ("ruleKey");
 
--- CreateIndex
-CREATE UNIQUE INDEX "SettlementScheduleJobRun_runDate_key" ON "SettlementScheduleJobRun"("runDate");
 
--- CreateIndex
-CREATE INDEX "SettlementScheduleJobRun_status_startedAt_idx" ON "SettlementScheduleJobRun"("status", "startedAt");
+--
+-- Name: OperationalSignal_sourceArea_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementScheduleJobRun_finishedAt_idx" ON "SettlementScheduleJobRun"("finishedAt");
+CREATE INDEX "OperationalSignal_sourceArea_status_idx" ON public."OperationalSignal" USING btree ("sourceArea", status);
 
--- CreateIndex
-CREATE UNIQUE INDEX "SettlementApprovalLine_settlementRefundAdjustmentId_key" ON "SettlementApprovalLine"("settlementRefundAdjustmentId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "SettlementApprovalLine_settlementRefundAdjustmentApplicatio_key" ON "SettlementApprovalLine"("settlementRefundAdjustmentApplicationId");
+--
+-- Name: OperationalSignal_status_severity_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementApprovalLine_financeLedgerEntryId_idx" ON "SettlementApprovalLine"("financeLedgerEntryId");
+CREATE INDEX "OperationalSignal_status_severity_idx" ON public."OperationalSignal" USING btree (status, severity);
 
--- CreateIndex
-CREATE INDEX "SettlementApprovalLine_lineType_idx" ON "SettlementApprovalLine"("lineType");
 
--- CreateIndex
-CREATE UNIQUE INDEX "SettlementApprovalLine_settlementApprovalId_financeLedgerEn_key" ON "SettlementApprovalLine"("settlementApprovalId", "financeLedgerEntryId");
+--
+-- Name: OperationalSignal_triggeredAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementCommissionInvoice_settlementApprovalId_idx" ON "SettlementCommissionInvoice"("settlementApprovalId");
+CREATE INDEX "OperationalSignal_triggeredAt_idx" ON public."OperationalSignal" USING btree ("triggeredAt");
 
--- CreateIndex
-CREATE INDEX "SettlementCommissionInvoice_vendorId_idx" ON "SettlementCommissionInvoice"("vendorId");
 
--- CreateIndex
-CREATE INDEX "SettlementCommissionInvoice_provider_idx" ON "SettlementCommissionInvoice"("provider");
+--
+-- Name: OperationalSignal_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementCommissionInvoice_status_idx" ON "SettlementCommissionInvoice"("status");
+CREATE INDEX "OperationalSignal_vendorId_status_idx" ON public."OperationalSignal" USING btree ("vendorId", status);
 
--- CreateIndex
-CREATE INDEX "SettlementCommissionInvoice_providerUuid_idx" ON "SettlementCommissionInvoice"("providerUuid");
 
--- CreateIndex
-CREATE INDEX "SettlementCommissionInvoice_invoiceNo_idx" ON "SettlementCommissionInvoice"("invoiceNo");
+--
+-- Name: OrderShippingRefundClaim_activeOrderKey_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "SettlementRefundAdjustment_refundFinanceLedgerEntryId_key" ON "SettlementRefundAdjustment"("refundFinanceLedgerEntryId");
+CREATE UNIQUE INDEX "OrderShippingRefundClaim_activeOrderKey_key" ON public."OrderShippingRefundClaim" USING btree ("activeOrderKey");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustment_vendorId_status_idx" ON "SettlementRefundAdjustment"("vendorId", "status");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustment_refundRecordId_idx" ON "SettlementRefundAdjustment"("refundRecordId");
+--
+-- Name: OrderShippingRefundClaim_ownerAttemptId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustment_originalOrderId_idx" ON "SettlementRefundAdjustment"("originalOrderId");
+CREATE UNIQUE INDEX "OrderShippingRefundClaim_ownerAttemptId_key" ON public."OrderShippingRefundClaim" USING btree ("ownerAttemptId");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustment_originalSettlementApprovalId_idx" ON "SettlementRefundAdjustment"("originalSettlementApprovalId");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustment_originalSettlementCommissionInvo_idx" ON "SettlementRefundAdjustment"("originalSettlementCommissionInvoiceId");
+--
+-- Name: OrderShippingRefundClaim_shopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustment_appliedSettlementApprovalId_idx" ON "SettlementRefundAdjustment"("appliedSettlementApprovalId");
+CREATE INDEX "OrderShippingRefundClaim_shopifyOrderId_idx" ON public."OrderShippingRefundClaim" USING btree ("shopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustment_createdAt_idx" ON "SettlementRefundAdjustment"("createdAt");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustmentEvent_settlementRefundAdjustmentI_idx" ON "SettlementRefundAdjustmentEvent"("settlementRefundAdjustmentId", "createdAt");
+--
+-- Name: OrderShippingRefundClaim_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustmentEvent_eventType_createdAt_idx" ON "SettlementRefundAdjustmentEvent"("eventType", "createdAt");
+CREATE INDEX "OrderShippingRefundClaim_status_idx" ON public."OrderShippingRefundClaim" USING btree (status);
 
--- CreateIndex
-CREATE UNIQUE INDEX "SettlementRefundAdjustmentApplication_settlementApprovalLin_key" ON "SettlementRefundAdjustmentApplication"("settlementApprovalLineId");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustmentApplication_settlementRefundAdjus_idx" ON "SettlementRefundAdjustmentApplication"("settlementRefundAdjustmentId", "status");
+--
+-- Name: OutboundShopifyRefundAttempt_customerCancellationRequestIte_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustmentApplication_settlementApprovalId_idx" ON "SettlementRefundAdjustmentApplication"("settlementApprovalId");
+CREATE UNIQUE INDEX "OutboundShopifyRefundAttempt_customerCancellationRequestIte_key" ON public."OutboundShopifyRefundAttempt" USING btree ("customerCancellationRequestItemId");
 
--- CreateIndex
-CREATE INDEX "SettlementRefundAdjustmentApplication_createdAt_idx" ON "SettlementRefundAdjustmentApplication"("createdAt");
 
--- CreateIndex
-CREATE INDEX "ShipmentShippingCost_vendorId_status_idx" ON "ShipmentShippingCost"("vendorId", "status");
+--
+-- Name: OutboundShopifyRefundAttempt_previewHash_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "ShipmentShippingCost_allocationId_status_idx" ON "ShipmentShippingCost"("allocationId", "status");
+CREATE INDEX "OutboundShopifyRefundAttempt_previewHash_idx" ON public."OutboundShopifyRefundAttempt" USING btree ("previewHash");
 
--- CreateIndex
-CREATE INDEX "ShipmentShippingCost_sourceShopifyOrderId_idx" ON "ShipmentShippingCost"("sourceShopifyOrderId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorShippingConfig_vendorId_key" ON "VendorShippingConfig"("vendorId");
+--
+-- Name: OutboundShopifyRefundAttempt_shopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorShippingConfig_vendorId_shippingEnabled_idx" ON "VendorShippingConfig"("vendorId", "shippingEnabled");
+CREATE INDEX "OutboundShopifyRefundAttempt_shopifyOrderId_idx" ON public."OutboundShopifyRefundAttempt" USING btree ("shopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "VendorShippingWarehouse_configId_isDefault_idx" ON "VendorShippingWarehouse"("configId", "isDefault");
 
--- CreateIndex
-CREATE INDEX "VendorShippingWarehouse_vendorId_provider_isDefault_idx" ON "VendorShippingWarehouse"("vendorId", "provider", "isDefault");
+--
+-- Name: OutboundShopifyRefundAttempt_shopifyRefundId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorShippingWarehouse_vendorId_provider_warehouseId_key" ON "VendorShippingWarehouse"("vendorId", "provider", "warehouseId");
+CREATE INDEX "OutboundShopifyRefundAttempt_shopifyRefundId_idx" ON public."OutboundShopifyRefundAttempt" USING btree ("shopifyRefundId");
 
--- CreateIndex
-CREATE INDEX "ShipmentExecution_sourceShopifyOrderId_idx" ON "ShipmentExecution"("sourceShopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "ShipmentExecution_vendorId_shipmentStatus_idx" ON "ShipmentExecution"("vendorId", "shipmentStatus");
+--
+-- Name: OutboundShopifyRefundAttempt_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "ShipmentExecution_provider_shipmentStatus_idx" ON "ShipmentExecution"("provider", "shipmentStatus");
+CREATE INDEX "OutboundShopifyRefundAttempt_status_idx" ON public."OutboundShopifyRefundAttempt" USING btree (status);
 
--- CreateIndex
-CREATE INDEX "ShipmentExecution_createdAt_idx" ON "ShipmentExecution"("createdAt");
 
--- CreateIndex
-CREATE UNIQUE INDEX "ShipmentExecution_allocationId_provider_key" ON "ShipmentExecution"("allocationId", "provider");
+--
+-- Name: OutboundShopifyRefundAttempt_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "PayoutBatch_vendorId_status_idx" ON "PayoutBatch"("vendorId", "status");
+CREATE INDEX "OutboundShopifyRefundAttempt_vendorAllocationId_idx" ON public."OutboundShopifyRefundAttempt" USING btree ("vendorAllocationId");
 
--- CreateIndex
-CREATE INDEX "PayoutBatch_createdAt_idx" ON "PayoutBatch"("createdAt");
 
--- CreateIndex
-CREATE INDEX "PayoutBatchLine_financeLedgerEntryId_idx" ON "PayoutBatchLine"("financeLedgerEntryId");
+--
+-- Name: PayoutBatchLine_financeLedgerEntryId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "PayoutBatchLine_settlementApprovalLineId_idx" ON "PayoutBatchLine"("settlementApprovalLineId");
+CREATE INDEX "PayoutBatchLine_financeLedgerEntryId_idx" ON public."PayoutBatchLine" USING btree ("financeLedgerEntryId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "PayoutBatchLine_payoutBatchId_settlementApprovalLineId_key" ON "PayoutBatchLine"("payoutBatchId", "settlementApprovalLineId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "VendorBalanceEvent_idempotencyKey_key" ON "VendorBalanceEvent"("idempotencyKey");
+--
+-- Name: PayoutBatchLine_payoutBatchId_settlementApprovalLineId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_vendorId_createdAt_idx" ON "VendorBalanceEvent"("vendorId", "createdAt");
+CREATE UNIQUE INDEX "PayoutBatchLine_payoutBatchId_settlementApprovalLineId_key" ON public."PayoutBatchLine" USING btree ("payoutBatchId", "settlementApprovalLineId");
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_vendorId_currency_idx" ON "VendorBalanceEvent"("vendorId", "currency");
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_type_createdAt_idx" ON "VendorBalanceEvent"("type", "createdAt");
+--
+-- Name: PayoutBatchLine_settlementApprovalLineId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_sourceType_sourceId_idx" ON "VendorBalanceEvent"("sourceType", "sourceId");
+CREATE INDEX "PayoutBatchLine_settlementApprovalLineId_idx" ON public."PayoutBatchLine" USING btree ("settlementApprovalLineId");
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_financeLedgerEntryId_idx" ON "VendorBalanceEvent"("financeLedgerEntryId");
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_refundRecordId_idx" ON "VendorBalanceEvent"("refundRecordId");
+--
+-- Name: PayoutBatch_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_payoutBatchId_idx" ON "VendorBalanceEvent"("payoutBatchId");
+CREATE INDEX "PayoutBatch_createdAt_idx" ON public."PayoutBatch" USING btree ("createdAt");
 
--- CreateIndex
-CREATE INDEX "VendorBalanceEvent_settlementApprovalId_idx" ON "VendorBalanceEvent"("settlementApprovalId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "WebhookEvent_idempotencyKey_key" ON "WebhookEvent"("idempotencyKey");
+--
+-- Name: PayoutBatch_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "WebhookEvent_topic_status_executionAvailableAt_receivedAt_idx" ON "WebhookEvent"("topic", "status", "executionAvailableAt", "receivedAt");
+CREATE INDEX "PayoutBatch_vendorId_status_idx" ON public."PayoutBatch" USING btree ("vendorId", status);
 
--- CreateIndex
-CREATE INDEX "WebhookEvent_topic_status_processingLeaseExpiresAt_idx" ON "WebhookEvent"("topic", "status", "processingLeaseExpiresAt");
 
--- CreateIndex
-CREATE INDEX "WebhookEvent_topic_sourceShopifyOrderId_status_idx" ON "WebhookEvent"("topic", "sourceShopifyOrderId", "status");
+--
+-- Name: ProductPanelVariantDisableOutboxEvent_allocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE UNIQUE INDEX "WebhookEvent_sourceShopDomain_topic_webhookId_key" ON "WebhookEvent"("sourceShopDomain", "topic", "webhookId");
+CREATE INDEX "ProductPanelVariantDisableOutboxEvent_allocationId_idx" ON public."ProductPanelVariantDisableOutboxEvent" USING btree ("allocationId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "OperationalJob_customerCancellationRequestItemId_key" ON "OperationalJob"("customerCancellationRequestItemId");
 
--- CreateIndex
-CREATE INDEX "OperationalJob_status_scheduledAt_idx" ON "OperationalJob"("status", "scheduledAt");
+--
+-- Name: ProductPanelVariantDisableOutboxEvent_idempotencyKey_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "OperationalJob_status_nextRetryAt_idx" ON "OperationalJob"("status", "nextRetryAt");
+CREATE UNIQUE INDEX "ProductPanelVariantDisableOutboxEvent_idempotencyKey_key" ON public."ProductPanelVariantDisableOutboxEvent" USING btree ("idempotencyKey");
 
--- CreateIndex
-CREATE INDEX "OperationalJob_jobType_idx" ON "OperationalJob"("jobType");
 
--- CreateIndex
-CREATE INDEX "OperationalJob_webhookEventId_idx" ON "OperationalJob"("webhookEventId");
+--
+-- Name: ProductPanelVariantDisableOutboxEvent_shopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "OperationalJob_vendorAllocationId_idx" ON "OperationalJob"("vendorAllocationId");
+CREATE INDEX "ProductPanelVariantDisableOutboxEvent_shopifyOrderId_idx" ON public."ProductPanelVariantDisableOutboxEvent" USING btree ("shopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "OperationalJob_sourceShopifyOrderId_idx" ON "OperationalJob"("sourceShopifyOrderId");
 
--- CreateIndex
-CREATE INDEX "OperationalJob_status_processingLeaseExpiresAt_idx" ON "OperationalJob"("status", "processingLeaseExpiresAt");
+--
+-- Name: ProductPanelVariantDisableOutboxEvent_status_requestedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "CanonicalReconciliationRun_startedAt_idx" ON "CanonicalReconciliationRun"("startedAt");
+CREATE INDEX "ProductPanelVariantDisableOutboxEvent_status_requestedAt_idx" ON public."ProductPanelVariantDisableOutboxEvent" USING btree (status, "requestedAt");
 
--- CreateIndex
-CREATE INDEX "CanonicalReconciliationRun_mode_status_idx" ON "CanonicalReconciliationRun"("mode", "status");
 
--- CreateIndex
-CREATE INDEX "OperationalSignal_status_severity_idx" ON "OperationalSignal"("status", "severity");
+--
+-- Name: ProductPanelVariantDisableOutboxEvent_vendorAllocationLineI_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "OperationalSignal_vendorId_status_idx" ON "OperationalSignal"("vendorId", "status");
+CREATE INDEX "ProductPanelVariantDisableOutboxEvent_vendorAllocationLineI_idx" ON public."ProductPanelVariantDisableOutboxEvent" USING btree ("vendorAllocationLineItemId");
 
--- CreateIndex
-CREATE INDEX "OperationalSignal_sourceArea_status_idx" ON "OperationalSignal"("sourceArea", "status");
 
--- CreateIndex
-CREATE INDEX "OperationalSignal_ruleKey_idx" ON "OperationalSignal"("ruleKey");
+--
+-- Name: ProductPanelVariantDisableOutboxEvent_vendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "OperationalSignal_triggeredAt_idx" ON "OperationalSignal"("triggeredAt");
+CREATE INDEX "ProductPanelVariantDisableOutboxEvent_vendorId_idx" ON public."ProductPanelVariantDisableOutboxEvent" USING btree ("vendorId");
 
--- CreateIndex
-CREATE INDEX "NotificationIntent_recipientRole_status_idx" ON "NotificationIntent"("recipientRole", "status");
 
--- CreateIndex
-CREATE INDEX "NotificationIntent_vendorId_status_idx" ON "NotificationIntent"("vendorId", "status");
+--
+-- Name: RefundEvidenceSnapshot_evidenceHash_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "NotificationIntent_signalId_idx" ON "NotificationIntent"("signalId");
+CREATE INDEX "RefundEvidenceSnapshot_evidenceHash_idx" ON public."RefundEvidenceSnapshot" USING btree ("evidenceHash");
 
--- CreateIndex
-CREATE INDEX "NotificationIntent_createdAt_idx" ON "NotificationIntent"("createdAt");
 
--- CreateIndex
-CREATE INDEX "AutomationAction_status_type_idx" ON "AutomationAction"("status", "type");
+--
+-- Name: RefundEvidenceSnapshot_historicalEconomicVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- CreateIndex
-CREATE INDEX "AutomationAction_vendorId_status_idx" ON "AutomationAction"("vendorId", "status");
+CREATE INDEX "RefundEvidenceSnapshot_historicalEconomicVendorId_idx" ON public."RefundEvidenceSnapshot" USING btree ("historicalEconomicVendorId");
 
--- CreateIndex
-CREATE INDEX "AutomationAction_signalId_idx" ON "AutomationAction"("signalId");
 
--- CreateIndex
-CREATE INDEX "AutomationAction_createdAt_idx" ON "AutomationAction"("createdAt");
+--
+-- Name: RefundEvidenceSnapshot_refundFinanceLedgerEntryId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SupportTicket" ADD CONSTRAINT "SupportTicket_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "RefundEvidenceSnapshot_refundFinanceLedgerEntryId_key" ON public."RefundEvidenceSnapshot" USING btree ("refundFinanceLedgerEntryId");
 
--- AddForeignKey
-ALTER TABLE "SupportTicket" ADD CONSTRAINT "SupportTicket_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SupportTicketNote" ADD CONSTRAINT "SupportTicketNote_supportTicketId_fkey" FOREIGN KEY ("supportTicketId") REFERENCES "SupportTicket"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundEvidenceSnapshot_refundRecordId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SupportTicketNote" ADD CONSTRAINT "SupportTicketNote_authorUserId_fkey" FOREIGN KEY ("authorUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "RefundEvidenceSnapshot_refundRecordId_key" ON public."RefundEvidenceSnapshot" USING btree ("refundRecordId");
 
--- AddForeignKey
-ALTER TABLE "SupportTicketReply" ADD CONSTRAINT "SupportTicketReply_supportTicketId_fkey" FOREIGN KEY ("supportTicketId") REFERENCES "SupportTicket"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SupportTicketReply" ADD CONSTRAINT "SupportTicketReply_authorUserId_fkey" FOREIGN KEY ("authorUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundEvidenceSnapshot_sourceShopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorFinancialProfile" ADD CONSTRAINT "VendorFinancialProfile_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundEvidenceSnapshot_sourceShopifyOrderId_idx" ON public."RefundEvidenceSnapshot" USING btree ("sourceShopifyOrderId");
 
--- AddForeignKey
-ALTER TABLE "VendorBillingProfile" ADD CONSTRAINT "VendorBillingProfile_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorProfileAuditLog" ADD CONSTRAINT "VendorProfileAuditLog_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundEvidenceSnapshot_sourceShopifyRefundId_vendorAllocati_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "UserVendorAccess" ADD CONSTRAINT "UserVendorAccess_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "RefundEvidenceSnapshot_sourceShopifyRefundId_vendorAllocati_key" ON public."RefundEvidenceSnapshot" USING btree ("sourceShopifyRefundId", "vendorAllocationId");
 
--- AddForeignKey
-ALTER TABLE "UserVendorAccess" ADD CONSTRAINT "UserVendorAccess_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorIntegrationAuditLog" ADD CONSTRAINT "VendorIntegrationAuditLog_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "VendorIntegrationClient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundEvidenceSnapshot_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "ShopifyOrderLineItem" ADD CONSTRAINT "ShopifyOrderLineItem_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundEvidenceSnapshot_vendorAllocationId_idx" ON public."RefundEvidenceSnapshot" USING btree ("vendorAllocationId");
 
--- AddForeignKey
-ALTER TABLE "VendorAllocation" ADD CONSTRAINT "VendorAllocation_sourceShopifyOrderId_fkey" FOREIGN KEY ("sourceShopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorAllocation" ADD CONSTRAINT "VendorAllocation_originalVendorId_fkey" FOREIGN KEY ("originalVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: RefundRecord_vendorAllocationId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorAllocation" ADD CONSTRAINT "VendorAllocation_assignedVendorId_fkey" FOREIGN KEY ("assignedVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "RefundRecord_vendorAllocationId_createdAt_idx" ON public."RefundRecord" USING btree ("vendorAllocationId", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "AllocationFullRefundTerminalFact" ADD CONSTRAINT "AllocationFullRefundTerminalFact_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "CustomerCancellationRequest" ADD CONSTRAINT "CustomerCancellationRequest_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalConflictEvidence_economicVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "CustomerCancellationRequest" ADD CONSTRAINT "CustomerCancellationRequest_reviewedByUserId_fkey" FOREIGN KEY ("reviewedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalConflictEvidence_economicVendorId_idx" ON public."RefundTerminalConflictEvidence" USING btree ("economicVendorId");
 
--- AddForeignKey
-ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "CustomerCancellationRequest"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_shopifyOrderLineItemId_fkey" FOREIGN KEY ("shopifyOrderLineItemId") REFERENCES "ShopifyOrderLineItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalConflictEvidence_evidenceHash_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalConflictEvidence_evidenceHash_idx" ON public."RefundTerminalConflictEvidence" USING btree ("evidenceHash");
 
--- AddForeignKey
-ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_reviewedByUserId_fkey" FOREIGN KEY ("reviewedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "OutboundShopifyRefundAttempt" ADD CONSTRAINT "OutboundShopifyRefundAttempt_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalConflictEvidence_historicalSaleFinanceLedgerE_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "OutboundShopifyRefundAttempt" ADD CONSTRAINT "OutboundShopifyRefundAttempt_requestedByUserId_fkey" FOREIGN KEY ("requestedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalConflictEvidence_historicalSaleFinanceLedgerE_idx" ON public."RefundTerminalConflictEvidence" USING btree ("historicalSaleFinanceLedgerEntryId");
 
--- AddForeignKey
-ALTER TABLE "OutboundShopifyRefundAttempt" ADD CONSTRAINT "OutboundShopifyRefundAttempt_customerCancellationRequestIt_fkey" FOREIGN KEY ("customerCancellationRequestItemId") REFERENCES "CustomerCancellationRequestItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "OrderShippingRefundClaim" ADD CONSTRAINT "OrderShippingRefundClaim_ownerAttemptId_fkey" FOREIGN KEY ("ownerAttemptId") REFERENCES "OutboundShopifyRefundAttempt"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalConflictEvidence_reviewId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorIntegrationInvoiceEvent" ADD CONSTRAINT "VendorIntegrationInvoiceEvent_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "VendorIntegrationClient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "RefundTerminalConflictEvidence_reviewId_key" ON public."RefundTerminalConflictEvidence" USING btree ("reviewId");
 
--- AddForeignKey
-ALTER TABLE "VendorIntegrationInvoiceEvent" ADD CONSTRAINT "VendorIntegrationInvoiceEvent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorIntegrationShipmentEvent" ADD CONSTRAINT "VendorIntegrationShipmentEvent_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "VendorIntegrationClient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalConflictEvidence_sourceShopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorIntegrationShipmentEvent" ADD CONSTRAINT "VendorIntegrationShipmentEvent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalConflictEvidence_sourceShopifyOrderId_idx" ON public."RefundTerminalConflictEvidence" USING btree ("sourceShopifyOrderId");
 
--- AddForeignKey
-ALTER TABLE "VendorIntegrationStatusEvent" ADD CONSTRAINT "VendorIntegrationStatusEvent_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "VendorIntegrationClient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorIntegrationStatusEvent" ADD CONSTRAINT "VendorIntegrationStatusEvent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalConflictEvidence_sourceShopifyRefundId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorAllocationLineItem" ADD CONSTRAINT "VendorAllocationLineItem_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalConflictEvidence_sourceShopifyRefundId_idx" ON public."RefundTerminalConflictEvidence" USING btree ("sourceShopifyRefundId");
 
--- AddForeignKey
-ALTER TABLE "VendorAllocationLineItem" ADD CONSTRAINT "VendorAllocationLineItem_shopifyLineItemId_fkey" FOREIGN KEY ("shopifyLineItemId") REFERENCES "ShopifyOrderLineItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "ProductPanelVariantDisableOutboxEvent" ADD CONSTRAINT "ProductPanelVariantDisableOutboxEvent_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalConflictEvidence_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "ProductPanelVariantDisableOutboxEvent" ADD CONSTRAINT "ProductPanelVariantDisableOutboxEvent_vendorAllocationLine_fkey" FOREIGN KEY ("vendorAllocationLineItemId") REFERENCES "VendorAllocationLineItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalConflictEvidence_vendorAllocationId_idx" ON public."RefundTerminalConflictEvidence" USING btree ("vendorAllocationId");
 
--- AddForeignKey
-ALTER TABLE "AllocationAssignmentHistory" ADD CONSTRAINT "AllocationAssignmentHistory_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "AllocationAssignmentHistory" ADD CONSTRAINT "AllocationAssignmentHistory_fromVendorId_fkey" FOREIGN KEY ("fromVendorId") REFERENCES "Vendor"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReviewEvent_eventType_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "AllocationAssignmentHistory" ADD CONSTRAINT "AllocationAssignmentHistory_toVendorId_fkey" FOREIGN KEY ("toVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalEvidenceReviewEvent_eventType_createdAt_idx" ON public."RefundTerminalEvidenceReviewEvent" USING btree ("eventType", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "AllocationAssignmentHistory" ADD CONSTRAINT "AllocationAssignmentHistory_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "AllocationSplitEvent" ADD CONSTRAINT "AllocationSplitEvent_sourceAllocationId_fkey" FOREIGN KEY ("sourceAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReviewEvent_reviewId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "AllocationSplitEvent" ADD CONSTRAINT "AllocationSplitEvent_childAllocationId_fkey" FOREIGN KEY ("childAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalEvidenceReviewEvent_reviewId_createdAt_idx" ON public."RefundTerminalEvidenceReviewEvent" USING btree ("reviewId", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "AllocationSplitEvent" ADD CONSTRAINT "AllocationSplitEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "AllocationSplitEvent" ADD CONSTRAINT "AllocationSplitEvent_sourceFinanceLedgerEntryId_fkey" FOREIGN KEY ("sourceFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReview_dedupeKey_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "AllocationSplitEvent" ADD CONSTRAINT "AllocationSplitEvent_remainingFinanceLedgerEntryId_fkey" FOREIGN KEY ("remainingFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "RefundTerminalEvidenceReview_dedupeKey_key" ON public."RefundTerminalEvidenceReview" USING btree ("dedupeKey");
 
--- AddForeignKey
-ALTER TABLE "AllocationSplitEvent" ADD CONSTRAINT "AllocationSplitEvent_childFinanceLedgerEntryId_fkey" FOREIGN KEY ("childFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "AllocationEconomicTransfer" ADD CONSTRAINT "AllocationEconomicTransfer_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReview_firstObservedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "AllocationEconomicTransfer" ADD CONSTRAINT "AllocationEconomicTransfer_fromVendorId_fkey" FOREIGN KEY ("fromVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalEvidenceReview_firstObservedAt_idx" ON public."RefundTerminalEvidenceReview" USING btree ("firstObservedAt");
 
--- AddForeignKey
-ALTER TABLE "AllocationEconomicTransfer" ADD CONSTRAINT "AllocationEconomicTransfer_toVendorId_fkey" FOREIGN KEY ("toVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "AllocationEconomicTransfer" ADD CONSTRAINT "AllocationEconomicTransfer_fromFinanceLedgerEntryId_fkey" FOREIGN KEY ("fromFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReview_sourceShopifyRefundId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "AllocationEconomicTransfer" ADD CONSTRAINT "AllocationEconomicTransfer_toFinanceLedgerEntryId_fkey" FOREIGN KEY ("toFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalEvidenceReview_sourceShopifyRefundId_idx" ON public."RefundTerminalEvidenceReview" USING btree ("sourceShopifyRefundId");
 
--- AddForeignKey
-ALTER TABLE "AllocationEconomicTransfer" ADD CONSTRAINT "AllocationEconomicTransfer_adminActorUserId_fkey" FOREIGN KEY ("adminActorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "FinanceIntegrityAlert" ADD CONSTRAINT "FinanceIntegrityAlert_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReview_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "FinanceIntegrityAlert" ADD CONSTRAINT "FinanceIntegrityAlert_allocationEconomicTransferId_fkey" FOREIGN KEY ("allocationEconomicTransferId") REFERENCES "AllocationEconomicTransfer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalEvidenceReview_status_idx" ON public."RefundTerminalEvidenceReview" USING btree (status);
 
--- AddForeignKey
-ALTER TABLE "FinanceIntegrityAlert" ADD CONSTRAINT "FinanceIntegrityAlert_acknowledgedByUserId_fkey" FOREIGN KEY ("acknowledgedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "FinanceIntegrityAlert" ADD CONSTRAINT "FinanceIntegrityAlert_resolvedByUserId_fkey" FOREIGN KEY ("resolvedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReview_terminalRefundFinanceLedgerEnt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "Fulfillment" ADD CONSTRAINT "Fulfillment_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalEvidenceReview_terminalRefundFinanceLedgerEnt_idx" ON public."RefundTerminalEvidenceReview" USING btree ("terminalRefundFinanceLedgerEntryId");
 
--- AddForeignKey
-ALTER TABLE "ReturnRecord" ADD CONSTRAINT "ReturnRecord_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "ReturnRecord" ADD CONSTRAINT "ReturnRecord_ownerVendorId_fkey" FOREIGN KEY ("ownerVendorId") REFERENCES "Vendor"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: RefundTerminalEvidenceReview_vendorAllocationId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "RefundRecord" ADD CONSTRAINT "RefundRecord_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "RefundTerminalEvidenceReview_vendorAllocationId_idx" ON public."RefundTerminalEvidenceReview" USING btree ("vendorAllocationId");
 
--- AddForeignKey
-ALTER TABLE "RefundEvidenceSnapshot" ADD CONSTRAINT "RefundEvidenceSnapshot_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "RefundEvidenceSnapshot" ADD CONSTRAINT "RefundEvidenceSnapshot_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES "RefundRecord"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: ReturnRecord_ownerVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "RefundEvidenceSnapshot" ADD CONSTRAINT "RefundEvidenceSnapshot_refundFinanceLedgerEntryId_fkey" FOREIGN KEY ("refundFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "ReturnRecord_ownerVendorId_idx" ON public."ReturnRecord" USING btree ("ownerVendorId");
 
--- AddForeignKey
-ALTER TABLE "RefundEvidenceSnapshot" ADD CONSTRAINT "RefundEvidenceSnapshot_historicalEconomicVendorId_fkey" FOREIGN KEY ("historicalEconomicVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "RefundEvidenceSnapshot" ADD CONSTRAINT "RefundEvidenceSnapshot_historicalSaleFinanceLedgerEntryId_fkey" FOREIGN KEY ("historicalSaleFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: ReturnRecord_sourceShopifyReturnGid_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalEvidenceReview" ADD CONSTRAINT "RefundTerminalEvidenceReview_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "ReturnRecord_sourceShopifyReturnGid_idx" ON public."ReturnRecord" USING btree ("sourceShopifyReturnGid");
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalEvidenceReview" ADD CONSTRAINT "RefundTerminalEvidenceReview_terminalRefundFinanceLedgerEn_fkey" FOREIGN KEY ("terminalRefundFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalEvidenceReview" ADD CONSTRAINT "RefundTerminalEvidenceReview_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES "RefundRecord"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: ReturnRecord_sourceShopifyReturnId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalEvidenceReview" ADD CONSTRAINT "RefundTerminalEvidenceReview_economicVendorId_fkey" FOREIGN KEY ("economicVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "ReturnRecord_sourceShopifyReturnId_idx" ON public."ReturnRecord" USING btree ("sourceShopifyReturnId");
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalEvidenceReview" ADD CONSTRAINT "RefundTerminalEvidenceReview_storedEvidenceSnapshotId_fkey" FOREIGN KEY ("storedEvidenceSnapshotId") REFERENCES "RefundEvidenceSnapshot"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "RefundTerminalEvidenceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: ReturnRecord_vendorAllocationId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "ReturnRecord_vendorAllocationId_createdAt_idx" ON public."ReturnRecord" USING btree ("vendorAllocationId", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_economicVendorId_fkey" FOREIGN KEY ("economicVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalConflictEvidence" ADD CONSTRAINT "RefundTerminalConflictEvidence_historicalSaleFinanceLedger_fkey" FOREIGN KEY ("historicalSaleFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: SettlementApprovalLine_financeLedgerEntryId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalEvidenceReviewEvent" ADD CONSTRAINT "RefundTerminalEvidenceReviewEvent_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "RefundTerminalEvidenceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "SettlementApprovalLine_financeLedgerEntryId_idx" ON public."SettlementApprovalLine" USING btree ("financeLedgerEntryId");
 
--- AddForeignKey
-ALTER TABLE "RefundTerminalEvidenceReviewEvent" ADD CONSTRAINT "RefundTerminalEvidenceReviewEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "LegacyRefundFinanceReview" ADD CONSTRAINT "LegacyRefundFinanceReview_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementApprovalLine_lineType_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "LegacyRefundFinanceReview" ADD CONSTRAINT "LegacyRefundFinanceReview_observedVendorId_fkey" FOREIGN KEY ("observedVendorId") REFERENCES "Vendor"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementApprovalLine_lineType_idx" ON public."SettlementApprovalLine" USING btree ("lineType");
 
--- AddForeignKey
-ALTER TABLE "LegacyRefundFinanceReviewSource" ADD CONSTRAINT "LegacyRefundFinanceReviewSource_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "LegacyRefundFinanceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "LegacyRefundFinanceReviewEvent" ADD CONSTRAINT "LegacyRefundFinanceReviewEvent_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "LegacyRefundFinanceReview"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+--
+-- Name: SettlementApprovalLine_settlementApprovalId_financeLedgerEn_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "LegacyRefundFinanceReviewEvent" ADD CONSTRAINT "LegacyRefundFinanceReviewEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "SettlementApprovalLine_settlementApprovalId_financeLedgerEn_key" ON public."SettlementApprovalLine" USING btree ("settlementApprovalId", "financeLedgerEntryId");
 
--- AddForeignKey
-ALTER TABLE "ShopifyRefund" ADD CONSTRAINT "ShopifyRefund_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "ShopifyRefundLineItem" ADD CONSTRAINT "ShopifyRefundLineItem_shopifyRefundId_fkey" FOREIGN KEY ("shopifyRefundId") REFERENCES "ShopifyRefund"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementApprovalLine_settlementRefundAdjustmentApplicatio_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "ShopifyRefundLineItem" ADD CONSTRAINT "ShopifyRefundLineItem_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES "RefundRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "SettlementApprovalLine_settlementRefundAdjustmentApplicatio_key" ON public."SettlementApprovalLine" USING btree ("settlementRefundAdjustmentApplicationId");
 
--- AddForeignKey
-ALTER TABLE "ShopifyRefundLineItem" ADD CONSTRAINT "ShopifyRefundLineItem_shopifyOrderLineItemId_fkey" FOREIGN KEY ("shopifyOrderLineItemId") REFERENCES "ShopifyOrderLineItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "FinanceLedgerEntry" ADD CONSTRAINT "FinanceLedgerEntry_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementApprovalLine_settlementRefundAdjustmentId_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "FinanceLedgerEntry" ADD CONSTRAINT "FinanceLedgerEntry_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "SettlementApprovalLine_settlementRefundAdjustmentId_key" ON public."SettlementApprovalLine" USING btree ("settlementRefundAdjustmentId");
 
--- AddForeignKey
-ALTER TABLE "FinanceLedgerEntry" ADD CONSTRAINT "FinanceLedgerEntry_supersededByLedgerId_fkey" FOREIGN KEY ("supersededByLedgerId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "FinanceEvent" ADD CONSTRAINT "FinanceEvent_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementApproval_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "FinanceEvent" ADD CONSTRAINT "FinanceEvent_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementApproval_createdAt_idx" ON public."SettlementApproval" USING btree ("createdAt");
 
--- AddForeignKey
-ALTER TABLE "FinanceEvent" ADD CONSTRAINT "FinanceEvent_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SettlementApproval" ADD CONSTRAINT "SettlementApproval_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementApproval_periodStart_periodEnd_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SettlementApprovalLine" ADD CONSTRAINT "SettlementApprovalLine_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES "SettlementApproval"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementApproval_periodStart_periodEnd_idx" ON public."SettlementApproval" USING btree ("periodStart", "periodEnd");
 
--- AddForeignKey
-ALTER TABLE "SettlementApprovalLine" ADD CONSTRAINT "SettlementApprovalLine_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SettlementApprovalLine" ADD CONSTRAINT "SettlementApprovalLine_settlementRefundAdjustmentApplicati_fkey" FOREIGN KEY ("settlementRefundAdjustmentApplicationId") REFERENCES "SettlementRefundAdjustmentApplication"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementApproval_scheduledCycleKey_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SettlementCommissionInvoice" ADD CONSTRAINT "SettlementCommissionInvoice_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES "SettlementApproval"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "SettlementApproval_scheduledCycleKey_key" ON public."SettlementApproval" USING btree ("scheduledCycleKey");
 
--- AddForeignKey
-ALTER TABLE "SettlementCommissionInvoice" ADD CONSTRAINT "SettlementCommissionInvoice_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES "RefundRecord"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementApproval_vendorId_scheduledCycleKey_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_refundFinanceLedgerEntryId_fkey" FOREIGN KEY ("refundFinanceLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementApproval_vendorId_scheduledCycleKey_idx" ON public."SettlementApproval" USING btree ("vendorId", "scheduledCycleKey");
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_originalOrderId_fkey" FOREIGN KEY ("originalOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementApproval_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_originalSettlementApprovalId_fkey" FOREIGN KEY ("originalSettlementApprovalId") REFERENCES "SettlementApproval"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementApproval_vendorId_status_idx" ON public."SettlementApproval" USING btree ("vendorId", status);
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_originalSettlementApprovalLineI_fkey" FOREIGN KEY ("originalSettlementApprovalLineId") REFERENCES "SettlementApprovalLine"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_originalSettlementCommissionInv_fkey" FOREIGN KEY ("originalSettlementCommissionInvoiceId") REFERENCES "SettlementCommissionInvoice"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementCommissionInvoice_active_settlement_provider_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_appliedSettlementApprovalId_fkey" FOREIGN KEY ("appliedSettlementApprovalId") REFERENCES "SettlementApproval"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "SettlementCommissionInvoice_active_settlement_provider_key" ON public."SettlementCommissionInvoice" USING btree ("settlementApprovalId", provider) WHERE (status <> 'CANCELLED'::public."SettlementCommissionInvoiceStatus");
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustment" ADD CONSTRAINT "SettlementRefundAdjustment_appliedSettlementApprovalLineId_fkey" FOREIGN KEY ("appliedSettlementApprovalLineId") REFERENCES "SettlementApprovalLine"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustmentEvent" ADD CONSTRAINT "SettlementRefundAdjustmentEvent_settlementRefundAdjustment_fkey" FOREIGN KEY ("settlementRefundAdjustmentId") REFERENCES "SettlementRefundAdjustment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementCommissionInvoice_invoiceNo_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustmentApplication" ADD CONSTRAINT "SettlementRefundAdjustmentApplication_settlementRefundAdju_fkey" FOREIGN KEY ("settlementRefundAdjustmentId") REFERENCES "SettlementRefundAdjustment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementCommissionInvoice_invoiceNo_idx" ON public."SettlementCommissionInvoice" USING btree ("invoiceNo");
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustmentApplication" ADD CONSTRAINT "SettlementRefundAdjustmentApplication_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES "SettlementApproval"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "SettlementRefundAdjustmentApplication" ADD CONSTRAINT "SettlementRefundAdjustmentApplication_settlementApprovalLi_fkey" FOREIGN KEY ("settlementApprovalLineId") REFERENCES "SettlementApprovalLine"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementCommissionInvoice_providerUuid_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "ShipmentShippingCost" ADD CONSTRAINT "ShipmentShippingCost_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementCommissionInvoice_providerUuid_idx" ON public."SettlementCommissionInvoice" USING btree ("providerUuid");
 
--- AddForeignKey
-ALTER TABLE "ShipmentShippingCost" ADD CONSTRAINT "ShipmentShippingCost_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorShippingConfig" ADD CONSTRAINT "VendorShippingConfig_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementCommissionInvoice_provider_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorShippingWarehouse" ADD CONSTRAINT "VendorShippingWarehouse_configId_fkey" FOREIGN KEY ("configId") REFERENCES "VendorShippingConfig"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementCommissionInvoice_provider_idx" ON public."SettlementCommissionInvoice" USING btree (provider);
 
--- AddForeignKey
-ALTER TABLE "VendorShippingWarehouse" ADD CONSTRAINT "VendorShippingWarehouse_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "ShipmentExecution" ADD CONSTRAINT "ShipmentExecution_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementCommissionInvoice_settlementApprovalId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "ShipmentExecution" ADD CONSTRAINT "ShipmentExecution_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementCommissionInvoice_settlementApprovalId_idx" ON public."SettlementCommissionInvoice" USING btree ("settlementApprovalId");
 
--- AddForeignKey
-ALTER TABLE "PayoutBatch" ADD CONSTRAINT "PayoutBatch_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "PayoutBatchLine" ADD CONSTRAINT "PayoutBatchLine_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES "PayoutBatch"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementCommissionInvoice_status_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "PayoutBatchLine" ADD CONSTRAINT "PayoutBatchLine_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementCommissionInvoice_status_idx" ON public."SettlementCommissionInvoice" USING btree (status);
 
--- AddForeignKey
-ALTER TABLE "PayoutBatchLine" ADD CONSTRAINT "PayoutBatchLine_settlementApprovalLineId_fkey" FOREIGN KEY ("settlementApprovalLineId") REFERENCES "SettlementApprovalLine"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorBalanceEvent" ADD CONSTRAINT "VendorBalanceEvent_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Name: SettlementCommissionInvoice_vendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorBalanceEvent" ADD CONSTRAINT "VendorBalanceEvent_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementCommissionInvoice_vendorId_idx" ON public."SettlementCommissionInvoice" USING btree ("vendorId");
 
--- AddForeignKey
-ALTER TABLE "VendorBalanceEvent" ADD CONSTRAINT "VendorBalanceEvent_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES "RefundRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "VendorBalanceEvent" ADD CONSTRAINT "VendorBalanceEvent_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES "PayoutBatch"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementRefundAdjustmentApplication_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "VendorBalanceEvent" ADD CONSTRAINT "VendorBalanceEvent_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES "SettlementApproval"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementRefundAdjustmentApplication_createdAt_idx" ON public."SettlementRefundAdjustmentApplication" USING btree ("createdAt");
 
--- AddForeignKey
-ALTER TABLE "WebhookEvent" ADD CONSTRAINT "WebhookEvent_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_webhookEventId_fkey" FOREIGN KEY ("webhookEventId") REFERENCES "WebhookEvent"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementRefundAdjustmentApplication_settlementApprovalId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementRefundAdjustmentApplication_settlementApprovalId_idx" ON public."SettlementRefundAdjustmentApplication" USING btree ("settlementApprovalId");
 
--- AddForeignKey
-ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES "RefundRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_returnRecordId_fkey" FOREIGN KEY ("returnRecordId") REFERENCES "ReturnRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementRefundAdjustmentApplication_settlementApprovalLin_key; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_customerCancellationRequestItemId_fkey" FOREIGN KEY ("customerCancellationRequestItemId") REFERENCES "CustomerCancellationRequestItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "SettlementRefundAdjustmentApplication_settlementApprovalLin_key" ON public."SettlementRefundAdjustmentApplication" USING btree ("settlementApprovalLineId");
 
--- AddForeignKey
-ALTER TABLE "OperationalSignal" ADD CONSTRAINT "OperationalSignal_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "OperationalSignal" ADD CONSTRAINT "OperationalSignal_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES "VendorAllocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementRefundAdjustmentApplication_settlementRefundAdjus_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "OperationalSignal" ADD CONSTRAINT "OperationalSignal_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementRefundAdjustmentApplication_settlementRefundAdjus_idx" ON public."SettlementRefundAdjustmentApplication" USING btree ("settlementRefundAdjustmentId", status);
 
--- AddForeignKey
-ALTER TABLE "OperationalSignal" ADD CONSTRAINT "OperationalSignal_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES "PayoutBatch"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "OperationalSignal" ADD CONSTRAINT "OperationalSignal_operationalJobId_fkey" FOREIGN KEY ("operationalJobId") REFERENCES "OperationalJob"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementRefundAdjustmentEvent_eventType_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "NotificationIntent" ADD CONSTRAINT "NotificationIntent_signalId_fkey" FOREIGN KEY ("signalId") REFERENCES "OperationalSignal"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementRefundAdjustmentEvent_eventType_createdAt_idx" ON public."SettlementRefundAdjustmentEvent" USING btree ("eventType", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "NotificationIntent" ADD CONSTRAINT "NotificationIntent_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "AutomationAction" ADD CONSTRAINT "AutomationAction_signalId_fkey" FOREIGN KEY ("signalId") REFERENCES "OperationalSignal"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementRefundAdjustmentEvent_settlementRefundAdjustmentI_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "AutomationAction" ADD CONSTRAINT "AutomationAction_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "SettlementRefundAdjustmentEvent_settlementRefundAdjustmentI_idx" ON public."SettlementRefundAdjustmentEvent" USING btree ("settlementRefundAdjustmentId", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "AutomationAction" ADD CONSTRAINT "AutomationAction_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES "VendorAllocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "AutomationAction" ADD CONSTRAINT "AutomationAction_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES "FinanceLedgerEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+--
+-- Name: SettlementRefundAdjustment_appliedSettlementApprovalId_idx; Type: INDEX; Schema: public; Owner: -
+--
 
--- AddForeignKey
-ALTER TABLE "AutomationAction" ADD CONSTRAINT "AutomationAction_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES "PayoutBatch"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "SettlementRefundAdjustment_appliedSettlementApprovalId_idx" ON public."SettlementRefundAdjustment" USING btree ("appliedSettlementApprovalId");
 
--- AddForeignKey
-ALTER TABLE "AutomationAction" ADD CONSTRAINT "AutomationAction_operationalJobId_fkey" FOREIGN KEY ("operationalJobId") REFERENCES "OperationalJob"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+--
+-- Name: SettlementRefundAdjustment_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementRefundAdjustment_createdAt_idx" ON public."SettlementRefundAdjustment" USING btree ("createdAt");
+
+
+--
+-- Name: SettlementRefundAdjustment_originalOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementRefundAdjustment_originalOrderId_idx" ON public."SettlementRefundAdjustment" USING btree ("originalOrderId");
+
+
+--
+-- Name: SettlementRefundAdjustment_originalSettlementApprovalId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementRefundAdjustment_originalSettlementApprovalId_idx" ON public."SettlementRefundAdjustment" USING btree ("originalSettlementApprovalId");
+
+
+--
+-- Name: SettlementRefundAdjustment_originalSettlementCommissionInvo_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementRefundAdjustment_originalSettlementCommissionInvo_idx" ON public."SettlementRefundAdjustment" USING btree ("originalSettlementCommissionInvoiceId");
+
+
+--
+-- Name: SettlementRefundAdjustment_refundFinanceLedgerEntryId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementRefundAdjustment_refundFinanceLedgerEntryId_key" ON public."SettlementRefundAdjustment" USING btree ("refundFinanceLedgerEntryId");
+
+
+--
+-- Name: SettlementRefundAdjustment_refundRecordId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementRefundAdjustment_refundRecordId_idx" ON public."SettlementRefundAdjustment" USING btree ("refundRecordId");
+
+
+--
+-- Name: SettlementRefundAdjustment_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementRefundAdjustment_vendorId_status_idx" ON public."SettlementRefundAdjustment" USING btree ("vendorId", status);
+
+
+--
+-- Name: SettlementScheduleJobRun_finishedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementScheduleJobRun_finishedAt_idx" ON public."SettlementScheduleJobRun" USING btree ("finishedAt");
+
+
+--
+-- Name: SettlementScheduleJobRun_runDate_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementScheduleJobRun_runDate_key" ON public."SettlementScheduleJobRun" USING btree ("runDate");
+
+
+--
+-- Name: SettlementScheduleJobRun_status_startedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementScheduleJobRun_status_startedAt_idx" ON public."SettlementScheduleJobRun" USING btree (status, "startedAt");
+
+
+--
+-- Name: ShipmentExecution_allocationId_provider_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ShipmentExecution_allocationId_provider_key" ON public."ShipmentExecution" USING btree ("allocationId", provider);
+
+
+--
+-- Name: ShipmentExecution_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ShipmentExecution_createdAt_idx" ON public."ShipmentExecution" USING btree ("createdAt");
+
+
+--
+-- Name: ShipmentExecution_provider_shipmentStatus_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ShipmentExecution_provider_shipmentStatus_idx" ON public."ShipmentExecution" USING btree (provider, "shipmentStatus");
+
+
+--
+-- Name: ShipmentExecution_sourceShopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ShipmentExecution_sourceShopifyOrderId_idx" ON public."ShipmentExecution" USING btree ("sourceShopifyOrderId");
+
+
+--
+-- Name: ShipmentExecution_vendorId_shipmentStatus_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ShipmentExecution_vendorId_shipmentStatus_idx" ON public."ShipmentExecution" USING btree ("vendorId", "shipmentStatus");
+
+
+--
+-- Name: ShipmentShippingCost_allocationId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ShipmentShippingCost_allocationId_status_idx" ON public."ShipmentShippingCost" USING btree ("allocationId", status);
+
+
+--
+-- Name: ShipmentShippingCost_sourceShopifyOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ShipmentShippingCost_sourceShopifyOrderId_idx" ON public."ShipmentShippingCost" USING btree ("sourceShopifyOrderId");
+
+
+--
+-- Name: ShipmentShippingCost_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ShipmentShippingCost_vendorId_status_idx" ON public."ShipmentShippingCost" USING btree ("vendorId", status);
+
+
+--
+-- Name: ShopifyOrderLineItem_shopifyOrderId_sourceLineItemId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ShopifyOrderLineItem_shopifyOrderId_sourceLineItemId_key" ON public."ShopifyOrderLineItem" USING btree ("shopifyOrderId", "sourceLineItemId");
+
+
+--
+-- Name: ShopifyOrder_sourceShopifyOrderId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ShopifyOrder_sourceShopifyOrderId_key" ON public."ShopifyOrder" USING btree ("sourceShopifyOrderId");
+
+
+--
+-- Name: ShopifyRefundLineItem_shopifyRefundId_sourceRefundLineItemI_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ShopifyRefundLineItem_shopifyRefundId_sourceRefundLineItemI_key" ON public."ShopifyRefundLineItem" USING btree ("shopifyRefundId", "sourceRefundLineItemId");
+
+
+--
+-- Name: ShopifyRefund_sourceShopifyRefundId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ShopifyRefund_sourceShopifyRefundId_key" ON public."ShopifyRefund" USING btree ("sourceShopifyRefundId");
+
+
+--
+-- Name: SupportTicketNote_supportTicketId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicketNote_supportTicketId_createdAt_idx" ON public."SupportTicketNote" USING btree ("supportTicketId", "createdAt");
+
+
+--
+-- Name: SupportTicketReply_supportTicketId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicketReply_supportTicketId_createdAt_idx" ON public."SupportTicketReply" USING btree ("supportTicketId", "createdAt");
+
+
+--
+-- Name: SupportTicket_adminUnreadCount_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_adminUnreadCount_idx" ON public."SupportTicket" USING btree ("adminUnreadCount");
+
+
+--
+-- Name: SupportTicket_assigneeUserId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_assigneeUserId_idx" ON public."SupportTicket" USING btree ("assigneeUserId");
+
+
+--
+-- Name: SupportTicket_category_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_category_status_idx" ON public."SupportTicket" USING btree (category, status);
+
+
+--
+-- Name: SupportTicket_contextType_contextId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_contextType_contextId_idx" ON public."SupportTicket" USING btree ("contextType", "contextId");
+
+
+--
+-- Name: SupportTicket_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_createdAt_idx" ON public."SupportTicket" USING btree ("createdAt");
+
+
+--
+-- Name: SupportTicket_escalatedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_escalatedAt_idx" ON public."SupportTicket" USING btree ("escalatedAt");
+
+
+--
+-- Name: SupportTicket_firstResponseDueAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_firstResponseDueAt_idx" ON public."SupportTicket" USING btree ("firstResponseDueAt");
+
+
+--
+-- Name: SupportTicket_nextResponseDueAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_nextResponseDueAt_idx" ON public."SupportTicket" USING btree ("nextResponseDueAt");
+
+
+--
+-- Name: SupportTicket_vendorId_status_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_vendorId_status_createdAt_idx" ON public."SupportTicket" USING btree ("vendorId", status, "createdAt");
+
+
+--
+-- Name: SupportTicket_vendorUnreadCount_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SupportTicket_vendorUnreadCount_idx" ON public."SupportTicket" USING btree ("vendorUnreadCount");
+
+
+--
+-- Name: UserVendorAccess_userId_vendorId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "UserVendorAccess_userId_vendorId_key" ON public."UserVendorAccess" USING btree ("userId", "vendorId");
+
+
+--
+-- Name: User_email_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "User_email_key" ON public."User" USING btree (email);
+
+
+--
+-- Name: VendorAllocationLineItem_vendorAllocationId_shopifyLineItem_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorAllocationLineItem_vendorAllocationId_shopifyLineItem_key" ON public."VendorAllocationLineItem" USING btree ("vendorAllocationId", "shopifyLineItemId");
+
+
+--
+-- Name: VendorAllocation_cancelRefundReviewStatus_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorAllocation_cancelRefundReviewStatus_idx" ON public."VendorAllocation" USING btree ("cancelRefundReviewStatus");
+
+
+--
+-- Name: VendorAllocation_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorAllocation_createdAt_idx" ON public."VendorAllocation" USING btree ("createdAt");
+
+
+--
+-- Name: VendorAllocation_odooSaleOrderId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorAllocation_odooSaleOrderId_idx" ON public."VendorAllocation" USING btree ("odooSaleOrderId");
+
+
+--
+-- Name: VendorAllocation_vendorIntegrationStatus_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorAllocation_vendorIntegrationStatus_idx" ON public."VendorAllocation" USING btree ("vendorIntegrationStatus");
+
+
+--
+-- Name: VendorBalanceEvent_financeLedgerEntryId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_financeLedgerEntryId_idx" ON public."VendorBalanceEvent" USING btree ("financeLedgerEntryId");
+
+
+--
+-- Name: VendorBalanceEvent_financialCorrectionAuthorityId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorBalanceEvent_financialCorrectionAuthorityId_key" ON public."VendorBalanceEvent" USING btree ("financialCorrectionAuthorityId");
+
+
+--
+-- Name: VendorBalanceEvent_idempotencyKey_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorBalanceEvent_idempotencyKey_key" ON public."VendorBalanceEvent" USING btree ("idempotencyKey");
+
+
+--
+-- Name: VendorBalanceEvent_payoutBatchId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_payoutBatchId_idx" ON public."VendorBalanceEvent" USING btree ("payoutBatchId");
+
+
+--
+-- Name: VendorBalanceEvent_refundRecordId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_refundRecordId_idx" ON public."VendorBalanceEvent" USING btree ("refundRecordId");
+
+
+--
+-- Name: VendorBalanceEvent_settlementApprovalId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_settlementApprovalId_idx" ON public."VendorBalanceEvent" USING btree ("settlementApprovalId");
+
+
+--
+-- Name: VendorBalanceEvent_sourceType_sourceId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_sourceType_sourceId_idx" ON public."VendorBalanceEvent" USING btree ("sourceType", "sourceId");
+
+
+--
+-- Name: VendorBalanceEvent_type_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_type_createdAt_idx" ON public."VendorBalanceEvent" USING btree (type, "createdAt");
+
+
+--
+-- Name: VendorBalanceEvent_vendorId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_vendorId_createdAt_idx" ON public."VendorBalanceEvent" USING btree ("vendorId", "createdAt");
+
+
+--
+-- Name: VendorBalanceEvent_vendorId_currency_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBalanceEvent_vendorId_currency_idx" ON public."VendorBalanceEvent" USING btree ("vendorId", currency);
+
+
+--
+-- Name: VendorBillingProfile_vendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorBillingProfile_vendorId_idx" ON public."VendorBillingProfile" USING btree ("vendorId");
+
+
+--
+-- Name: VendorBillingProfile_vendorId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorBillingProfile_vendorId_key" ON public."VendorBillingProfile" USING btree ("vendorId");
+
+
+--
+-- Name: VendorFinancialProfile_vendorId_active_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorFinancialProfile_vendorId_active_idx" ON public."VendorFinancialProfile" USING btree ("vendorId", active);
+
+
+--
+-- Name: VendorFinancialProfile_vendorId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorFinancialProfile_vendorId_key" ON public."VendorFinancialProfile" USING btree ("vendorId");
+
+
+--
+-- Name: VendorIntegrationAuditLog_clientId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationAuditLog_clientId_createdAt_idx" ON public."VendorIntegrationAuditLog" USING btree ("clientId", "createdAt");
+
+
+--
+-- Name: VendorIntegrationAuditLog_vendorIdentifier_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationAuditLog_vendorIdentifier_createdAt_idx" ON public."VendorIntegrationAuditLog" USING btree ("vendorIdentifier", "createdAt");
+
+
+--
+-- Name: VendorIntegrationClient_enabled_revokedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationClient_enabled_revokedAt_idx" ON public."VendorIntegrationClient" USING btree (enabled, "revokedAt");
+
+
+--
+-- Name: VendorIntegrationClient_tokenHash_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorIntegrationClient_tokenHash_key" ON public."VendorIntegrationClient" USING btree ("tokenHash");
+
+
+--
+-- Name: VendorIntegrationClient_vendorIdentifier_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationClient_vendorIdentifier_idx" ON public."VendorIntegrationClient" USING btree ("vendorIdentifier");
+
+
+--
+-- Name: VendorIntegrationInvoiceEvent_clientId_vendorAllocationId_i_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorIntegrationInvoiceEvent_clientId_vendorAllocationId_i_key" ON public."VendorIntegrationInvoiceEvent" USING btree ("clientId", "vendorAllocationId", "idempotencyKey");
+
+
+--
+-- Name: VendorIntegrationInvoiceEvent_vendorAllocationId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationInvoiceEvent_vendorAllocationId_createdAt_idx" ON public."VendorIntegrationInvoiceEvent" USING btree ("vendorAllocationId", "createdAt");
+
+
+--
+-- Name: VendorIntegrationInvoiceEvent_vendorIdentifier_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationInvoiceEvent_vendorIdentifier_createdAt_idx" ON public."VendorIntegrationInvoiceEvent" USING btree ("vendorIdentifier", "createdAt");
+
+
+--
+-- Name: VendorIntegrationShipmentEvent_clientId_vendorAllocationId__key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorIntegrationShipmentEvent_clientId_vendorAllocationId__key" ON public."VendorIntegrationShipmentEvent" USING btree ("clientId", "vendorAllocationId", "idempotencyKey");
+
+
+--
+-- Name: VendorIntegrationShipmentEvent_vendorAllocationId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationShipmentEvent_vendorAllocationId_createdAt_idx" ON public."VendorIntegrationShipmentEvent" USING btree ("vendorAllocationId", "createdAt");
+
+
+--
+-- Name: VendorIntegrationShipmentEvent_vendorIdentifier_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationShipmentEvent_vendorIdentifier_createdAt_idx" ON public."VendorIntegrationShipmentEvent" USING btree ("vendorIdentifier", "createdAt");
+
+
+--
+-- Name: VendorIntegrationStatusEvent_clientId_vendorAllocationId_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorIntegrationStatusEvent_clientId_vendorAllocationId_id_key" ON public."VendorIntegrationStatusEvent" USING btree ("clientId", "vendorAllocationId", "idempotencyKey");
+
+
+--
+-- Name: VendorIntegrationStatusEvent_vendorAllocationId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationStatusEvent_vendorAllocationId_createdAt_idx" ON public."VendorIntegrationStatusEvent" USING btree ("vendorAllocationId", "createdAt");
+
+
+--
+-- Name: VendorIntegrationStatusEvent_vendorIdentifier_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIntegrationStatusEvent_vendorIdentifier_createdAt_idx" ON public."VendorIntegrationStatusEvent" USING btree ("vendorIdentifier", "createdAt");
+
+
+--
+-- Name: VendorProfileAuditLog_fieldName_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorProfileAuditLog_fieldName_idx" ON public."VendorProfileAuditLog" USING btree ("fieldName");
+
+
+--
+-- Name: VendorProfileAuditLog_vendorId_changedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorProfileAuditLog_vendorId_changedAt_idx" ON public."VendorProfileAuditLog" USING btree ("vendorId", "changedAt");
+
+
+--
+-- Name: VendorProfileAuditLog_vendorId_section_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorProfileAuditLog_vendorId_section_idx" ON public."VendorProfileAuditLog" USING btree ("vendorId", section);
+
+
+--
+-- Name: VendorShippingConfig_vendorId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorShippingConfig_vendorId_key" ON public."VendorShippingConfig" USING btree ("vendorId");
+
+
+--
+-- Name: VendorShippingConfig_vendorId_shippingEnabled_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorShippingConfig_vendorId_shippingEnabled_idx" ON public."VendorShippingConfig" USING btree ("vendorId", "shippingEnabled");
+
+
+--
+-- Name: VendorShippingWarehouse_configId_isDefault_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorShippingWarehouse_configId_isDefault_idx" ON public."VendorShippingWarehouse" USING btree ("configId", "isDefault");
+
+
+--
+-- Name: VendorShippingWarehouse_vendorId_provider_isDefault_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorShippingWarehouse_vendorId_provider_isDefault_idx" ON public."VendorShippingWarehouse" USING btree ("vendorId", provider, "isDefault");
+
+
+--
+-- Name: VendorShippingWarehouse_vendorId_provider_warehouseId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorShippingWarehouse_vendorId_provider_warehouseId_key" ON public."VendorShippingWarehouse" USING btree ("vendorId", provider, "warehouseId");
+
+
+--
+-- Name: WebhookEvent_idempotencyKey_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "WebhookEvent_idempotencyKey_key" ON public."WebhookEvent" USING btree ("idempotencyKey");
+
+
+--
+-- Name: WebhookEvent_sourceShopDomain_topic_webhookId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "WebhookEvent_sourceShopDomain_topic_webhookId_key" ON public."WebhookEvent" USING btree ("sourceShopDomain", topic, "webhookId");
+
+
+--
+-- Name: WebhookEvent_topic_sourceShopifyOrderId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "WebhookEvent_topic_sourceShopifyOrderId_status_idx" ON public."WebhookEvent" USING btree (topic, "sourceShopifyOrderId", status);
+
+
+--
+-- Name: WebhookEvent_topic_status_executionAvailableAt_receivedAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "WebhookEvent_topic_status_executionAvailableAt_receivedAt_idx" ON public."WebhookEvent" USING btree (topic, status, "executionAvailableAt", "receivedAt");
+
+
+--
+-- Name: WebhookEvent_topic_status_processingLeaseExpiresAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "WebhookEvent_topic_status_processingLeaseExpiresAt_idx" ON public."WebhookEvent" USING btree (topic, status, "processingLeaseExpiresAt");
+
+
+--
+-- Name: ZeroNetAck_accepted_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ZeroNetAck_accepted_key" ON public."FinancialCorrectionZeroNetAcknowledgement" USING btree ("acceptedEvidenceSnapshotId");
+
+
+--
+-- Name: ZeroNetAck_allocation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ZeroNetAck_allocation_idx" ON public."FinancialCorrectionZeroNetAcknowledgement" USING btree ("vendorAllocationId");
+
+
+--
+-- Name: ZeroNetAck_event_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ZeroNetAck_event_key" ON public."FinancialCorrectionZeroNetAcknowledgement" USING btree ("resolvedReviewEventId");
+
+
+--
+-- Name: ZeroNetAck_evidence_pair_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ZeroNetAck_evidence_pair_key" ON public."FinancialCorrectionZeroNetAcknowledgement" USING btree ("acceptedEvidenceSnapshotId", "incomingConflictEvidenceId");
+
+
+--
+-- Name: ZeroNetAck_incoming_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ZeroNetAck_incoming_key" ON public."FinancialCorrectionZeroNetAcknowledgement" USING btree ("incomingConflictEvidenceId");
+
+
+--
+-- Name: ZeroNetAck_review_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ZeroNetAck_review_key" ON public."FinancialCorrectionZeroNetAcknowledgement" USING btree ("reviewId");
+
+
+--
+-- Name: ZeroNetAck_vendor_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ZeroNetAck_vendor_idx" ON public."FinancialCorrectionZeroNetAcknowledgement" USING btree ("vendorId");
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage FinancialCorrectionApprovedDeductionCoverage_source_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "FinancialCorrectionApprovedDeductionCoverage_source_guard" BEFORE INSERT OR UPDATE ON public."FinancialCorrectionApprovedDeductionCoverage" FOR EACH ROW EXECUTE FUNCTION public."checkApprovedDeductionCoverage"();
+
+
+--
+-- Name: FinancialCorrectionCredit FinancialCorrectionCredit_direction_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "FinancialCorrectionCredit_direction_guard" BEFORE INSERT OR UPDATE ON public."FinancialCorrectionCredit" FOR EACH ROW EXECUTE FUNCTION public."checkFinancialCorrectionEffectDirection"();
+
+
+--
+-- Name: FinancialCorrectionDeduction FinancialCorrectionDeduction_direction_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "FinancialCorrectionDeduction_direction_guard" BEFORE INSERT OR UPDATE ON public."FinancialCorrectionDeduction" FOR EACH ROW EXECUTE FUNCTION public."checkFinancialCorrectionDeductionDirection"();
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_correction_direction_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "VendorBalanceEvent_correction_direction_guard" BEFORE INSERT OR UPDATE ON public."VendorBalanceEvent" FOR EACH ROW EXECUTE FUNCTION public."checkFinancialCorrectionDebtDirection"();
+
+
+--
+-- Name: AllocationAssignmentHistory AllocationAssignmentHistory_actorUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationAssignmentHistory"
+    ADD CONSTRAINT "AllocationAssignmentHistory_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationAssignmentHistory AllocationAssignmentHistory_fromVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationAssignmentHistory"
+    ADD CONSTRAINT "AllocationAssignmentHistory_fromVendorId_fkey" FOREIGN KEY ("fromVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationAssignmentHistory AllocationAssignmentHistory_toVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationAssignmentHistory"
+    ADD CONSTRAINT "AllocationAssignmentHistory_toVendorId_fkey" FOREIGN KEY ("toVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationAssignmentHistory AllocationAssignmentHistory_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationAssignmentHistory"
+    ADD CONSTRAINT "AllocationAssignmentHistory_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: AllocationEconomicTransfer AllocationEconomicTransfer_adminActorUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationEconomicTransfer"
+    ADD CONSTRAINT "AllocationEconomicTransfer_adminActorUserId_fkey" FOREIGN KEY ("adminActorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationEconomicTransfer AllocationEconomicTransfer_fromFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationEconomicTransfer"
+    ADD CONSTRAINT "AllocationEconomicTransfer_fromFinanceLedgerEntryId_fkey" FOREIGN KEY ("fromFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationEconomicTransfer AllocationEconomicTransfer_fromVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationEconomicTransfer"
+    ADD CONSTRAINT "AllocationEconomicTransfer_fromVendorId_fkey" FOREIGN KEY ("fromVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationEconomicTransfer AllocationEconomicTransfer_toFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationEconomicTransfer"
+    ADD CONSTRAINT "AllocationEconomicTransfer_toFinanceLedgerEntryId_fkey" FOREIGN KEY ("toFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationEconomicTransfer AllocationEconomicTransfer_toVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationEconomicTransfer"
+    ADD CONSTRAINT "AllocationEconomicTransfer_toVendorId_fkey" FOREIGN KEY ("toVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationEconomicTransfer AllocationEconomicTransfer_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationEconomicTransfer"
+    ADD CONSTRAINT "AllocationEconomicTransfer_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: AllocationFullRefundTerminalFact AllocationFullRefundTerminalFact_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationFullRefundTerminalFact"
+    ADD CONSTRAINT "AllocationFullRefundTerminalFact_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationSplitEvent AllocationSplitEvent_actorUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationSplitEvent"
+    ADD CONSTRAINT "AllocationSplitEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationSplitEvent AllocationSplitEvent_childAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationSplitEvent"
+    ADD CONSTRAINT "AllocationSplitEvent_childAllocationId_fkey" FOREIGN KEY ("childAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationSplitEvent AllocationSplitEvent_childFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationSplitEvent"
+    ADD CONSTRAINT "AllocationSplitEvent_childFinanceLedgerEntryId_fkey" FOREIGN KEY ("childFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationSplitEvent AllocationSplitEvent_remainingFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationSplitEvent"
+    ADD CONSTRAINT "AllocationSplitEvent_remainingFinanceLedgerEntryId_fkey" FOREIGN KEY ("remainingFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AllocationSplitEvent AllocationSplitEvent_sourceAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationSplitEvent"
+    ADD CONSTRAINT "AllocationSplitEvent_sourceAllocationId_fkey" FOREIGN KEY ("sourceAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationSplitEvent AllocationSplitEvent_sourceFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationSplitEvent"
+    ADD CONSTRAINT "AllocationSplitEvent_sourceFinanceLedgerEntryId_fkey" FOREIGN KEY ("sourceFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AutomationAction AutomationAction_allocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AutomationAction"
+    ADD CONSTRAINT "AutomationAction_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AutomationAction AutomationAction_financeLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AutomationAction"
+    ADD CONSTRAINT "AutomationAction_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AutomationAction AutomationAction_operationalJobId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AutomationAction"
+    ADD CONSTRAINT "AutomationAction_operationalJobId_fkey" FOREIGN KEY ("operationalJobId") REFERENCES public."OperationalJob"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AutomationAction AutomationAction_payoutBatchId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AutomationAction"
+    ADD CONSTRAINT "AutomationAction_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AutomationAction AutomationAction_signalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AutomationAction"
+    ADD CONSTRAINT "AutomationAction_signalId_fkey" FOREIGN KEY ("signalId") REFERENCES public."OperationalSignal"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: AutomationAction AutomationAction_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AutomationAction"
+    ADD CONSTRAINT "AutomationAction_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: CustomerCancellationRequestItem CustomerCancellationRequestItem_requestId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequestItem"
+    ADD CONSTRAINT "CustomerCancellationRequestItem_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES public."CustomerCancellationRequest"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: CustomerCancellationRequestItem CustomerCancellationRequestItem_reviewedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequestItem"
+    ADD CONSTRAINT "CustomerCancellationRequestItem_reviewedByUserId_fkey" FOREIGN KEY ("reviewedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: CustomerCancellationRequestItem CustomerCancellationRequestItem_shopifyOrderLineItemId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequestItem"
+    ADD CONSTRAINT "CustomerCancellationRequestItem_shopifyOrderLineItemId_fkey" FOREIGN KEY ("shopifyOrderLineItemId") REFERENCES public."ShopifyOrderLineItem"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: CustomerCancellationRequestItem CustomerCancellationRequestItem_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequestItem"
+    ADD CONSTRAINT "CustomerCancellationRequestItem_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: CustomerCancellationRequest CustomerCancellationRequest_reviewedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequest"
+    ADD CONSTRAINT "CustomerCancellationRequest_reviewedByUserId_fkey" FOREIGN KEY ("reviewedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: CustomerCancellationRequest CustomerCancellationRequest_shopifyOrderId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."CustomerCancellationRequest"
+    ADD CONSTRAINT "CustomerCancellationRequest_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: FinanceEvent FinanceEvent_financeLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceEvent"
+    ADD CONSTRAINT "FinanceEvent_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceEvent FinanceEvent_shopifyOrderId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceEvent"
+    ADD CONSTRAINT "FinanceEvent_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceEvent FinanceEvent_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceEvent"
+    ADD CONSTRAINT "FinanceEvent_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: FinanceIntegrityAlert FinanceIntegrityAlert_acknowledgedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceIntegrityAlert"
+    ADD CONSTRAINT "FinanceIntegrityAlert_acknowledgedByUserId_fkey" FOREIGN KEY ("acknowledgedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceIntegrityAlert FinanceIntegrityAlert_allocationEconomicTransferId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceIntegrityAlert"
+    ADD CONSTRAINT "FinanceIntegrityAlert_allocationEconomicTransferId_fkey" FOREIGN KEY ("allocationEconomicTransferId") REFERENCES public."AllocationEconomicTransfer"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceIntegrityAlert FinanceIntegrityAlert_resolvedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceIntegrityAlert"
+    ADD CONSTRAINT "FinanceIntegrityAlert_resolvedByUserId_fkey" FOREIGN KEY ("resolvedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceIntegrityAlert FinanceIntegrityAlert_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceIntegrityAlert"
+    ADD CONSTRAINT "FinanceIntegrityAlert_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceLedgerEntry FinanceLedgerEntry_supersededByLedgerId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceLedgerEntry"
+    ADD CONSTRAINT "FinanceLedgerEntry_supersededByLedgerId_fkey" FOREIGN KEY ("supersededByLedgerId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceLedgerEntry FinanceLedgerEntry_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceLedgerEntry"
+    ADD CONSTRAINT "FinanceLedgerEntry_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: FinanceLedgerEntry FinanceLedgerEntry_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinanceLedgerEntry"
+    ADD CONSTRAINT "FinanceLedgerEntry_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage FinancialCorrectionApprovedDeductionCoverage_deductionId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionApprovedDeductionCoverage"
+    ADD CONSTRAINT "FinancialCorrectionApprovedDeductionCoverage_deductionId_fkey" FOREIGN KEY ("deductionId") REFERENCES public."FinancialCorrectionDeduction"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage FinancialCorrectionApprovedDeductionCoverage_settlementApproval; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionApprovedDeductionCoverage"
+    ADD CONSTRAINT "FinancialCorrectionApprovedDeductionCoverage_settlementApproval" FOREIGN KEY ("settlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionCoverage FinancialCorrectionApprovedDeductionCoverage_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionApprovedDeductionCoverage"
+    ADD CONSTRAINT "FinancialCorrectionApprovedDeductionCoverage_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionPayoutLine FinancialCorrectionApprovedDeductionPayoutLine_coverageId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionApprovedDeductionPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionApprovedDeductionPayoutLine_coverageId_fkey" FOREIGN KEY ("coverageId") REFERENCES public."FinancialCorrectionApprovedDeductionCoverage"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionApprovedDeductionPayoutLine FinancialCorrectionApprovedDeductionPayoutLine_payoutBatchId_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionApprovedDeductionPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionApprovedDeductionPayoutLine_payoutBatchId_fk" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_accepted_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_accepted_fkey" FOREIGN KEY ("acceptedEvidenceSnapshotId") REFERENCES public."RefundEvidenceSnapshot"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_actor_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_actor_fkey" FOREIGN KEY ("authorizedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_approved_settlement_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_approved_settlement_fkey" FOREIGN KEY ("historicalApprovedSettlementId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_event_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_event_fkey" FOREIGN KEY ("resolvedReviewEventId") REFERENCES public."RefundTerminalEvidenceReviewEvent"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_incoming_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_incoming_fkey" FOREIGN KEY ("incomingConflictEvidenceId") REFERENCES public."RefundTerminalConflictEvidence"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_payout_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_payout_fkey" FOREIGN KEY ("historicalPayoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionAuthority FinancialCorrectionAuthority_review_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionAuthority"
+    ADD CONSTRAINT "FinancialCorrectionAuthority_review_fkey" FOREIGN KEY ("reviewId") REFERENCES public."RefundTerminalEvidenceReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionBaselineClaim FinancialCorrectionBaselineClaim_accepted_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionBaselineClaim"
+    ADD CONSTRAINT "FinancialCorrectionBaselineClaim_accepted_fkey" FOREIGN KEY ("acceptedEvidenceSnapshotId") REFERENCES public."RefundEvidenceSnapshot"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionCreditPayoutLine FinancialCorrectionCreditPayoutLine_payoutBatchId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCreditPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionCreditPayoutLine_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionCreditPayoutLine FinancialCorrectionCreditPayoutLine_settlementCreditLineId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCreditPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionCreditPayoutLine_settlementCreditLineId_fkey" FOREIGN KEY ("settlementCreditLineId") REFERENCES public."FinancialCorrectionCreditSettlementLine"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionCreditSettlementLine FinancialCorrectionCreditSettlementLine_creditId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCreditSettlementLine"
+    ADD CONSTRAINT "FinancialCorrectionCreditSettlementLine_creditId_fkey" FOREIGN KEY ("creditId") REFERENCES public."FinancialCorrectionCredit"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionCreditSettlementLine FinancialCorrectionCreditSettlementLine_settlementApproval_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCreditSettlementLine"
+    ADD CONSTRAINT "FinancialCorrectionCreditSettlementLine_settlementApproval_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionCredit FinancialCorrectionCredit_authorityId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCredit"
+    ADD CONSTRAINT "FinancialCorrectionCredit_authorityId_fkey" FOREIGN KEY ("authorityId") REFERENCES public."FinancialCorrectionAuthority"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionCredit FinancialCorrectionCredit_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionCredit"
+    ADD CONSTRAINT "FinancialCorrectionCredit_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionDeductionPayoutLine FinancialCorrectionDeductionPayoutLine_batch_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeductionPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionDeductionPayoutLine_batch_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionDeductionPayoutLine FinancialCorrectionDeductionPayoutLine_source_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeductionPayoutLine"
+    ADD CONSTRAINT "FinancialCorrectionDeductionPayoutLine_source_fkey" FOREIGN KEY ("settlementDeductionLineId") REFERENCES public."FinancialCorrectionDeductionSettlementLine"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionDeductionSettlementLine FinancialCorrectionDeductionSettlementLine_settlement_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeductionSettlementLine"
+    ADD CONSTRAINT "FinancialCorrectionDeductionSettlementLine_settlement_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionDeductionSettlementLine FinancialCorrectionDeductionSettlementLine_source_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeductionSettlementLine"
+    ADD CONSTRAINT "FinancialCorrectionDeductionSettlementLine_source_fkey" FOREIGN KEY ("deductionId") REFERENCES public."FinancialCorrectionDeduction"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionDeduction FinancialCorrectionDeduction_authorityId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeduction"
+    ADD CONSTRAINT "FinancialCorrectionDeduction_authorityId_fkey" FOREIGN KEY ("authorityId") REFERENCES public."FinancialCorrectionAuthority"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionDeduction FinancialCorrectionDeduction_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionDeduction"
+    ADD CONSTRAINT "FinancialCorrectionDeduction_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionZeroNetAcknowledgement FinancialCorrectionZeroNetAcknowledgement_acceptedEvidence_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionZeroNetAcknowledgement"
+    ADD CONSTRAINT "FinancialCorrectionZeroNetAcknowledgement_acceptedEvidence_fkey" FOREIGN KEY ("acceptedEvidenceSnapshotId") REFERENCES public."RefundEvidenceSnapshot"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionZeroNetAcknowledgement FinancialCorrectionZeroNetAcknowledgement_acknowledgedByUs_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionZeroNetAcknowledgement"
+    ADD CONSTRAINT "FinancialCorrectionZeroNetAcknowledgement_acknowledgedByUs_fkey" FOREIGN KEY ("acknowledgedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionZeroNetAcknowledgement FinancialCorrectionZeroNetAcknowledgement_incomingConflict_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionZeroNetAcknowledgement"
+    ADD CONSTRAINT "FinancialCorrectionZeroNetAcknowledgement_incomingConflict_fkey" FOREIGN KEY ("incomingConflictEvidenceId") REFERENCES public."RefundTerminalConflictEvidence"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionZeroNetAcknowledgement FinancialCorrectionZeroNetAcknowledgement_resolvedReviewEv_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionZeroNetAcknowledgement"
+    ADD CONSTRAINT "FinancialCorrectionZeroNetAcknowledgement_resolvedReviewEv_fkey" FOREIGN KEY ("resolvedReviewEventId") REFERENCES public."RefundTerminalEvidenceReviewEvent"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: FinancialCorrectionZeroNetAcknowledgement FinancialCorrectionZeroNetAcknowledgement_reviewId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."FinancialCorrectionZeroNetAcknowledgement"
+    ADD CONSTRAINT "FinancialCorrectionZeroNetAcknowledgement_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES public."RefundTerminalEvidenceReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: Fulfillment Fulfillment_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."Fulfillment"
+    ADD CONSTRAINT "Fulfillment_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: LegacyRefundFinanceReviewEvent LegacyRefundFinanceReviewEvent_actorUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReviewEvent"
+    ADD CONSTRAINT "LegacyRefundFinanceReviewEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: LegacyRefundFinanceReviewEvent LegacyRefundFinanceReviewEvent_reviewId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReviewEvent"
+    ADD CONSTRAINT "LegacyRefundFinanceReviewEvent_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES public."LegacyRefundFinanceReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: LegacyRefundFinanceReviewSource LegacyRefundFinanceReviewSource_reviewId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReviewSource"
+    ADD CONSTRAINT "LegacyRefundFinanceReviewSource_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES public."LegacyRefundFinanceReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: LegacyRefundFinanceReview LegacyRefundFinanceReview_observedVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReview"
+    ADD CONSTRAINT "LegacyRefundFinanceReview_observedVendorId_fkey" FOREIGN KEY ("observedVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: LegacyRefundFinanceReview LegacyRefundFinanceReview_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."LegacyRefundFinanceReview"
+    ADD CONSTRAINT "LegacyRefundFinanceReview_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: NotificationIntent NotificationIntent_signalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."NotificationIntent"
+    ADD CONSTRAINT "NotificationIntent_signalId_fkey" FOREIGN KEY ("signalId") REFERENCES public."OperationalSignal"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: NotificationIntent NotificationIntent_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."NotificationIntent"
+    ADD CONSTRAINT "NotificationIntent_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: OperationalJob OperationalJob_customerCancellationRequestItemId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalJob"
+    ADD CONSTRAINT "OperationalJob_customerCancellationRequestItemId_fkey" FOREIGN KEY ("customerCancellationRequestItemId") REFERENCES public."CustomerCancellationRequestItem"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalJob OperationalJob_refundRecordId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalJob"
+    ADD CONSTRAINT "OperationalJob_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES public."RefundRecord"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalJob OperationalJob_returnRecordId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalJob"
+    ADD CONSTRAINT "OperationalJob_returnRecordId_fkey" FOREIGN KEY ("returnRecordId") REFERENCES public."ReturnRecord"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalJob OperationalJob_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalJob"
+    ADD CONSTRAINT "OperationalJob_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalJob OperationalJob_webhookEventId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalJob"
+    ADD CONSTRAINT "OperationalJob_webhookEventId_fkey" FOREIGN KEY ("webhookEventId") REFERENCES public."WebhookEvent"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalSignal OperationalSignal_allocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalSignal"
+    ADD CONSTRAINT "OperationalSignal_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalSignal OperationalSignal_financeLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalSignal"
+    ADD CONSTRAINT "OperationalSignal_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalSignal OperationalSignal_operationalJobId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalSignal"
+    ADD CONSTRAINT "OperationalSignal_operationalJobId_fkey" FOREIGN KEY ("operationalJobId") REFERENCES public."OperationalJob"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalSignal OperationalSignal_payoutBatchId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalSignal"
+    ADD CONSTRAINT "OperationalSignal_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OperationalSignal OperationalSignal_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OperationalSignal"
+    ADD CONSTRAINT "OperationalSignal_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: OrderShippingRefundClaim OrderShippingRefundClaim_ownerAttemptId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OrderShippingRefundClaim"
+    ADD CONSTRAINT "OrderShippingRefundClaim_ownerAttemptId_fkey" FOREIGN KEY ("ownerAttemptId") REFERENCES public."OutboundShopifyRefundAttempt"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: OutboundShopifyRefundAttempt OutboundShopifyRefundAttempt_customerCancellationRequestIt_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OutboundShopifyRefundAttempt"
+    ADD CONSTRAINT "OutboundShopifyRefundAttempt_customerCancellationRequestIt_fkey" FOREIGN KEY ("customerCancellationRequestItemId") REFERENCES public."CustomerCancellationRequestItem"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OutboundShopifyRefundAttempt OutboundShopifyRefundAttempt_requestedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OutboundShopifyRefundAttempt"
+    ADD CONSTRAINT "OutboundShopifyRefundAttempt_requestedByUserId_fkey" FOREIGN KEY ("requestedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: OutboundShopifyRefundAttempt OutboundShopifyRefundAttempt_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."OutboundShopifyRefundAttempt"
+    ADD CONSTRAINT "OutboundShopifyRefundAttempt_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: PayoutBatchLine PayoutBatchLine_financeLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutBatchLine"
+    ADD CONSTRAINT "PayoutBatchLine_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: PayoutBatchLine PayoutBatchLine_payoutBatchId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutBatchLine"
+    ADD CONSTRAINT "PayoutBatchLine_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: PayoutBatchLine PayoutBatchLine_settlementApprovalLineId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutBatchLine"
+    ADD CONSTRAINT "PayoutBatchLine_settlementApprovalLineId_fkey" FOREIGN KEY ("settlementApprovalLineId") REFERENCES public."SettlementApprovalLine"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutBatch PayoutBatch_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutBatch"
+    ADD CONSTRAINT "PayoutBatch_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ProductPanelVariantDisableOutboxEvent ProductPanelVariantDisableOutboxEvent_allocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ProductPanelVariantDisableOutboxEvent"
+    ADD CONSTRAINT "ProductPanelVariantDisableOutboxEvent_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ProductPanelVariantDisableOutboxEvent ProductPanelVariantDisableOutboxEvent_vendorAllocationLine_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ProductPanelVariantDisableOutboxEvent"
+    ADD CONSTRAINT "ProductPanelVariantDisableOutboxEvent_vendorAllocationLine_fkey" FOREIGN KEY ("vendorAllocationLineItemId") REFERENCES public."VendorAllocationLineItem"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: RefundEvidenceSnapshot RefundEvidenceSnapshot_historicalEconomicVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundEvidenceSnapshot"
+    ADD CONSTRAINT "RefundEvidenceSnapshot_historicalEconomicVendorId_fkey" FOREIGN KEY ("historicalEconomicVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundEvidenceSnapshot RefundEvidenceSnapshot_historicalSaleFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundEvidenceSnapshot"
+    ADD CONSTRAINT "RefundEvidenceSnapshot_historicalSaleFinanceLedgerEntryId_fkey" FOREIGN KEY ("historicalSaleFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundEvidenceSnapshot RefundEvidenceSnapshot_refundFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundEvidenceSnapshot"
+    ADD CONSTRAINT "RefundEvidenceSnapshot_refundFinanceLedgerEntryId_fkey" FOREIGN KEY ("refundFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundEvidenceSnapshot RefundEvidenceSnapshot_refundRecordId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundEvidenceSnapshot"
+    ADD CONSTRAINT "RefundEvidenceSnapshot_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES public."RefundRecord"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundEvidenceSnapshot RefundEvidenceSnapshot_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundEvidenceSnapshot"
+    ADD CONSTRAINT "RefundEvidenceSnapshot_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundRecord RefundRecord_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundRecord"
+    ADD CONSTRAINT "RefundRecord_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: RefundTerminalConflictEvidence RefundTerminalConflictEvidence_economicVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalConflictEvidence"
+    ADD CONSTRAINT "RefundTerminalConflictEvidence_economicVendorId_fkey" FOREIGN KEY ("economicVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalConflictEvidence RefundTerminalConflictEvidence_historicalSaleFinanceLedger_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalConflictEvidence"
+    ADD CONSTRAINT "RefundTerminalConflictEvidence_historicalSaleFinanceLedger_fkey" FOREIGN KEY ("historicalSaleFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalConflictEvidence RefundTerminalConflictEvidence_reviewId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalConflictEvidence"
+    ADD CONSTRAINT "RefundTerminalConflictEvidence_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES public."RefundTerminalEvidenceReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalConflictEvidence RefundTerminalConflictEvidence_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalConflictEvidence"
+    ADD CONSTRAINT "RefundTerminalConflictEvidence_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalEvidenceReviewEvent RefundTerminalEvidenceReviewEvent_actorUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReviewEvent"
+    ADD CONSTRAINT "RefundTerminalEvidenceReviewEvent_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: RefundTerminalEvidenceReviewEvent RefundTerminalEvidenceReviewEvent_reviewId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReviewEvent"
+    ADD CONSTRAINT "RefundTerminalEvidenceReviewEvent_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES public."RefundTerminalEvidenceReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalEvidenceReview RefundTerminalEvidenceReview_economicVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReview"
+    ADD CONSTRAINT "RefundTerminalEvidenceReview_economicVendorId_fkey" FOREIGN KEY ("economicVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalEvidenceReview RefundTerminalEvidenceReview_refundRecordId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReview"
+    ADD CONSTRAINT "RefundTerminalEvidenceReview_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES public."RefundRecord"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalEvidenceReview RefundTerminalEvidenceReview_storedEvidenceSnapshotId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReview"
+    ADD CONSTRAINT "RefundTerminalEvidenceReview_storedEvidenceSnapshotId_fkey" FOREIGN KEY ("storedEvidenceSnapshotId") REFERENCES public."RefundEvidenceSnapshot"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalEvidenceReview RefundTerminalEvidenceReview_terminalRefundFinanceLedgerEn_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReview"
+    ADD CONSTRAINT "RefundTerminalEvidenceReview_terminalRefundFinanceLedgerEn_fkey" FOREIGN KEY ("terminalRefundFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: RefundTerminalEvidenceReview RefundTerminalEvidenceReview_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."RefundTerminalEvidenceReview"
+    ADD CONSTRAINT "RefundTerminalEvidenceReview_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: ReturnRecord ReturnRecord_ownerVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ReturnRecord"
+    ADD CONSTRAINT "ReturnRecord_ownerVendorId_fkey" FOREIGN KEY ("ownerVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: ReturnRecord ReturnRecord_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ReturnRecord"
+    ADD CONSTRAINT "ReturnRecord_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementApprovalLine SettlementApprovalLine_financeLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApprovalLine"
+    ADD CONSTRAINT "SettlementApprovalLine_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementApprovalLine SettlementApprovalLine_settlementApprovalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApprovalLine"
+    ADD CONSTRAINT "SettlementApprovalLine_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementApprovalLine SettlementApprovalLine_settlementRefundAdjustmentApplicati_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApprovalLine"
+    ADD CONSTRAINT "SettlementApprovalLine_settlementRefundAdjustmentApplicati_fkey" FOREIGN KEY ("settlementRefundAdjustmentApplicationId") REFERENCES public."SettlementRefundAdjustmentApplication"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: SettlementApproval SettlementApproval_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApproval"
+    ADD CONSTRAINT "SettlementApproval_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementCommissionInvoice SettlementCommissionInvoice_settlementApprovalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementCommissionInvoice"
+    ADD CONSTRAINT "SettlementCommissionInvoice_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementCommissionInvoice SettlementCommissionInvoice_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementCommissionInvoice"
+    ADD CONSTRAINT "SettlementCommissionInvoice_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustmentApplication SettlementRefundAdjustmentApplication_settlementApprovalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustmentApplication"
+    ADD CONSTRAINT "SettlementRefundAdjustmentApplication_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustmentApplication SettlementRefundAdjustmentApplication_settlementApprovalLi_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustmentApplication"
+    ADD CONSTRAINT "SettlementRefundAdjustmentApplication_settlementApprovalLi_fkey" FOREIGN KEY ("settlementApprovalLineId") REFERENCES public."SettlementApprovalLine"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustmentApplication SettlementRefundAdjustmentApplication_settlementRefundAdju_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustmentApplication"
+    ADD CONSTRAINT "SettlementRefundAdjustmentApplication_settlementRefundAdju_fkey" FOREIGN KEY ("settlementRefundAdjustmentId") REFERENCES public."SettlementRefundAdjustment"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustmentEvent SettlementRefundAdjustmentEvent_settlementRefundAdjustment_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustmentEvent"
+    ADD CONSTRAINT "SettlementRefundAdjustmentEvent_settlementRefundAdjustment_fkey" FOREIGN KEY ("settlementRefundAdjustmentId") REFERENCES public."SettlementRefundAdjustment"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_appliedSettlementApprovalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_appliedSettlementApprovalId_fkey" FOREIGN KEY ("appliedSettlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_appliedSettlementApprovalLineId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_appliedSettlementApprovalLineId_fkey" FOREIGN KEY ("appliedSettlementApprovalLineId") REFERENCES public."SettlementApprovalLine"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_originalOrderId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_originalOrderId_fkey" FOREIGN KEY ("originalOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_originalSettlementApprovalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_originalSettlementApprovalId_fkey" FOREIGN KEY ("originalSettlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_originalSettlementApprovalLineI_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_originalSettlementApprovalLineI_fkey" FOREIGN KEY ("originalSettlementApprovalLineId") REFERENCES public."SettlementApprovalLine"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_originalSettlementCommissionInv_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_originalSettlementCommissionInv_fkey" FOREIGN KEY ("originalSettlementCommissionInvoiceId") REFERENCES public."SettlementCommissionInvoice"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_refundFinanceLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_refundFinanceLedgerEntryId_fkey" FOREIGN KEY ("refundFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_refundRecordId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES public."RefundRecord"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementRefundAdjustment SettlementRefundAdjustment_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementRefundAdjustment"
+    ADD CONSTRAINT "SettlementRefundAdjustment_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShipmentExecution ShipmentExecution_allocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShipmentExecution"
+    ADD CONSTRAINT "ShipmentExecution_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShipmentExecution ShipmentExecution_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShipmentExecution"
+    ADD CONSTRAINT "ShipmentExecution_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShipmentShippingCost ShipmentShippingCost_allocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShipmentShippingCost"
+    ADD CONSTRAINT "ShipmentShippingCost_allocationId_fkey" FOREIGN KEY ("allocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShipmentShippingCost ShipmentShippingCost_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShipmentShippingCost"
+    ADD CONSTRAINT "ShipmentShippingCost_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShopifyOrderLineItem ShopifyOrderLineItem_shopifyOrderId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyOrderLineItem"
+    ADD CONSTRAINT "ShopifyOrderLineItem_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShopifyRefundLineItem ShopifyRefundLineItem_refundRecordId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyRefundLineItem"
+    ADD CONSTRAINT "ShopifyRefundLineItem_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES public."RefundRecord"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: ShopifyRefundLineItem ShopifyRefundLineItem_shopifyOrderLineItemId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyRefundLineItem"
+    ADD CONSTRAINT "ShopifyRefundLineItem_shopifyOrderLineItemId_fkey" FOREIGN KEY ("shopifyOrderLineItemId") REFERENCES public."ShopifyOrderLineItem"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShopifyRefundLineItem ShopifyRefundLineItem_shopifyRefundId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyRefundLineItem"
+    ADD CONSTRAINT "ShopifyRefundLineItem_shopifyRefundId_fkey" FOREIGN KEY ("shopifyRefundId") REFERENCES public."ShopifyRefund"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: ShopifyRefund ShopifyRefund_shopifyOrderId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ShopifyRefund"
+    ADD CONSTRAINT "ShopifyRefund_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SupportTicketNote SupportTicketNote_authorUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicketNote"
+    ADD CONSTRAINT "SupportTicketNote_authorUserId_fkey" FOREIGN KEY ("authorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SupportTicketNote SupportTicketNote_supportTicketId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicketNote"
+    ADD CONSTRAINT "SupportTicketNote_supportTicketId_fkey" FOREIGN KEY ("supportTicketId") REFERENCES public."SupportTicket"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SupportTicketReply SupportTicketReply_authorUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicketReply"
+    ADD CONSTRAINT "SupportTicketReply_authorUserId_fkey" FOREIGN KEY ("authorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SupportTicketReply SupportTicketReply_supportTicketId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicketReply"
+    ADD CONSTRAINT "SupportTicketReply_supportTicketId_fkey" FOREIGN KEY ("supportTicketId") REFERENCES public."SupportTicket"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SupportTicket SupportTicket_createdByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicket"
+    ADD CONSTRAINT "SupportTicket_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SupportTicket SupportTicket_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SupportTicket"
+    ADD CONSTRAINT "SupportTicket_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: UserVendorAccess UserVendorAccess_userId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."UserVendorAccess"
+    ADD CONSTRAINT "UserVendorAccess_userId_fkey" FOREIGN KEY ("userId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: UserVendorAccess UserVendorAccess_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."UserVendorAccess"
+    ADD CONSTRAINT "UserVendorAccess_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorAllocationLineItem VendorAllocationLineItem_shopifyLineItemId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorAllocationLineItem"
+    ADD CONSTRAINT "VendorAllocationLineItem_shopifyLineItemId_fkey" FOREIGN KEY ("shopifyLineItemId") REFERENCES public."ShopifyOrderLineItem"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorAllocationLineItem VendorAllocationLineItem_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorAllocationLineItem"
+    ADD CONSTRAINT "VendorAllocationLineItem_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorAllocation VendorAllocation_assignedVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorAllocation"
+    ADD CONSTRAINT "VendorAllocation_assignedVendorId_fkey" FOREIGN KEY ("assignedVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorAllocation VendorAllocation_originalVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorAllocation"
+    ADD CONSTRAINT "VendorAllocation_originalVendorId_fkey" FOREIGN KEY ("originalVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorAllocation VendorAllocation_sourceShopifyOrderId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorAllocation"
+    ADD CONSTRAINT "VendorAllocation_sourceShopifyOrderId_fkey" FOREIGN KEY ("sourceShopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_correction_authority_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBalanceEvent"
+    ADD CONSTRAINT "VendorBalanceEvent_correction_authority_fkey" FOREIGN KEY ("financialCorrectionAuthorityId") REFERENCES public."FinancialCorrectionAuthority"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_financeLedgerEntryId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBalanceEvent"
+    ADD CONSTRAINT "VendorBalanceEvent_financeLedgerEntryId_fkey" FOREIGN KEY ("financeLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_payoutBatchId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBalanceEvent"
+    ADD CONSTRAINT "VendorBalanceEvent_payoutBatchId_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_refundRecordId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBalanceEvent"
+    ADD CONSTRAINT "VendorBalanceEvent_refundRecordId_fkey" FOREIGN KEY ("refundRecordId") REFERENCES public."RefundRecord"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_settlementApprovalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBalanceEvent"
+    ADD CONSTRAINT "VendorBalanceEvent_settlementApprovalId_fkey" FOREIGN KEY ("settlementApprovalId") REFERENCES public."SettlementApproval"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: VendorBalanceEvent VendorBalanceEvent_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBalanceEvent"
+    ADD CONSTRAINT "VendorBalanceEvent_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorBillingProfile VendorBillingProfile_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorBillingProfile"
+    ADD CONSTRAINT "VendorBillingProfile_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorFinancialProfile VendorFinancialProfile_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorFinancialProfile"
+    ADD CONSTRAINT "VendorFinancialProfile_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIntegrationAuditLog VendorIntegrationAuditLog_clientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationAuditLog"
+    ADD CONSTRAINT "VendorIntegrationAuditLog_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES public."VendorIntegrationClient"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIntegrationInvoiceEvent VendorIntegrationInvoiceEvent_clientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationInvoiceEvent"
+    ADD CONSTRAINT "VendorIntegrationInvoiceEvent_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES public."VendorIntegrationClient"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIntegrationInvoiceEvent VendorIntegrationInvoiceEvent_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationInvoiceEvent"
+    ADD CONSTRAINT "VendorIntegrationInvoiceEvent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIntegrationShipmentEvent VendorIntegrationShipmentEvent_clientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationShipmentEvent"
+    ADD CONSTRAINT "VendorIntegrationShipmentEvent_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES public."VendorIntegrationClient"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIntegrationShipmentEvent VendorIntegrationShipmentEvent_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationShipmentEvent"
+    ADD CONSTRAINT "VendorIntegrationShipmentEvent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIntegrationStatusEvent VendorIntegrationStatusEvent_clientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationStatusEvent"
+    ADD CONSTRAINT "VendorIntegrationStatusEvent_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES public."VendorIntegrationClient"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIntegrationStatusEvent VendorIntegrationStatusEvent_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIntegrationStatusEvent"
+    ADD CONSTRAINT "VendorIntegrationStatusEvent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorProfileAuditLog VendorProfileAuditLog_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorProfileAuditLog"
+    ADD CONSTRAINT "VendorProfileAuditLog_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorShippingConfig VendorShippingConfig_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorShippingConfig"
+    ADD CONSTRAINT "VendorShippingConfig_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorShippingWarehouse VendorShippingWarehouse_configId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorShippingWarehouse"
+    ADD CONSTRAINT "VendorShippingWarehouse_configId_fkey" FOREIGN KEY ("configId") REFERENCES public."VendorShippingConfig"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorShippingWarehouse VendorShippingWarehouse_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorShippingWarehouse"
+    ADD CONSTRAINT "VendorShippingWarehouse_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: WebhookEvent WebhookEvent_shopifyOrderId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."WebhookEvent"
+    ADD CONSTRAINT "WebhookEvent_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- PostgreSQL database dump complete
+--

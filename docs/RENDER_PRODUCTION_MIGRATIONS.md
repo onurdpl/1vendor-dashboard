@@ -90,7 +90,16 @@ The maintained baseline files are:
 - `backend/prisma/bootstrap/current-schema.sql`
 - `backend/prisma/bootstrap/baseline-manifest.json`
 
-Whenever `backend/prisma/schema.prisma` changes, the baseline must be refreshed in the same change because the bootstrap validates its checksum. Regenerate `current-schema.sql` from the actual schema using the repository's installed Prisma version and the generation command recorded in the manifest. Then advance the manifest cutoff to the latest migration represented by that snapshot, refresh the ordered baseline migration list, and update the recorded Prisma version plus schema, snapshot, and aggregate migration-file checksums. The bootstrap validates all of this metadata and applies only migrations newer than the cutoff afterward, so incomplete or inconsistent maintenance must fail CI. Validate the refreshed baseline against a disposable empty PostgreSQL database; leave all historical migration files unchanged.
+Whenever `backend/prisma/schema.prisma` or its migrations change, refresh the baseline with PostgreSQL **16 server and client** tooling on an isolated local database server:
+
+```bash
+BOOTSTRAP_REFRESH_DATABASE_URL='postgresql://USER:PASSWORD@127.0.0.1:PORT/postgres?schema=public' \
+  npm run backend:db:bootstrap:refresh
+```
+
+The refresh command creates disposable databases, reconstructs the previous baseline, restores the one proven pre-cutoff partial index from its immutable historical migration, applies remaining migrations, verifies the PostgreSQL catalog, and generates a normalized native `pg_dump --schema-only` snapshot. It independently regenerates the result and verifies a fresh restore before writing tracked artifacts. The manifest records the latest represented migration, migration-file checksum, target Prisma schema checksum, snapshot checksum, and semantic catalog fingerprint. The separate `backend:db:bootstrap:check` command regenerates and compares without changing tracked files; CI runs it against PostgreSQL 16.
+
+`prisma migrate diff --from-empty --to-schema-datamodel` alone is **not** a supported baseline generator: it omits migration-only partial indexes, CHECK constraints, functions, and triggers. Historical migrations remain immutable. Raw migration replay from migration one is not the supported fresh path. Existing databases continue to use `backend:db:deploy`, not fresh bootstrap.
 
 Restoring an existing production backup is not fresh bootstrap: restore the backup and continue with normal migration deployment. Fresh bootstrap is appropriate in disaster recovery only when the recovery plan intentionally creates a truly empty replacement database and restores or reconstructs application data separately.
 
