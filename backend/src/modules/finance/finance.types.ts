@@ -363,6 +363,7 @@ export type PayoutBatchDto = {
   shippingDeductionAmount: string;
   refundAmount: string;
   correctionCreditAmount: string;
+  correctionDeductionAmount: string;
   payableBeforeDebtOffset: string;
   outstandingDebtAmount: string;
   debtOffsetAmount: string;
@@ -380,6 +381,7 @@ export type PayoutBatchDto = {
   warning: string | null;
   lines?: PayoutBatchLineDto[];
   correctionCreditLines?: Array<{ id: string; settlementCreditLineId: string; amountMinor: number; status: string }>;
+  correctionDeductionLines?: Array<{ id: string; settlementDeductionLineId: string; amountMinor: number; status: string }>;
 };
 
 export type PreparePayoutBatchDto = {

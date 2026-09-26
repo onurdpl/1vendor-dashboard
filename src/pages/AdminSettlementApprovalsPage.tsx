@@ -1172,6 +1172,13 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
           ))}
         </MetadataGroup>
       ) : null}
+      {(approval.correctionDeductionLines?.length ?? 0) > 0 ? (
+        <MetadataGroup title="Financial correction deductions">
+          {approval.correctionDeductionLines?.map((line) => (
+            <MetadataRow key={line.id} label={`Deduction ${line.deductionId}`} value={`-${formatMinor(line.amountMinor, approval.currency)} · ${line.status}`} />
+          ))}
+        </MetadataGroup>
+      ) : null}
     </>
   );
 }
@@ -2460,7 +2467,7 @@ export function AdminSettlementApprovalsPage() {
         scheduledRunDate: nextApproval.scheduledRunDate ?? existingSummary?.scheduledRunDate,
         scheduledPeriodEnd: nextApproval.scheduledPeriodEnd ?? existingSummary?.scheduledPeriodEnd,
         scheduledCycleKey: nextApproval.scheduledCycleKey ?? existingSummary?.scheduledCycleKey,
-        lineCount: existingSummary?.lineCount ?? nextApproval.lines.length + (nextApproval.correctionCreditLines?.length ?? 0),
+        lineCount: existingSummary?.lineCount ?? nextApproval.lines.length + (nextApproval.correctionCreditLines?.length ?? 0) + (nextApproval.correctionDeductionLines?.length ?? 0),
       };
       return [summary, ...current.filter((item) => item.id !== summary.id)]
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
@@ -3085,6 +3092,7 @@ export function AdminSettlementApprovalsPage() {
                 <KPIStatCard label="Commission" value={formatMinor(approval.commissionMinor, approval.currency)} tone="info" />
                 <KPIStatCard label="Commission VAT" value={formatMinor(approval.commissionVatMinor, approval.currency)} tone="info" />
                 {(approval.correctionCreditMinor ?? 0) > 0 ? <KPIStatCard label="Financial correction credit" value={formatMinor(approval.correctionCreditMinor ?? 0, approval.currency)} tone="info" /> : null}
+                {(approval.correctionDeductionMinor ?? 0) > 0 ? <KPIStatCard label="Financial correction deduction" value={`-${formatMinor(approval.correctionDeductionMinor ?? 0, approval.currency)}`} tone="info" /> : null}
                 <KPIStatCard label="Net payable" value={formatMinor(approval.netPayableMinor, approval.currency)} tone={approval.netPayableMinor > 0 ? 'success' : 'neutral'} />
               </div>
               <ApprovalSnapshotLines approval={approval} />
@@ -3112,6 +3120,13 @@ export function AdminSettlementApprovalsPage() {
                     ))}
                   </MetadataGroup>
                 ) : null}
+                {(preview.correctionDeductions?.length ?? 0) > 0 ? (
+                  <MetadataGroup title="Financial correction deductions">
+                    {preview.correctionDeductions?.map((deduction) => (
+                      <MetadataRow key={deduction.id} label={`Deduction ${deduction.id}`} value={`-${formatMinor(deduction.amountMinor, preview.summary.currency)}`} />
+                    ))}
+                  </MetadataGroup>
+                ) : null}
                 <div>
                   <h3>Operational totals</h3>
                   <p className="page-description">Saved approval math is unchanged; these preview totals remain available after the decision summary.</p>
@@ -3121,6 +3136,7 @@ export function AdminSettlementApprovalsPage() {
                   <KPIStatCard label="Commission" value={formatMinor(preview.summary.commissionMinor, preview.summary.currency)} tone="info" />
                   <KPIStatCard label="Commission VAT" value={formatMinor(preview.summary.commissionVatMinor, preview.summary.currency)} tone="info" />
                   {(preview.summary.correctionCreditMinor ?? 0) > 0 ? <KPIStatCard label="Financial correction credit" value={formatMinor(preview.summary.correctionCreditMinor ?? 0, preview.summary.currency)} tone="info" /> : null}
+                  {(preview.summary.correctionDeductionMinor ?? 0) > 0 ? <KPIStatCard label="Financial correction deduction" value={`-${formatMinor(preview.summary.correctionDeductionMinor ?? 0, preview.summary.currency)}`} tone="info" /> : null}
                   <KPIStatCard label="Net payable" value={formatMinor(preview.summary.netPayableMinor, preview.summary.currency)} tone={preview.summary.netPayableMinor > 0 ? 'success' : 'neutral'} />
                   <KPIStatCard label="Outstanding debt" value={formatMinor(previewDebtProjection?.outstandingVendorDebtMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.outstandingVendorDebtMinor ?? 0) > 0 ? 'danger' : 'neutral'} />
                   <KPIStatCard label="Debt offset" value={formatMinor(previewDebtProjection?.debtOffsetPreviewMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.debtOffsetPreviewMinor ?? 0) > 0 ? 'warning' : 'neutral'} />

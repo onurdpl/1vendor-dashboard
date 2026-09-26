@@ -1795,6 +1795,7 @@ export type PayoutBatch = {
   shippingDeductionAmount: string;
   refundAmount: string;
   correctionCreditAmount?: string;
+  correctionDeductionAmount?: string;
   payableBeforeDebtOffset?: string;
   outstandingDebtAmount?: string;
   debtOffsetAmount?: string;

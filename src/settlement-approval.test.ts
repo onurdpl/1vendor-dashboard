@@ -20,7 +20,13 @@ const prismaMock = vi.hoisted(() => ({
   financialCorrectionCredit: {
     findMany: vi.fn(),
   },
+  financialCorrectionDeduction: {
+    findMany: vi.fn(),
+  },
   financialCorrectionCreditSettlementLine: {
+    updateMany: vi.fn(),
+  },
+  financialCorrectionDeductionSettlementLine: {
     updateMany: vi.fn(),
   },
   settlementRefundAdjustment: {
@@ -241,6 +247,7 @@ function buildApproval(input: {
     commissionVatMinor: 2000,
     netPayableMinor: 78000,
     correctionCreditMinor: 0,
+    correctionDeductionMinor: 0,
     approvedBy: input.status === 'APPROVED' ? 'admin-1' : null,
     approvedAt: input.status === 'APPROVED' ? new Date('2026-06-01T12:00:00.000Z') : null,
     cancelledBy: input.status === 'CANCELLED' ? 'admin-2' : null,
@@ -262,6 +269,7 @@ function buildApproval(input: {
       },
     ],
     correctionCreditLines: [],
+    correctionDeductionLines: [],
   };
 }
 
@@ -306,8 +314,12 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementApprovalLine.update.mockReset();
     prismaMock.financialCorrectionCredit.findMany.mockReset();
     prismaMock.financialCorrectionCredit.findMany.mockResolvedValue([]);
+    prismaMock.financialCorrectionDeduction.findMany.mockReset();
+    prismaMock.financialCorrectionDeduction.findMany.mockResolvedValue([]);
     prismaMock.financialCorrectionCreditSettlementLine.updateMany.mockReset();
     prismaMock.financialCorrectionCreditSettlementLine.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.financialCorrectionDeductionSettlementLine.updateMany.mockReset();
+    prismaMock.financialCorrectionDeductionSettlementLine.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.settlementRefundAdjustment.findMany.mockReset();
     prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([]);
     prismaMock.settlementRefundAdjustment.findUnique.mockReset();
@@ -1210,6 +1222,7 @@ describe('settlement approval foundation', () => {
           select: {
             lines: true,
             correctionCreditLines: true,
+            correctionDeductionLines: true,
           },
         },
       },
@@ -1284,6 +1297,7 @@ describe('settlement approval foundation', () => {
           commissionVatMinor: 1800,
           netPayableMinor: 79200,
           correctionCreditMinor: 0,
+          correctionDeductionMinor: 0,
           sourceSnapshotJson: expect.objectContaining({
             candidateScope: 'vendor_wide',
             settlementBillingSnapshot: expect.objectContaining({
@@ -1346,6 +1360,7 @@ describe('settlement approval foundation', () => {
         include: {
           lines: true,
           correctionCreditLines: true,
+          correctionDeductionLines: true,
         },
       }),
     );
@@ -2551,6 +2566,7 @@ describe('settlement approval foundation', () => {
         commissionVatMinor: 2000,
         netPayableMinor: 78000,
         correctionCreditMinor: 0,
+        correctionDeductionMinor: 0,
         currency: 'TRY',
       },
       lines: [

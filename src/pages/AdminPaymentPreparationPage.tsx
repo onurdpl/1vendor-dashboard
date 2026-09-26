@@ -802,6 +802,9 @@ export function AdminPaymentPreparationPage() {
                         ? formatPaymentAmount(selectedItem.batch.correctionCreditAmount ?? '0')
                         : formatPaymentAmount(selectedItem.dashboard.payoutBatchSummary?.eligibleCreditAmount ?? '0')} />
                     ) : null}
+                    {selectedItem.source === 'batch' && hasAmount(selectedItem.batch.correctionDeductionAmount) ? (
+                      <MetadataRow label="Financial correction deduction" value={`-${formatPaymentAmount(selectedItem.batch.correctionDeductionAmount ?? '0')}`} />
+                    ) : null}
                     <MetadataRow
                       label="Refund deductions"
                       value={
@@ -839,7 +842,7 @@ export function AdminPaymentPreparationPage() {
                       label="Settlements"
                       value={
                         selectedItem.source === 'batch'
-                          ? `${selectedItem.batch.lineCount} ${hasAmount(selectedItem.batch.correctionCreditAmount) ? 'settlement sources' : 'settlement rows'}`
+                          ? `${selectedItem.batch.lineCount} ${hasAmount(selectedItem.batch.correctionCreditAmount) || hasAmount(selectedItem.batch.correctionDeductionAmount) ? 'settlement sources' : 'settlement rows'}`
                           : `${selectedItem.dashboard.payoutBatchSummary?.eligibleRowCount ?? 0} eligible settlement rows${(selectedItem.dashboard.payoutBatchSummary?.eligibleCreditCount ?? 0) > 0 ? ` · ${selectedItem.dashboard.payoutBatchSummary?.eligibleCreditCount} correction credit` : ''}`
                       }
                     />

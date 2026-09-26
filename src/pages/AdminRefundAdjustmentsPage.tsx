@@ -23,6 +23,8 @@ import {
   applyPaidFinancialCorrectionCredit,
   getBeforeSettlementFinancialCorrectionCreditState,
   applyBeforeSettlementFinancialCorrectionCredit,
+  getBeforeSettlementFinancialCorrectionDeductionState,
+  applyBeforeSettlementFinancialCorrectionDeduction,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
   acknowledgeAdminLegacyRefundReview,
@@ -276,6 +278,8 @@ export function AdminRefundAdjustmentsPage() {
   const [paidCreditError, setPaidCreditError] = useState<string | null>(null);
   const [beforeSettlementCreditPending, setBeforeSettlementCreditPending] = useState(false);
   const [beforeSettlementCreditError, setBeforeSettlementCreditError] = useState<string | null>(null);
+  const [beforeSettlementDeductionPending, setBeforeSettlementDeductionPending] = useState(false);
+  const [beforeSettlementDeductionError, setBeforeSettlementDeductionError] = useState<string | null>(null);
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -394,6 +398,19 @@ export function AdminRefundAdjustmentsPage() {
     ? beforeSettlementCreditQuery.data : null;
   const beforeSettlementCreditApplication = beforeSettlementCreditState && beforeSettlementCreditState.application?.reviewId === terminalDetail?.id
     ? beforeSettlementCreditState.application : null;
+  const beforeSettlementDeductionQuery = useQueryResource(
+    ['admin', 'finance', 'before-settlement-correction-deduction', terminalDetail?.id ?? 'none', terminalDetail?.updatedAt ?? 'none'],
+    ({ signal }) => getBeforeSettlementFinancialCorrectionDeductionState(terminalDetail!.id, signal),
+    {
+      routeName: 'Before-settlement correction deduction',
+      endpoint: terminalDetail ? `/admin/finance/refund-reviews/${terminalDetail.id}/financial-correction-before-settlement-deduction` : '/admin/finance/refund-reviews',
+      enabled: Boolean(terminalDetail),
+    },
+  );
+  const beforeSettlementDeductionState = terminalDetail && !beforeSettlementDeductionQuery.isFetching && !beforeSettlementDeductionQuery.error
+    ? beforeSettlementDeductionQuery.data : null;
+  const beforeSettlementDeductionApplication = beforeSettlementDeductionState && beforeSettlementDeductionState.application?.reviewId === terminalDetail?.id
+    ? beforeSettlementDeductionState.application : null;
   const currentPaidReason = paidCorrectionReason.reviewId === terminalDetail?.id ? paidCorrectionReason.value : '';
 
   const runPaidCorrection = async () => {
@@ -459,6 +476,28 @@ export function AdminRefundAdjustmentsPage() {
       await Promise.all([correctionPreviewQuery.refetch(), beforeSettlementCreditQuery.refetch(), terminalDetailQuery.refetch()]);
     } finally {
       setBeforeSettlementCreditPending(false);
+    }
+  };
+
+  const runBeforeSettlementDeduction = async () => {
+    if (!eligibleTerminalDetail || !correctionPreview || !beforeSettlementDeductionState?.eligible ||
+        beforeSettlementDeductionApplication || beforeSettlementDeductionPending ||
+        !currentPaidReason.trim() || currentPaidReason.trim().length > 500 ||
+        correctionPreview.economicDirection !== 'VENDOR_DEDUCTION' ||
+        correctionPreview.difference.vendorPayableReversalMinor <= 0) return;
+    setBeforeSettlementDeductionPending(true);
+    setBeforeSettlementDeductionError(null);
+    try {
+      await applyBeforeSettlementFinancialCorrectionDeduction(eligibleTerminalDetail.id, {
+        previewFingerprint: correctionPreview.previewFingerprint, reason: currentPaidReason.trim(),
+      });
+      setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: '' });
+      await Promise.all([beforeSettlementDeductionQuery.refetch(), paidCorrectionQuery.refetch()]);
+    } catch (error) {
+      setBeforeSettlementDeductionError(error instanceof Error ? error.message : 'Before-settlement deduction could not be applied.');
+      await Promise.all([correctionPreviewQuery.refetch(), beforeSettlementDeductionQuery.refetch(), terminalDetailQuery.refetch()]);
+    } finally {
+      setBeforeSettlementDeductionPending(false);
     }
   };
 
@@ -842,7 +881,8 @@ export function AdminRefundAdjustmentsPage() {
                   </div>
                   <p className="page-description">Review actions do not change accepted finance.</p>
                   {terminalDetail.resolutionOutcome === 'CORRECTION_REQUIRED' && paidCorrectionState &&
-                    !paidCorrectionApplication && !paidCreditApplication && !beforeSettlementCreditApplication ? (
+                    !paidCorrectionApplication && !paidCreditApplication && !beforeSettlementCreditApplication &&
+                    !beforeSettlementDeductionApplication ? (
                     <p className="op-alert op-tone-attention">Financial correction required. No financial correction has been applied.</p>
                   ) : null}
 
@@ -880,9 +920,9 @@ export function AdminRefundAdjustmentsPage() {
                   {eligibleTerminalDetail ? (
                     <section className="op-panel-section" aria-label="Financial correction preview">
                       <h4>Financial correction preview</h4>
-                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication || beforeSettlementCreditApplication
+                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication || beforeSettlementCreditApplication || beforeSettlementDeductionApplication
                         ? 'Read-only calculation. Applied correction is shown below.'
-                        : paidCorrectionState && paidCreditState && beforeSettlementCreditState
+                        : paidCorrectionState && paidCreditState && beforeSettlementCreditState && beforeSettlementDeductionState
                           ? 'Read-only calculation. No financial correction has been applied.'
                           : 'Read-only calculation. Checking correction history...'}</p>
                       {correctionPreviewQuery.isFetching ? <p className="page-description">Loading correction preview...</p> : null}
@@ -913,7 +953,8 @@ export function AdminRefundAdjustmentsPage() {
                             <MetadataRow label="Corrected vendor-payable effect" value={formatMinor(correctionPreview.corrected.vendorPayableReversalMinor)} />
                             <MetadataRow label="Final vendor-payable difference" value={formatSignedMinor(correctionPreview.difference.vendorPayableReversalMinor)} />
                             <MetadataRow label="Economic direction" value={correctionPreview.economicDirection === 'VENDOR_DEDUCTION'
-                              ? 'Vendor owes Sporgym more'
+                              ? beforeSettlementDeductionState?.eligible || beforeSettlementDeductionApplication
+                                ? 'Unpaid vendor entitlement decreases' : 'Vendor owes Sporgym more'
                               : correctionPreview.economicDirection === 'VENDOR_CREDIT'
                                 ? 'Sporgym owes vendor more'
                                 : 'No vendor monetary effect'} />
@@ -940,6 +981,18 @@ export function AdminRefundAdjustmentsPage() {
                                 <label><span>Required Admin reason</span><textarea maxLength={500} value={currentPaidReason} onChange={(event) => setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: event.target.value })} /></label>
                                 <button type="button" disabled={paidCorrectionPending || !currentPaidReason.trim()} onClick={() => void runPaidCorrection()}>
                                   {paidCorrectionPending ? 'Applying...' : 'Approve & Apply Correction'}
+                                </button>
+                              </section>
+                            ) : null}
+                          {correctionPreview.economicDirection === 'VENDOR_DEDUCTION' &&
+                            correctionPreview.difference.vendorPayableReversalMinor > 0 &&
+                            beforeSettlementDeductionState?.eligible && !beforeSettlementDeductionApplication ? (
+                              <section className="op-panel-section" aria-label="Before-settlement correction deduction application">
+                                <h5>Before-settlement vendor entitlement reduction</h5>
+                                <p className="page-description">Gross Financial Correction deduction: {formatMinor(correctionPreview.difference.vendorPayableReversalMinor)}. No current settlement or payout exists for the affected finance. This reduces unpaid entitlement; it does not create vendor debt.</p>
+                                <label><span>Required Admin reason</span><textarea maxLength={500} value={currentPaidReason} onChange={(event) => setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: event.target.value })} /></label>
+                                <button type="button" disabled={beforeSettlementDeductionPending || !currentPaidReason.trim()} onClick={() => void runBeforeSettlementDeduction()}>
+                                  {beforeSettlementDeductionPending ? 'Applying...' : 'Approve & Apply Correction'}
                                 </button>
                               </section>
                             ) : null}
@@ -1029,6 +1082,24 @@ export function AdminRefundAdjustmentsPage() {
                       <MetadataRow label="Payout" value={beforeSettlementCreditApplication.payoutBatchId ?? 'Not yet paid'} />
                       <MetadataRow label="Reason" value={beforeSettlementCreditApplication.reason} />
                       <p className="page-description">This separate gross credit can enter a future settlement and payout.</p>
+                    </MetadataGroup>
+                  ) : null}
+                  {beforeSettlementDeductionError ? <p className="op-alert op-tone-danger" role="alert">{beforeSettlementDeductionError}</p> : null}
+                  {beforeSettlementDeductionQuery.error ? <p className="op-alert op-tone-attention" role="status">Before-settlement deduction history unavailable: {beforeSettlementDeductionQuery.error}</p> : null}
+                  {beforeSettlementDeductionApplication ? (
+                    <MetadataGroup title="Applied before-settlement financial correction deduction">
+                      <MetadataRow label="Status" value="Applied" />
+                      <MetadataRow label="Direction" value="Vendor entitlement reduction" />
+                      <MetadataRow label="Gross deduction" value={formatMinor(beforeSettlementDeductionApplication.grossDeductionMinor)} />
+                      <MetadataRow label="Admin actor" value={beforeSettlementDeductionApplication.authorizedByUserId} />
+                      <MetadataRow label="Applied at" value={formatDate(beforeSettlementDeductionApplication.appliedAt)} />
+                      <MetadataRow label="Correction authority" value={beforeSettlementDeductionApplication.id} />
+                      <MetadataRow label="Deduction source" value={beforeSettlementDeductionApplication.deductionId} />
+                      <MetadataRow label="Route" value="Before settlement" />
+                      <MetadataRow label="Settlement" value={beforeSettlementDeductionApplication.settlementApprovalId ?? 'Not yet settled'} />
+                      <MetadataRow label="Payout" value={beforeSettlementDeductionApplication.payoutBatchId ?? 'Not yet paid'} />
+                      <MetadataRow label="Reason" value={beforeSettlementDeductionApplication.reason} />
+                      <p className="page-description">This is a separate reduction of unpaid entitlement, not vendor debt.</p>
                     </MetadataGroup>
                   ) : null}
                   {zeroNetQuery.error ? <p className="op-alert op-tone-attention" role="status">Zero-net acknowledgement history unavailable: {zeroNetQuery.error}</p> : null}
