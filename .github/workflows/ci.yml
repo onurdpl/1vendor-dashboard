@@ -131,18 +131,18 @@ jobs:
           KARGONOMI_BASE_URL: https://app.kargonomi.com.tr/api/v1
           KARGONOMI_API_TOKEN: test-token
 
-      - name: Real REVIEW financial correction browser smoke
-        id: real_review_browser_smoke
+      - name: Real Financial Correction browser smokes
+        id: real_financial_correction_browser_smokes
         run: npm run smoke:browser:real
         env:
           BROWSER_SMOKE_ALLOW_LOCAL_DB: '1'
           BROWSER_SMOKE_ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
       - name: Upload real browser smoke failure artifacts
-        if: failure() && steps.real_review_browser_smoke.outcome == 'failure'
+        if: failure() && steps.real_financial_correction_browser_smokes.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: financial-correction-review-browser-smoke
+          name: financial-correction-browser-smokes
           path: test-results/
           if-no-files-found: warn
           retention-days: 3

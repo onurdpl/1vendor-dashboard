@@ -12,11 +12,29 @@ if (process.env.BROWSER_SMOKE_ALLOW_LOCAL_DB !== '1' || adminUrl.hostname !== 'l
   throw new Error('Set BROWSER_SMOKE_ALLOW_LOCAL_DB=1 with a local /postgres maintenance URL.');
 }
 
-const databaseName = `vendor_dashboard_browser_smoke_${process.pid}_${Date.now()}`;
-const targetUrl = new URL(adminUrl);
-targetUrl.pathname = `/${databaseName}`;
-targetUrl.searchParams.set('schema', 'public');
-const databaseUrl = targetUrl.toString();
+const scenarios = [
+  {
+    name: 'review-credit',
+    fixture: 'tests/e2e/fixtures/review-credit.ts',
+    reviewId: 'browser-smoke-review-credit-review',
+    spec: 'financial-correction-review-credit.real.spec.ts',
+    verify: 'tests/e2e/fixtures/verify-review-credit.ts',
+  },
+  {
+    name: 'draft-deduction',
+    fixture: 'tests/e2e/fixtures/draft-deduction.ts',
+    reviewId: 'browser-smoke-draft-deduction-review',
+    spec: 'financial-correction-draft-deduction.real.spec.ts',
+    verify: 'tests/e2e/fixtures/verify-draft-deduction.ts',
+  },
+];
+const requested = process.argv.slice(2);
+if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction)$/.test(requested[0]))) {
+  throw new Error('Use no arguments for both smokes, or --scenario=review-credit|draft-deduction.');
+}
+const selectedScenarios = requested.length
+  ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])
+  : scenarios;
 const localBackend = 'http://localhost:4000';
 const localFrontend = 'http://localhost:5173';
 const baseEnv = {
@@ -25,9 +43,7 @@ const baseEnv = {
   TMPDIR: process.env.TMPDIR || '/tmp',
   ...(process.env.PGPASSWORD ? { PGPASSWORD: process.env.PGPASSWORD } : {}),
 };
-const databaseEnv = { ...baseEnv, DATABASE_URL: databaseUrl, BROWSER_SMOKE_ALLOW_LOCAL_DB: '1' };
-const backendEnv = {
-  ...databaseEnv,
+const backendDefaults = {
   NODE_ENV: 'test', PORT: '4000', CORS_ORIGIN: localFrontend,
   JWT_SECRET: 'browser-smoke-local-only-session-secret',
   SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: 'false',
@@ -47,8 +63,6 @@ const backendEnv = {
 const frontendEnv = {
   ...baseEnv, VITE_API_MODE: 'real', VITE_API_BASE_URL: localBackend,
 };
-const processes = [];
-let databaseCreated = false;
 
 function run(command, args, env = baseEnv) {
   return new Promise((resolve, reject) => {
@@ -58,7 +72,7 @@ function run(command, args, env = baseEnv) {
   });
 }
 
-function start(command, args, env) {
+function start(command, args, env, processes) {
   const child = spawn(command, args, { cwd: root, env, stdio: 'inherit', detached: true });
   processes.push(child);
   return child;
@@ -87,7 +101,7 @@ async function waitFor(url, check, child) {
   throw new Error(`${url} did not become ready.`);
 }
 
-async function stopServers() {
+async function stopServers(processes) {
   for (const child of processes.reverse()) {
     if (!child.pid) continue;
     try { process.kill(-child.pid, 'SIGTERM'); } catch { /* Already exited. */ }
@@ -99,34 +113,44 @@ async function stopServers() {
   }
 }
 
-async function main() {
+async function runScenario(scenario) {
   if (await portOpen('127.0.0.1', 4000) || await portOpen('::1', 4000) ||
       await portOpen('127.0.0.1', 5173) || await portOpen('::1', 5173)) {
     throw new Error('Ports 4000 and 5173 must be free; refusing to attach to existing servers.');
   }
+  const databaseName = `vendor_dashboard_browser_smoke_${process.pid}_${Date.now()}`;
+  const targetUrl = new URL(adminUrl);
+  targetUrl.pathname = `/${databaseName}`;
+  targetUrl.searchParams.set('schema', 'public');
+  const databaseEnv = { ...baseEnv, DATABASE_URL: targetUrl.toString(), BROWSER_SMOKE_ALLOW_LOCAL_DB: '1' };
+  const backendEnv = { ...databaseEnv, ...backendDefaults };
+  const processes = [];
+  let databaseCreated = false;
+  console.log(`Running real browser scenario ${scenario.name}.`);
   try {
     await run('createdb', [`--maintenance-db=${adminUrl.toString()}`, databaseName]);
     databaseCreated = true;
     console.log(`Created disposable database ${databaseName}.`);
     await run('npm', ['run', 'backend:db:generate'], databaseEnv);
     await run('npm', ['run', 'backend:db:bootstrap:fresh'], databaseEnv);
-    await run('node_modules/.bin/tsx', ['tests/e2e/fixtures/review-credit.ts'], databaseEnv);
+    await run('node_modules/.bin/tsx', [scenario.fixture], databaseEnv);
     await run('npm', ['run', 'backend:build'], backendEnv);
     await run('npm', ['run', 'build'], frontendEnv);
 
-    const backend = start('npm', ['run', 'backend:start'], backendEnv);
+    const backend = start('npm', ['run', 'backend:start'], backendEnv, processes);
     await waitFor(`${localBackend}/health`, async (response) => {
       const health = await response.json();
       return health.status === 'ok' && health.dbReachable === true && health.schemaReady === true;
     }, backend);
-    const frontend = start('npm', ['run', 'preview', '--', '--host', 'localhost', '--port', '5173', '--strictPort'], frontendEnv);
+    const frontend = start('npm', ['run', 'preview', '--', '--host', 'localhost', '--port', '5173', '--strictPort'], frontendEnv, processes);
     await waitFor(localFrontend, async () => true, frontend);
     await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts'], {
-      ...baseEnv, BROWSER_SMOKE_REVIEW_ID: 'browser-smoke-review-credit-review',
+      ...baseEnv, BROWSER_SMOKE_REVIEW_ID: scenario.reviewId, BROWSER_SMOKE_REAL_SPEC: scenario.spec,
     });
-    await run('node_modules/.bin/tsx', ['tests/e2e/fixtures/verify-review-credit.ts'], databaseEnv);
+    await run('node_modules/.bin/tsx', [scenario.verify], databaseEnv);
+    console.log(`Real browser scenario ${scenario.name} passed browser and DB post-check.`);
   } finally {
-    await stopServers();
+    await stopServers(processes);
     if (databaseCreated) {
       await run('dropdb', ['--force', `--maintenance-db=${adminUrl.toString()}`, databaseName]);
       console.log(`Disposed database ${databaseName}.`);
@@ -134,4 +158,4 @@ async function main() {
   }
 }
 
-await main();
+for (const scenario of selectedScenarios) await runScenario(scenario);
