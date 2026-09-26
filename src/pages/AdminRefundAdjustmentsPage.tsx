@@ -31,6 +31,8 @@ import {
   applyApprovedSettlementFinancialCorrectionDeduction,
   getDraftPayoutFinancialCorrectionState,
   applyDraftPayoutFinancialCorrection,
+  getReviewPayoutFinancialCorrectionState,
+  applyReviewPayoutFinancialCorrection,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
   acknowledgeAdminLegacyRefundReview,
@@ -292,6 +294,9 @@ export function AdminRefundAdjustmentsPage() {
   const [approvedSettlementDeductionError, setApprovedSettlementDeductionError] = useState<string | null>(null);
   const [draftPayoutCorrectionPending, setDraftPayoutCorrectionPending] = useState(false);
   const [draftPayoutCorrectionError, setDraftPayoutCorrectionError] = useState<string | null>(null);
+  const [reviewPayoutCorrectionPending, setReviewPayoutCorrectionPending] = useState(false);
+  const [reviewPayoutCorrectionError, setReviewPayoutCorrectionError] = useState<string | null>(null);
+  const [reviewEftNotSentConfirmation, setReviewEftNotSentConfirmation] = useState<{ reviewId: string; value: boolean }>({ reviewId: '', value: false });
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -462,6 +467,21 @@ export function AdminRefundAdjustmentsPage() {
     ? draftPayoutCorrectionQuery.data : null;
   const draftPayoutCorrectionApplication = draftPayoutCorrectionState && draftPayoutCorrectionState.application?.reviewId === terminalDetail?.id
     ? draftPayoutCorrectionState.application : null;
+  const reviewPayoutCorrectionQuery = useQueryResource(
+    ['admin', 'finance', 'review-payout-correction', terminalDetail?.id ?? 'none', terminalDetail?.updatedAt ?? 'none'],
+    ({ signal }) => getReviewPayoutFinancialCorrectionState(terminalDetail!.id, signal),
+    {
+      routeName: 'Review payout financial correction',
+      endpoint: terminalDetail ? `/admin/finance/refund-reviews/${terminalDetail.id}/financial-correction-review-payout` : '/admin/finance/refund-reviews',
+      enabled: Boolean(terminalDetail),
+    },
+  );
+  const reviewPayoutCorrectionState = terminalDetail && !reviewPayoutCorrectionQuery.isFetching && !reviewPayoutCorrectionQuery.error
+    ? reviewPayoutCorrectionQuery.data : null;
+  const reviewPayoutCorrectionApplication = reviewPayoutCorrectionState && reviewPayoutCorrectionState.application?.reviewId === terminalDetail?.id
+    ? reviewPayoutCorrectionState.application : null;
+  const currentReviewEftNotSentConfirmation = reviewEftNotSentConfirmation.reviewId === terminalDetail?.id
+    ? reviewEftNotSentConfirmation.value : false;
   const currentPaidReason = paidCorrectionReason.reviewId === terminalDetail?.id ? paidCorrectionReason.value : '';
 
   const runPaidCorrection = async () => {
@@ -618,6 +638,31 @@ export function AdminRefundAdjustmentsPage() {
     }
   };
 
+  const runReviewPayoutCorrection = async () => {
+    if (!eligibleTerminalDetail || !correctionPreview || !reviewPayoutCorrectionState?.eligible ||
+        !reviewPayoutCorrectionState.reviewPayout || reviewPayoutCorrectionApplication || reviewPayoutCorrectionPending ||
+        !currentReviewEftNotSentConfirmation || !currentPaidReason.trim() || currentPaidReason.trim().length > 500 ||
+        correctionPreview.economicDirection === 'NONE') return;
+    setReviewPayoutCorrectionPending(true);
+    setReviewPayoutCorrectionError(null);
+    try {
+      await applyReviewPayoutFinancialCorrection(eligibleTerminalDetail.id, {
+        previewFingerprint: correctionPreview.previewFingerprint,
+        reason: currentPaidReason.trim(),
+        confirmEftNotSent: true,
+      });
+      setReviewEftNotSentConfirmation({ reviewId: eligibleTerminalDetail.id, value: false });
+      setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: '' });
+      await Promise.all([reviewPayoutCorrectionQuery.refetch(), approvedSettlementCreditQuery.refetch(),
+        approvedSettlementDeductionQuery.refetch()]);
+    } catch (error) {
+      setReviewPayoutCorrectionError(error instanceof Error ? error.message : 'Review payout correction could not be applied.');
+      await Promise.all([correctionPreviewQuery.refetch(), reviewPayoutCorrectionQuery.refetch(), terminalDetailQuery.refetch()]);
+    } finally {
+      setReviewPayoutCorrectionPending(false);
+    }
+  };
+
   const runZeroNetAcknowledgement = async () => {
     if (!correctionPreview || !eligibleTerminalDetail || zeroNetPending || zeroNetQuery.isFetching ||
         zeroNetQuery.error || zeroNetAcknowledgement || correctionPreview.currency !== 'TRY' ||
@@ -771,6 +816,7 @@ export function AdminRefundAdjustmentsPage() {
             <input value={vendorFilter} onChange={(event) => {
               setVendorFilter(event.target.value);
               setTerminalOffset(0);
+              setReviewEftNotSentConfirmation({ reviewId: '', value: false });
               setLegacyOffset(0);
             }} placeholder="Vendor id" />
           </label>
@@ -930,6 +976,7 @@ export function AdminRefundAdjustmentsPage() {
               setTerminalStatusFilter(event.target.value as 'all' | TerminalRefundReviewStatus);
               setTerminalOffset(0);
               setSelectedTerminalId(null);
+              setReviewEftNotSentConfirmation({ reviewId: '', value: false });
             }}>
               <option value="all">All statuses</option>
               <option value="ACTIVE">Active</option>
@@ -943,6 +990,7 @@ export function AdminRefundAdjustmentsPage() {
               setTerminalOutcomeFilter(event.target.value as 'all' | TerminalRefundReviewResolutionOutcome);
               setTerminalOffset(0);
               setSelectedTerminalId(null);
+              setReviewEftNotSentConfirmation({ reviewId: '', value: false });
             }}>
               <option value="all">All outcomes</option>
               <option value="NO_CORRECTION_NEEDED">No correction needed</option>
@@ -970,6 +1018,7 @@ export function AdminRefundAdjustmentsPage() {
                 selected={review.id === selectedTerminalReview?.id}
                 onSelect={() => {
                   setSelectedTerminalId(review.id);
+                  setReviewEftNotSentConfirmation({ reviewId: '', value: false });
                   setTerminalActionNote('');
                   setTerminalResolutionOutcome('');
                   setTerminalActionError(null);
@@ -1037,7 +1086,7 @@ export function AdminRefundAdjustmentsPage() {
                   {eligibleTerminalDetail ? (
                     <section className="op-panel-section" aria-label="Financial correction preview">
                       <h4>Financial correction preview</h4>
-                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication || beforeSettlementCreditApplication || beforeSettlementDeductionApplication || draftPayoutCorrectionApplication
+                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication || beforeSettlementCreditApplication || beforeSettlementDeductionApplication || draftPayoutCorrectionApplication || reviewPayoutCorrectionApplication
                         ? 'Read-only calculation. Applied correction is shown below.'
                         : paidCorrectionState && paidCreditState && beforeSettlementCreditState && beforeSettlementDeductionState
                           ? 'Read-only calculation. No financial correction has been applied.'
@@ -1072,7 +1121,8 @@ export function AdminRefundAdjustmentsPage() {
                             <MetadataRow label="Economic direction" value={correctionPreview.economicDirection === 'VENDOR_DEDUCTION'
                               ? beforeSettlementDeductionState?.eligible || beforeSettlementDeductionApplication ||
                                   approvedSettlementDeductionState?.eligible || approvedSettlementDeductionApplication ||
-                                  draftPayoutCorrectionState?.eligible || draftPayoutCorrectionApplication
+                                  draftPayoutCorrectionState?.eligible || draftPayoutCorrectionApplication ||
+                                  reviewPayoutCorrectionState?.eligible || reviewPayoutCorrectionApplication
                                 ? 'Unpaid vendor entitlement decreases' : 'Vendor owes Sporgym more'
                               : correctionPreview.economicDirection === 'VENDOR_CREDIT'
                                 ? 'Sporgym owes vendor more'
@@ -1104,9 +1154,20 @@ export function AdminRefundAdjustmentsPage() {
                                 </button>
                               </section>
                             ) : null}
-                          {draftPayoutCorrectionState?.reasonCode === 'PAYOUT_ALREADY_REVIEW' ? (
-                            <p className="op-alert op-tone-attention">Payout is already in payment review. Financial Correction cannot rebuild this payout.</p>
-                          ) : null}
+                          {reviewPayoutCorrectionState?.eligible && reviewPayoutCorrectionState.reviewPayout &&
+                            !reviewPayoutCorrectionApplication && correctionPreview.economicDirection !== 'NONE' ? (
+                              <section className="op-panel-section" aria-label="Review payout correction application">
+                                <h5>Cancel review payout &amp; apply correction</h5>
+                                <p className="page-description">Current REVIEW payout {reviewPayoutCorrectionState.reviewPayout.id}: gross {formatMinor(reviewPayoutCorrectionState.reviewPayout.grossAmountMinor)}, net {formatMinor(reviewPayoutCorrectionState.reviewPayout.netAmountMinor)}. {correctionPreview.economicDirection === 'VENDOR_CREDIT'
+                                  ? `Vendor credit: +${formatMinor(-correctionPreview.difference.vendorPayableReversalMinor)}. The credit requires a separate approved correction settlement before replacement payout preparation.`
+                                  : `Vendor deduction: -${formatMinor(correctionPreview.difference.vendorPayableReversalMinor)}. This reduces the next payout entitlement and does not create vendor debt.`} The REVIEW payout will be cancelled but remain visible in history. No replacement payout is created automatically; prepare one afterward.</p>
+                                <label><span>Required Admin reason</span><textarea maxLength={500} value={currentPaidReason} onChange={(event) => setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: event.target.value })} /></label>
+                                <label><input type="checkbox" checked={currentReviewEftNotSentConfirmation} onChange={(event) => setReviewEftNotSentConfirmation({ reviewId: eligibleTerminalDetail.id, value: event.target.checked })} /> I confirm that no external bank/EFT instruction for this payout has been sent.</label>
+                                <button type="button" disabled={reviewPayoutCorrectionPending || !currentPaidReason.trim() || !currentReviewEftNotSentConfirmation} onClick={() => void runReviewPayoutCorrection()}>
+                                  {reviewPayoutCorrectionPending ? 'Applying...' : 'Cancel Review Payout & Apply Correction'}
+                                </button>
+                              </section>
+                            ) : null}
                           {correctionPreview.economicDirection === 'VENDOR_DEDUCTION' &&
                             correctionPreview.difference.vendorPayableReversalMinor > 0 && paidCorrectionState?.eligible &&
                             !paidCorrectionApplication ? (
@@ -1316,6 +1377,24 @@ export function AdminRefundAdjustmentsPage() {
                       <p className="page-description">The original payout snapshot remains in history. Prepare a new payout separately from current financial sources.</p>
                     </MetadataGroup>
                   ) : null}
+                  {reviewPayoutCorrectionError ? <p className="op-alert op-tone-danger" role="alert">{reviewPayoutCorrectionError}</p> : null}
+                  {reviewPayoutCorrectionQuery.error ? <p className="op-alert op-tone-attention" role="status">Review payout correction history unavailable: {reviewPayoutCorrectionQuery.error}</p> : null}
+                  {reviewPayoutCorrectionApplication ? (
+                    <MetadataGroup title="Applied review payout financial correction">
+                      <MetadataRow label="Status" value="Applied" />
+                      <MetadataRow label="Direction" value={reviewPayoutCorrectionApplication.direction === 'VENDOR_CREDIT' ? 'Vendor credit' : 'Vendor deduction'} />
+                      <MetadataRow label="Correction amount" value={formatMinor(reviewPayoutCorrectionApplication.amountMinor)} />
+                      <MetadataRow label="Cancelled REVIEW payout" value={reviewPayoutCorrectionApplication.historicalPayoutBatchId} />
+                      <MetadataRow label="Original payout amount" value={formatMinor(reviewPayoutCorrectionApplication.historicalPayoutNetMinor)} />
+                      <MetadataRow label="Cancelled at" value={formatDate(reviewPayoutCorrectionApplication.historicalPayoutCancelledAt)} />
+                      <MetadataRow label="EFT not sent confirmed at" value={formatDate(reviewPayoutCorrectionApplication.eftNotSentConfirmedAt)} />
+                      <MetadataRow label="Confirmation" value="No external bank/EFT instruction for this payout had been sent" />
+                      <MetadataRow label="Correction authority" value={reviewPayoutCorrectionApplication.id} />
+                      <MetadataRow label="Admin actor" value={reviewPayoutCorrectionApplication.authorizedByUserId} />
+                      <MetadataRow label="Reason" value={reviewPayoutCorrectionApplication.reason} />
+                      <p className="page-description">The original payout snapshot remains in history. Prepare a new payout separately from current financial sources.</p>
+                    </MetadataGroup>
+                  ) : null}
                   {zeroNetQuery.error ? <p className="op-alert op-tone-attention" role="status">Zero-net acknowledgement history unavailable: {zeroNetQuery.error}</p> : null}
                   {zeroNetAcknowledgement ? (
                     <MetadataGroup title="Zero-net reconciliation acknowledgement">
@@ -1369,9 +1448,9 @@ export function AdminRefundAdjustmentsPage() {
           </div>
         ) : null}
         {terminalPage && !terminalPage.error && (terminalPage.count > REVIEW_PAGE_SIZE || terminalOffset > 0) ? <div className="op-toolbar refund-review-pagination">
-          <button type="button" disabled={terminalOffset === 0} onClick={() => setTerminalOffset(Math.max(0, terminalOffset - REVIEW_PAGE_SIZE))}>Previous conflicts</button>
+          <button type="button" disabled={terminalOffset === 0} onClick={() => { setReviewEftNotSentConfirmation({ reviewId: '', value: false }); setTerminalOffset(Math.max(0, terminalOffset - REVIEW_PAGE_SIZE)); }}>Previous conflicts</button>
           <span>{terminalPage.items.length ? `${terminalOffset + 1}–${Math.min(terminalOffset + REVIEW_PAGE_SIZE, terminalPage.count)}` : '0'} of {terminalPage.count}</span>
-          <button type="button" disabled={terminalOffset + REVIEW_PAGE_SIZE >= terminalPage.count} onClick={() => setTerminalOffset(terminalOffset + REVIEW_PAGE_SIZE)}>Next conflicts</button>
+          <button type="button" disabled={terminalOffset + REVIEW_PAGE_SIZE >= terminalPage.count} onClick={() => { setReviewEftNotSentConfirmation({ reviewId: '', value: false }); setTerminalOffset(terminalOffset + REVIEW_PAGE_SIZE); }}>Next conflicts</button>
         </div> : null}
       </section>
 

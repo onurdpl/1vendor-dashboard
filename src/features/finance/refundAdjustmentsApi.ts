@@ -474,6 +474,39 @@ export function applyDraftPayoutFinancialCorrection(reviewId: string, input: { p
   );
 }
 
+export type ReviewPayoutFinancialCorrectionApplication = Omit<DraftPayoutFinancialCorrectionApplication,
+  'route'> & {
+  route: 'REVIEW_PAYOUT_VENDOR_CREDIT' | 'REVIEW_PAYOUT_VENDOR_DEDUCTION';
+  eftNotSentConfirmedAt: string;
+  eftNotSentConfirmationVersion: 'review-eft-not-sent-v1';
+  observedPayoutStatus: 'REVIEW';
+};
+
+export type ReviewPayoutFinancialCorrectionState = {
+  ok: true;
+  writesPerformed: false;
+  application: ReviewPayoutFinancialCorrectionApplication | null;
+  eligible: boolean;
+  reasonCode: string | null;
+  reviewPayout: { id: string; status: 'REVIEW'; netAmountMinor: number;
+    grossAmountMinor: number; debtOffsetMinor: number } | null;
+};
+
+const reviewPayoutCorrectionPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-review-payout`;
+
+export function getReviewPayoutFinancialCorrectionState(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<ReviewPayoutFinancialCorrectionState>(reviewPayoutCorrectionPath(reviewId), { signal });
+}
+
+export function applyReviewPayoutFinancialCorrection(reviewId: string, input: {
+  previewFingerprint: string; reason: string; confirmEftNotSent: true;
+}) {
+  return apiClient.post<{ ok: true; application: ReviewPayoutFinancialCorrectionApplication }>(
+    reviewPayoutCorrectionPath(reviewId), input,
+  );
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;

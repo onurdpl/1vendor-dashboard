@@ -17,10 +17,10 @@ export function assertApprovedDeductionCoverage(coverage: {
       coverage.vendorId !== source.vendorId || coverage.amountMinor !== source.amountMinor ||
       source.currency !== 'TRY' || authority.vendorId !== source.vendorId || authority.currency !== 'TRY' ||
       authority.economicDirection !== 'VENDOR_DEDUCTION' ||
-      !['APPROVED_SETTLEMENT_VENDOR_DEDUCTION', 'DRAFT_PAYOUT_VENDOR_DEDUCTION'].includes(authority.applicationRoute) ||
+      !['APPROVED_SETTLEMENT_VENDOR_DEDUCTION', 'DRAFT_PAYOUT_VENDOR_DEDUCTION', 'REVIEW_PAYOUT_VENDOR_DEDUCTION'].includes(authority.applicationRoute) ||
       authority.vendorPayableDifferenceMinor !== source.amountMinor || !authority.appliedAt ||
       (authority.applicationRoute === 'APPROVED_SETTLEMENT_VENDOR_DEDUCTION' && authority.historicalPayoutBatchId) ||
-      (authority.applicationRoute === 'DRAFT_PAYOUT_VENDOR_DEDUCTION' && !authority.historicalPayoutBatchId) ||
+      (['DRAFT_PAYOUT_VENDOR_DEDUCTION', 'REVIEW_PAYOUT_VENDOR_DEDUCTION'].includes(authority.applicationRoute) && !authority.historicalPayoutBatchId) ||
       authority.historicalApprovedSettlementId !== coverage.settlementApprovalId ||
       origin.id !== coverage.settlementApprovalId || origin.status !== 'APPROVED' || !origin.approvedAt ||
       origin.vendorId !== coverage.vendorId || origin.currency !== 'TRY') {

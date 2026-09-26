@@ -26,6 +26,8 @@ import {
   applyApprovedSettlementFinancialCorrectionDeduction,
   getDraftPayoutFinancialCorrectionState,
   applyDraftPayoutFinancialCorrection,
+  getReviewPayoutFinancialCorrectionState,
+  applyReviewPayoutFinancialCorrection,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
@@ -49,6 +51,7 @@ import {
   type ApprovedSettlementFinancialCorrectionCreditApplication,
   type ApprovedSettlementFinancialCorrectionDeductionApplication,
   type DraftPayoutFinancialCorrectionApplication,
+  type ReviewPayoutFinancialCorrectionApplication,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -76,6 +79,8 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     applyApprovedSettlementFinancialCorrectionDeduction: vi.fn(),
     getDraftPayoutFinancialCorrectionState: vi.fn(),
     applyDraftPayoutFinancialCorrection: vi.fn(),
+    getReviewPayoutFinancialCorrectionState: vi.fn(),
+    applyReviewPayoutFinancialCorrection: vi.fn(),
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
@@ -107,6 +112,8 @@ const getApprovedSettlementDeductionStateMock = vi.mocked(getApprovedSettlementF
 const applyApprovedSettlementDeductionMock = vi.mocked(applyApprovedSettlementFinancialCorrectionDeduction);
 const getDraftPayoutCorrectionStateMock = vi.mocked(getDraftPayoutFinancialCorrectionState);
 const applyDraftPayoutCorrectionMock = vi.mocked(applyDraftPayoutFinancialCorrection);
+const getReviewPayoutCorrectionStateMock = vi.mocked(getReviewPayoutFinancialCorrectionState);
+const applyReviewPayoutCorrectionMock = vi.mocked(applyReviewPayoutFinancialCorrection);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
@@ -338,6 +345,14 @@ const appliedDraftPayoutCorrection: DraftPayoutFinancialCorrectionApplication = 
   authorizedAt: '2026-09-25T12:00:00Z', appliedAt: '2026-09-25T12:00:00Z',
   previewFingerprint: 'financial-correction-preview-v1:verified',
 };
+const appliedReviewPayoutCorrection: ReviewPayoutFinancialCorrectionApplication = {
+  ...appliedDraftPayoutCorrection,
+  id: 'review-correction-1', route: 'REVIEW_PAYOUT_VENDOR_DEDUCTION',
+  historicalPayoutBatchId: 'review-payout-1',
+  eftNotSentConfirmedAt: '2026-09-26T12:00:00Z',
+  eftNotSentConfirmationVersion: 'review-eft-not-sent-v1',
+  observedPayoutStatus: 'REVIEW',
+};
 
 function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
   return {
@@ -399,6 +414,8 @@ beforeEach(() => {
   getApprovedSettlementDeductionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'APPROVED_SETTLEMENT_REQUIRED', approvedSettlement: null });
   getDraftPayoutCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null,
     eligible: false, reasonCode: 'DRAFT_PAYOUT_REQUIRED', draftPayout: null });
+  getReviewPayoutCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null,
+    eligible: false, reasonCode: 'REVIEW_PAYOUT_REQUIRED', reviewPayout: null });
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
@@ -972,7 +989,8 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.queryByLabelText('Draft payout correction application')).not.toBeInTheDocument();
   });
 
-  it('shows REVIEW as blocked without a cancel-and-apply action', async () => {
+  it('requires explicit EFT-not-sent confirmation before REVIEW cancel-and-apply', async () => {
+    const user = userEvent.setup();
     listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
       terminalReviews: { error: null, count: 1, limit: 25, offset: 0,
         items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
@@ -981,8 +999,31 @@ describe('AdminRefundAdjustmentsPage', () => {
       review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
     getDraftPayoutCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false,
       application: null, eligible: false, reasonCode: 'PAYOUT_ALREADY_REVIEW', draftPayout: null });
+    getReviewPayoutCorrectionStateMock.mockResolvedValueOnce({ ok: true, writesPerformed: false,
+      application: null, eligible: true, reasonCode: null,
+      reviewPayout: { id: 'review-payout-1', status: 'REVIEW', netAmountMinor: 100000,
+        grossAmountMinor: 100000, debtOffsetMinor: 0 } })
+      .mockResolvedValue({ ok: true, writesPerformed: false, application: appliedReviewPayoutCorrection,
+        eligible: false, reasonCode: 'CORRECTION_ALREADY_APPLIED', reviewPayout: null });
+    applyReviewPayoutCorrectionMock.mockResolvedValue({ ok: true, application: appliedReviewPayoutCorrection });
     renderPage();
-    expect(await screen.findByText('Payout is already in payment review. Financial Correction cannot rebuild this payout.')).toBeInTheDocument();
+    const section = await screen.findByLabelText('Review payout correction application');
+    expect(section).toHaveTextContent('review-payout-1');
+    expect(section).toHaveTextContent('No replacement payout is created automatically');
+    const action = within(section).getByRole('button', { name: 'Cancel Review Payout & Apply Correction' });
+    const confirmation = within(section).getByRole('checkbox', { name: /no external bank\/EFT instruction/i });
+    expect(confirmation).not.toBeChecked();
+    expect(action).toBeDisabled();
+    await user.type(within(section).getByRole('textbox', { name: 'Required Admin reason' }), 'Verified no EFT instruction');
+    expect(action).toBeDisabled();
+    await user.click(confirmation);
+    await user.click(action);
+    await waitFor(() => expect(applyReviewPayoutCorrectionMock).toHaveBeenCalledWith('review-1', {
+      previewFingerprint: 'financial-correction-preview-v1:verified', reason: 'Verified no EFT instruction',
+      confirmEftNotSent: true,
+    }));
+    expect(await screen.findByText('review-correction-1')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Review payout correction application')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel Draft Payout & Apply Correction' })).not.toBeInTheDocument();
     expect(applyDraftPayoutCorrectionMock).not.toHaveBeenCalled();
   });

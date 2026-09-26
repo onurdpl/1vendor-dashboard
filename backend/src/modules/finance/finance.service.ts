@@ -2457,7 +2457,7 @@ export async function preparePayoutBatch(
       where: {
         vendorId: input.vendorId,
         currency: 'TRY',
-        authority: { applicationRoute: { in: ['APPROVED_SETTLEMENT_VENDOR_CREDIT', 'DRAFT_PAYOUT_VENDOR_CREDIT'] } },
+        authority: { applicationRoute: { in: ['APPROVED_SETTLEMENT_VENDOR_CREDIT', 'DRAFT_PAYOUT_VENDOR_CREDIT', 'REVIEW_PAYOUT_VENDOR_CREDIT'] } },
         settlementLines: { none: {
           status: 'ACTIVE', settlementApproval: { status: 'APPROVED' },
         } },
@@ -2636,7 +2636,7 @@ export async function preparePayoutBatch(
           line.settlementApproval.correctionCreditMinor < line.amountMinor) {
         throw new Error('Financial Correction Credit settlement source is inconsistent.');
       }
-      if (['APPROVED_SETTLEMENT_VENDOR_CREDIT', 'DRAFT_PAYOUT_VENDOR_CREDIT'].includes(line.credit.authority.applicationRoute)) {
+      if (['APPROVED_SETTLEMENT_VENDOR_CREDIT', 'DRAFT_PAYOUT_VENDOR_CREDIT', 'REVIEW_PAYOUT_VENDOR_CREDIT'].includes(line.credit.authority.applicationRoute)) {
         const originId = line.credit.authority.historicalApprovedSettlementId;
         const origin = originId ? await tx.settlementApproval.findUnique({
           where: { id: originId },
@@ -3554,13 +3554,22 @@ export async function cancelDraftPayoutBatchWithClient(tx: Prisma.TransactionCli
   await releaseCancelledPayoutSources(tx, batchId, cancelledAt);
 }
 
+export async function cancelReviewPayoutBatchWithClient(tx: Prisma.TransactionClient, batchId: string, cancelledAt: Date) {
+  const cancellation = await tx.payoutBatch.updateMany({
+    where: { id: batchId, status: 'REVIEW', paidAt: null },
+    data: { status: 'CANCELLED' },
+  });
+  if (cancellation.count !== 1) throw new Error('REVIEW_PAYOUT_STATE_CHANGED');
+  await releaseCancelledPayoutSources(tx, batchId, cancelledAt);
+}
+
 export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto> {
   return prisma.$transaction(async (tx) => {
     const cancellation = await tx.payoutBatch.updateMany({
       where: {
         id: batchId,
         status: {
-          notIn: ['PAID', 'CANCELLED'],
+          notIn: ['PAID', 'CANCELLED', 'REVIEW'],
         },
         paidAt: null,
       },
@@ -3585,6 +3594,9 @@ export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto
       }
       if (currentBatch.status === 'PAID' || currentBatch.paidAt) {
         throw new Error('Paid payout batches cannot be cancelled.');
+      }
+      if (currentBatch.status === 'REVIEW') {
+        throw new Error('REVIEW_GENERAL_CANCELLATION_FORBIDDEN');
       }
 
       throw new Error('Payout batch could not be cancelled because its status changed.');

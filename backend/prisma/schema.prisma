@@ -1423,6 +1423,14 @@ model FinancialCorrectionAuthority {
   historicalDraftPayoutDebtOffsetMinor Int?
   historicalDraftPayoutSourceFingerprint String?
   historicalDraftPayoutCancelledAt    DateTime?
+  historicalReviewPayoutGrossMinor    Int?
+  historicalReviewPayoutNetMinor      Int?
+  historicalReviewPayoutDebtOffsetMinor Int?
+  historicalReviewPayoutSourceFingerprint String?
+  historicalReviewPayoutCancelledAt  DateTime?
+  reviewEftNotSentConfirmedAt         DateTime?
+  reviewEftNotSentConfirmationVersion String?
+  reviewPayoutObservedStatus          String?
   historicalApprovedSettlementId     String?
   historicalApprovedSettlementAt     DateTime?
   historicalApprovedSettlementNetMinor Int?

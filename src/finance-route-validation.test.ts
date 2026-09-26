@@ -32,6 +32,9 @@ const getApprovedSettlementDeductionStateMock = vi.hoisted(() => vi.fn());
 const applyApprovedSettlementDeductionMock = vi.hoisted(() => vi.fn());
 const getDraftPayoutCorrectionStateMock = vi.hoisted(() => vi.fn());
 const applyDraftPayoutCorrectionMock = vi.hoisted(() => vi.fn());
+const getReviewPayoutCorrectionStateMock = vi.hoisted(() => vi.fn());
+const applyReviewPayoutCorrectionMock = vi.hoisted(() => vi.fn());
+const cancelPayoutBatchMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -87,6 +90,13 @@ vi.mock('../backend/src/modules/finance/financial-correction-draft-payout.servic
     constructor(readonly code: string, readonly statusCode = 409) { super(code); }
   },
 }));
+vi.mock('../backend/src/modules/finance/financial-correction-review-payout.service.js', () => ({
+  getReviewPayoutFinancialCorrectionState: getReviewPayoutCorrectionStateMock,
+  applyReviewPayoutFinancialCorrection: applyReviewPayoutCorrectionMock,
+  ReviewPayoutFinancialCorrectionError: class ReviewPayoutFinancialCorrectionError extends Error {
+    constructor(readonly code: string, readonly statusCode = 409) { super(code); }
+  },
+}));
 const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
   class FinanceIntegrityScannerValidationError extends Error {
     statusCode: number;
@@ -109,7 +119,7 @@ const FinanceIntegrityAlertLifecycleErrorMock = vi.hoisted(() =>
 );
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
-  cancelPayoutBatch: vi.fn(),
+  cancelPayoutBatch: cancelPayoutBatchMock,
   getPayoutBatch: vi.fn(),
   getVendorFinanceDashboard: vi.fn(),
   getVendorFinanceSummary: getVendorFinanceSummaryMock,
@@ -685,6 +695,49 @@ describe('finance route validation', () => {
     const read = createReply();
     expect(await gets.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' } }, read))
       .toEqual({ ok: true, writesPerformed: false, eligible: false });
+  });
+
+  it('keeps REVIEW correction Admin-only and requires explicit no-EFT confirmation without client money', async () => {
+    const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-review-payout';
+    const posts = createRegisteredPostRoutes();
+    const gets = createRegisteredGetRoutes();
+    for (const role of ['finance', 'vendor', 'support']) {
+      const denied = createReply();
+      await posts.get(path)?.({ authUser: { role, id: `${role}-1` }, params: { reviewId: 'review-1' },
+        body: { previewFingerprint: 'fingerprint', reason: 'Verified', confirmEftNotSent: true } }, denied);
+      expect(denied.statusCode).toBe(403);
+      const deniedRead = createReply();
+      await gets.get(path)?.({ authUser: { role }, params: { reviewId: 'review-1' } }, deniedRead);
+      expect(deniedRead.statusCode).toBe(403);
+    }
+    for (const extraField of [{ amountMinor: 10000 }, { payoutBatchId: 'client-payout' }, { direction: 'VENDOR_CREDIT' }]) {
+      const extra = createReply();
+      await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+        body: { previewFingerprint: 'fingerprint', reason: 'Verified', confirmEftNotSent: true, ...extraField } }, extra);
+      expect(extra.statusCode).toBe(400);
+    }
+    applyReviewPayoutCorrectionMock.mockResolvedValue({ id: 'review-correction-1' });
+    const allowed = createReply();
+    expect(await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+      body: { previewFingerprint: 'fingerprint', reason: 'Verified', confirmEftNotSent: true } }, allowed))
+      .toEqual({ ok: true, application: { id: 'review-correction-1' } });
+    expect(applyReviewPayoutCorrectionMock).toHaveBeenCalledWith({ reviewId: 'review-1',
+      previewFingerprint: 'fingerprint', reason: 'Verified', confirmEftNotSent: true, actorUserId: 'admin-1' });
+    getReviewPayoutCorrectionStateMock.mockResolvedValue({ eligible: false });
+    const read = createReply();
+    expect(await gets.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' } }, read))
+      .toEqual({ ok: true, writesPerformed: false, eligible: false });
+  });
+
+  it('returns a structured conflict for generic REVIEW cancellation', async () => {
+    cancelPayoutBatchMock.mockRejectedValueOnce(new Error('REVIEW_GENERAL_CANCELLATION_FORBIDDEN'));
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+    expect(await posts.get('/admin/payout-batches/:id/cancel')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'review-payout-1' },
+    }, reply)).toEqual({ status: 409, body: { code: 'REVIEW_GENERAL_CANCELLATION_FORBIDDEN',
+      message: 'REVIEW_GENERAL_CANCELLATION_FORBIDDEN' } });
+    expect(reply.statusCode).toBe(409);
   });
 
   it('returns only dashboard finance summary fields', async () => {

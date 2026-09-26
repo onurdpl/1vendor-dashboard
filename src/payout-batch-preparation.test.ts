@@ -59,6 +59,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 const {
   cancelDraftPayoutBatchWithClient,
+  cancelReviewPayoutBatchWithClient,
   cancelPayoutBatch,
   getVendorFinanceSummary,
   PayoutBatchTransitionRevalidationError,
@@ -2256,7 +2257,7 @@ describe('payout batch preparation', () => {
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'batch-review',
-        status: { notIn: ['PAID', 'CANCELLED'] },
+        status: { notIn: ['PAID', 'CANCELLED', 'REVIEW'] },
         paidAt: null,
       },
       data: { status: 'CANCELLED' },
@@ -2302,6 +2303,17 @@ describe('payout batch preparation', () => {
     });
   });
 
+  it('rejects ordinary REVIEW cancellation without releasing payout sources', async () => {
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce({ status: 'REVIEW', paidAt: null });
+    await expect(cancelPayoutBatch('batch-review')).rejects.toThrow('REVIEW_GENERAL_CANCELLATION_FORBIDDEN');
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ status: { notIn: ['PAID', 'CANCELLED', 'REVIEW'] } }),
+    }));
+    expect(prismaMock.financialCorrectionCreditPayoutLine.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financialCorrectionDeductionPayoutLine.updateMany).not.toHaveBeenCalled();
+  });
+
   it('releases every supported correction payout source in the DRAFT-only cancellation', async () => {
     const cancelledAt = new Date('2026-06-02T08:31:00.000Z');
     prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 1 });
@@ -2310,6 +2322,26 @@ describe('payout batch preparation', () => {
 
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
       where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
+      data: { status: 'CANCELLED' },
+    });
+    for (const source of [prismaMock.financialCorrectionCreditPayoutLine,
+      prismaMock.financialCorrectionDeductionPayoutLine,
+      prismaMock.financialCorrectionApprovedDeductionPayoutLine]) {
+      expect(source.updateMany).toHaveBeenCalledWith({
+        where: { payoutBatchId: 'batch-review', status: 'ACTIVE' },
+        data: { status: 'CANCELLED', cancelledAt },
+      });
+    }
+  });
+
+  it('releases every supported correction payout source in the REVIEW correction cancellation', async () => {
+    const cancelledAt = new Date('2026-09-26T08:31:00.000Z');
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await cancelReviewPayoutBatchWithClient(prismaMock as never, 'batch-review', cancelledAt);
+
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
+      where: { id: 'batch-review', status: 'REVIEW', paidAt: null },
       data: { status: 'CANCELLED' },
     });
     for (const source of [prismaMock.financialCorrectionCreditPayoutLine,
