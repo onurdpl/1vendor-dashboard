@@ -420,6 +420,7 @@ model Vendor {
   balanceEvents                VendorBalanceEvent[]
   financialCorrectionCredits   FinancialCorrectionCredit[]
   financialCorrectionDeductions FinancialCorrectionDeduction[]
+  approvedDeductionCoverages FinancialCorrectionApprovedDeductionCoverage[]
   profileAuditLogs             VendorProfileAuditLog[]
   operationalSignals           OperationalSignal[]
   automationActions            AutomationAction[]
@@ -1500,8 +1501,45 @@ model FinancialCorrectionDeduction {
   authority       FinancialCorrectionAuthority @relation(fields: [authorityId], references: [id], onDelete: Restrict)
   vendor          Vendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
   settlementLines FinancialCorrectionDeductionSettlementLine[]
+  approvedCoverage FinancialCorrectionApprovedDeductionCoverage?
 
   @@index([vendorId, currency, createdAt])
+}
+
+// A whole deduction reserved against one lineage-matched, unpaid approved settlement.
+model FinancialCorrectionApprovedDeductionCoverage {
+  id                   String @id @default(cuid())
+  deductionId          String @unique
+  settlementApprovalId String
+  vendorId             String
+  amountMinor          Int
+  currency             String @default("TRY")
+  status               String @default("ACTIVE")
+  createdAt            DateTime @default(now())
+  releasedAt           DateTime?
+  deduction            FinancialCorrectionDeduction @relation(fields: [deductionId], references: [id], onDelete: Restrict)
+  settlementApproval   SettlementApproval @relation(fields: [settlementApprovalId], references: [id], onDelete: Restrict, map: "FinancialCorrectionApprovedDeductionCoverage_settlementApproval")
+  vendor               Vendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  payoutLines          FinancialCorrectionApprovedDeductionPayoutLine[]
+
+  @@index([settlementApprovalId, status], map: "FinancialCorrectionApprovedDeductionCoverage_approval_status_id")
+  @@index([vendorId, currency, status], map: "FinancialCorrectionApprovedDeductionCoverage_vendor_currency_st")
+}
+
+model FinancialCorrectionApprovedDeductionPayoutLine {
+  id            String @id @default(cuid())
+  coverageId    String
+  payoutBatchId String
+  amountMinor   Int
+  status        String @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  cancelledAt   DateTime?
+  paidAt        DateTime?
+  coverage      FinancialCorrectionApprovedDeductionCoverage @relation(fields: [coverageId], references: [id], onDelete: Restrict)
+  payoutBatch   PayoutBatch @relation(fields: [payoutBatchId], references: [id], onDelete: Restrict, map: "FinancialCorrectionApprovedDeductionPayoutLine_payoutBatchId_fk")
+
+  @@unique([coverageId, payoutBatchId], map: "FinancialCorrectionApprovedDeductionPayoutLine_source_batch_key")
+  @@index([payoutBatchId], map: "FinancialCorrectionApprovedDeductionPayoutLine_batch_idx")
 }
 
 // Cancelled consumption is retained and releases its deduction for redrafting.
@@ -1752,6 +1790,7 @@ model SettlementApproval {
   appliedRefundAdjustments     SettlementRefundAdjustment[]            @relation("AppliedSettlementApprovalRefundAdjustments")
   vendorBalanceEvents          VendorBalanceEvent[]
   originatingFinancialCorrections FinancialCorrectionAuthority[] @relation("ApprovedSettlementCorrectionOrigin")
+  approvedDeductionCoverages FinancialCorrectionApprovedDeductionCoverage[]
 
   @@index([vendorId, status])
   @@index([vendorId, scheduledCycleKey])
@@ -2046,6 +2085,7 @@ model PayoutBatch {
   lines                   PayoutBatchLine[]
   correctionCreditLines   FinancialCorrectionCreditPayoutLine[]
   correctionDeductionLines FinancialCorrectionDeductionPayoutLine[]
+  approvedDeductionLines FinancialCorrectionApprovedDeductionPayoutLine[]
   vendorBalanceEvents     VendorBalanceEvent[]
   paidFinancialCorrections FinancialCorrectionAuthority[]
   operationalSignals      OperationalSignal[]

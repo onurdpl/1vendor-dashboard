@@ -22,6 +22,8 @@ import {
   applyBeforeSettlementFinancialCorrectionDeduction,
   getApprovedSettlementFinancialCorrectionCreditState,
   applyApprovedSettlementFinancialCorrectionCredit,
+  getApprovedSettlementFinancialCorrectionDeductionState,
+  applyApprovedSettlementFinancialCorrectionDeduction,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
@@ -43,6 +45,7 @@ import {
   type BeforeSettlementFinancialCorrectionCreditApplication,
   type BeforeSettlementFinancialCorrectionDeductionApplication,
   type ApprovedSettlementFinancialCorrectionCreditApplication,
+  type ApprovedSettlementFinancialCorrectionDeductionApplication,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -66,6 +69,8 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     applyBeforeSettlementFinancialCorrectionDeduction: vi.fn(),
     getApprovedSettlementFinancialCorrectionCreditState: vi.fn(),
     applyApprovedSettlementFinancialCorrectionCredit: vi.fn(),
+    getApprovedSettlementFinancialCorrectionDeductionState: vi.fn(),
+    applyApprovedSettlementFinancialCorrectionDeduction: vi.fn(),
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
@@ -93,6 +98,8 @@ const getBeforeSettlementDeductionStateMock = vi.mocked(getBeforeSettlementFinan
 const applyBeforeSettlementDeductionMock = vi.mocked(applyBeforeSettlementFinancialCorrectionDeduction);
 const getApprovedSettlementCreditStateMock = vi.mocked(getApprovedSettlementFinancialCorrectionCreditState);
 const applyApprovedSettlementCreditMock = vi.mocked(applyApprovedSettlementFinancialCorrectionCredit);
+const getApprovedSettlementDeductionStateMock = vi.mocked(getApprovedSettlementFinancialCorrectionDeductionState);
+const applyApprovedSettlementDeductionMock = vi.mocked(applyApprovedSettlementFinancialCorrectionDeduction);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
@@ -303,6 +310,16 @@ const appliedApprovedSettlementCredit: ApprovedSettlementFinancialCorrectionCred
   historicalApprovedSettlementNetMinor: 100000,
 };
 
+const appliedApprovedSettlementDeduction: ApprovedSettlementFinancialCorrectionDeductionApplication = {
+  ...appliedBeforeSettlementDeduction,
+  id: 'correction-approved-deduction-1', deductionId: 'deduction-approved-1',
+  route: 'APPROVED_SETTLEMENT_VENDOR_DEDUCTION',
+  historicalApprovedSettlementId: 'historical-approval-1',
+  historicalApprovedSettlementAt: '2026-09-20T12:00:00Z',
+  historicalApprovedSettlementNetMinor: 100000,
+  coverageId: 'coverage-1', coverageAmountMinor: 1760, coverageStatus: 'ACTIVE',
+};
+
 function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
   return {
     type: 'legacy_refund_finance', id: 'legacy-review-1', status: 'ACTIVE', resolutionOutcome: null,
@@ -360,6 +377,7 @@ beforeEach(() => {
   getBeforeSettlementCreditStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'WRONG_CORRECTION_DIRECTION' });
   getBeforeSettlementDeductionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'BEFORE_SETTLEMENT_ROUTE_UNAVAILABLE' });
   getApprovedSettlementCreditStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'APPROVED_SETTLEMENT_REQUIRED', approvedSettlement: null });
+  getApprovedSettlementDeductionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'APPROVED_SETTLEMENT_REQUIRED', approvedSettlement: null });
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
@@ -866,6 +884,40 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(await screen.findByText('deduction-1')).toBeInTheDocument();
     expect(screen.getByText('Unpaid vendor entitlement decreases')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve & Apply Correction' })).not.toBeInTheDocument();
+    expect(applyPaidCorrectionMock).not.toHaveBeenCalled();
+  });
+
+  it('offers approved-settlement deduction only with server eligibility and shows reserved coverage after Apply', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0,
+        items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true,
+      review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getApprovedSettlementDeductionStateMock.mockResolvedValueOnce({ ok: true, writesPerformed: false,
+      application: null, eligible: true, reasonCode: null,
+      approvedSettlement: { id: 'historical-approval-1', approvedAt: '2026-09-20T12:00:00Z',
+        netPayableMinor: 100000, availableCoverageMinor: 100000 } })
+      .mockResolvedValue({ ok: true, writesPerformed: false,
+        application: appliedApprovedSettlementDeduction, eligible: false,
+        reasonCode: 'DEDUCTION_EFFECT_ALREADY_EXISTS', approvedSettlement: null });
+    applyApprovedSettlementDeductionMock.mockResolvedValue({ ok: true,
+      application: appliedApprovedSettlementDeduction });
+    renderPage();
+    const section = await screen.findByLabelText('Approved-settlement correction deduction application');
+    const apply = within(section).getByRole('button', { name: 'Approve & Apply Correction' });
+    expect(apply).toBeDisabled();
+    expect(section).toHaveTextContent('TRY 1,000.00');
+    expect(section).toHaveTextContent('This does not create vendor debt.');
+    await user.type(within(section).getByRole('textbox', { name: 'Required Admin reason' }), 'Approved deduction evidence');
+    await user.click(apply);
+    await waitFor(() => expect(applyApprovedSettlementDeductionMock).toHaveBeenCalledWith('review-1', {
+      previewFingerprint: 'financial-correction-preview-v1:verified', reason: 'Approved deduction evidence',
+    }));
+    expect(await screen.findByText('coverage-1')).toBeInTheDocument();
+    expect(screen.getByText('deduction-approved-1')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Approved-settlement correction deduction application')).not.toBeInTheDocument();
     expect(applyPaidCorrectionMock).not.toHaveBeenCalled();
   });
 

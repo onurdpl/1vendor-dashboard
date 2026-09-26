@@ -39,6 +39,11 @@ import {
   getApprovedSettlementFinancialCorrectionCreditState,
 } from './financial-correction-approved-settlement-credit.service.js';
 import {
+  applyApprovedSettlementFinancialCorrectionDeduction,
+  ApprovedSettlementFinancialCorrectionDeductionError,
+  getApprovedSettlementFinancialCorrectionDeductionState,
+} from './financial-correction-approved-settlement-deduction.service.js';
+import {
   applyBeforeSettlementFinancialCorrectionDeduction,
   BeforeSettlementFinancialCorrectionError as BeforeSettlementDeductionError,
   getBeforeSettlementFinancialCorrectionDeductionState,
@@ -1537,6 +1542,44 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       const { reviewId } = request.params as { reviewId: string };
       return { ok: true as const, writesPerformed: false as const,
         ...(await getBeforeSettlementFinancialCorrectionDeductionState(reviewId)) };
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-reviews/:reviewId/financial-correction-approved-settlement-deduction',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      const { reviewId } = request.params as { reviewId: string };
+      return { ok: true as const, writesPerformed: false as const,
+        ...(await getApprovedSettlementFinancialCorrectionDeductionState(reviewId)) };
+    },
+  );
+
+  app.post(
+    '/admin/finance/refund-reviews/:reviewId/financial-correction-approved-settlement-deduction',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin' || !request.authUser.id) return reply.code(403).send({ message: 'Admin access required.' });
+      try {
+        const body = request.body;
+        if (!body || typeof body !== 'object' || Array.isArray(body) ||
+            Object.keys(body).some((key) => key !== 'previewFingerprint' && key !== 'reason')) {
+          throw new ApprovedSettlementFinancialCorrectionDeductionError('INVALID_REQUEST', 400);
+        }
+        const { reviewId } = request.params as { reviewId: string };
+        return { ok: true as const, application: await applyApprovedSettlementFinancialCorrectionDeduction({
+          reviewId,
+          previewFingerprint: readOptionalBodyString(body, 'previewFingerprint') ?? '',
+          reason: readOptionalBodyString(body, 'reason') ?? '',
+          actorUserId: request.authUser.id,
+        }) };
+      } catch (error) {
+        if (error instanceof ApprovedSettlementFinancialCorrectionDeductionError) {
+          return reply.code(error.statusCode).send({ ok: false, code: error.code, message: error.message });
+        }
+        throw error;
+      }
     },
   );
 

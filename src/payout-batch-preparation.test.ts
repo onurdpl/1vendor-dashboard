@@ -34,6 +34,13 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     updateMany: vi.fn(),
   },
+  financialCorrectionApprovedDeductionCoverage: {
+    findMany: vi.fn(),
+  },
+  financialCorrectionApprovedDeductionPayoutLine: {
+    findMany: vi.fn(),
+    updateMany: vi.fn(),
+  },
   vendorBalanceEvent: {
     findMany: vi.fn(),
     upsert: vi.fn(),
@@ -270,6 +277,7 @@ function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[], s
     lines,
     correctionCreditLines: [],
     correctionDeductionLines: [],
+    approvedDeductionLines: [],
   };
 }
 
@@ -311,6 +319,7 @@ function mockPreparedBatchResponse(id = 'batch-approved-source') {
     })),
     correctionCreditLines: [],
     correctionDeductionLines: [],
+    approvedDeductionLines: [],
   }));
 }
 
@@ -356,6 +365,12 @@ describe('payout batch preparation', () => {
     prismaMock.financialCorrectionDeductionPayoutLine.findMany.mockResolvedValue([]);
     prismaMock.financialCorrectionDeductionPayoutLine.updateMany.mockReset();
     prismaMock.financialCorrectionDeductionPayoutLine.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.financialCorrectionApprovedDeductionCoverage.findMany.mockReset();
+    prismaMock.financialCorrectionApprovedDeductionCoverage.findMany.mockResolvedValue([]);
+    prismaMock.financialCorrectionApprovedDeductionPayoutLine.findMany.mockReset();
+    prismaMock.financialCorrectionApprovedDeductionPayoutLine.findMany.mockResolvedValue([]);
+    prismaMock.financialCorrectionApprovedDeductionPayoutLine.updateMany.mockReset();
+    prismaMock.financialCorrectionApprovedDeductionPayoutLine.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.vendorBalanceEvent.findMany.mockReset();
     prismaMock.vendorBalanceEvent.upsert.mockReset();
     prismaMock.financeIntegrityAlert.findMany.mockReset();
@@ -903,6 +918,7 @@ describe('payout batch preparation', () => {
       })),
       correctionCreditLines: [],
       correctionDeductionLines: [],
+      approvedDeductionLines: [],
     }));
 
     await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
@@ -1429,6 +1445,7 @@ describe('payout batch preparation', () => {
       lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({ id: `line-${index}`, ...line, createdAt: new Date('2026-09-25T12:00:00Z') })),
       correctionCreditLines: [],
       correctionDeductionLines: [],
+      approvedDeductionLines: [],
     }));
     const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
     expect(batch).toMatchObject({ payableBeforeDebtOffset: '400.00', outstandingDebtAmount: '150.00',

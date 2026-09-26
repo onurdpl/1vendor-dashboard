@@ -2559,6 +2559,14 @@ export async function cancelSettlementApproval(
       if (existing.status === SettlementApprovalStatus.CANCELLED) {
         throw new Error('Settlement approval is already cancelled.');
       }
+      // Serialize cancellation with approved-settlement deduction Apply and payout preparation.
+      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "Vendor" WHERE "id" = ${existing.vendorId} FOR UPDATE
+      `);
+      const activeDeductionCoverage = await tx.financialCorrectionApprovedDeductionCoverage.findFirst({
+        where: { settlementApprovalId: id, status: 'ACTIVE' }, select: { id: true },
+      });
+      if (activeDeductionCoverage) throw new Error('ORIGIN_SETTLEMENT_CANCELLATION_BLOCKED');
       const activeCommissionInvoices = (existing as typeof existing & { commissionInvoices: Array<{ id: string }> })
         .commissionInvoices;
       if (activeCommissionInvoices.length > 0) {

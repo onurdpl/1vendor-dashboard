@@ -2,7 +2,8 @@ import type { Prisma } from '@prisma/client';
 
 export async function getAvailableFinancialCorrectionDeductions(db: Prisma.TransactionClient, vendorId: string) {
   const deductions = await db.financialCorrectionDeduction.findMany({
-    where: { vendorId, currency: 'TRY', settlementLines: { none: { status: 'ACTIVE' } } },
+    where: { vendorId, currency: 'TRY', authority: { applicationRoute: 'BEFORE_SETTLEMENT_VENDOR_DEDUCTION' },
+      settlementLines: { none: { status: 'ACTIVE' } } },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { id: true, vendorId: true, amountMinor: true, currency: true, authorityId: true,
       authority: { select: { vendorId: true, currency: true, economicDirection: true,

@@ -382,6 +382,7 @@ export type PayoutBatchDto = {
   lines?: PayoutBatchLineDto[];
   correctionCreditLines?: Array<{ id: string; settlementCreditLineId: string; amountMinor: number; status: string }>;
   correctionDeductionLines?: Array<{ id: string; settlementDeductionLineId: string; amountMinor: number; status: string }>;
+  approvedDeductionLines?: Array<{ id: string; coverageId: string; amountMinor: number; status: string }>;
 };
 
 export type PreparePayoutBatchDto = {

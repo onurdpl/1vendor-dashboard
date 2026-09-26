@@ -398,6 +398,35 @@ export function applyBeforeSettlementFinancialCorrectionDeduction(reviewId: stri
   return apiClient.post<{ ok: true; application: BeforeSettlementFinancialCorrectionDeductionApplication }>(beforeSettlementDeductionPath(reviewId), input);
 }
 
+export type ApprovedSettlementFinancialCorrectionDeductionApplication = Omit<
+  BeforeSettlementFinancialCorrectionDeductionApplication, 'route' | 'settlementApprovalId' | 'settlementStatus'
+> & {
+  route: 'APPROVED_SETTLEMENT_VENDOR_DEDUCTION';
+  historicalApprovedSettlementId: string;
+  historicalApprovedSettlementAt: string;
+  historicalApprovedSettlementNetMinor: number;
+  coverageId: string;
+  coverageAmountMinor: number;
+  coverageStatus: 'ACTIVE' | 'RELEASED';
+};
+
+const approvedSettlementDeductionPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-approved-settlement-deduction`;
+
+export function getApprovedSettlementFinancialCorrectionDeductionState(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; writesPerformed: false;
+    application: ApprovedSettlementFinancialCorrectionDeductionApplication | null;
+    eligible: boolean; reasonCode: string | null;
+    approvedSettlement: { id: string; approvedAt: string; netPayableMinor: number;
+      availableCoverageMinor: number } | null }>(approvedSettlementDeductionPath(reviewId), { signal });
+}
+
+export function applyApprovedSettlementFinancialCorrectionDeduction(reviewId: string, input: { previewFingerprint: string; reason: string }) {
+  return apiClient.post<{ ok: true; application: ApprovedSettlementFinancialCorrectionDeductionApplication }>(
+    approvedSettlementDeductionPath(reviewId), input,
+  );
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;
