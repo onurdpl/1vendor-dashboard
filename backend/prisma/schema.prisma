@@ -1418,6 +1418,11 @@ model FinancialCorrectionAuthority {
   previewFingerprint                 String
   historicalPayoutBatchId            String?
   historicalPayoutPaidAt             DateTime?
+  historicalDraftPayoutGrossMinor     Int?
+  historicalDraftPayoutNetMinor       Int?
+  historicalDraftPayoutDebtOffsetMinor Int?
+  historicalDraftPayoutSourceFingerprint String?
+  historicalDraftPayoutCancelledAt    DateTime?
   historicalApprovedSettlementId     String?
   historicalApprovedSettlementAt     DateTime?
   historicalApprovedSettlementNetMinor Int?

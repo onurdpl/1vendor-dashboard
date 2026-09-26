@@ -2457,7 +2457,7 @@ export async function preparePayoutBatch(
       where: {
         vendorId: input.vendorId,
         currency: 'TRY',
-        authority: { applicationRoute: 'APPROVED_SETTLEMENT_VENDOR_CREDIT' },
+        authority: { applicationRoute: { in: ['APPROVED_SETTLEMENT_VENDOR_CREDIT', 'DRAFT_PAYOUT_VENDOR_CREDIT'] } },
         settlementLines: { none: {
           status: 'ACTIVE', settlementApproval: { status: 'APPROVED' },
         } },
@@ -2636,7 +2636,7 @@ export async function preparePayoutBatch(
           line.settlementApproval.correctionCreditMinor < line.amountMinor) {
         throw new Error('Financial Correction Credit settlement source is inconsistent.');
       }
-      if (line.credit.authority.applicationRoute === 'APPROVED_SETTLEMENT_VENDOR_CREDIT') {
+      if (['APPROVED_SETTLEMENT_VENDOR_CREDIT', 'DRAFT_PAYOUT_VENDOR_CREDIT'].includes(line.credit.authority.applicationRoute)) {
         const originId = line.credit.authority.historicalApprovedSettlementId;
         const origin = originId ? await tx.settlementApproval.findUnique({
           where: { id: originId },
@@ -3530,13 +3530,37 @@ export async function validatePayoutBatchBeforeTransition(payoutBatchId: string)
   return prisma.$transaction(async (tx) => validatePayoutBatchBeforeTransitionWithClient(tx, payoutBatchId));
 }
 
+async function releaseCancelledPayoutSources(tx: Prisma.TransactionClient, batchId: string, cancelledAt: Date) {
+    await tx.financialCorrectionCreditPayoutLine.updateMany({
+      where: { payoutBatchId: batchId, status: 'ACTIVE' },
+      data: { status: 'CANCELLED', cancelledAt },
+    });
+    await tx.financialCorrectionDeductionPayoutLine.updateMany({
+      where: { payoutBatchId: batchId, status: 'ACTIVE' },
+      data: { status: 'CANCELLED', cancelledAt },
+    });
+    await tx.financialCorrectionApprovedDeductionPayoutLine.updateMany({
+      where: { payoutBatchId: batchId, status: 'ACTIVE' },
+      data: { status: 'CANCELLED', cancelledAt },
+    });
+}
+
+export async function cancelDraftPayoutBatchWithClient(tx: Prisma.TransactionClient, batchId: string, cancelledAt: Date) {
+  const cancellation = await tx.payoutBatch.updateMany({
+    where: { id: batchId, status: 'DRAFT', paidAt: null },
+    data: { status: 'CANCELLED' },
+  });
+  if (cancellation.count !== 1) throw new Error('DRAFT_PAYOUT_STATE_CHANGED');
+  await releaseCancelledPayoutSources(tx, batchId, cancelledAt);
+}
+
 export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto> {
   return prisma.$transaction(async (tx) => {
     const cancellation = await tx.payoutBatch.updateMany({
       where: {
         id: batchId,
         status: {
-          not: 'PAID',
+          notIn: ['PAID', 'CANCELLED'],
         },
         paidAt: null,
       },
@@ -3566,18 +3590,7 @@ export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto
       throw new Error('Payout batch could not be cancelled because its status changed.');
     }
 
-    await tx.financialCorrectionCreditPayoutLine.updateMany({
-      where: { payoutBatchId: batchId, status: 'ACTIVE' },
-      data: { status: 'CANCELLED', cancelledAt: new Date() },
-    });
-    await tx.financialCorrectionDeductionPayoutLine.updateMany({
-      where: { payoutBatchId: batchId, status: 'ACTIVE' },
-      data: { status: 'CANCELLED', cancelledAt: new Date() },
-    });
-    await tx.financialCorrectionApprovedDeductionPayoutLine.updateMany({
-      where: { payoutBatchId: batchId, status: 'ACTIVE' },
-      data: { status: 'CANCELLED', cancelledAt: new Date() },
-    });
+    await releaseCancelledPayoutSources(tx, batchId, new Date());
 
     const batch = await tx.payoutBatch.findUnique({
       where: {
@@ -3679,13 +3692,13 @@ export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatc
   return prisma.$transaction(async (tx) => {
     await validatePayoutBatchBeforeTransitionWithClient(tx, batchId);
 
-    const batch = await tx.payoutBatch.update({
-      where: {
-        id: batchId,
-      },
-      data: {
-        status: 'REVIEW',
-      },
+    const transition = await tx.payoutBatch.updateMany({
+      where: { id: batchId, status: 'DRAFT', paidAt: null },
+      data: { status: 'REVIEW' },
+    });
+    if (transition.count !== 1) throw new Error('Payout batch must still be DRAFT to enter review.');
+    const batch = await tx.payoutBatch.findUnique({
+      where: { id: batchId },
       include: {
         correctionCreditLines: true,
         correctionDeductionLines: true,
@@ -3697,7 +3710,7 @@ export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatc
         },
       },
     });
-
+    if (!batch) throw new Error('Payout batch not found.');
     return mapPayoutBatch(batch);
   });
 }

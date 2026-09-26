@@ -58,6 +58,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const {
+  cancelDraftPayoutBatchWithClient,
   cancelPayoutBatch,
   getVendorFinanceSummary,
   PayoutBatchTransitionRevalidationError,
@@ -282,12 +283,12 @@ function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[], s
 }
 
 function mockTransitionBatch(batch: ReturnType<typeof buildTransitionBatch>) {
-  prismaMock.payoutBatch.findUnique.mockResolvedValue(batch);
-  prismaMock.payoutBatch.update.mockResolvedValue({
+  prismaMock.payoutBatch.findUnique.mockResolvedValueOnce(batch).mockResolvedValue({
     ...batch,
     status: 'REVIEW',
     updatedAt: new Date('2026-05-13T11:05:00Z'),
   });
+  prismaMock.payoutBatch.updateMany.mockResolvedValue({ count: 1 });
 }
 
 function mockPreparedBatchResponse(id = 'batch-approved-source') {
@@ -1531,9 +1532,9 @@ describe('payout batch preparation', () => {
 
     const reviewed = await markPayoutBatchReview('batch-review');
 
-    expect(prismaMock.payoutBatch.update).toHaveBeenCalledWith(
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'batch-review' },
+        where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
         data: { status: 'REVIEW' },
       }),
     );
@@ -1745,8 +1746,8 @@ describe('payout batch preparation', () => {
     await expect(markPayoutBatchReview('batch-review')).resolves.toMatchObject({
       status: 'review',
     });
-    expect(prismaMock.payoutBatch.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'batch-review' },
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
       data: expect.objectContaining({ status: 'REVIEW' }),
     }));
   });
@@ -1851,7 +1852,7 @@ describe('payout batch preparation', () => {
     await expect(markPayoutBatchReview('batch-review')).resolves.toMatchObject({
       status: 'review',
     });
-    expect(prismaMock.payoutBatch.update).toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalled();
   });
 
   it('blocks review when the exact settlement line is also linked to another active payout', async () => {
@@ -2050,7 +2051,7 @@ describe('payout batch preparation', () => {
 
     const reviewed = await markPayoutBatchReview('batch-review');
 
-    expect(prismaMock.payoutBatch.update).toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalled();
     expect(reviewed).toMatchObject({
       status: 'review',
       lineCount: 1,
@@ -2255,7 +2256,7 @@ describe('payout batch preparation', () => {
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'batch-review',
-        status: { not: 'PAID' },
+        status: { notIn: ['PAID', 'CANCELLED'] },
         paidAt: null,
       },
       data: { status: 'CANCELLED' },
@@ -2299,6 +2300,26 @@ describe('payout batch preparation', () => {
       id: 'batch-review',
       status: 'cancelled',
     });
+  });
+
+  it('releases every supported correction payout source in the DRAFT-only cancellation', async () => {
+    const cancelledAt = new Date('2026-06-02T08:31:00.000Z');
+    prismaMock.payoutBatch.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await cancelDraftPayoutBatchWithClient(prismaMock as never, 'batch-review', cancelledAt);
+
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
+      where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
+      data: { status: 'CANCELLED' },
+    });
+    for (const source of [prismaMock.financialCorrectionCreditPayoutLine,
+      prismaMock.financialCorrectionDeductionPayoutLine,
+      prismaMock.financialCorrectionApprovedDeductionPayoutLine]) {
+      expect(source.updateMany).toHaveBeenCalledWith({
+        where: { payoutBatchId: 'batch-review', status: 'ACTIVE' },
+        data: { status: 'CANCELLED', cancelledAt },
+      });
+    }
   });
 
   it('keeps paid as the terminal winner when Mark Paid completes before Cancel', async () => {

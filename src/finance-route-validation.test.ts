@@ -30,6 +30,8 @@ const getApprovedSettlementCreditStateMock = vi.hoisted(() => vi.fn());
 const applyApprovedSettlementCreditMock = vi.hoisted(() => vi.fn());
 const getApprovedSettlementDeductionStateMock = vi.hoisted(() => vi.fn());
 const applyApprovedSettlementDeductionMock = vi.hoisted(() => vi.fn());
+const getDraftPayoutCorrectionStateMock = vi.hoisted(() => vi.fn());
+const applyDraftPayoutCorrectionMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -75,6 +77,13 @@ vi.mock('../backend/src/modules/finance/financial-correction-approved-settlement
   getApprovedSettlementFinancialCorrectionDeductionState: getApprovedSettlementDeductionStateMock,
   applyApprovedSettlementFinancialCorrectionDeduction: applyApprovedSettlementDeductionMock,
   ApprovedSettlementFinancialCorrectionDeductionError: class ApprovedSettlementFinancialCorrectionDeductionError extends Error {
+    constructor(readonly code: string, readonly statusCode = 409) { super(code); }
+  },
+}));
+vi.mock('../backend/src/modules/finance/financial-correction-draft-payout.service.js', () => ({
+  getDraftPayoutFinancialCorrectionState: getDraftPayoutCorrectionStateMock,
+  applyDraftPayoutFinancialCorrection: applyDraftPayoutCorrectionMock,
+  DraftPayoutFinancialCorrectionError: class DraftPayoutFinancialCorrectionError extends Error {
     constructor(readonly code: string, readonly statusCode = 409) { super(code); }
   },
 }));
@@ -640,6 +649,39 @@ describe('finance route validation', () => {
     expect(applyApprovedSettlementDeductionMock).toHaveBeenCalledWith({ reviewId: 'review-1',
       previewFingerprint: 'fingerprint', reason: 'Verified', actorUserId: 'admin-1' });
     getApprovedSettlementDeductionStateMock.mockResolvedValue({ eligible: false });
+    const read = createReply();
+    expect(await gets.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' } }, read))
+      .toEqual({ ok: true, writesPerformed: false, eligible: false });
+  });
+
+  it('keeps atomic draft payout correction Admin-only and rejects client financial authority', async () => {
+    const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-draft-payout';
+    const posts = createRegisteredPostRoutes();
+    const gets = createRegisteredGetRoutes();
+    for (const role of ['finance', 'vendor', 'support']) {
+      const denied = createReply();
+      await posts.get(path)?.({ authUser: { role, id: `${role}-1` }, params: { reviewId: 'review-1' },
+        body: { previewFingerprint: 'fingerprint', reason: 'Verified' } }, denied);
+      expect(denied.statusCode).toBe(403);
+      const deniedRead = createReply();
+      await gets.get(path)?.({ authUser: { role }, params: { reviewId: 'review-1' } }, deniedRead);
+      expect(deniedRead.statusCode).toBe(403);
+    }
+    for (const extraField of [{ amountMinor: 10000 }, { payoutBatchId: 'client-payout' }, { direction: 'VENDOR_CREDIT' }]) {
+      const extra = createReply();
+      await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+        body: { previewFingerprint: 'fingerprint', reason: 'Verified', ...extraField } }, extra);
+      expect(extra.statusCode).toBe(400);
+    }
+    expect(applyDraftPayoutCorrectionMock).not.toHaveBeenCalled();
+    applyDraftPayoutCorrectionMock.mockResolvedValue({ id: 'draft-correction-1' });
+    const allowed = createReply();
+    expect(await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+      body: { previewFingerprint: 'fingerprint', reason: 'Verified' } }, allowed))
+      .toEqual({ ok: true, application: { id: 'draft-correction-1' } });
+    expect(applyDraftPayoutCorrectionMock).toHaveBeenCalledWith({ reviewId: 'review-1',
+      previewFingerprint: 'fingerprint', reason: 'Verified', actorUserId: 'admin-1' });
+    getDraftPayoutCorrectionStateMock.mockResolvedValue({ eligible: false });
     const read = createReply();
     expect(await gets.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' } }, read))
       .toEqual({ ok: true, writesPerformed: false, eligible: false });

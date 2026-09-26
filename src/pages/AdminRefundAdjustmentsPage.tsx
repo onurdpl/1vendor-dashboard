@@ -29,6 +29,8 @@ import {
   applyBeforeSettlementFinancialCorrectionDeduction,
   getApprovedSettlementFinancialCorrectionDeductionState,
   applyApprovedSettlementFinancialCorrectionDeduction,
+  getDraftPayoutFinancialCorrectionState,
+  applyDraftPayoutFinancialCorrection,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
   acknowledgeAdminLegacyRefundReview,
@@ -288,6 +290,8 @@ export function AdminRefundAdjustmentsPage() {
   const [beforeSettlementDeductionError, setBeforeSettlementDeductionError] = useState<string | null>(null);
   const [approvedSettlementDeductionPending, setApprovedSettlementDeductionPending] = useState(false);
   const [approvedSettlementDeductionError, setApprovedSettlementDeductionError] = useState<string | null>(null);
+  const [draftPayoutCorrectionPending, setDraftPayoutCorrectionPending] = useState(false);
+  const [draftPayoutCorrectionError, setDraftPayoutCorrectionError] = useState<string | null>(null);
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -445,6 +449,19 @@ export function AdminRefundAdjustmentsPage() {
     ? approvedSettlementDeductionQuery.data : null;
   const approvedSettlementDeductionApplication = approvedSettlementDeductionState && approvedSettlementDeductionState.application?.reviewId === terminalDetail?.id
     ? approvedSettlementDeductionState.application : null;
+  const draftPayoutCorrectionQuery = useQueryResource(
+    ['admin', 'finance', 'draft-payout-correction', terminalDetail?.id ?? 'none', terminalDetail?.updatedAt ?? 'none'],
+    ({ signal }) => getDraftPayoutFinancialCorrectionState(terminalDetail!.id, signal),
+    {
+      routeName: 'Draft payout financial correction',
+      endpoint: terminalDetail ? `/admin/finance/refund-reviews/${terminalDetail.id}/financial-correction-draft-payout` : '/admin/finance/refund-reviews',
+      enabled: Boolean(terminalDetail),
+    },
+  );
+  const draftPayoutCorrectionState = terminalDetail && !draftPayoutCorrectionQuery.isFetching && !draftPayoutCorrectionQuery.error
+    ? draftPayoutCorrectionQuery.data : null;
+  const draftPayoutCorrectionApplication = draftPayoutCorrectionState && draftPayoutCorrectionState.application?.reviewId === terminalDetail?.id
+    ? draftPayoutCorrectionState.application : null;
   const currentPaidReason = paidCorrectionReason.reviewId === terminalDetail?.id ? paidCorrectionReason.value : '';
 
   const runPaidCorrection = async () => {
@@ -576,6 +593,28 @@ export function AdminRefundAdjustmentsPage() {
       await Promise.all([correctionPreviewQuery.refetch(), approvedSettlementDeductionQuery.refetch(), terminalDetailQuery.refetch()]);
     } finally {
       setApprovedSettlementDeductionPending(false);
+    }
+  };
+
+  const runDraftPayoutCorrection = async () => {
+    if (!eligibleTerminalDetail || !correctionPreview || !draftPayoutCorrectionState?.eligible ||
+        !draftPayoutCorrectionState.draftPayout || draftPayoutCorrectionApplication || draftPayoutCorrectionPending ||
+        !currentPaidReason.trim() || currentPaidReason.trim().length > 500 ||
+        correctionPreview.economicDirection === 'NONE') return;
+    setDraftPayoutCorrectionPending(true);
+    setDraftPayoutCorrectionError(null);
+    try {
+      await applyDraftPayoutFinancialCorrection(eligibleTerminalDetail.id, {
+        previewFingerprint: correctionPreview.previewFingerprint, reason: currentPaidReason.trim(),
+      });
+      setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: '' });
+      await Promise.all([draftPayoutCorrectionQuery.refetch(), approvedSettlementCreditQuery.refetch(),
+        approvedSettlementDeductionQuery.refetch()]);
+    } catch (error) {
+      setDraftPayoutCorrectionError(error instanceof Error ? error.message : 'Draft payout correction could not be applied.');
+      await Promise.all([correctionPreviewQuery.refetch(), draftPayoutCorrectionQuery.refetch(), terminalDetailQuery.refetch()]);
+    } finally {
+      setDraftPayoutCorrectionPending(false);
     }
   };
 
@@ -998,7 +1037,7 @@ export function AdminRefundAdjustmentsPage() {
                   {eligibleTerminalDetail ? (
                     <section className="op-panel-section" aria-label="Financial correction preview">
                       <h4>Financial correction preview</h4>
-                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication || beforeSettlementCreditApplication || beforeSettlementDeductionApplication
+                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication || beforeSettlementCreditApplication || beforeSettlementDeductionApplication || draftPayoutCorrectionApplication
                         ? 'Read-only calculation. Applied correction is shown below.'
                         : paidCorrectionState && paidCreditState && beforeSettlementCreditState && beforeSettlementDeductionState
                           ? 'Read-only calculation. No financial correction has been applied.'
@@ -1032,7 +1071,8 @@ export function AdminRefundAdjustmentsPage() {
                             <MetadataRow label="Final vendor-payable difference" value={formatSignedMinor(correctionPreview.difference.vendorPayableReversalMinor)} />
                             <MetadataRow label="Economic direction" value={correctionPreview.economicDirection === 'VENDOR_DEDUCTION'
                               ? beforeSettlementDeductionState?.eligible || beforeSettlementDeductionApplication ||
-                                  approvedSettlementDeductionState?.eligible || approvedSettlementDeductionApplication
+                                  approvedSettlementDeductionState?.eligible || approvedSettlementDeductionApplication ||
+                                  draftPayoutCorrectionState?.eligible || draftPayoutCorrectionApplication
                                 ? 'Unpaid vendor entitlement decreases' : 'Vendor owes Sporgym more'
                               : correctionPreview.economicDirection === 'VENDOR_CREDIT'
                                 ? 'Sporgym owes vendor more'
@@ -1051,6 +1091,22 @@ export function AdminRefundAdjustmentsPage() {
                                 {zeroNetError ? <p className="op-alert op-tone-danger" role="alert">{zeroNetError}</p> : null}
                               </section>
                             ) : null}
+                          {draftPayoutCorrectionState?.eligible && draftPayoutCorrectionState.draftPayout &&
+                            !draftPayoutCorrectionApplication && correctionPreview.economicDirection !== 'NONE' ? (
+                              <section className="op-panel-section" aria-label="Draft payout correction application">
+                                <h5>Cancel draft payout &amp; apply correction</h5>
+                                <p className="page-description">Current DRAFT payout {draftPayoutCorrectionState.draftPayout.id}: {formatMinor(draftPayoutCorrectionState.draftPayout.netAmountMinor)}. {correctionPreview.economicDirection === 'VENDOR_CREDIT'
+                                  ? `Vendor credit: +${formatMinor(-correctionPreview.difference.vendorPayableReversalMinor)}. The credit requires a separate approved correction settlement before replacement payout preparation.`
+                                  : `Vendor deduction: -${formatMinor(correctionPreview.difference.vendorPayableReversalMinor)}. This reduces the next payout entitlement and does not create vendor debt.`} The DRAFT payout will be cancelled but remain visible in history. No replacement payout is created automatically; prepare one afterward.</p>
+                                <label><span>Required Admin reason</span><textarea maxLength={500} value={currentPaidReason} onChange={(event) => setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: event.target.value })} /></label>
+                                <button type="button" disabled={draftPayoutCorrectionPending || !currentPaidReason.trim()} onClick={() => void runDraftPayoutCorrection()}>
+                                  {draftPayoutCorrectionPending ? 'Applying...' : 'Cancel Draft Payout & Apply Correction'}
+                                </button>
+                              </section>
+                            ) : null}
+                          {draftPayoutCorrectionState?.reasonCode === 'PAYOUT_ALREADY_REVIEW' ? (
+                            <p className="op-alert op-tone-attention">Payout is already in payment review. Financial Correction cannot rebuild this payout.</p>
+                          ) : null}
                           {correctionPreview.economicDirection === 'VENDOR_DEDUCTION' &&
                             correctionPreview.difference.vendorPayableReversalMinor > 0 && paidCorrectionState?.eligible &&
                             !paidCorrectionApplication ? (
@@ -1125,7 +1181,7 @@ export function AdminRefundAdjustmentsPage() {
                             ) : null}
                           {correctionPreview.economicDirection === 'VENDOR_CREDIT' &&
                             !paidCreditState?.eligible && !beforeSettlementCreditState?.eligible &&
-                            !approvedSettlementCreditState?.eligible &&
+                            !approvedSettlementCreditState?.eligible && !draftPayoutCorrectionState?.eligible &&
                             !paidCreditApplication && !beforeSettlementCreditApplication && !approvedSettlementCreditApplication &&
                             !paidCreditQuery.isFetching && !beforeSettlementCreditQuery.isFetching && !approvedSettlementCreditQuery.isFetching ? (
                               <p className="op-alert op-tone-attention">Vendor credit application is unavailable for this review.</p>
@@ -1242,6 +1298,22 @@ export function AdminRefundAdjustmentsPage() {
                       <MetadataRow label="Payout" value={approvedSettlementDeductionApplication.payoutBatchId ?? 'Not yet paid'} />
                       <MetadataRow label="Reason" value={approvedSettlementDeductionApplication.reason} />
                       <p className="page-description">The historical approved settlement was not modified. This separate deduction reduces the first payout entitlement; it is not vendor debt.</p>
+                    </MetadataGroup>
+                  ) : null}
+                  {draftPayoutCorrectionError ? <p className="op-alert op-tone-danger" role="alert">{draftPayoutCorrectionError}</p> : null}
+                  {draftPayoutCorrectionQuery.error ? <p className="op-alert op-tone-attention" role="status">Draft payout correction history unavailable: {draftPayoutCorrectionQuery.error}</p> : null}
+                  {draftPayoutCorrectionApplication ? (
+                    <MetadataGroup title="Applied draft payout financial correction">
+                      <MetadataRow label="Status" value="Applied" />
+                      <MetadataRow label="Direction" value={draftPayoutCorrectionApplication.direction === 'VENDOR_CREDIT' ? 'Vendor credit' : 'Vendor deduction'} />
+                      <MetadataRow label="Correction amount" value={formatMinor(draftPayoutCorrectionApplication.amountMinor)} />
+                      <MetadataRow label="Cancelled DRAFT payout" value={draftPayoutCorrectionApplication.historicalPayoutBatchId} />
+                      <MetadataRow label="Original payout amount" value={formatMinor(draftPayoutCorrectionApplication.historicalPayoutNetMinor)} />
+                      <MetadataRow label="Cancelled at" value={formatDate(draftPayoutCorrectionApplication.historicalPayoutCancelledAt)} />
+                      <MetadataRow label="Correction authority" value={draftPayoutCorrectionApplication.id} />
+                      <MetadataRow label="Admin actor" value={draftPayoutCorrectionApplication.authorizedByUserId} />
+                      <MetadataRow label="Reason" value={draftPayoutCorrectionApplication.reason} />
+                      <p className="page-description">The original payout snapshot remains in history. Prepare a new payout separately from current financial sources.</p>
                     </MetadataGroup>
                   ) : null}
                   {zeroNetQuery.error ? <p className="op-alert op-tone-attention" role="status">Zero-net acknowledgement history unavailable: {zeroNetQuery.error}</p> : null}

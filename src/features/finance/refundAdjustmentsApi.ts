@@ -427,6 +427,53 @@ export function applyApprovedSettlementFinancialCorrectionDeduction(reviewId: st
   );
 }
 
+export type DraftPayoutFinancialCorrectionApplication = {
+  id: string;
+  reviewId: string;
+  route: 'DRAFT_PAYOUT_VENDOR_CREDIT' | 'DRAFT_PAYOUT_VENDOR_DEDUCTION';
+  status: 'APPLIED';
+  direction: 'VENDOR_CREDIT' | 'VENDOR_DEDUCTION';
+  amountMinor: number;
+  currency: 'TRY';
+  creditId: string | null;
+  deductionId: string | null;
+  coverageId: string | null;
+  historicalApprovedSettlementId: string;
+  historicalPayoutBatchId: string;
+  historicalPayoutNetMinor: number;
+  historicalPayoutGrossMinor: number;
+  historicalPayoutDebtOffsetMinor: number;
+  historicalPayoutCancelledAt: string;
+  authorizedByUserId: string;
+  reason: string;
+  authorizedAt: string;
+  appliedAt: string;
+  previewFingerprint: string;
+};
+
+export type DraftPayoutFinancialCorrectionState = {
+  ok: true;
+  writesPerformed: false;
+  application: DraftPayoutFinancialCorrectionApplication | null;
+  eligible: boolean;
+  reasonCode: string | null;
+  draftPayout: { id: string; status: 'DRAFT'; netAmountMinor: number;
+    grossAmountMinor: number; debtOffsetMinor: number } | null;
+};
+
+const draftPayoutCorrectionPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-draft-payout`;
+
+export function getDraftPayoutFinancialCorrectionState(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<DraftPayoutFinancialCorrectionState>(draftPayoutCorrectionPath(reviewId), { signal });
+}
+
+export function applyDraftPayoutFinancialCorrection(reviewId: string, input: { previewFingerprint: string; reason: string }) {
+  return apiClient.post<{ ok: true; application: DraftPayoutFinancialCorrectionApplication }>(
+    draftPayoutCorrectionPath(reviewId), input,
+  );
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;

@@ -24,6 +24,8 @@ import {
   applyApprovedSettlementFinancialCorrectionCredit,
   getApprovedSettlementFinancialCorrectionDeductionState,
   applyApprovedSettlementFinancialCorrectionDeduction,
+  getDraftPayoutFinancialCorrectionState,
+  applyDraftPayoutFinancialCorrection,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
@@ -46,6 +48,7 @@ import {
   type BeforeSettlementFinancialCorrectionDeductionApplication,
   type ApprovedSettlementFinancialCorrectionCreditApplication,
   type ApprovedSettlementFinancialCorrectionDeductionApplication,
+  type DraftPayoutFinancialCorrectionApplication,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -71,6 +74,8 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     applyApprovedSettlementFinancialCorrectionCredit: vi.fn(),
     getApprovedSettlementFinancialCorrectionDeductionState: vi.fn(),
     applyApprovedSettlementFinancialCorrectionDeduction: vi.fn(),
+    getDraftPayoutFinancialCorrectionState: vi.fn(),
+    applyDraftPayoutFinancialCorrection: vi.fn(),
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
@@ -100,6 +105,8 @@ const getApprovedSettlementCreditStateMock = vi.mocked(getApprovedSettlementFina
 const applyApprovedSettlementCreditMock = vi.mocked(applyApprovedSettlementFinancialCorrectionCredit);
 const getApprovedSettlementDeductionStateMock = vi.mocked(getApprovedSettlementFinancialCorrectionDeductionState);
 const applyApprovedSettlementDeductionMock = vi.mocked(applyApprovedSettlementFinancialCorrectionDeduction);
+const getDraftPayoutCorrectionStateMock = vi.mocked(getDraftPayoutFinancialCorrectionState);
+const applyDraftPayoutCorrectionMock = vi.mocked(applyDraftPayoutFinancialCorrection);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
@@ -320,6 +327,18 @@ const appliedApprovedSettlementDeduction: ApprovedSettlementFinancialCorrectionD
   coverageId: 'coverage-1', coverageAmountMinor: 1760, coverageStatus: 'ACTIVE',
 };
 
+const appliedDraftPayoutCorrection: DraftPayoutFinancialCorrectionApplication = {
+  id: 'draft-correction-1', reviewId: 'review-1', route: 'DRAFT_PAYOUT_VENDOR_DEDUCTION',
+  status: 'APPLIED', direction: 'VENDOR_DEDUCTION', amountMinor: 1760, currency: 'TRY',
+  creditId: null, deductionId: 'draft-deduction-1', coverageId: 'draft-coverage-1',
+  historicalApprovedSettlementId: 'historical-approval-1', historicalPayoutBatchId: 'draft-payout-1',
+  historicalPayoutNetMinor: 100000, historicalPayoutGrossMinor: 120000,
+  historicalPayoutDebtOffsetMinor: 0, historicalPayoutCancelledAt: '2026-09-25T12:00:00Z',
+  authorizedByUserId: 'admin-1', reason: 'Verified draft correction',
+  authorizedAt: '2026-09-25T12:00:00Z', appliedAt: '2026-09-25T12:00:00Z',
+  previewFingerprint: 'financial-correction-preview-v1:verified',
+};
+
 function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
   return {
     type: 'legacy_refund_finance', id: 'legacy-review-1', status: 'ACTIVE', resolutionOutcome: null,
@@ -378,6 +397,8 @@ beforeEach(() => {
   getBeforeSettlementDeductionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'BEFORE_SETTLEMENT_ROUTE_UNAVAILABLE' });
   getApprovedSettlementCreditStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'APPROVED_SETTLEMENT_REQUIRED', approvedSettlement: null });
   getApprovedSettlementDeductionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'APPROVED_SETTLEMENT_REQUIRED', approvedSettlement: null });
+  getDraftPayoutCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null,
+    eligible: false, reasonCode: 'DRAFT_PAYOUT_REQUIRED', draftPayout: null });
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
@@ -919,6 +940,51 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.getByText('deduction-approved-1')).toBeInTheDocument();
     expect(screen.queryByLabelText('Approved-settlement correction deduction application')).not.toBeInTheDocument();
     expect(applyPaidCorrectionMock).not.toHaveBeenCalled();
+  });
+
+  it('shows a single server-gated cancel DRAFT and apply action with required reason', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0,
+        items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true,
+      review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getDraftPayoutCorrectionStateMock.mockResolvedValueOnce({ ok: true, writesPerformed: false,
+      application: null, eligible: true, reasonCode: null,
+      draftPayout: { id: 'draft-payout-1', status: 'DRAFT', netAmountMinor: 100000,
+        grossAmountMinor: 120000, debtOffsetMinor: 0 } })
+      .mockResolvedValue({ ok: true, writesPerformed: false, application: appliedDraftPayoutCorrection,
+        eligible: false, reasonCode: 'CORRECTION_ALREADY_APPLIED', draftPayout: null });
+    applyDraftPayoutCorrectionMock.mockResolvedValue({ ok: true, application: appliedDraftPayoutCorrection });
+    renderPage();
+    const section = await screen.findByLabelText('Draft payout correction application');
+    expect(section).toHaveTextContent('draft-payout-1');
+    expect(section).toHaveTextContent('No replacement payout is created automatically');
+    const action = within(section).getByRole('button', { name: 'Cancel Draft Payout & Apply Correction' });
+    expect(action).toBeDisabled();
+    await user.type(within(section).getByRole('textbox', { name: 'Required Admin reason' }), 'Verified draft correction');
+    await user.click(action);
+    await waitFor(() => expect(applyDraftPayoutCorrectionMock).toHaveBeenCalledWith('review-1', {
+      previewFingerprint: 'financial-correction-preview-v1:verified', reason: 'Verified draft correction',
+    }));
+    expect(await screen.findByText('draft-correction-1')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Draft payout correction application')).not.toBeInTheDocument();
+  });
+
+  it('shows REVIEW as blocked without a cancel-and-apply action', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0,
+        items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true,
+      review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getDraftPayoutCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false,
+      application: null, eligible: false, reasonCode: 'PAYOUT_ALREADY_REVIEW', draftPayout: null });
+    renderPage();
+    expect(await screen.findByText('Payout is already in payment review. Financial Correction cannot rebuild this payout.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel Draft Payout & Apply Correction' })).not.toBeInTheDocument();
+    expect(applyDraftPayoutCorrectionMock).not.toHaveBeenCalled();
   });
 
   it('reports an unavailable preview without inventing a corrected amount or action', async () => {
