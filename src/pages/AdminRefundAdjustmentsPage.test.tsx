@@ -828,6 +828,7 @@ describe('AdminRefundAdjustmentsPage', () => {
     renderPage();
     const apply = await screen.findByRole('button', { name: 'Approve & Apply Credit' });
     expect(apply).toBeDisabled();
+    expect(screen.queryByText('Vendor credit application is unavailable for this review.')).not.toBeInTheDocument();
     expect(screen.getByText(/creates a standalone future vendor payable credit/)).toHaveTextContent('TRY 17.60');
     await user.type(screen.getByRole('textbox', { name: 'Required Admin reason' }), 'Verified credit evidence');
     await user.click(apply);
@@ -1009,6 +1010,7 @@ describe('AdminRefundAdjustmentsPage', () => {
     renderPage();
     const section = await screen.findByLabelText('Review payout correction application');
     expect(section).toHaveTextContent('review-payout-1');
+    expect(screen.queryByText('Vendor credit application is unavailable for this review.')).not.toBeInTheDocument();
     expect(section).toHaveTextContent('No replacement payout is created automatically');
     const action = within(section).getByRole('button', { name: 'Cancel Review Payout & Apply Correction' });
     const confirmation = within(section).getByRole('checkbox', { name: /no external bank\/EFT instruction/i });
@@ -1026,6 +1028,57 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.queryByLabelText('Review payout correction application')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel Draft Payout & Apply Correction' })).not.toBeInTheDocument();
     expect(applyDraftPayoutCorrectionMock).not.toHaveBeenCalled();
+  });
+
+  it('shows eligible REVIEW vendor credit without the unavailable-credit fallback', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0,
+        items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true,
+      review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false,
+      preview: makeCorrectionPreview({
+        difference: { refundAmountMinor: -2000, commissionReversalMinor: -200,
+          commissionVatReversalMinor: -40, vendorPayableReversalMinor: -1760 },
+        economicDirection: 'VENDOR_CREDIT',
+      }) });
+    getReviewPayoutCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false,
+      application: null, eligible: true, reasonCode: null,
+      reviewPayout: { id: 'review-payout-credit-1', status: 'REVIEW', netAmountMinor: 100000,
+        grossAmountMinor: 100000, debtOffsetMinor: 0 } });
+    renderPage();
+    const section = await screen.findByLabelText('Review payout correction application');
+    const action = within(section).getByRole('button', { name: 'Cancel Review Payout & Apply Correction' });
+    expect(screen.queryByText('Vendor credit application is unavailable for this review.')).not.toBeInTheDocument();
+    expect(action).toBeDisabled();
+    await user.type(within(section).getByRole('textbox', { name: 'Required Admin reason' }), 'Verified review credit');
+    expect(action).toBeDisabled();
+    await user.click(within(section).getByRole('checkbox', { name: /no external bank\/EFT instruction/i }));
+    expect(action).toBeEnabled();
+    expect(screen.queryByText('Vendor credit application is unavailable for this review.')).not.toBeInTheDocument();
+  });
+
+  it('retains unavailable vendor-credit guidance when REVIEW credit is not eligible', async () => {
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0,
+        items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true,
+      review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false,
+      preview: makeCorrectionPreview({
+        difference: { refundAmountMinor: -2000, commissionReversalMinor: -200,
+          commissionVatReversalMinor: -40, vendorPayableReversalMinor: -1760 },
+        economicDirection: 'VENDOR_CREDIT',
+      }) });
+    getReviewPayoutCorrectionStateMock.mockResolvedValue({ ok: true, writesPerformed: false,
+      application: null, eligible: false, reasonCode: 'REVIEW_PAYOUT_REQUIRED', reviewPayout: null });
+    renderPage();
+    expect(await screen.findByText('Vendor credit application is unavailable for this review.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Review payout correction application')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel Review Payout & Apply Correction' })).not.toBeInTheDocument();
   });
 
   it('reports an unavailable preview without inventing a corrected amount or action', async () => {

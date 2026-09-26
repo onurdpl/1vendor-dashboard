@@ -1243,8 +1243,10 @@ export function AdminRefundAdjustmentsPage() {
                           {correctionPreview.economicDirection === 'VENDOR_CREDIT' &&
                             !paidCreditState?.eligible && !beforeSettlementCreditState?.eligible &&
                             !approvedSettlementCreditState?.eligible && !draftPayoutCorrectionState?.eligible &&
+                            !reviewPayoutCorrectionState?.eligible && !reviewPayoutCorrectionApplication &&
                             !paidCreditApplication && !beforeSettlementCreditApplication && !approvedSettlementCreditApplication &&
-                            !paidCreditQuery.isFetching && !beforeSettlementCreditQuery.isFetching && !approvedSettlementCreditQuery.isFetching ? (
+                            !paidCreditQuery.isFetching && !beforeSettlementCreditQuery.isFetching && !approvedSettlementCreditQuery.isFetching &&
+                            !reviewPayoutCorrectionQuery.isFetching ? (
                               <p className="op-alert op-tone-attention">Vendor credit application is unavailable for this review.</p>
                             ) : null}
                         </>
