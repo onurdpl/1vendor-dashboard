@@ -101,6 +101,7 @@ jobs:
                   r.numFailedTests !== 0) process.exit(1);
             ' "$report" "$file"
           done <<'SUITES'
+          phase2b_validation PHASE2B_TEST_DATABASE_ISOLATED src/financial-correction-zero-net.postgres.test.ts
           phase2c_bootstrap PHASE2C_TEST_DATABASE_ISOLATED src/financial-correction-paid-debt.postgres.test.ts
           phase2d_validation PHASE2D_TEST_DATABASE_ISOLATED src/financial-correction-paid-credit.postgres.test.ts
           phase2e1_validation PHASE2E1_TEST_DATABASE_ISOLATED src/financial-correction-before-settlement-credit.postgres.test.ts
