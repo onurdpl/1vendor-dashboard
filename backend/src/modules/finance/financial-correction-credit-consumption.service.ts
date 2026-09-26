@@ -27,6 +27,8 @@ export function assertFinancialCorrectionCreditSource(credit: {
       !((credit.authority.applicationRoute === 'PAID_VENDOR_CREDIT' &&
         credit.authority.historicalPayoutBatchId && credit.authority.historicalPayoutPaidAt) ||
         (credit.authority.applicationRoute === 'BEFORE_SETTLEMENT_VENDOR_CREDIT' &&
+          !credit.authority.historicalPayoutBatchId && !credit.authority.historicalPayoutPaidAt) ||
+        (credit.authority.applicationRoute === 'APPROVED_SETTLEMENT_VENDOR_CREDIT' &&
           !credit.authority.historicalPayoutBatchId && !credit.authority.historicalPayoutPaidAt)) ||
       credit.authority.vendorPayableDifferenceMinor !== -credit.amountMinor ||
       !credit.authority.appliedAt) {

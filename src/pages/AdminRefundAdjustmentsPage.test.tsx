@@ -20,6 +20,8 @@ import {
   applyBeforeSettlementFinancialCorrectionCredit,
   getBeforeSettlementFinancialCorrectionDeductionState,
   applyBeforeSettlementFinancialCorrectionDeduction,
+  getApprovedSettlementFinancialCorrectionCreditState,
+  applyApprovedSettlementFinancialCorrectionCredit,
   listAdminRefundReviews,
   listRefundAdjustments,
   reopenAdminRefundReview,
@@ -40,6 +42,7 @@ import {
   type PaidFinancialCorrectionCreditApplication,
   type BeforeSettlementFinancialCorrectionCreditApplication,
   type BeforeSettlementFinancialCorrectionDeductionApplication,
+  type ApprovedSettlementFinancialCorrectionCreditApplication,
 } from '../features/finance/refundAdjustmentsApi';
 import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
@@ -61,6 +64,8 @@ vi.mock('../features/finance/refundAdjustmentsApi', async (importOriginal) => {
     applyBeforeSettlementFinancialCorrectionCredit: vi.fn(),
     getBeforeSettlementFinancialCorrectionDeductionState: vi.fn(),
     applyBeforeSettlementFinancialCorrectionDeduction: vi.fn(),
+    getApprovedSettlementFinancialCorrectionCreditState: vi.fn(),
+    applyApprovedSettlementFinancialCorrectionCredit: vi.fn(),
     acknowledgeAdminRefundReview: vi.fn(),
     resolveAdminRefundReview: vi.fn(),
     reopenAdminRefundReview: vi.fn(),
@@ -86,6 +91,8 @@ const getBeforeSettlementCreditStateMock = vi.mocked(getBeforeSettlementFinancia
 const applyBeforeSettlementCreditMock = vi.mocked(applyBeforeSettlementFinancialCorrectionCredit);
 const getBeforeSettlementDeductionStateMock = vi.mocked(getBeforeSettlementFinancialCorrectionDeductionState);
 const applyBeforeSettlementDeductionMock = vi.mocked(applyBeforeSettlementFinancialCorrectionDeduction);
+const getApprovedSettlementCreditStateMock = vi.mocked(getApprovedSettlementFinancialCorrectionCreditState);
+const applyApprovedSettlementCreditMock = vi.mocked(applyApprovedSettlementFinancialCorrectionCredit);
 const acknowledgeAdminRefundReviewMock = vi.mocked(acknowledgeAdminRefundReview);
 const resolveAdminRefundReviewMock = vi.mocked(resolveAdminRefundReview);
 const reopenAdminRefundReviewMock = vi.mocked(reopenAdminRefundReview);
@@ -287,6 +294,15 @@ const appliedBeforeSettlementDeduction: BeforeSettlementFinancialCorrectionDeduc
   settlementApprovalId: null, settlementStatus: null, payoutBatchId: null, payoutStatus: null,
 };
 
+const appliedApprovedSettlementCredit: ApprovedSettlementFinancialCorrectionCreditApplication = {
+  ...appliedBeforeSettlementCredit,
+  id: 'correction-approved-1', creditId: 'credit-approved-1',
+  route: 'APPROVED_SETTLEMENT_VENDOR_CREDIT',
+  historicalApprovedSettlementId: 'historical-approval-1',
+  historicalApprovedSettlementAt: '2026-09-20T12:00:00Z',
+  historicalApprovedSettlementNetMinor: 100000,
+};
+
 function makeLegacyReview(overrides: Partial<LegacyRefundFinanceCandidate> = {}): LegacyRefundFinanceCandidate {
   return {
     type: 'legacy_refund_finance', id: 'legacy-review-1', status: 'ACTIVE', resolutionOutcome: null,
@@ -343,6 +359,7 @@ beforeEach(() => {
   getPaidCreditStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'CREDIT_ROUTE_UNSUPPORTED' });
   getBeforeSettlementCreditStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'WRONG_CORRECTION_DIRECTION' });
   getBeforeSettlementDeductionStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'BEFORE_SETTLEMENT_ROUTE_UNAVAILABLE' });
+  getApprovedSettlementCreditStateMock.mockResolvedValue({ ok: true, writesPerformed: false, application: null, eligible: false, reasonCode: 'APPROVED_SETTLEMENT_REQUIRED', approvedSettlement: null });
   acknowledgeAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'ACKNOWLEDGED' }) });
   resolveAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'NO_CORRECTION_NEEDED' }) });
   reopenAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail() });
@@ -791,6 +808,39 @@ describe('AdminRefundAdjustmentsPage', () => {
     }));
     expect(await screen.findByText('credit-before-1')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve & Apply Correction' })).not.toBeInTheDocument();
+    expect(applyPaidCreditMock).not.toHaveBeenCalled();
+  });
+
+  it('offers approved-settlement credit only on server eligibility and retains the historical settlement reference', async () => {
+    const user = userEvent.setup();
+    listAdminRefundReviewsMock.mockResolvedValue(reviewResponse({
+      terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' })] },
+    }));
+    getAdminRefundReviewMock.mockResolvedValue({ ok: true, review: makeTerminalDetail({ status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' }) });
+    getAdminFinancialCorrectionPreviewMock.mockResolvedValue({ ok: true, writesPerformed: false, preview: makeCorrectionPreview({
+      corrected: { refundAmountMinor: 8000, commissionReversalMinor: 800, commissionVatReversalMinor: 160, vendorPayableReversalMinor: 7040 },
+      difference: { refundAmountMinor: -2000, commissionReversalMinor: -200, commissionVatReversalMinor: -40, vendorPayableReversalMinor: -1760 },
+      economicDirection: 'VENDOR_CREDIT',
+    }) });
+    getApprovedSettlementCreditStateMock.mockResolvedValueOnce({ ok: true, writesPerformed: false, application: null, eligible: true,
+      reasonCode: null, approvedSettlement: { id: 'historical-approval-1', approvedAt: '2026-09-20T12:00:00Z', netPayableMinor: 100000 } })
+      .mockResolvedValue({ ok: true, writesPerformed: false, application: appliedApprovedSettlementCredit, eligible: false,
+        reasonCode: 'CREDIT_EFFECT_ALREADY_EXISTS', approvedSettlement: null });
+    applyApprovedSettlementCreditMock.mockResolvedValue({ ok: true, application: appliedApprovedSettlementCredit });
+    renderPage();
+    const section = await screen.findByLabelText('Approved-settlement correction credit application');
+    const apply = within(section).getByRole('button', { name: 'Approve & Apply Correction' });
+    expect(apply).toBeDisabled();
+    expect(within(section).getByText(/Historical approved settlement:/)).toHaveTextContent('TRY 1,000.00');
+    await user.type(within(section).getByRole('textbox', { name: 'Required Admin reason' }), 'Verified approved settlement evidence');
+    await user.click(apply);
+    await waitFor(() => expect(applyApprovedSettlementCreditMock).toHaveBeenCalledWith('review-1', {
+      previewFingerprint: 'financial-correction-preview-v1:verified', reason: 'Verified approved settlement evidence',
+    }));
+    expect(await screen.findByText('credit-approved-1')).toBeInTheDocument();
+    expect(screen.getByText('historical-approval-1')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Approved-settlement correction credit application')).not.toBeInTheDocument();
+    expect(applyBeforeSettlementCreditMock).not.toHaveBeenCalled();
     expect(applyPaidCreditMock).not.toHaveBeenCalled();
   });
 

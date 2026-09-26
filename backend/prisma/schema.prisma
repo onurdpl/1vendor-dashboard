@@ -1417,6 +1417,9 @@ model FinancialCorrectionAuthority {
   previewFingerprint                 String
   historicalPayoutBatchId            String?
   historicalPayoutPaidAt             DateTime?
+  historicalApprovedSettlementId     String?
+  historicalApprovedSettlementAt     DateTime?
+  historicalApprovedSettlementNetMinor Int?
   applicationRoute                   String
   authorizedByUserId                 String
   reason                             String
@@ -1428,12 +1431,14 @@ model FinancialCorrectionAuthority {
   incomingConflictEvidence           RefundTerminalConflictEvidence @relation(fields: [incomingConflictEvidenceId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_incoming_fkey")
   authorizedByUser                   User @relation("paidFinancialCorrectionActor", fields: [authorizedByUserId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_actor_fkey")
   historicalPayoutBatch              PayoutBatch? @relation(fields: [historicalPayoutBatchId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_payout_fkey")
+  historicalApprovedSettlement       SettlementApproval? @relation("ApprovedSettlementCorrectionOrigin", fields: [historicalApprovedSettlementId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_approved_settlement_fkey")
   debtEvent                          VendorBalanceEvent? @relation("paidFinancialCorrectionDebt")
   creditEffect                       FinancialCorrectionCredit?
   deductionEffect                    FinancialCorrectionDeduction?
 
   @@unique([acceptedEvidenceSnapshotId, incomingConflictEvidenceId], map: "FinancialCorrectionAuthority_pair_key")
   @@index([vendorId, appliedAt], map: "FinancialCorrectionAuthority_vendor_applied_idx")
+  @@index([historicalApprovedSettlementId], map: "FinancialCorrectionAuthority_approved_settlement_idx")
 }
 
 // One gross future payable created by an eligible vendor-credit correction.
@@ -1746,6 +1751,7 @@ model SettlementApproval {
   originalRefundAdjustments    SettlementRefundAdjustment[]            @relation("OriginalSettlementApprovalRefundAdjustments")
   appliedRefundAdjustments     SettlementRefundAdjustment[]            @relation("AppliedSettlementApprovalRefundAdjustments")
   vendorBalanceEvents          VendorBalanceEvent[]
+  originatingFinancialCorrections FinancialCorrectionAuthority[] @relation("ApprovedSettlementCorrectionOrigin")
 
   @@index([vendorId, status])
   @@index([vendorId, scheduledCycleKey])

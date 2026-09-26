@@ -338,6 +338,33 @@ export function applyBeforeSettlementFinancialCorrectionCredit(reviewId: string,
   return apiClient.post<{ ok: true; application: BeforeSettlementFinancialCorrectionCreditApplication }>(beforeSettlementCreditPath(reviewId), input);
 }
 
+export type ApprovedSettlementFinancialCorrectionCreditApplication = Omit<
+  BeforeSettlementFinancialCorrectionCreditApplication, 'route'
+> & {
+  route: 'APPROVED_SETTLEMENT_VENDOR_CREDIT';
+  historicalApprovedSettlementId: string;
+  historicalApprovedSettlementAt: string;
+  historicalApprovedSettlementNetMinor: number;
+};
+
+const approvedSettlementCreditPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-approved-settlement-credit`;
+
+export function getApprovedSettlementFinancialCorrectionCreditState(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; writesPerformed: false;
+    application: ApprovedSettlementFinancialCorrectionCreditApplication | null;
+    eligible: boolean; reasonCode: string | null;
+    approvedSettlement: { id: string; approvedAt: string; netPayableMinor: number } | null }>(
+    approvedSettlementCreditPath(reviewId), { signal },
+  );
+}
+
+export function applyApprovedSettlementFinancialCorrectionCredit(reviewId: string, input: { previewFingerprint: string; reason: string }) {
+  return apiClient.post<{ ok: true; application: ApprovedSettlementFinancialCorrectionCreditApplication }>(
+    approvedSettlementCreditPath(reviewId), input,
+  );
+}
+
 export type BeforeSettlementFinancialCorrectionDeductionApplication = {
   id: string;
   reviewId: string;

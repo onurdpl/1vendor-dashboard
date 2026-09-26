@@ -17,6 +17,9 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
   },
+  financialCorrectionCredit: {
+    findFirst: vi.fn(),
+  },
   financialCorrectionCreditSettlementLine: {
     findMany: vi.fn(),
   },
@@ -339,6 +342,8 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatch.findUnique.mockReset();
     prismaMock.payoutBatch.update.mockReset();
     prismaMock.payoutBatch.updateMany.mockReset();
+    prismaMock.financialCorrectionCredit.findFirst.mockReset();
+    prismaMock.financialCorrectionCredit.findFirst.mockResolvedValue(null);
     prismaMock.financialCorrectionCreditSettlementLine.findMany.mockReset();
     prismaMock.financialCorrectionCreditSettlementLine.findMany.mockResolvedValue([]);
     prismaMock.financialCorrectionCreditPayoutLine.findMany.mockReset();
@@ -379,6 +384,14 @@ describe('payout batch preparation', () => {
       settlementDelayDays: 21,
       active: true,
     });
+  });
+
+  it('blocks first payout while an approved-settlement correction credit lacks approved settlement', async () => {
+    prismaMock.financialCorrectionCredit.findFirst.mockResolvedValue({ id: 'pending-credit' });
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user'))
+      .rejects.toThrow('FINANCIAL_CORRECTION_CREDIT_AWAITING_SETTLEMENT_APPROVAL');
+    expect(prismaMock.financeLedgerEntry.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
   });
 
   it('reads latest completed vendor payment from paid payout batches only', async () => {

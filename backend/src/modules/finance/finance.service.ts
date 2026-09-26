@@ -2436,6 +2436,24 @@ export async function preparePayoutBatch(
   }
 
   return prisma.$transaction(async (tx) => {
+    // Serialize first-payout selection with approved-settlement correction Apply.
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
+    `);
+    const unsettledApprovedCorrectionCredit = await tx.financialCorrectionCredit.findFirst({
+      where: {
+        vendorId: input.vendorId,
+        currency: 'TRY',
+        authority: { applicationRoute: 'APPROVED_SETTLEMENT_VENDOR_CREDIT' },
+        settlementLines: { none: {
+          status: 'ACTIVE', settlementApproval: { status: 'APPROVED' },
+        } },
+      },
+      select: { id: true },
+    });
+    if (unsettledApprovedCorrectionCredit) {
+      throw new Error('FINANCIAL_CORRECTION_CREDIT_AWAITING_SETTLEMENT_APPROVAL');
+    }
     const entries = await tx.financeLedgerEntry.findMany({
         where: {
           vendorId: input.vendorId,
@@ -2604,6 +2622,23 @@ export async function preparePayoutBatch(
       if (line.cancelledAt || line.amountMinor <= 0 || line.amountMinor !== line.credit.amountMinor ||
           line.settlementApproval.correctionCreditMinor < line.amountMinor) {
         throw new Error('Financial Correction Credit settlement source is inconsistent.');
+      }
+      if (line.credit.authority.applicationRoute === 'APPROVED_SETTLEMENT_VENDOR_CREDIT') {
+        const originId = line.credit.authority.historicalApprovedSettlementId;
+        const origin = originId ? await tx.settlementApproval.findUnique({
+          where: { id: originId },
+          select: { status: true, vendorId: true, currency: true, approvedAt: true,
+            netPayableMinor: true, _count: { select: { lines: true } } },
+        }) : null;
+        const eligibleOriginLines = eligibleCandidates.filter(({ settlementLine }) =>
+          settlementLine.settlementApproval.id === originId);
+        if (!origin || origin.status !== 'APPROVED' || origin.vendorId !== input.vendorId ||
+            origin.currency !== 'TRY' || !origin.approvedAt ||
+            origin.approvedAt.getTime() !== line.credit.authority.historicalApprovedSettlementAt?.getTime() ||
+            origin.netPayableMinor !== line.credit.authority.historicalApprovedSettlementNetMinor ||
+            eligibleOriginLines.length !== origin._count.lines) {
+          throw new Error('APPROVED_SETTLEMENT_CREDIT_ROUTE_UNAVAILABLE');
+        }
       }
     }
     const deductionCandidates = await tx.financialCorrectionDeductionSettlementLine.findMany({
