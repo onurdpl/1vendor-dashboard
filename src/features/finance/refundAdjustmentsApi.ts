@@ -321,6 +321,23 @@ export function applyPaidFinancialCorrectionCredit(reviewId: string, input: { pr
   return apiClient.post<{ ok: true; application: PaidFinancialCorrectionCreditApplication }>(paidCreditPath(reviewId), input);
 }
 
+export type BeforeSettlementFinancialCorrectionCreditApplication = Omit<
+  PaidFinancialCorrectionCreditApplication, 'historicalPayoutBatchId' | 'historicalPayoutPaidAt'
+> & { route: 'BEFORE_SETTLEMENT_VENDOR_CREDIT' };
+
+const beforeSettlementCreditPath = (reviewId: string) =>
+  `/admin/finance/refund-reviews/${encodeURIComponent(reviewId)}/financial-correction-before-settlement-credit`;
+
+export function getBeforeSettlementFinancialCorrectionCreditState(reviewId: string, signal?: AbortSignal) {
+  return apiClient.get<{ ok: true; writesPerformed: false; application: BeforeSettlementFinancialCorrectionCreditApplication | null; eligible: boolean; reasonCode: string | null }>(
+    beforeSettlementCreditPath(reviewId), { signal },
+  );
+}
+
+export function applyBeforeSettlementFinancialCorrectionCredit(reviewId: string, input: { previewFingerprint: string; reason: string }) {
+  return apiClient.post<{ ok: true; application: BeforeSettlementFinancialCorrectionCreditApplication }>(beforeSettlementCreditPath(reviewId), input);
+}
+
 type RefundReviewActionInput = {
   expectedStatus: TerminalRefundReviewStatus;
   expectedUpdatedAt: string;

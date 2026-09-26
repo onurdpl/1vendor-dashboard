@@ -2178,6 +2178,11 @@ export async function createDraftApproval(
 ): Promise<SettlementApprovalDto> {
   return prisma.$transaction(
     async (tx) => {
+      // Serialize draft snapshots with before-settlement credit authorization for this vendor.
+      // This is deliberately the first database operation in the Serializable transaction.
+      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
+      `);
       const preview = await buildApprovalPreview(input, tx);
       if (preview.lines.length === 0 && preview.correctionCredits.length === 0) {
         if (preview.pendingRefundAdjustments.pendingAdjustmentCount > 0) {

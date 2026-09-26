@@ -21,6 +21,8 @@ import {
   applyPaidFinancialCorrectionDebt,
   getPaidFinancialCorrectionCreditState,
   applyPaidFinancialCorrectionCredit,
+  getBeforeSettlementFinancialCorrectionCreditState,
+  applyBeforeSettlementFinancialCorrectionCredit,
   reopenAdminRefundReview,
   resolveAdminRefundReview,
   acknowledgeAdminLegacyRefundReview,
@@ -272,6 +274,8 @@ export function AdminRefundAdjustmentsPage() {
   const [paidCorrectionError, setPaidCorrectionError] = useState<string | null>(null);
   const [paidCreditPending, setPaidCreditPending] = useState(false);
   const [paidCreditError, setPaidCreditError] = useState<string | null>(null);
+  const [beforeSettlementCreditPending, setBeforeSettlementCreditPending] = useState(false);
+  const [beforeSettlementCreditError, setBeforeSettlementCreditError] = useState<string | null>(null);
 
   const query = useQueryResource(
     ['admin', 'finance', 'refund-adjustments', vendorFilter],
@@ -377,6 +381,19 @@ export function AdminRefundAdjustmentsPage() {
     ? paidCreditQuery.data : null;
   const paidCreditApplication = paidCreditState && paidCreditState.application?.reviewId === terminalDetail?.id
     ? paidCreditState.application : null;
+  const beforeSettlementCreditQuery = useQueryResource(
+    ['admin', 'finance', 'before-settlement-correction-credit', terminalDetail?.id ?? 'none', terminalDetail?.updatedAt ?? 'none'],
+    ({ signal }) => getBeforeSettlementFinancialCorrectionCreditState(terminalDetail!.id, signal),
+    {
+      routeName: 'Before-settlement correction credit',
+      endpoint: terminalDetail ? `/admin/finance/refund-reviews/${terminalDetail.id}/financial-correction-before-settlement-credit` : '/admin/finance/refund-reviews',
+      enabled: Boolean(terminalDetail),
+    },
+  );
+  const beforeSettlementCreditState = terminalDetail && !beforeSettlementCreditQuery.isFetching && !beforeSettlementCreditQuery.error
+    ? beforeSettlementCreditQuery.data : null;
+  const beforeSettlementCreditApplication = beforeSettlementCreditState && beforeSettlementCreditState.application?.reviewId === terminalDetail?.id
+    ? beforeSettlementCreditState.application : null;
   const currentPaidReason = paidCorrectionReason.reviewId === terminalDetail?.id ? paidCorrectionReason.value : '';
 
   const runPaidCorrection = async () => {
@@ -420,6 +437,28 @@ export function AdminRefundAdjustmentsPage() {
       await Promise.all([correctionPreviewQuery.refetch(), paidCreditQuery.refetch(), terminalDetailQuery.refetch()]);
     } finally {
       setPaidCreditPending(false);
+    }
+  };
+
+  const runBeforeSettlementCredit = async () => {
+    if (!eligibleTerminalDetail || !correctionPreview || !beforeSettlementCreditState?.eligible ||
+        beforeSettlementCreditApplication || beforeSettlementCreditPending ||
+        !currentPaidReason.trim() || currentPaidReason.trim().length > 500 ||
+        correctionPreview.economicDirection !== 'VENDOR_CREDIT' ||
+        correctionPreview.difference.vendorPayableReversalMinor >= 0) return;
+    setBeforeSettlementCreditPending(true);
+    setBeforeSettlementCreditError(null);
+    try {
+      await applyBeforeSettlementFinancialCorrectionCredit(eligibleTerminalDetail.id, {
+        previewFingerprint: correctionPreview.previewFingerprint, reason: currentPaidReason.trim(),
+      });
+      setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: '' });
+      await Promise.all([beforeSettlementCreditQuery.refetch(), paidCreditQuery.refetch()]);
+    } catch (error) {
+      setBeforeSettlementCreditError(error instanceof Error ? error.message : 'Before-settlement credit could not be applied.');
+      await Promise.all([correctionPreviewQuery.refetch(), beforeSettlementCreditQuery.refetch(), terminalDetailQuery.refetch()]);
+    } finally {
+      setBeforeSettlementCreditPending(false);
     }
   };
 
@@ -802,7 +841,8 @@ export function AdminRefundAdjustmentsPage() {
                     <StatusBadge tone={terminalDetail.status === 'RESOLVED' ? 'neutral' : 'attention'}>{terminalDetail.status}</StatusBadge>
                   </div>
                   <p className="page-description">Review actions do not change accepted finance.</p>
-                  {terminalDetail.resolutionOutcome === 'CORRECTION_REQUIRED' && paidCorrectionState && !paidCorrectionApplication ? (
+                  {terminalDetail.resolutionOutcome === 'CORRECTION_REQUIRED' && paidCorrectionState &&
+                    !paidCorrectionApplication && !paidCreditApplication && !beforeSettlementCreditApplication ? (
                     <p className="op-alert op-tone-attention">Financial correction required. No financial correction has been applied.</p>
                   ) : null}
 
@@ -840,9 +880,9 @@ export function AdminRefundAdjustmentsPage() {
                   {eligibleTerminalDetail ? (
                     <section className="op-panel-section" aria-label="Financial correction preview">
                       <h4>Financial correction preview</h4>
-                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication
+                      <p className="page-description">{paidCorrectionApplication || paidCreditApplication || beforeSettlementCreditApplication
                         ? 'Read-only calculation. Applied correction is shown below.'
-                        : paidCorrectionState && paidCreditState
+                        : paidCorrectionState && paidCreditState && beforeSettlementCreditState
                           ? 'Read-only calculation. No financial correction has been applied.'
                           : 'Read-only calculation. Checking correction history...'}</p>
                       {correctionPreviewQuery.isFetching ? <p className="page-description">Loading correction preview...</p> : null}
@@ -915,7 +955,24 @@ export function AdminRefundAdjustmentsPage() {
                                 </button>
                               </section>
                             ) : null}
-                          {correctionPreview.economicDirection === 'VENDOR_CREDIT' && !paidCreditState?.eligible && !paidCreditApplication && !paidCreditQuery.isFetching ? <p className="op-alert op-tone-attention">Vendor credit application is unavailable for this review.</p> : null}
+                          {correctionPreview.economicDirection === 'VENDOR_CREDIT' &&
+                            correctionPreview.difference.vendorPayableReversalMinor < 0 &&
+                            beforeSettlementCreditState?.eligible && !beforeSettlementCreditApplication ? (
+                              <section className="op-panel-section" aria-label="Before-settlement correction credit application">
+                                <h5>Before-settlement vendor credit</h5>
+                                <p className="page-description">Sporgym owes vendor {formatMinor(-correctionPreview.difference.vendorPayableReversalMinor)}. This creates a separate gross future payable source. No current settlement or payout exists for the affected finance.</p>
+                                <label><span>Required Admin reason</span><textarea maxLength={500} value={currentPaidReason} onChange={(event) => setPaidCorrectionReason({ reviewId: eligibleTerminalDetail.id, value: event.target.value })} /></label>
+                                <button type="button" disabled={beforeSettlementCreditPending || !currentPaidReason.trim()} onClick={() => void runBeforeSettlementCredit()}>
+                                  {beforeSettlementCreditPending ? 'Applying...' : 'Approve & Apply Correction'}
+                                </button>
+                              </section>
+                            ) : null}
+                          {correctionPreview.economicDirection === 'VENDOR_CREDIT' &&
+                            !paidCreditState?.eligible && !beforeSettlementCreditState?.eligible &&
+                            !paidCreditApplication && !beforeSettlementCreditApplication &&
+                            !paidCreditQuery.isFetching && !beforeSettlementCreditQuery.isFetching ? (
+                              <p className="op-alert op-tone-attention">Vendor credit application is unavailable for this review.</p>
+                            ) : null}
                         </>
                       ) : null}
                     </section>
@@ -954,6 +1011,24 @@ export function AdminRefundAdjustmentsPage() {
                       <MetadataRow label="Payout" value={paidCreditApplication.payoutBatchId ?? 'Not yet paid'} />
                       <MetadataRow label="Reason" value={paidCreditApplication.reason} />
                       <p className="page-description">The historical PAID payout was not modified. This separate gross credit can enter a future settlement and payout.</p>
+                    </MetadataGroup>
+                  ) : null}
+                  {beforeSettlementCreditError ? <p className="op-alert op-tone-danger" role="alert">{beforeSettlementCreditError}</p> : null}
+                  {beforeSettlementCreditQuery.error ? <p className="op-alert op-tone-attention" role="status">Before-settlement credit history unavailable: {beforeSettlementCreditQuery.error}</p> : null}
+                  {beforeSettlementCreditApplication ? (
+                    <MetadataGroup title="Applied before-settlement financial correction credit">
+                      <MetadataRow label="Status" value="Applied" />
+                      <MetadataRow label="Direction" value="Vendor credit" />
+                      <MetadataRow label="Gross credit" value={formatMinor(beforeSettlementCreditApplication.grossCreditMinor)} />
+                      <MetadataRow label="Admin actor" value={beforeSettlementCreditApplication.authorizedByUserId} />
+                      <MetadataRow label="Applied at" value={formatDate(beforeSettlementCreditApplication.appliedAt)} />
+                      <MetadataRow label="Correction authority" value={beforeSettlementCreditApplication.id} />
+                      <MetadataRow label="Credit source" value={beforeSettlementCreditApplication.creditId} />
+                      <MetadataRow label="Route" value="Before settlement" />
+                      <MetadataRow label="Settlement" value={beforeSettlementCreditApplication.settlementApprovalId ?? 'Not yet settled'} />
+                      <MetadataRow label="Payout" value={beforeSettlementCreditApplication.payoutBatchId ?? 'Not yet paid'} />
+                      <MetadataRow label="Reason" value={beforeSettlementCreditApplication.reason} />
+                      <p className="page-description">This separate gross credit can enter a future settlement and payout.</p>
                     </MetadataGroup>
                   ) : null}
                   {zeroNetQuery.error ? <p className="op-alert op-tone-attention" role="status">Zero-net acknowledgement history unavailable: {zeroNetQuery.error}</p> : null}

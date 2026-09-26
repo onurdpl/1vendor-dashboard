@@ -1806,7 +1806,8 @@ export async function getVendorFinanceDashboard(
       select: { amountMinor: true,
         credit: { select: { vendorId: true, currency: true, amountMinor: true,
           authority: { select: { vendorId: true, currency: true, economicDirection: true,
-            applicationRoute: true, vendorPayableDifferenceMinor: true, appliedAt: true } } } } },
+            applicationRoute: true, vendorPayableDifferenceMinor: true, appliedAt: true,
+            historicalPayoutBatchId: true, historicalPayoutPaidAt: true } } } } },
     }),
   ]);
   const aggregationStartedAt = startDashboardTimer();

@@ -18,6 +18,7 @@ function serialize(record: AppliedCredit) {
   const credit = record.creditEffect;
   if (record.economicDirection !== 'VENDOR_CREDIT' || record.applicationRoute !== 'PAID_VENDOR_CREDIT' ||
       record.currency !== 'TRY' || record.vendorPayableDifferenceMinor >= 0 ||
+      !record.historicalPayoutBatchId || !record.historicalPayoutPaidAt ||
       !credit || credit.authorityId !== record.id || credit.vendorId !== record.vendorId ||
       credit.currency !== 'TRY' || credit.amountMinor !== -record.vendorPayableDifferenceMinor) {
     return fail('CREDIT_EFFECT_MISMATCH', 500);
@@ -50,7 +51,7 @@ function serialize(record: AppliedCredit) {
 
 export async function getPaidFinancialCorrectionCreditState(reviewId: string, db: typeof prisma = prisma) {
   const existing = await db.financialCorrectionAuthority.findUnique({ where: { reviewId }, include: appliedCreditInclude });
-  if (existing) return existing.economicDirection === 'VENDOR_CREDIT'
+  if (existing) return existing.applicationRoute === 'PAID_VENDOR_CREDIT'
     ? { application: serialize(existing), eligible: false, reasonCode: 'CREDIT_EFFECT_ALREADY_EXISTS' }
     : { application: null, eligible: false, reasonCode: 'BASELINE_ALREADY_CLAIMED' };
   try {
@@ -92,7 +93,7 @@ export async function applyPaidFinancialCorrectionCredit(input: {
   const matchingExisting = async () => {
     const existing = await db.financialCorrectionAuthority.findUnique({ where: { reviewId: input.reviewId }, include: appliedCreditInclude });
     if (!existing) return null;
-    if (existing.economicDirection === 'VENDOR_CREDIT' && existing.previewFingerprint === input.previewFingerprint &&
+    if (existing.applicationRoute === 'PAID_VENDOR_CREDIT' && existing.previewFingerprint === input.previewFingerprint &&
         existing.authorizedByUserId === input.actorUserId && existing.reason === reason) return serialize(existing);
     return fail('CREDIT_EFFECT_ALREADY_EXISTS');
   };
@@ -104,7 +105,7 @@ export async function applyPaidFinancialCorrectionCredit(input: {
       `);
       const existing = await tx.financialCorrectionAuthority.findUnique({ where: { reviewId: input.reviewId }, include: appliedCreditInclude });
       if (existing) {
-        if (existing.economicDirection === 'VENDOR_CREDIT' && existing.previewFingerprint === input.previewFingerprint &&
+        if (existing.applicationRoute === 'PAID_VENDOR_CREDIT' && existing.previewFingerprint === input.previewFingerprint &&
             existing.authorizedByUserId === input.actorUserId && existing.reason === reason) return serialize(existing);
         return fail('CREDIT_EFFECT_ALREADY_EXISTS');
       }

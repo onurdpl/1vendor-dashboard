@@ -1378,7 +1378,7 @@ model FinancialCorrectionBaselineClaim {
   acceptedEvidenceSnapshot   RefundEvidenceSnapshot @relation(fields: [acceptedEvidenceSnapshotId], references: [id], onDelete: Restrict, map: "FinancialCorrectionBaselineClaim_accepted_fkey")
 }
 
-// Phase 2C: immutable authority for one locally PAID vendor-deduction correction.
+// Immutable authority for one supported financial correction route.
 model FinancialCorrectionAuthority {
   id                                 String @id @default(cuid())
   reviewId                           String @unique(map: "FinancialCorrectionAuthority_review_key")
@@ -1414,8 +1414,8 @@ model FinancialCorrectionAuthority {
   vendorPayableDifferenceMinor       Int
   economicDirection                  String
   previewFingerprint                 String
-  historicalPayoutBatchId            String
-  historicalPayoutPaidAt             DateTime
+  historicalPayoutBatchId            String?
+  historicalPayoutPaidAt             DateTime?
   applicationRoute                   String
   authorizedByUserId                 String
   reason                             String
@@ -1426,7 +1426,7 @@ model FinancialCorrectionAuthority {
   acceptedEvidenceSnapshot           RefundEvidenceSnapshot @relation(fields: [acceptedEvidenceSnapshotId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_accepted_fkey")
   incomingConflictEvidence           RefundTerminalConflictEvidence @relation(fields: [incomingConflictEvidenceId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_incoming_fkey")
   authorizedByUser                   User @relation("paidFinancialCorrectionActor", fields: [authorizedByUserId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_actor_fkey")
-  historicalPayoutBatch              PayoutBatch @relation(fields: [historicalPayoutBatchId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_payout_fkey")
+  historicalPayoutBatch              PayoutBatch? @relation(fields: [historicalPayoutBatchId], references: [id], onDelete: Restrict, map: "FinancialCorrectionAuthority_payout_fkey")
   debtEvent                          VendorBalanceEvent? @relation("paidFinancialCorrectionDebt")
   creditEffect                       FinancialCorrectionCredit?
 
@@ -1434,7 +1434,7 @@ model FinancialCorrectionAuthority {
   @@index([vendorId, appliedAt], map: "FinancialCorrectionAuthority_vendor_applied_idx")
 }
 
-// One gross future payable created by a locally PAID vendor-credit correction.
+// One gross future payable created by an eligible vendor-credit correction.
 model FinancialCorrectionCredit {
   id                   String @id @default(cuid())
   authorityId          String @unique

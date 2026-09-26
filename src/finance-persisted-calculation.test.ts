@@ -714,6 +714,7 @@ describe('persisted vendor finance calculations', () => {
       credit: { vendorId: 'sporjinal', currency: 'TRY', amountMinor: 10000,
         authority: { vendorId: 'sporjinal', currency: 'TRY', economicDirection: 'VENDOR_CREDIT',
           applicationRoute: 'PAID_VENDOR_CREDIT', vendorPayableDifferenceMinor: -10000,
+          historicalPayoutBatchId: 'paid-batch-1', historicalPayoutPaidAt: new Date('2026-08-31T12:00:00Z'),
           appliedAt: new Date('2026-09-01T12:00:00Z') } },
     }]);
     const dashboard = await getVendorFinanceDashboard('sporjinal');

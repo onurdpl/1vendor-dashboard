@@ -22,6 +22,8 @@ const getPaidCorrectionStateMock = vi.hoisted(() => vi.fn());
 const applyPaidCorrectionMock = vi.hoisted(() => vi.fn());
 const getPaidCreditStateMock = vi.hoisted(() => vi.fn());
 const applyPaidCreditMock = vi.hoisted(() => vi.fn());
+const getBeforeSettlementCreditStateMock = vi.hoisted(() => vi.fn());
+const applyBeforeSettlementCreditMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -41,6 +43,13 @@ vi.mock('../backend/src/modules/finance/financial-correction-paid-debt.service.j
 vi.mock('../backend/src/modules/finance/financial-correction-paid-credit.service.js', () => ({
   getPaidFinancialCorrectionCreditState: getPaidCreditStateMock,
   applyPaidFinancialCorrectionCredit: applyPaidCreditMock,
+}));
+vi.mock('../backend/src/modules/finance/financial-correction-before-settlement-credit.service.js', () => ({
+  getBeforeSettlementFinancialCorrectionCreditState: getBeforeSettlementCreditStateMock,
+  applyBeforeSettlementFinancialCorrectionCredit: applyBeforeSettlementCreditMock,
+  BeforeSettlementFinancialCorrectionError: class BeforeSettlementFinancialCorrectionError extends Error {
+    constructor(readonly code: string, readonly statusCode = 409) { super(code); }
+  },
 }));
 const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
   class FinanceIntegrityScannerValidationError extends Error {
@@ -493,6 +502,32 @@ describe('finance route validation', () => {
     await createRegisteredGetRoutes().get(path)?.({ authUser: { role: 'vendor' }, params: { reviewId: 'review-1' } }, deniedRead);
     expect(deniedRead.statusCode).toBe(403);
     expect(getPaidCreditStateMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps before-settlement credit Admin-only and accepts no client monetary authority', async () => {
+    const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-before-settlement-credit';
+    const posts = createRegisteredPostRoutes();
+    for (const role of ['finance', 'vendor', 'support']) {
+      const denied = createReply();
+      await posts.get(path)?.({ authUser: { role, id: `${role}-1` }, params: { reviewId: 'review-1' },
+        body: { previewFingerprint: 'fingerprint', reason: 'Verified' } }, denied);
+      expect(denied.statusCode).toBe(403);
+    }
+    const extra = createReply();
+    await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+      body: { previewFingerprint: 'fingerprint', reason: 'Verified', grossCreditMinor: 10000 } }, extra);
+    expect(extra.statusCode).toBe(400);
+    expect(applyBeforeSettlementCreditMock).not.toHaveBeenCalled();
+    applyBeforeSettlementCreditMock.mockResolvedValue({ id: 'before-correction-1' });
+    const allowed = createReply();
+    expect(await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { reviewId: 'review-1' },
+      body: { previewFingerprint: 'fingerprint', reason: 'Verified' } }, allowed)).toEqual({ ok: true, application: { id: 'before-correction-1' } });
+    expect(applyBeforeSettlementCreditMock).toHaveBeenCalledWith({ reviewId: 'review-1', previewFingerprint: 'fingerprint',
+      reason: 'Verified', actorUserId: 'admin-1' });
+    const deniedRead = createReply();
+    await createRegisteredGetRoutes().get(path)?.({ authUser: { role: 'vendor' }, params: { reviewId: 'review-1' } }, deniedRead);
+    expect(deniedRead.statusCode).toBe(403);
+    expect(getBeforeSettlementCreditStateMock).not.toHaveBeenCalled();
   });
 
   it('returns only dashboard finance summary fields', async () => {

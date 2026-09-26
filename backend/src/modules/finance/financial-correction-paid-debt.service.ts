@@ -59,6 +59,7 @@ type AppliedRecord = Prisma.FinancialCorrectionAuthorityGetPayload<{ include: { 
 function serialize(record: AppliedRecord) {
   if (record.economicDirection !== 'VENDOR_DEDUCTION' || record.currency !== 'TRY' ||
       record.applicationRoute !== 'PAID_VENDOR_DEBT' || record.vendorPayableDifferenceMinor <= 0 ||
+      !record.historicalPayoutBatchId || !record.historicalPayoutPaidAt ||
       !record.debtEvent || record.debtEvent.financialCorrectionAuthorityId !== record.id ||
       record.debtEvent.sourceType !== 'financial_correction' || record.debtEvent.sourceId !== record.id ||
       record.debtEvent.type !== 'VENDOR_DEBT_CREATED' || record.debtEvent.vendorId !== record.vendorId ||
