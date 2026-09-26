@@ -50,6 +50,9 @@ jobs:
       - name: Ensure PostgreSQL 16 client for baseline verification
         run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
 
+      - name: Install Playwright Chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
       - name: Validate fresh database bootstrap
         run: |
           PGPASSWORD=postgres createdb --host=127.0.0.1 --username=postgres vendor_dashboard_fresh_bootstrap
@@ -126,3 +129,19 @@ jobs:
           SHIPPING_PROVIDER: kargonomi
           KARGONOMI_BASE_URL: https://app.kargonomi.com.tr/api/v1
           KARGONOMI_API_TOKEN: test-token
+
+      - name: Real REVIEW financial correction browser smoke
+        id: real_review_browser_smoke
+        run: npm run smoke:browser:real
+        env:
+          BROWSER_SMOKE_ALLOW_LOCAL_DB: '1'
+          BROWSER_SMOKE_ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+      - name: Upload real browser smoke failure artifacts
+        if: failure() && steps.real_review_browser_smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial-correction-review-browser-smoke
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 3
