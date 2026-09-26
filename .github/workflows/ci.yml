@@ -69,11 +69,44 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_test?schema=public
 
-      - name: Test Phase 2C PostgreSQL correction concurrency
-        run: npm run test:postgres:phase2c
-        env:
-          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_fresh_bootstrap?schema=public
-          PHASE2C_TEST_DATABASE_ISOLATED: '1'
+      - name: Test Financial Correction PostgreSQL suites
+        run: |
+          set -euo pipefail
+
+          while read -r db gate file; do
+            PGPASSWORD=postgres createdb \
+              --host=127.0.0.1 \
+              --username=postgres \
+              --template=vendor_dashboard_fresh_bootstrap \
+              "$db"
+
+            url="postgresql://postgres:postgres@127.0.0.1:5432/$db?schema=public"
+            report="$RUNNER_TEMP/$db-vitest.json"
+
+            env "TEST_DATABASE_URL=$url" "$gate=1" \
+              npm run test -- "$file" \
+                --reporter=default \
+                --reporter=json \
+                --outputFile.json="$report"
+
+            node -e '
+              const r = require(process.argv[1]);
+              const file = process.argv[2];
+              if (!r.success || r.testResults.length !== 1 ||
+                  !r.testResults[0].name.endsWith(file) ||
+                  r.numPassedTests < 1 || r.numPendingTests !== 0 ||
+                  r.numFailedTests !== 0) process.exit(1);
+            ' "$report" "$file"
+          done <<'SUITES'
+          phase2c_bootstrap PHASE2C_TEST_DATABASE_ISOLATED src/financial-correction-paid-debt.postgres.test.ts
+          phase2d_validation PHASE2D_TEST_DATABASE_ISOLATED src/financial-correction-paid-credit.postgres.test.ts
+          phase2e1_validation PHASE2E1_TEST_DATABASE_ISOLATED src/financial-correction-before-settlement-credit.postgres.test.ts
+          phase2e2_validation PHASE2E2_TEST_DATABASE_ISOLATED src/financial-correction-before-settlement-deduction.postgres.test.ts
+          phase2e3a_validation PHASE2E3A_TEST_DATABASE_ISOLATED src/financial-correction-approved-settlement-credit.postgres.test.ts
+          phase2e3b_validation PHASE2E3B_TEST_DATABASE_ISOLATED src/financial-correction-approved-settlement-deduction.postgres.test.ts
+          phase2f1_validation PHASE2F1_TEST_DATABASE_ISOLATED src/financial-correction-draft-payout.postgres.test.ts
+          phase2f2_validation PHASE2F2_TEST_DATABASE_ISOLATED src/financial-correction-review-payout.postgres.test.ts
+          SUITES
 
       - name: Build
         run: npm run build
