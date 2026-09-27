@@ -36,8 +36,8 @@ Covered flows:
 
 ## Real-backend Financial Correction smokes
 
-The REVIEW vendor-credit, DRAFT vendor-deduction, PAID vendor-deduction, and zero-net
-acknowledgement smokes use
+The REVIEW vendor-credit, DRAFT vendor-deduction, PAID vendor-deduction, zero-net
+acknowledgement, and approved-settlement/no-payout vendor-deduction smokes use
 normal Admin login, a built Vite frontend, a real local backend, and separate disposable
 PostgreSQL 16 databases.
 They are separate from the
@@ -55,7 +55,8 @@ The runner connects to the local `postgres` maintenance database (override only 
 credentials if needed; the hostname must be `localhost`), creates a uniquely named
 `vendor_dashboard_browser_smoke_*` database for each scenario, runs the canonical fresh
 bootstrap, seeds a real Argon2id Admin and the scenario's persisted finance fixture,
-and verifies canonical eligibility before opening Chromium. REVIEW, DRAFT, PAID, and zero-net run
+and verifies canonical eligibility before opening Chromium. REVIEW, DRAFT, PAID, zero-net,
+and approved-settlement/no-payout run
 sequentially, never sharing a database. For each scenario the runner starts backend and
 frontend with explicit local-only integration settings, verifies the applied result,
 and drops only the database it created even if the test fails.
@@ -87,8 +88,15 @@ preview with no vendor monetary effect. It requires no Admin reason or EFT attes
 The DB post-check verifies one acknowledgement and one baseline claim, with no monetary
 correction authority, credit, deduction, vendor debt, correction settlement or payout
 effect, new payout, or new settlement. The original SALE/REFUND ledgers and accepted/
-incoming evidence remain unchanged. PAID credit, approved/no-payout, DRAFT credit,
+incoming evidence remain unchanged. PAID credit, DRAFT credit,
 and REVIEW deduction routes are not covered here.
+
+The approved-settlement/no-payout browser test covers an eligible
+`VENDOR_DEDUCTION`: it requires an Admin reason but no EFT-not-sent attestation.
+It observes the real correction POST and verifies that the historical approved
+settlement remains unchanged, one deduction with active approved coverage is
+created, no vendor debt or payout is created, and no replacement payout is
+created automatically.
 
 GitHub CI installs Chromium with the repository Playwright CLI and runs
 `npm run smoke:browser:real` as a required step in the existing `build-and-test` job.

@@ -41,10 +41,17 @@ const scenarios = [
     spec: 'financial-correction-zero-net.real.spec.ts',
     verify: 'tests/e2e/fixtures/verify-zero-net.ts',
   },
+  {
+    name: 'approved-no-payout-deduction',
+    fixture: 'tests/e2e/fixtures/approved-no-payout-deduction.ts',
+    reviewId: 'browser-smoke-approved-no-payout-deduction-review',
+    spec: 'financial-correction-approved-no-payout-deduction.real.spec.ts',
+    verify: 'tests/e2e/fixtures/verify-approved-no-payout-deduction.ts',
+  },
 ];
 const requested = process.argv.slice(2);
-if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net)$/.test(requested[0]))) {
-  throw new Error('Use no arguments for all smokes, or --scenario=review-credit|draft-deduction|paid-deduction|zero-net.');
+if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction)$/.test(requested[0]))) {
+  throw new Error('Use no arguments for all smokes, or --scenario=review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction.');
 }
 const selectedScenarios = requested.length
   ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])
