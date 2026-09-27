@@ -36,7 +36,8 @@ Covered flows:
 
 ## Real-backend Financial Correction smokes
 
-The REVIEW vendor-credit, DRAFT vendor-deduction, and PAID vendor-deduction smokes use
+The REVIEW vendor-credit, DRAFT vendor-deduction, PAID vendor-deduction, and zero-net
+acknowledgement smokes use
 normal Admin login, a built Vite frontend, a real local backend, and separate disposable
 PostgreSQL 16 databases.
 They are separate from the
@@ -54,7 +55,7 @@ The runner connects to the local `postgres` maintenance database (override only 
 credentials if needed; the hostname must be `localhost`), creates a uniquely named
 `vendor_dashboard_browser_smoke_*` database for each scenario, runs the canonical fresh
 bootstrap, seeds a real Argon2id Admin and the scenario's persisted finance fixture,
-and verifies canonical eligibility before opening Chromium. REVIEW, DRAFT, and PAID run
+and verifies canonical eligibility before opening Chromium. REVIEW, DRAFT, PAID, and zero-net run
 sequentially, never sharing a database. For each scenario the runner starts backend and
 frontend with explicit local-only integration settings, verifies the applied result,
 and drops only the database it created even if the test fails.
@@ -79,7 +80,14 @@ The PAID browser test covers an eligible `VENDOR_DEDUCTION`: it requires an Admi
 but no EFT-not-sent attestation. It observes the real PAID correction POST and verifies
 that the historical PAID payout and approved settlement remain unchanged, a separate
 correction-linked vendor debt is created, the payout is not cancelled, and no replacement
-payout is created automatically. PAID credit, zero-net, approved/no-payout, DRAFT credit,
+payout is created automatically.
+
+The zero-net browser test covers a real Admin acknowledgement of an eligible TRY
+preview with no vendor monetary effect. It requires no Admin reason or EFT attestation.
+The DB post-check verifies one acknowledgement and one baseline claim, with no monetary
+correction authority, credit, deduction, vendor debt, correction settlement or payout
+effect, new payout, or new settlement. The original SALE/REFUND ledgers and accepted/
+incoming evidence remain unchanged. PAID credit, approved/no-payout, DRAFT credit,
 and REVIEW deduction routes are not covered here.
 
 GitHub CI installs Chromium with the repository Playwright CLI and runs
