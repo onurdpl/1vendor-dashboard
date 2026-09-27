@@ -115,6 +115,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Mock browser smoke
+        run: npm run smoke:browser
+
       - name: Test
         run: npm run test
 
