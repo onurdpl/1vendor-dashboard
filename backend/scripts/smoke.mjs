@@ -45,7 +45,7 @@ const backendEnv = {
   ...loadEnvFile(path.join(process.cwd(), '.env')),
   ...process.env,
 };
-const shopifyShopDomain = backendEnv.SHOPIFY_SHOP_DOMAIN || 'demo-shop.myshopify.com';
+const shopifyShopDomain = 'demo-shop.myshopify.com';
 const prisma = backendEnv.DATABASE_URL
   ? new PrismaClient({
       datasources: {
@@ -457,6 +457,7 @@ async function runSmoke() {
       SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
       SHOPIFY_FULFILLMENT_WEBHOOK_SECRET: shopifyFulfillmentWebhookSecret,
       SHOPIFY_SHOP_DOMAIN: shopifyShopDomain,
+      SHOPIFY_ADMIN_ACCESS_TOKEN: '',
       SHIPPING_PROVIDER: process.env.SHIPPING_PROVIDER || 'kargonomi',
       KARGONOMI_BASE_URL: process.env.KARGONOMI_BASE_URL || 'https://app.kargonomi.com.tr/api/v1',
       KARGONOMI_API_TOKEN: process.env.KARGONOMI_API_TOKEN || 'test-token',
