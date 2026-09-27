@@ -22,6 +22,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:5173',
+    serviceWorkers: 'block',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

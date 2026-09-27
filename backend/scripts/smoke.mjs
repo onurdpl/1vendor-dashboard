@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 
 const port = 4010;
@@ -447,7 +448,8 @@ async function runSmoke() {
       ],
     },
   });
-  const child = spawn(process.execPath, ['dist/server.js'], {
+  const egressGuard = fileURLToPath(new URL('../../scripts/test-node-egress-guard.mjs', import.meta.url));
+  const child = spawn(process.execPath, ['--import', egressGuard, 'dist/server.js'], {
     cwd: process.cwd(),
     env: {
       ...process.env,

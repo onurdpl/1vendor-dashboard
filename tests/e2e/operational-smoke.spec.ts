@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures/browser-egress-guard';
 
 const SESSION_KEYS = [
   'vendor-dashboard.session-token',

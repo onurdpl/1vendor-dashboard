@@ -131,7 +131,7 @@ jobs:
         run: npm run backend:smoke
         env:
           SHIPPING_PROVIDER: kargonomi
-          KARGONOMI_BASE_URL: https://app.kargonomi.com.tr/api/v1
+          KARGONOMI_BASE_URL: http://127.0.0.1:9
           KARGONOMI_API_TOKEN: test-token
 
       - name: Real Financial Correction browser smokes

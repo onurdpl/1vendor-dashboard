@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
-    setupFiles: ['./src/test/setup.ts'],
+    setupFiles: ['./scripts/test-node-egress-guard.mjs', './src/test/setup.ts'],
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],
     maxWorkers: 2,
     testTimeout: 10000,

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/browser-egress-guard';
 
 const reviewId = process.env.BROWSER_SMOKE_REVIEW_ID;
 const refundId = 'gid://shopify/Refund/browser-smoke-paid-deduction';

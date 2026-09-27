@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const nodeEgressGuard = path.join(root, 'scripts/test-node-egress-guard.mjs');
 const adminUrl = new URL(process.env.BROWSER_SMOKE_ADMIN_DATABASE_URL ||
   `postgresql://${encodeURIComponent(userInfo().username)}@localhost/postgres`);
 if (process.env.BROWSER_SMOKE_ALLOW_LOCAL_DB !== '1' || adminUrl.hostname !== 'localhost' ||
@@ -158,7 +159,9 @@ async function runScenario(scenario) {
     await run('npm', ['run', 'backend:build'], backendEnv);
     await run('npm', ['run', 'build'], frontendEnv);
 
-    const backend = start('npm', ['run', 'backend:start'], backendEnv, processes);
+    const backend = start('npm', ['run', 'backend:start'], {
+      ...backendEnv, NODE_OPTIONS: `--import=${nodeEgressGuard}`,
+    }, processes);
     await waitFor(`${localBackend}/health`, async (response) => {
       const health = await response.json();
       return health.status === 'ok' && health.dbReachable === true && health.schemaReady === true;
