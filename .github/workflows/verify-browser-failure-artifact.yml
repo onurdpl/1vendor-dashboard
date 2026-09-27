@@ -1,0 +1,69 @@
+name: Verify Browser Failure Artifact
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify-browser-failure-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Probe browser failure artifacts
+        id: browser_failure_artifact_probe
+        run: |
+          cat > "$RUNNER_TEMP/browser-failure-artifact-probe.config.cjs" <<'EOF'
+          const path = require('node:path');
+          const { createRequire } = require('node:module');
+          const projectRequire = createRequire(path.join(process.env.GITHUB_WORKSPACE, 'package.json'));
+          const { defineConfig, devices } = projectRequire('@playwright/test');
+
+          module.exports = defineConfig({
+            testDir: process.env.RUNNER_TEMP,
+            testMatch: 'browser-failure-artifact-probe.spec.cjs',
+            outputDir: path.join(process.env.GITHUB_WORKSPACE, 'test-results'),
+            retries: 0,
+            reporter: 'list',
+            use: {
+              trace: 'retain-on-failure',
+              screenshot: 'only-on-failure',
+            },
+            projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+          });
+          EOF
+
+          cat > "$RUNNER_TEMP/browser-failure-artifact-probe.spec.cjs" <<'EOF'
+          const path = require('node:path');
+          const { createRequire } = require('node:module');
+          const projectRequire = createRequire(path.join(process.env.GITHUB_WORKSPACE, 'package.json'));
+          const { test, expect } = projectRequire('@playwright/test');
+
+          test('intentionally captures a harmless browser assertion failure', async ({ page }) => {
+            await page.setContent('<main><h1>Artifact probe</h1></main>');
+            await expect(page.getByText('THIS_TEXT_MUST_NOT_EXIST')).toBeVisible({ timeout: 1_000 });
+          });
+          EOF
+
+          ./node_modules/.bin/playwright test --config "$RUNNER_TEMP/browser-failure-artifact-probe.config.cjs"
+
+      - name: Upload browser failure artifact probe
+        if: failure() && steps.browser_failure_artifact_probe.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-artifact-probe
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 1
