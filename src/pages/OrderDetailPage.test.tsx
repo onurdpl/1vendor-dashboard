@@ -3224,7 +3224,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const financialSummary = await screen.findByLabelText('Order financial summary');
     expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
-    expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
+    expect(await within(financialSummary).findByText('Refund Impact')).toBeInTheDocument();
     expect(within(financialSummary).getByText('Refund completed for this order.')).toBeInTheDocument();
     expectRedundantVendorFinanceCopyToBeAbsent(financialSummary);
     const currentState = screen.getByLabelText('Current order state');
