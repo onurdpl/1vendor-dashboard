@@ -85,7 +85,7 @@ function serialize(record: AppliedRecord) {
 
 export async function getPaidFinancialCorrectionState(reviewId: string, db: typeof prisma = prisma) {
   const existing = await db.financialCorrectionAuthority.findUnique({ where: { reviewId }, include: { debtEvent: true } });
-  if (existing) return existing.economicDirection === 'VENDOR_DEDUCTION'
+  if (existing) return existing.applicationRoute === 'PAID_VENDOR_DEBT'
     ? { application: serialize(existing), eligible: false, reasonCode: 'ALREADY_APPLIED' }
     : { application: null, eligible: false, reasonCode: 'BASELINE_ALREADY_CONSUMED' };
   try {

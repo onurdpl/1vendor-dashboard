@@ -524,6 +524,31 @@ describe('finance route validation', () => {
     expect(getPaidCorrectionStateMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'BEFORE_SETTLEMENT_VENDOR_DEDUCTION',
+    'APPROVED_SETTLEMENT_VENDOR_DEDUCTION',
+    'DRAFT_PAYOUT_VENDOR_DEDUCTION',
+    'REVIEW_PAYOUT_VENDOR_DEDUCTION',
+  ])('returns readable Admin paid-debt history for an applied %s', async (applicationRoute) => {
+    const actual = await vi.importActual<typeof import('../backend/src/modules/finance/financial-correction-paid-debt.service.js')>(
+      '../backend/src/modules/finance/financial-correction-paid-debt.service.js',
+    );
+    const db = { financialCorrectionAuthority: { findUnique: vi.fn().mockResolvedValue({
+      id: 'other-authority', applicationRoute, economicDirection: 'VENDOR_DEDUCTION',
+      currency: 'TRY', debtEvent: null,
+    }) } } as unknown as Parameters<typeof actual.getPaidFinancialCorrectionState>[1];
+    getPaidCorrectionStateMock.mockImplementation((reviewId: string) => actual.getPaidFinancialCorrectionState(reviewId, db));
+    const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-paid-debt';
+    const handler = createRegisteredGetRoutes().get(path);
+    expect(handler).toBeDefined();
+    const reply = createReply();
+    await expect(handler!({ authUser: { role: 'admin' }, params: { reviewId: 'review-1' } }, reply))
+      .resolves.toEqual({ ok: true, writesPerformed: false,
+        application: null, eligible: false, reasonCode: 'BASELINE_ALREADY_CONSUMED' });
+    expect(reply.statusCode).toBe(200);
+    expect(applyPaidCorrectionMock).not.toHaveBeenCalled();
+  });
+
   it('keeps paid vendor credit Admin-only and rejects client-supplied monetary authority', async () => {
     const path = '/admin/finance/refund-reviews/:reviewId/financial-correction-paid-credit';
     const posts = createRegisteredPostRoutes();

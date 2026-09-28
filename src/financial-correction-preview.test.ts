@@ -360,6 +360,63 @@ function paidCorrectionFixture() {
 }
 
 describe('paid-payout financial correction vendor debt', () => {
+  it('reads the serialized PAID_VENDOR_DEBT application without another financial write', async () => {
+    const test = paidCorrectionFixture();
+    const preview = await previewTerminalFinancialCorrection('review-1', test.input.db);
+    const application = await applyPaidFinancialCorrectionDebt({
+      reviewId: 'review-1', previewFingerprint: preview.previewFingerprint,
+      actorUserId: 'admin-1', reason: 'Verified',
+    }, test.db);
+    test.createAuthority.mockClear();
+    test.createDebt.mockClear();
+    test.createClaim.mockClear();
+    vi.mocked(test.db.$transaction).mockClear();
+
+    await expect(getPaidFinancialCorrectionState('review-1', test.db)).resolves.toEqual({
+      application, eligible: false, reasonCode: 'ALREADY_APPLIED',
+    });
+    expect(test.createAuthority).not.toHaveBeenCalled();
+    expect(test.createDebt).not.toHaveBeenCalled();
+    expect(test.createClaim).not.toHaveBeenCalled();
+    expect(test.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'BEFORE_SETTLEMENT_VENDOR_DEDUCTION',
+    'APPROVED_SETTLEMENT_VENDOR_DEDUCTION',
+    'DRAFT_PAYOUT_VENDOR_DEDUCTION',
+    'REVIEW_PAYOUT_VENDOR_DEDUCTION',
+    'PAID_VENDOR_CREDIT',
+  ])('does not serialize another route as paid debt: %s', async (applicationRoute) => {
+    const test = paidCorrectionFixture();
+    test.tx.financialCorrectionAuthority.findUnique.mockResolvedValue({
+      id: 'other-authority', applicationRoute,
+      economicDirection: applicationRoute === 'PAID_VENDOR_CREDIT' ? 'VENDOR_CREDIT' : 'VENDOR_DEDUCTION',
+      currency: 'TRY', debtEvent: null,
+    });
+
+    await expect(getPaidFinancialCorrectionState('review-1', test.db)).resolves.toEqual({
+      application: null, eligible: false, reasonCode: 'BASELINE_ALREADY_CONSUMED',
+    });
+    expect(test.input.findUnique).not.toHaveBeenCalled();
+    expect(test.createAuthority).not.toHaveBeenCalled();
+    expect(test.createDebt).not.toHaveBeenCalled();
+    expect(test.createClaim).not.toHaveBeenCalled();
+    expect(test.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('retains strict PAID_VENDOR_DEBT history validation when its debt is missing', async () => {
+    const test = paidCorrectionFixture();
+    const preview = await previewTerminalFinancialCorrection('review-1', test.input.db);
+    await applyPaidFinancialCorrectionDebt({
+      reviewId: 'review-1', previewFingerprint: preview.previewFingerprint,
+      actorUserId: 'admin-1', reason: 'Verified',
+    }, test.db);
+    test.authority!.debtEvent = null;
+    await expect(getPaidFinancialCorrectionState('review-1', test.db))
+      .rejects.toMatchObject({ code: 'EFFECT_WRITE_FAILED', statusCode: 500 });
+  });
+
   it('freezes the exact preview delta and PAID payout, then creates one correction-specific negative debt', async () => {
     const test = paidCorrectionFixture();
     const preview = await previewTerminalFinancialCorrection('review-1', test.input.db);
