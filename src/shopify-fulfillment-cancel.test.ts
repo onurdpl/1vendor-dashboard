@@ -27,9 +27,6 @@ const env: AppEnv = {
   SHIPPING_PROVIDER: 'hepsijet',
   KARGO_ENTEGRATOR_ENABLED: false,
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
-  TRY_OTO_ENABLED: false,
-  TRY_OTO_SANDBOX_MODE: false,
-  TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
 };
 
 const fulfillmentGid = 'gid://shopify/Fulfillment/7210505470289';

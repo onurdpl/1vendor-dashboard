@@ -1,5 +1,9 @@
 # Try OTO Sandbox PoC Checklist And Payload Pack
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 This document is for manual sandbox validation only. It does not implement a provider adapter, register provider runtime configuration, or change existing shipping providers.
 
 Primary evidence:
@@ -784,4 +788,3 @@ PoC mapping:
 
 Unknown:
 - Whether returns can identify items reliably by SKU when an order contains duplicate SKUs.
-

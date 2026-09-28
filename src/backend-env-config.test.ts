@@ -33,6 +33,22 @@ function resetEnv(overrides: Record<string, string | undefined>) {
 }
 
 describe('backend env shipping provider gates', () => {
+  it.each([
+    ['Lidio', ['LIDIO_ENABLED', 'LIDIO_BASE_URL', 'LIDIO_MERCHANT_CODE', 'LIDIO_AUTHORIZATION_SCHEME',
+      'LIDIO_AUTHORIZATION_TOKEN', 'LIDIO_MERCHANT_KEY', 'LIDIO_API_PASSWORD', 'LIDIO_SUBSELLER_PROFILE_ID']],
+    ['Odoo', ['ODOO_ENABLED', 'ODOO_DRY_RUN', 'ODOO_DISCOVERY_ONLY', 'ODOO_URL', 'ODOO_DB',
+      'ODOO_USERNAME', 'ODOO_API_KEY']],
+    ['Try OTO', ['TRY_OTO_ENABLED', 'TRY_OTO_BASE_URL', 'TRY_OTO_REFRESH_TOKEN', 'TRY_OTO_SANDBOX_MODE',
+      'TRY_OTO_WEBHOOK_INGEST_ENABLED', 'TRY_OTO_WEBHOOK_SHARED_SECRET']],
+  ])('ignores stale %s configuration without changing active startup', (_provider, keys) => {
+    resetEnv({});
+    const baseline = loadEnv();
+    resetEnv(Object.fromEntries((keys as string[]).map((key) => [key, 'true'])));
+    const configured = loadEnv();
+    expect(configured).toEqual(baseline);
+    expect(Object.keys(configured).filter((key) => /^(LIDIO_|ODOO_|TRY_OTO_)/.test(key))).toEqual([]);
+  });
+
   it('does not expose retired Navlungo or Kargo Entegrator runtime configuration', () => {
     resetEnv({
       NAVLUNGO_BASE_URL: 'https://retired.example.test',
@@ -48,71 +64,6 @@ describe('backend env shipping provider gates', () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
-  });
-
-  it('keeps Try OTO passive while preserving its stored env values', () => {
-    resetEnv({
-      SHIPPING_PROVIDER: 'kargonomi',
-      SHIPPING_EXECUTION_ENABLED: 'true',
-      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
-      KARGONOMI_API_TOKEN: 'configured-token',
-      TRY_OTO_ENABLED: 'true',
-      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
-      TRY_OTO_REFRESH_TOKEN: 'configured-refresh-token',
-      TRY_OTO_SANDBOX_MODE: 'true',
-      TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
-    });
-
-    const env = loadEnv();
-
-    expect(env.SHIPPING_PROVIDER).toBe('kargonomi');
-    expect(env.SHIPPING_EXECUTION_ENABLED).toBe(true);
-    expect(env.TRY_OTO_ENABLED).toBe(true);
-    expect(env.TRY_OTO_BASE_URL).toBe('https://staging-api.tryoto.com');
-    expect(env.TRY_OTO_REFRESH_TOKEN).toBe('configured-refresh-token');
-    expect(env.TRY_OTO_SANDBOX_MODE).toBe(true);
-    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
-  });
-
-  it('does not require Try OTO webhook secret in production when legacy ingest env is set', () => {
-    resetEnv({
-      NODE_ENV: 'production',
-      CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
-      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
-      SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
-      SHIPPING_PROVIDER: 'kargonomi',
-      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
-      KARGONOMI_API_TOKEN: 'configured-token',
-      TRY_OTO_ENABLED: 'true',
-      TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
-      TRY_OTO_WEBHOOK_SHARED_SECRET: undefined,
-    });
-
-    const env = loadEnv();
-
-    expect(env.SHIPPING_PROVIDER).toBe('kargonomi');
-    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
-    expect(env.TRY_OTO_WEBHOOK_SHARED_SECRET).toBeUndefined();
-  });
-
-  it('ignores short Try OTO webhook secrets because ingest is passive', () => {
-    resetEnv({
-      NODE_ENV: 'production',
-      CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
-      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
-      SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
-      SHIPPING_PROVIDER: 'kargonomi',
-      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
-      KARGONOMI_API_TOKEN: 'configured-token',
-      TRY_OTO_ENABLED: 'true',
-      TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
-      TRY_OTO_WEBHOOK_SHARED_SECRET: 'short-secret',
-    });
-
-    const env = loadEnv();
-
-    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
-    expect(env.TRY_OTO_WEBHOOK_SHARED_SECRET).toBe('short-secret');
   });
 
   it('parses Kargonomi env values without requiring X-App-Key', () => {
@@ -383,51 +334,6 @@ describe('customer cancellation environment', () => {
   });
 });
 
-describe('backend env Lidio configuration', () => {
-  afterEach(() => {
-    process.env = { ...originalEnv };
-  });
-
-  it('exposes Lidio configuration with documented defaults', () => {
-    resetEnv({
-      LIDIO_ENABLED: 'true',
-      LIDIO_BASE_URL: 'https://test.lidio.com/api',
-      LIDIO_MERCHANT_CODE: 'SPORGYM',
-      LIDIO_AUTHORIZATION_SCHEME: undefined,
-      LIDIO_AUTHORIZATION_TOKEN: 'configured-token',
-      LIDIO_MERCHANT_KEY: '',
-      LIDIO_API_PASSWORD: '',
-      LIDIO_SUBSELLER_PROFILE_ID: undefined,
-    });
-
-    const env = loadEnv();
-
-    expect(env.LIDIO_ENABLED).toBe(true);
-    expect(env.LIDIO_BASE_URL).toBe('https://test.lidio.com/api');
-    expect(env.LIDIO_MERCHANT_CODE).toBe('SPORGYM');
-    expect(env.LIDIO_AUTHORIZATION_SCHEME).toBe('MxS2S');
-    expect(env.LIDIO_AUTHORIZATION_TOKEN).toBe('configured-token');
-    expect(env.LIDIO_MERCHANT_KEY).toBeUndefined();
-    expect(env.LIDIO_API_PASSWORD).toBeUndefined();
-    expect(env.LIDIO_SUBSELLER_PROFILE_ID).toBe(3);
-  });
-
-  it('requires only base URL, merchant code, and authorization token when Lidio is enabled', () => {
-    resetEnv({
-      LIDIO_ENABLED: 'true',
-      LIDIO_BASE_URL: 'https://test.lidio.com/api',
-      LIDIO_MERCHANT_CODE: 'SPORGYM',
-      LIDIO_AUTHORIZATION_TOKEN: undefined,
-      LIDIO_MERCHANT_KEY: undefined,
-      LIDIO_API_PASSWORD: undefined,
-      LIDIO_SUBSELLER_PROFILE_ID: undefined,
-    });
-
-    expect(() => loadEnv()).toThrow(
-      'Missing required Lidio env vars when LIDIO_ENABLED=true: LIDIO_AUTHORIZATION_TOKEN.',
-    );
-  });
-});
 
 describe('database source diagnostics', () => {
   it('reports database host and database name without exposing credentials', () => {

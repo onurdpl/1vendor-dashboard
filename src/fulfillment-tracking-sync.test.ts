@@ -58,9 +58,6 @@ const env = {
   SHIPPING_PROVIDER: 'hepsijet' as const,
   KARGO_ENTEGRATOR_ENABLED: false,
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
-  TRY_OTO_ENABLED: false,
-  TRY_OTO_SANDBOX_MODE: false,
-  TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
 };
 
 function buildAllocation(overrides: Record<string, unknown> = {}) {

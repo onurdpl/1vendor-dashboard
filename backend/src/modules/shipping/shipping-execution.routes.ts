@@ -57,10 +57,6 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
 
-  app.post('/webhooks/try-oto', async (request, reply) => {
-    void request;
-    return reply.code(409).send(disabledProviderResponse('try_oto'));
-  });
 
   app.get(
     '/shipping/config',
@@ -338,70 +334,6 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
         return reply.code(400).send({ message });
       }
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    '/admin/shipments/:id/probe-try-oto-return-details',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Admin access required.' });
-      }
-
-      void env;
-      void request;
-      return reply.code(409).send(disabledProviderResponse('try_oto'));
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    '/admin/shipments/:id/probe-try-oto-return-link',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Admin access required.' });
-      }
-
-      void env;
-      void request;
-      return reply.code(409).send(disabledProviderResponse('try_oto'));
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    '/admin/shipments/:id/probe-try-oto-return-awb-print',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Admin access required.' });
-      }
-
-      void env;
-      void request;
-      return reply.code(409).send(disabledProviderResponse('try_oto'));
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    '/admin/shipments/:id/probe-shopify-return-label',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Admin access required.' });
-      }
-
-      void env;
-      void request;
-      return reply.code(409).send(disabledProviderResponse('try_oto'));
     },
   );
 

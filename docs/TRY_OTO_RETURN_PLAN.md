@@ -1,5 +1,9 @@
 # Try OTO Return Shipment Implementation Plan
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 This document is planning-only. It must not be treated as a runtime provider contract until the sandbox PoC confirms the return flow end to end.
 
 Sources reviewed:

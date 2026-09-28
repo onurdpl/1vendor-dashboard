@@ -33,9 +33,6 @@ function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
     SHIPPING_PROVIDER: 'kargonomi',
     KARGO_ENTEGRATOR_ENABLED: false,
     KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
-    TRY_OTO_ENABLED: false,
-    TRY_OTO_SANDBOX_MODE: false,
-    TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
     ...overrides,
   };
 }

@@ -1,5 +1,9 @@
 # Try OTO Webhook Security
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 ## Purpose
 
 `POST /webhooks/try-oto` can update local shipment execution state when Try OTO webhook ingestion is enabled. Provider-native Try OTO webhook signature semantics are currently unknown, so production ingestion must fail closed unless interim authenticity verification is configured.

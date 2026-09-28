@@ -74,11 +74,6 @@ const env = {
   SHIPPING_EXECUTION_ENABLED: true,
   SHIPPING_SANDBOX_MODE: false,
   SHIPPING_PROVIDER: 'kargonomi' as const,
-  TRY_OTO_ENABLED: false,
-  TRY_OTO_BASE_URL: undefined,
-  TRY_OTO_REFRESH_TOKEN: undefined,
-  TRY_OTO_SANDBOX_MODE: false,
-  TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
 };
 
 describe('return lifecycle Kargonomi-only auto-create trigger', () => {

@@ -1,5 +1,9 @@
 # Lidio Sandbox Probe Plan
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 ## Scope
 - This document defines environment documentation and a minimal read-only sandbox probe plan only.
 - Do not implement runtime code from this plan until the read-only contract is confirmed.

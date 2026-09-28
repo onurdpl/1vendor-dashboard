@@ -1,5 +1,9 @@
 # Odoo Discovery
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 ## Status
 
 Odoo discovery is inactive and deprecated.

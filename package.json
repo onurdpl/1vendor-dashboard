@@ -18,9 +18,6 @@
     "backend:build": "npm --prefix backend run build",
     "backend:typecheck": "npm --prefix backend run typecheck",
     "backend:smoke": "npm --prefix backend run smoke",
-    "backend:lidio:sandbox-probe": "npm --prefix backend run lidio:sandbox-probe",
-    "backend:lidio:create-subseller-probe": "npm --prefix backend run lidio:create-subseller-probe",
-    "backend:lidio:marketplace-payment-probe": "npm --prefix backend run lidio:marketplace-payment-probe",
     "backend:db:generate": "npm --prefix backend run db:generate",
     "backend:db:deploy": "npm --prefix backend run db:deploy",
     "backend:db:bootstrap:fresh": "npm --prefix backend run db:bootstrap:fresh",
@@ -41,7 +38,6 @@
     "shopify:fulfillment-webhooks:register": "npm --prefix backend run shopify:fulfillment-webhooks:register",
     "backend:kargonomi:probe": "npm --prefix backend run kargonomi:probe",
     "kargonomi:lookup-probe": "npm --prefix backend run kargonomi:lookup-probe",
-    "lidio:sandbox-probe": "npm --prefix backend run lidio:sandbox-probe",
     "vendor-integration:create-token": "npm --prefix backend run vendor-integration:create-token",
     "auth:hash-report": "npm --prefix backend run auth:hash-report",
     "real-api:dry-run": "node scripts/real-api-dry-run.mjs"

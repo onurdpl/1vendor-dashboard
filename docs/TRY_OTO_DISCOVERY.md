@@ -1,5 +1,9 @@
 # Try OTO Integration Discovery
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 Discovery source:
 - `/Users/onur/Downloads/OTO API V2.postman_collection.json`
 - `docs/SHOPIFY_DISCOVERIES.md`

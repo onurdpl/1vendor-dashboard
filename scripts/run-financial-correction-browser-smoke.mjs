@@ -79,7 +79,7 @@ const backendDefaults = {
   CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: 'false',
   SHIPPING_EXECUTION_ENABLED: 'false',
   EMAIL_NOTIFICATIONS_ENABLED: 'false', EMAIL_PROVIDER: 'noop',
-  LIDIO_ENABLED: 'false', LOGO_ISBASI_CREATE_ENABLED: 'false',
+  LOGO_ISBASI_CREATE_ENABLED: 'false',
   KARGONOMI_BASE_URL: 'http://localhost:9', KARGONOMI_API_TOKEN: 'browser-smoke-inert',
 };
 const frontendEnv = {

@@ -1,5 +1,9 @@
 # Lidio Environment Setup
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 ## Scope
 - This document covers Lidio backend environment configuration only.
 - Do not commit real Lidio tokens, keys, passwords, or credentials.

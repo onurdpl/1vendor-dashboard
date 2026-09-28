@@ -273,6 +273,10 @@ No refund automation.
 
 ### Phase 2: Auto-Create Try OTO Return Label
 
+> Historical retired-provider plan only. Try OTO is no longer connected or supported;
+> its detached return-label execution and probes have been removed. This section
+> does not authorize current provider execution or change Shopify return authority.
+
 Goal:
 - For eligible return records, create Try OTO return shipment/barcode/label.
 - Idempotently prevent duplicate return labels for the same Shopify return/order/line item/vendor.
@@ -697,6 +701,8 @@ Mitigation:
 - Stop automation if line items or vendor attribution cannot be resolved.
 
 ### Try OTO Label Async Timing
+
+> Historical Try OTO observations only; the provider integration has been retired.
 
 Risk:
 - Try OTO may create return shipment/barcode before label PDF is immediately available.

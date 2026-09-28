@@ -73,12 +73,6 @@ export type AppEnv = {
   SHIPPING_EXECUTION_ENABLED: boolean;
   SHIPPING_SANDBOX_MODE: boolean;
   SHIPPING_PROVIDER: 'kargonomi';
-  TRY_OTO_ENABLED: boolean;
-  TRY_OTO_BASE_URL?: string;
-  TRY_OTO_REFRESH_TOKEN?: string;
-  TRY_OTO_SANDBOX_MODE: boolean;
-  TRY_OTO_WEBHOOK_INGEST_ENABLED: boolean;
-  TRY_OTO_WEBHOOK_SHARED_SECRET?: string;
   KARGONOMI_BASE_URL?: string;
   KARGONOMI_API_TOKEN?: string;
   KARGONOMI_APP_KEY?: string;
@@ -94,14 +88,6 @@ export type AppEnv = {
   LOGO_ISBASI_CREATE_ENABLED?: boolean;
   LOGO_ISBASI_CREATE_ENVIRONMENT?: string;
   LOGO_ISBASI_EXPECTED_TENANT_ID?: string;
-  LIDIO_ENABLED?: boolean;
-  LIDIO_BASE_URL?: string;
-  LIDIO_MERCHANT_CODE?: string;
-  LIDIO_AUTHORIZATION_SCHEME?: string;
-  LIDIO_AUTHORIZATION_TOKEN?: string;
-  LIDIO_MERCHANT_KEY?: string;
-  LIDIO_API_PASSWORD?: string;
-  LIDIO_SUBSELLER_PROFILE_ID?: number;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -311,18 +297,6 @@ export function loadEnv(): AppEnv {
   const logoIsbasiCreateEnabled = parseBoolean(process.env.LOGO_ISBASI_CREATE_ENABLED, false);
   const logoIsbasiCreateEnvironment = process.env.LOGO_ISBASI_CREATE_ENVIRONMENT?.trim().toLowerCase() || undefined;
   const logoIsbasiExpectedTenantId = process.env.LOGO_ISBASI_EXPECTED_TENANT_ID?.trim() || undefined;
-  const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
-  const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
-  const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
-  const lidioAuthorizationScheme = process.env.LIDIO_AUTHORIZATION_SCHEME?.trim() || 'MxS2S';
-  const lidioAuthorizationToken = process.env.LIDIO_AUTHORIZATION_TOKEN?.trim() || undefined;
-  const lidioMerchantKey = process.env.LIDIO_MERCHANT_KEY?.trim() || undefined;
-  const lidioApiPassword = process.env.LIDIO_API_PASSWORD?.trim() || undefined;
-  const lidioSubsellerProfileId = process.env.LIDIO_SUBSELLER_PROFILE_ID?.trim()
-    ? parsePositiveInteger(process.env.LIDIO_SUBSELLER_PROFILE_ID, 3)
-    : 3;
-  const tryOtoWebhookIngestEnabled = false;
-  const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
 
   if (shippingProvider === 'kargonomi') {
     if (!kargonomiBaseUrl) {
@@ -330,17 +304,6 @@ export function loadEnv(): AppEnv {
     }
     if (!kargonomiApiToken) {
       throw new Error('KARGONOMI_API_TOKEN is required when SHIPPING_PROVIDER=kargonomi.');
-    }
-  }
-  if (lidioEnabled) {
-    const missingLidioKeys = [
-      lidioBaseUrl ? null : 'LIDIO_BASE_URL',
-      lidioMerchantCode ? null : 'LIDIO_MERCHANT_CODE',
-      lidioAuthorizationToken ? null : 'LIDIO_AUTHORIZATION_TOKEN',
-    ].filter((key): key is string => Boolean(key));
-
-    if (missingLidioKeys.length) {
-      throw new Error(`Missing required Lidio env vars when LIDIO_ENABLED=true: ${missingLidioKeys.join(', ')}.`);
     }
   }
 
@@ -495,12 +458,6 @@ export function loadEnv(): AppEnv {
     SHIPPING_EXECUTION_ENABLED: parseBoolean(process.env.SHIPPING_EXECUTION_ENABLED, false),
     SHIPPING_SANDBOX_MODE: parseBoolean(process.env.SHIPPING_SANDBOX_MODE, false),
     SHIPPING_PROVIDER: shippingProvider,
-    TRY_OTO_ENABLED: parseBoolean(process.env.TRY_OTO_ENABLED, false),
-    TRY_OTO_BASE_URL: process.env.TRY_OTO_BASE_URL || undefined,
-    TRY_OTO_REFRESH_TOKEN: process.env.TRY_OTO_REFRESH_TOKEN || undefined,
-    TRY_OTO_SANDBOX_MODE: parseBoolean(process.env.TRY_OTO_SANDBOX_MODE, false),
-    TRY_OTO_WEBHOOK_INGEST_ENABLED: tryOtoWebhookIngestEnabled,
-    TRY_OTO_WEBHOOK_SHARED_SECRET: tryOtoWebhookSharedSecret,
     KARGONOMI_BASE_URL: kargonomiBaseUrl,
     KARGONOMI_API_TOKEN: kargonomiApiToken,
     KARGONOMI_APP_KEY: process.env.KARGONOMI_APP_KEY || undefined,
@@ -516,13 +473,5 @@ export function loadEnv(): AppEnv {
     LOGO_ISBASI_CREATE_ENABLED: logoIsbasiCreateEnabled,
     LOGO_ISBASI_CREATE_ENVIRONMENT: logoIsbasiCreateEnvironment,
     LOGO_ISBASI_EXPECTED_TENANT_ID: logoIsbasiExpectedTenantId,
-    LIDIO_ENABLED: lidioEnabled,
-    LIDIO_BASE_URL: lidioBaseUrl,
-    LIDIO_MERCHANT_CODE: lidioMerchantCode,
-    LIDIO_AUTHORIZATION_SCHEME: lidioAuthorizationScheme,
-    LIDIO_AUTHORIZATION_TOKEN: lidioAuthorizationToken,
-    LIDIO_MERCHANT_KEY: lidioMerchantKey,
-    LIDIO_API_PASSWORD: lidioApiPassword,
-    LIDIO_SUBSELLER_PROFILE_ID: lidioSubsellerProfileId,
   } as AppEnv;
 }

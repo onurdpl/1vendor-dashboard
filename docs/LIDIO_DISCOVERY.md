@@ -1,5 +1,9 @@
 # Lidio Marketplace Discovery
 
+> Historical retired-integration notes. This provider is no longer connected or supported.
+> Setup commands, credentials, probes and execution paths below are forensic history only,
+> not current operational instructions. The executable integration has been removed.
+
 ## Scope
 - This document is based only on the uploaded OpenAPI schema at `/Users/onur/Downloads/Lidio-API.json`.
 - No runtime code, routes, database migrations, payment calls, refund calls, shipping/provider logic, Try OTO/Kargonomi work, or finance ledger persistence were added.
