@@ -23,7 +23,7 @@ This checklist is for Render production deploys of the VendorOps frontend and ba
   - `SHOPIFY_SHOP_DOMAIN`
   - `SHOPIFY_ADMIN_ACCESS_TOKEN` = the dedicated Admin API access token, not the Shopify app Client Secret
   - `SHOPIFY_API_VERSION` (live Shopify webhooks currently use stable `2026-01`; do not set production webhooks to `unstable`)
-  - provider gates such as `SHIPPING_EXECUTION_ENABLED`, `KARGO_ENTEGRATOR_ENABLED`, and `LOGO_ISBASI_CREATE_ENABLED` only when intentionally live
+  - provider gates such as `SHIPPING_EXECUTION_ENABLED` and `LOGO_ISBASI_CREATE_ENABLED` only when intentionally live
 - Confirm production frontend variables:
   - `VITE_API_MODE=real`
   - `VITE_API_BASE_URL=<backend origin>` for standard cross-origin mode, or `VITE_API_BASE_URL=/api` for the reversible mobile same-origin proxy test

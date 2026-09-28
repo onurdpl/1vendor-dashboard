@@ -260,23 +260,6 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
     },
   );
 
-  app.post<{ Params: { id: string } }>(
-    '/shipments/:id/update-navlungo',
-    {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
-    },
-    async (request, reply) => {
-      const vendorId = request.vendorContext?.vendorId;
-      if (!vendorId) {
-        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
-      }
-
-      void env;
-      void vendorId;
-      void request;
-      return reply.code(409).send(disabledProviderResponse('navlungo'));
-    },
-  );
 
   app.post<{ Params: { id: string } }>(
     '/shipments/:id/create-return',

@@ -808,7 +808,7 @@ describe('Kargonomi return preview', () => {
     expect(adapterCreateShipment).not.toHaveBeenCalled();
   });
 
-  it('persists successful Kargonomi return shipment fields', async () => {
+  it('preserves generated Kargonomi return reference and persists successful shipment fields', async () => {
     const adapterCreateShipment = vi.fn().mockResolvedValue({
       providerShipmentId: '2654001',
       trackingNumber: 'KSUR2654001RET',
@@ -823,7 +823,7 @@ describe('Kargonomi return preview', () => {
         labelUrlPresent: true,
       },
     });
-    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord({ returnReferenceId: null }));
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
     prismaMock.returnRecord.update.mockResolvedValue({});
     prismaMock.returnRecord.findFirst.mockResolvedValue(
@@ -888,6 +888,12 @@ describe('Kargonomi return preview', () => {
         }),
       }),
     );
+    const expectedReference = 'RET-YALISPOR0000000000000000-107100000000000000000000-RETURN100000000000000000';
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ returnReferenceId: expectedReference }),
+    }));
+    expect(adapterCreateShipment.mock.calls[0][0].requestSnapshot.packages[0].barcode)
+      .toBe(expectedReference.slice(0, 64));
     expect(result.returnProviderShipmentId).toBe('2654001');
   });
 

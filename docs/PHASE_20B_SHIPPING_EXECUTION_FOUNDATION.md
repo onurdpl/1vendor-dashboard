@@ -1,5 +1,7 @@
 # Phase 20B - Shipping Execution Foundation
 
+> Historical retired-provider notes only. Kargo Entegrator is disconnected; its env keys and setup instructions below are not supported runtime configuration. Kargonomi is the only active shipping/return provider.
+
 Phase 20B adds the first merchant-of-record shipping execution foundation. The platform remains the canonical operational and finance truth, while carriers execute shipment creation and return tracking, label, and cost evidence.
 
 This phase does not add a WMS, carrier rate shopping, label printing infrastructure, return shipments, procurement accounting, or automatic carrier reconciliation.

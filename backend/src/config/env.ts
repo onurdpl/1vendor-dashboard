@@ -73,13 +73,6 @@ export type AppEnv = {
   SHIPPING_EXECUTION_ENABLED: boolean;
   SHIPPING_SANDBOX_MODE: boolean;
   SHIPPING_PROVIDER: 'kargonomi';
-  KARGO_ENTEGRATOR_ENABLED: boolean;
-  KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: boolean;
-  KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?: string;
-  KARGO_ENTEGRATOR_BASE_URL?: string;
-  KARGO_ENTEGRATOR_API_KEY?: string;
-  KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?: string;
-  KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE?: 'primary' | 'deprecated';
   TRY_OTO_ENABLED: boolean;
   TRY_OTO_BASE_URL?: string;
   TRY_OTO_REFRESH_TOKEN?: string;
@@ -91,14 +84,6 @@ export type AppEnv = {
   KARGONOMI_APP_KEY?: string;
   KARGONOMI_DEFAULT_WAREHOUSE_ID?: string;
   KARGONOMI_ACCOUNT_TAX_NUMBER?: string;
-  NAVLUNGO_BASE_URL?: string;
-  NAVLUNGO_API_USERNAME?: string;
-  NAVLUNGO_API_PASSWORD?: string;
-  NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID?: string;
-  NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID?: string;
-  NAVLUNGO_DEFAULT_BARCODE_FORMAT?: string;
-  NAVLUNGO_DEFAULT_CARRIER_ID?: string;
-  NAVLUNGO_CREATE_POST_PROBE_CONFIRM?: string;
   IYZICO_SANDBOX_API_KEY?: string;
   IYZICO_SANDBOX_SECRET_KEY?: string;
   IYZICO_SANDBOX_BASE_URL?: string;
@@ -316,14 +301,6 @@ export function loadEnv(): AppEnv {
   const kargonomiApiToken = process.env.KARGONOMI_API_TOKEN || undefined;
   const kargonomiDefaultWarehouseId = process.env.KARGONOMI_DEFAULT_WAREHOUSE_ID || undefined;
   const kargonomiAccountTaxNumber = process.env.KARGONOMI_ACCOUNT_TAX_NUMBER?.trim() || undefined;
-  const navlungoBaseUrl = process.env.NAVLUNGO_BASE_URL || undefined;
-  const navlungoApiUsername = process.env.NAVLUNGO_API_USERNAME || undefined;
-  const navlungoApiPassword = process.env.NAVLUNGO_API_PASSWORD || undefined;
-  const navlungoDefaultSenderAddressId = process.env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID || undefined;
-  const navlungoReturnRecipientAddressId = process.env.NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID || undefined;
-  const navlungoDefaultBarcodeFormat = process.env.NAVLUNGO_DEFAULT_BARCODE_FORMAT || undefined;
-  const navlungoDefaultCarrierId = process.env.NAVLUNGO_DEFAULT_CARRIER_ID || undefined;
-  const navlungoCreatePostProbeConfirm = process.env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM || undefined;
   const iyzicoSandboxApiKey = process.env.IYZICO_SANDBOX_API_KEY || undefined;
   const iyzicoSandboxSecretKey = process.env.IYZICO_SANDBOX_SECRET_KEY || undefined;
   const iyzicoSandboxBaseUrl = process.env.IYZICO_SANDBOX_BASE_URL || undefined;
@@ -529,14 +506,6 @@ export function loadEnv(): AppEnv {
     KARGONOMI_APP_KEY: process.env.KARGONOMI_APP_KEY || undefined,
     KARGONOMI_DEFAULT_WAREHOUSE_ID: kargonomiDefaultWarehouseId,
     KARGONOMI_ACCOUNT_TAX_NUMBER: kargonomiAccountTaxNumber,
-    NAVLUNGO_BASE_URL: navlungoBaseUrl,
-    NAVLUNGO_API_USERNAME: navlungoApiUsername,
-    NAVLUNGO_API_PASSWORD: navlungoApiPassword,
-    NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID: navlungoDefaultSenderAddressId,
-    NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID: navlungoReturnRecipientAddressId,
-    NAVLUNGO_DEFAULT_BARCODE_FORMAT: navlungoDefaultBarcodeFormat,
-    NAVLUNGO_DEFAULT_CARRIER_ID: navlungoDefaultCarrierId,
-    NAVLUNGO_CREATE_POST_PROBE_CONFIRM: navlungoCreatePostProbeConfirm,
     IYZICO_SANDBOX_API_KEY: iyzicoSandboxApiKey,
     IYZICO_SANDBOX_SECRET_KEY: iyzicoSandboxSecretKey,
     IYZICO_SANDBOX_BASE_URL: iyzicoSandboxBaseUrl,

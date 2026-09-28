@@ -85,6 +85,12 @@ function createRegisteredPostRoutes() {
 }
 
 describe('backend returns list route contract', () => {
+  it('registers Kargonomi return actions but no retired Navlungo return action', () => {
+    const posts = createRegisteredPostRoutes();
+    expect([...posts.keys()].some((path) => path.includes('navlungo'))).toBe(false);
+    expect([...posts.keys()].some((path) => path.includes('kargonomi'))).toBe(true);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

@@ -1,7 +1,6 @@
 import type { AppEnv } from '../../config/env.js';
 import type { ShipmentExecutionStatusDto, ShippingProviderDto } from './shipping-execution.types.js';
 import { KargonomiAdapter } from './kargonomi-provider.adapter.js';
-import { NavlungoAdapter } from './navlungo-provider.adapter.js';
 
 export type ShippingProviderCreateInput = {
   allocationId: string;
@@ -1651,7 +1650,7 @@ export function createShippingProviderAdapter(
     return new KargonomiAdapter(env);
   }
   if (provider === 'navlungo') {
-    return new NavlungoAdapter(env);
+    throw new Error('Navlungo is retired. Kargonomi is the only active shipping provider.');
   }
 
   return new HepsijetAdapter(env);

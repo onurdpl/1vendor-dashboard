@@ -1,5 +1,7 @@
 # Navlungo Discovery
 
+> Historical discovery only. Navlungo is retired: its provider client, executable diagnostics, return actions, ingestion fallback, manual probe and runtime env plumbing have been removed. The implementation notes below describe the former PoC, not supported configuration. Kargonomi is the only active shipping/return provider.
+
 ## Purpose
 
 This document captures docs-only discovery for a possible Navlungo domestic shipping provider integration.

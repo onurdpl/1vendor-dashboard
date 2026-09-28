@@ -1,5 +1,7 @@
 # Navlungo Provider Questions
 
+> Historical unanswered provider questions, retained for forensic context only. Navlungo is retired and no integration setup is required.
+
 - Which API version should we use for production: v2 or v2.1?
 - What is the production base URL?
 - Is v2.1 Beta production-ready?

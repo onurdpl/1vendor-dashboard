@@ -3,7 +3,6 @@ import { createShopifyAdminService } from './shopify-admin.service.js';
 import type { AppEnv } from '../../config/env.js';
 import {
   autoCreateKargonomiReturnShipmentForApprovedReturn,
-  autoCreateNavlungoReturnPickupForApprovedReturn,
 } from '../returns/returns.service.js';
 import { assertResolvedEconomicOwnerForMoneyMovement } from '../finance/economic-owner-resolution.service.js';
 import { resolveAllocationForShopifyOrderLineItem } from '../orders/allocation-ownership-resolution.service.js';
@@ -128,11 +127,7 @@ async function autoCreateReturnPickupsForApprovedRecords(env: AppEnv, returnReco
   let skipped = 0;
 
   for (const returnRecordId of returnRecordIds) {
-    const kargonomiResult = await autoCreateKargonomiReturnShipmentForApprovedReturn(returnRecordId, env);
-    const result =
-      kargonomiResult.skippedReason === 'provider_not_kargonomi'
-        ? await autoCreateNavlungoReturnPickupForApprovedReturn(returnRecordId, env)
-        : kargonomiResult;
+    const result = await autoCreateKargonomiReturnShipmentForApprovedReturn(returnRecordId, env);
     if (result.attempted) {
       attempted += 1;
     } else {

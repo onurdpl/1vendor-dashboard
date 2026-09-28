@@ -1234,6 +1234,8 @@ Frontend note:
 - The C4 cleanup readiness/archive diagnostic routes remain admin-only compatibility endpoints and report the legacy schema as removed/not applicable.
 
 ## Shipping Execution Foundation (Phase 20B)
+
+Historical foundation notes below are retained for context. Kargonomi is the only active shipping/return provider. Navlungo execution/routes/probes and runtime env configuration, and Kargo Entegrator runtime env declarations, have been retired. The historical generic `sanitizeNavlungoReferencePart()` helper remains unchanged for Kargonomi return references; stored legacy provider evidence remains readable.
 - Phase 20B introduces merchant-of-record shipping execution orchestration while keeping the platform as canonical operational and finance truth.
 - External carriers execute shipment creation. The backend persists carrier evidence without replacing Shopify canonical fulfillment state or weakening existing fulfillment safeguards.
 - Provider abstraction:
@@ -1282,12 +1284,7 @@ Frontend note:
   - source type is `EXTERNAL_PROVIDER`
   - status is `CONFIRMED`
   - immutable finance ledger snapshots are not mutated retroactively
-- Shipping execution configuration is disabled by default:
-  - `SHIPPING_EXECUTION_ENABLED=false`
-  - `SHIPPING_PROVIDER=kargo_entegrator`
-  - `KARGO_ENTEGRATOR_ENABLED=false`
-  - `KARGO_ENTEGRATOR_BASE_URL`
-  - `KARGO_ENTEGRATOR_API_KEY`
+- Current shipping execution uses `SHIPPING_PROVIDER=kargonomi` with `KARGONOMI_*` configuration. The retired `KARGO_ENTEGRATOR_*` keys are not runtime configuration.
 - Kargo Entegratör cargo integration ids and warehouse ids are vendor-scoped configuration, never global env values.
 - Backend endpoints:
   - `GET /shipping/config`

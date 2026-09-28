@@ -1,5 +1,7 @@
 # Kargo Entegrator Contract Checklist
 
+> Historical retired-provider notes only. Kargo Entegrator is disconnected; its env keys and setup instructions below are not supported runtime configuration. Kargonomi is the only active shipping/return provider.
+
 This checklist captures the current Kargo Entegrator contract gaps before real or Dummy Kargo shipment creation is expanded. It is intentionally a list of unknowns; do not treat any item here as confirmed provider behavior until the provider documentation or support response confirms it.
 
 ## Current Safety Boundary

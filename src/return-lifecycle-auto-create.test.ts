@@ -73,26 +73,15 @@ const env = {
   EMAIL_ADMIN_RECIPIENTS: [],
   SHIPPING_EXECUTION_ENABLED: true,
   SHIPPING_SANDBOX_MODE: false,
-  SHIPPING_PROVIDER: 'navlungo' as const,
-  KARGO_ENTEGRATOR_ENABLED: true,
-  KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
-  KARGO_ENTEGRATOR_BASE_URL: 'https://kargo.example',
-  KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
+  SHIPPING_PROVIDER: 'kargonomi' as const,
   TRY_OTO_ENABLED: false,
   TRY_OTO_BASE_URL: undefined,
   TRY_OTO_REFRESH_TOKEN: undefined,
   TRY_OTO_SANDBOX_MODE: false,
   TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
-  NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2.1',
-  NAVLUNGO_API_USERNAME: 'user',
-  NAVLUNGO_API_PASSWORD: 'pass',
-  NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID: '55574',
-  NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID: '77701',
-  NAVLUNGO_DEFAULT_BARCODE_FORMAT: 'pdf-A6',
-  NAVLUNGO_DEFAULT_CARRIER_ID: '9',
 };
 
-describe('return lifecycle Navlungo auto-create trigger', () => {
+describe('return lifecycle Kargonomi-only auto-create trigger', () => {
   beforeEach(() => {
     prismaMock.webhookEvent.update.mockReset();
     prismaMock.returnRecord.updateMany.mockReset();
@@ -153,7 +142,7 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     ]);
   }
 
-  it('runs Navlungo return pickup auto-create after Shopify return approval updates ReturnRecord status', async () => {
+  it('does not fall back to retired Navlungo when Kargonomi cannot auto-create an approved return', async () => {
     const result = await applyReturnLifecycleStatusWebhook(env, 'returns/approve', {
       event: {
         id: 'webhook-1',
@@ -167,10 +156,11 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     expect(result).toMatchObject({
       ok: true,
       affectedRecordCount: 1,
-      navlungoReturnAutoCreateAttemptedCount: 1,
-      navlungoReturnAutoCreateSkippedCount: 0,
+      navlungoReturnAutoCreateAttemptedCount: 0,
+      navlungoReturnAutoCreateSkippedCount: 1,
     });
-    expect(autoCreateNavlungoReturnPickupForApprovedReturnMock).toHaveBeenCalledWith('return-request-1', env);
+    expect(autoCreateKargonomiReturnShipmentForApprovedReturnMock).toHaveBeenCalledWith('return-request-1', env);
+    expect(autoCreateNavlungoReturnPickupForApprovedReturnMock).not.toHaveBeenCalled();
   });
 
   it('runs Kargonomi return shipment auto-create without falling through to Navlungo for Kargonomi records', async () => {

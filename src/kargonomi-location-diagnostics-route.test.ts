@@ -24,8 +24,6 @@ function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
     SHIPPING_EXECUTION_ENABLED: false,
     SHIPPING_SANDBOX_MODE: false,
     SHIPPING_PROVIDER: 'kargonomi',
-    KARGO_ENTEGRATOR_ENABLED: false,
-    KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
     TRY_OTO_ENABLED: false,
     TRY_OTO_SANDBOX_MODE: false,
     TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
@@ -60,6 +58,14 @@ function buildReply() {
 }
 
 describe('Kargonomi location lookup diagnostics route', () => {
+  it('registers Kargonomi diagnostics without retired Navlungo diagnostics', () => {
+    const app = { get: vi.fn(), post: vi.fn() };
+    registerDiagnosticsRoutes(app as never, buildEnv());
+    const paths = [...app.get.mock.calls, ...app.post.mock.calls].map(([path]) => path);
+    expect(paths).toContain('/admin/diagnostics/kargonomi/location-lookup');
+    expect(paths.some((path) => path.includes('navlungo'))).toBe(false);
+  });
+
   it('requires admin access', async () => {
     const handler = registerRoute(buildEnv());
     const reply = buildReply();

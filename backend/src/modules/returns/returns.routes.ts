@@ -12,7 +12,6 @@ import {
 import {
   getVendorReturnById,
   createKargonomiReturnShipmentForReturn,
-  createNavlungoReturnPickupForReturn,
   listVendorDashboardReturns,
   listVendorReturns,
   markReturnReceived,
@@ -21,9 +20,7 @@ import {
   type ReturnActorScope,
   ReturnReviewError,
   reviewReturn,
-  saveNavlungoReturnPickupAddressCompletion,
   syncKargonomiReturnToShopify,
-  syncNavlungoReturnPickupStatusForReturn,
 } from './returns.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
@@ -54,29 +51,7 @@ type ReturnReviewBody = {
   reason?: string;
 };
 
-type NavlungoReturnPickupBody = {
-  dryRun?: boolean;
-  apiVersionOverride?: 'current' | 'v2' | 'v2.1';
-  endpointVersionOverride?: 'current' | 'v2' | 'v2.1';
-  carrierOverride?: 'current' | '9' | '10';
-  carrierIdOverride?: 'current' | '9' | '10';
-  endpointPathOverride?: '/post/create' | '/post/return';
-  diagnosticConfirm?: 'YES';
-  customerOverrides?: {
-    name?: string;
-    phone?: string;
-    email?: string;
-    country?: string;
-    postcode?: string;
-    city?: string;
-    district?: string;
-    address?: string;
-  };
-};
 
-type NavlungoReturnPickupAddressCompletionBody = {
-  customerOverrides?: NavlungoReturnPickupBody['customerOverrides'];
-};
 
 function sendReviewError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
   if (error instanceof ReturnReviewError) {
@@ -355,37 +330,6 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
-  app.post<{ Params: { returnId: string }; Body: NavlungoReturnPickupBody }>(
-    '/returns/:returnId/navlungo-return-pickup',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      const actor = await resolveReturnActor(request, reply);
-      if (!actor.ok) {
-        return actor.response;
-      }
-      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
-      if (restriction) {
-        return restriction;
-      }
-
-      try {
-        return await createNavlungoReturnPickupForReturn(request.params.returnId, actor.actor, env, {
-          dryRun: request.body?.dryRun === true,
-          customerOverrides: request.body?.customerOverrides,
-          apiVersionOverride: request.body?.apiVersionOverride,
-          endpointVersionOverride: request.body?.endpointVersionOverride,
-          carrierOverride: request.body?.carrierOverride,
-          carrierIdOverride: request.body?.carrierIdOverride,
-          endpointPathOverride: request.body?.endpointPathOverride,
-          diagnosticConfirm: request.body?.diagnosticConfirm,
-        });
-      } catch (error) {
-        return sendReviewError(error, reply);
-      }
-    },
-  );
 
   app.get<{ Params: { returnId: string } }>(
     '/returns/:returnId/kargonomi-return-preview',
@@ -475,54 +419,5 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
-  app.post<{ Params: { returnId: string }; Body: NavlungoReturnPickupAddressCompletionBody }>(
-    '/returns/:returnId/navlungo-return-pickup/address-completion',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      const actor = await resolveReturnActor(request, reply);
-      if (!actor.ok) {
-        return actor.response;
-      }
-      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
-      if (restriction) {
-        return restriction;
-      }
 
-      try {
-        return await saveNavlungoReturnPickupAddressCompletion(
-          request.params.returnId,
-          actor.actor,
-          env,
-          request.body?.customerOverrides ?? {},
-        );
-      } catch (error) {
-        return sendReviewError(error, reply);
-      }
-    },
-  );
-
-  app.post<{ Params: { returnId: string } }>(
-    '/returns/:returnId/navlungo-return-status-sync',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      const actor = await resolveReturnActor(request, reply);
-      if (!actor.ok) {
-        return actor.response;
-      }
-      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
-      if (restriction) {
-        return restriction;
-      }
-
-      try {
-        return await syncNavlungoReturnPickupStatusForReturn(request.params.returnId, actor.actor, env);
-      } catch (error) {
-        return sendReviewError(error, reply);
-      }
-    },
-  );
 }

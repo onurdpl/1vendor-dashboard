@@ -33,6 +33,19 @@ function resetEnv(overrides: Record<string, string | undefined>) {
 }
 
 describe('backend env shipping provider gates', () => {
+  it('does not expose retired Navlungo or Kargo Entegrator runtime configuration', () => {
+    resetEnv({
+      NAVLUNGO_BASE_URL: 'https://retired.example.test',
+      NAVLUNGO_API_USERNAME: 'unused',
+      NAVLUNGO_API_PASSWORD: 'unused',
+      KARGO_ENTEGRATOR_ENABLED: 'true',
+      KARGO_ENTEGRATOR_API_KEY: 'unused',
+    });
+    expect(Object.keys(loadEnv()).filter((key) =>
+      key.startsWith('NAVLUNGO_') || key.startsWith('KARGO_ENTEGRATOR_'),
+    )).toEqual([]);
+  });
+
   afterEach(() => {
     process.env = { ...originalEnv };
   });
@@ -138,7 +151,7 @@ describe('backend env shipping provider gates', () => {
     expect(env.PRODUCT_PANEL_HMAC_SECRET).toBe('configured-product-panel-secret');
   });
 
-  it('parses Navlungo env values without switching provider by default', () => {
+  it('ignores retired Navlungo env values without switching provider', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'kargonomi',
       KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
@@ -155,13 +168,7 @@ describe('backend env shipping provider gates', () => {
     const env = loadEnv();
 
     expect(env.SHIPPING_PROVIDER).toBe('kargonomi');
-    expect(env.NAVLUNGO_BASE_URL).toBe('https://domestic-api.navlungo.com/v2');
-    expect(env.NAVLUNGO_API_USERNAME).toBe('api-user');
-    expect(env.NAVLUNGO_API_PASSWORD).toBe('secret-password');
-    expect(env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID).toBe('55574');
-    expect(env.NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID).toBe('77701');
-    expect(env.NAVLUNGO_DEFAULT_BARCODE_FORMAT).toBe('pdf-A6');
-    expect(env.NAVLUNGO_DEFAULT_CARRIER_ID).toBe('9');
+    expect(Object.keys(env).some((key) => key.startsWith('NAVLUNGO_'))).toBe(false);
   });
 
   it('rejects Navlungo as a live SHIPPING_PROVIDER even with credentials', () => {

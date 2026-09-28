@@ -1,5 +1,7 @@
 # Kargo Entegrator Webhook Security
 
+> Historical retired-provider notes only. Kargo Entegrator is disconnected; its env keys and setup instructions below are not supported runtime configuration. Kargonomi is the only active shipping/return provider.
+
 ## Purpose
 
 `POST /webhooks/shipping/kargo-entegrator` can update local shipment execution state when sandbox webhook ingestion is enabled. Provider-native Kargo Entegrator webhook signature semantics are currently unknown, so production ingestion must fail closed unless interim authenticity verification is configured.

@@ -24,13 +24,6 @@ import {
 import { resolvePagination } from '../../lib/pagination.js';
 import { runKargonomiLocationLookupDiagnostics } from '../shipping/kargonomi-location-lookup-probe.js';
 import {
-  runNavlungoBarcodeProbeDiagnostics,
-  runNavlungoCheckPostProbeDiagnostics,
-  runNavlungoCreatePostProbeDiagnostics,
-  validateNavlungoCreatePostProbeEnv,
-} from '../shipping/navlungo-create-post-probe.js';
-import { runNavlungoAuthDiagnostics, runNavlungoCarrierDiagnostics } from '../shipping/navlungo-provider.adapter.js';
-import {
   createCurrentStateOrderRepairService,
   CurrentStateOrderRepairError,
 } from '../shopify/current-state-order-repair.service.js';
@@ -393,102 +386,10 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
-  app.get(
-    '/admin/diagnostics/navlungo/auth',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Forbidden' });
-      }
 
-      return runNavlungoAuthDiagnostics(env);
-    },
-  );
 
-  app.get(
-    '/admin/diagnostics/navlungo/carriers',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Forbidden' });
-      }
 
-      return runNavlungoCarrierDiagnostics(env);
-    },
-  );
 
-  app.post<{ Body: { confirm?: string } }>(
-    '/admin/diagnostics/navlungo/create-post-probe',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Forbidden' });
-      }
-
-      if (request.body?.confirm !== 'YES') {
-        return reply.code(400).send({ message: 'UI confirmation is required before running the Navlungo Create Post probe.' });
-      }
-
-      const validation = validateNavlungoCreatePostProbeEnv(env);
-      if (!validation.ok) {
-        return reply.code(400).send({ message: validation.reason, diagnostics: validation.diagnostics });
-      }
-
-      try {
-        return await runNavlungoCreatePostProbeDiagnostics({ env });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Navlungo Create Post probe failed.';
-        return reply.code(502).send({ message });
-      }
-    },
-  );
-
-  app.post<{ Body: { postNumber?: string } }>(
-    '/admin/diagnostics/navlungo/check-post',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Forbidden' });
-      }
-
-      if (!request.body?.postNumber?.trim()) {
-        return reply.code(400).send({ message: 'postNumber is required for the Navlungo Check Post probe.' });
-      }
-
-      try {
-        return await runNavlungoCheckPostProbeDiagnostics({ env, postNumber: request.body.postNumber });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Navlungo Check Post probe failed.';
-        return reply.code(502).send({ message });
-      }
-    },
-  );
-
-  app.post<{ Body: { postNumber?: string } }>(
-    '/admin/diagnostics/navlungo/barcode',
-    {
-      preHandler: [authMiddleware.authenticateRequest],
-    },
-    async (request, reply) => {
-      if (request.authUser?.role !== 'admin') {
-        return reply.code(403).send({ message: 'Forbidden' });
-      }
-
-      if (!request.body?.postNumber?.trim()) {
-        return reply.code(400).send({ message: 'postNumber is required for the Navlungo Barcode probe.' });
-      }
-
-      return runNavlungoBarcodeProbeDiagnostics(request.body.postNumber);
-    },
-  );
 
   app.get<{ Params: { shopifyOrderId: string } }>(
     '/admin/diagnostics/returns/order/:shopifyOrderId',
