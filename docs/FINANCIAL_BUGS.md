@@ -17,6 +17,8 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 
 Audit E added finance-orchestration evidence at repository baseline `af59454e0084f20473e3a64a6cff38b5779d4712`. It did not enable a scheduler, approve unattended financial transitions, or establish provider/bank retry guarantees.
 
+Audit F supplied read-only production-state findings for this register. The reported inspection used `BEGIN READ ONLY` / `ROLLBACK` with `transaction_read_only = on`; this documentation update does not reconnect to production. Production counts below are Audit F-reported observations, not independent queries performed for this edit. Absence of a current instance does not close a static finding.
+
 ## Confirmed functional defects
 
 ### FIN-BUG-001 — SALE refund impact bypasses settlement delay
@@ -28,6 +30,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** The same source can enter a DRAFT before delivery/waiting-period maturity and then be rejected at approval. An existing test expects an unfulfilled refunded SALE to be included; this is not just missing coverage.
 - **Current impact:** Preview/DRAFT and approval give conflicting eligibility answers.
 - **Automation impact:** BLOCKER; preview/DRAFT is not final economic authority.
+- **Audit F production evidence — CANNOT_PROVE_FROM_RETAINED_DATA:** Thirteen refunded SALE ledgers participate in settlements; ten had a RefundRecord before settlement creation. None of those ten settlements was created before its currently retained `settlementEligibleAt`, and none of their APPROVED subset was approved before it. Historical snapshots recorded refund detected/included and `partially_refunded`, but omit `refundOffsetAppliedBeforeSettlement`. No delay-bypass monetary incident was proven; the code defect remains OPEN.
 - **Audit E evidence:** A future worker cannot safely promote scheduled preview or DRAFT inclusion to approval authority; approval still performs its own revalidation and can reject this same refunded SALE.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (`rowIsEligible`, preview candidate filtering, approval revalidation); `backend/src/modules/finance/finance.service.ts` (settlement status derivation); settlement eligibility tests under `src/`.
 - **Production incidence:** UNKNOWN.
@@ -45,6 +48,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** A cancelled cycle may appear READY while an attempted replacement fails on PostgreSQL insertion.
 - **Current impact:** Operator-facing readiness contradicts durable cycle identity.
 - **Automation impact:** BLOCKER for unattended DRAFT creation and cycle retry.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** Eleven settlements include two scheduled DRAFTs, but no CANCELLED scheduled cycle or duplicate `scheduledCycleKey` was found. This does not change the service/unique-constraint contradiction or close the defect.
 - **Audit E evidence:** The scheduled DRAFT transaction rechecks active approvals, but cancellation retains the unconditionally unique cycle key. Neither a repeated job date nor a fresh preview can make that key reusable.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-schedule.service.ts` (`findExistingScheduledApproval`, dry-run and create flow); `backend/src/modules/finance/settlement-approval.service.ts` (scheduled precheck, cancellation); `backend/prisma/schema.prisma` (`SettlementApproval.scheduledCycleKey @unique`).
 - **Production incidence:** UNKNOWN.
@@ -62,6 +66,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** `delivery + settlementDelayDays` can move forward after a delivered shipment refresh.
 - **Current impact:** Previously matured sources can appear not yet mature.
 - **Automation impact:** BLOCKER until a stable delivery-time authority is established.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** Of 67 fulfillments, 58 fulfilled rows retain both `fulfilledAt` and `shipmentUpdatedAt`; the latter is later on 43 (maximum observed difference 1 day 16:25:44). Thirty-two shifted fulfilled SALE pairs have positive historical delay. Tested retained `settlementEligibleAt` values matched neither simple timestamp-plus-delay formula, so exact historical monetary impact cannot be reconstructed from these fields.
 - **Audit E evidence:** Replaying scheduled selection cannot stabilize an eligibility cutoff whose underlying delivery timestamp may move after provider refresh.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (SALE timing); `backend/src/modules/shopify/fulfillment-ingestion.service.ts` (`shipmentUpdatedAt` writes); `backend/prisma/schema.prisma` (`Fulfillment.shipmentUpdatedAt`).
 - **Production incidence:** UNKNOWN.
@@ -112,6 +117,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** Saving finance settings can silently reactivate an intentionally inactive profile and replace prior settings.
 - **Current impact:** Vendor finance policy can change beyond the Admin's stated edit.
 - **Automation impact:** CRITICAL BLOCKER before any scheduler relies on `active=true`.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** Both production VendorFinancialProfile rows are active; no inactive profile currently exposes this edit-flow bug. Historical silent reactivation was not proven. The static defect remains OPEN.
 - **Audit E evidence:** Schedule profile enumeration filters for `active=true`; the inactive-profile edit/reactivation defect therefore directly affects which vendors a future worker would consider.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`getVendorFinancialProfile`, `upsertVendorFinancialProfile`, `input.active ?? true`); `src/pages/VendorProfilePage.tsx` (finance-policy form/payload); `backend/prisma/schema.prisma` (`VendorFinancialProfile`).
 - **Production incidence:** UNKNOWN.
@@ -146,6 +152,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** Two small commission lines can each round to a VAT amount whose sum differs from VAT rounded once on their aggregate commission. Actual Logo rounding behavior remains UNKNOWN.
 - **Current impact:** Potential invoice-total mismatch between frozen settlement economics and the provider document; actual production mismatch is unproven.
 - **Automation impact:** BLOCKER before treating invoice monetary equivalence as authoritative.
+- **Audit F production evidence — CANNOT_PROVE_FROM_RETAINED_DATA:** All five locally CREATED production Logo invoice rows lack stored `invoiceTotalMinor` and `invoiceCurrency`; the proposed provider-total comparison cannot be performed from retained data. No production monetary mismatch is established, and the local contract finding remains OPEN.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/payout-calculator.ts` (per-line commission VAT rounding); `backend/src/modules/finance/settlement-approval.service.ts` (line totals summed); `backend/src/modules/finance/settlement-logo-request-snapshot-builder.service.ts` and `backend/src/modules/logo-isbasi/logo-isbasi-commission-preview.ts` (single aggregate Logo line and VAT rate).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: accounting-approved invoice representation and tolerance.
@@ -164,6 +171,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** Code suggests that with one refunded return and another approved-but-unrefunded return on the same allocation, the latter might not hold the SALE. Whether this state is reachable is unproven.
 - **Current impact:** Potential premature settlement; not confirmed.
 - **Automation impact:** Potential eligibility blocker pending proof; do not turn it into a confirmed bug without evidence.
+- **Audit F production evidence:** One allocation has at least two returns and a refund; zero combine multiple returns, an approved return, and a refund in the candidate configuration. One allocation has an approved return and a refund. The hypothesized hold failure remains unproven. Open-looking return/settlement overlap is reported separately below and is not automatically classified as a blocker.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (return/hold candidate logic); return/refund models in `backend/prisma/schema.prisma`.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** UNKNOWN until the multi-return state and existing rule are proven.
@@ -180,6 +188,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** A `FAILED` record can be retried; whether a prior non-2xx response followed an external creation is UNKNOWN.
 - **Current impact:** A retry may theoretically duplicate an externally created invoice; no production duplicate is established.
 - **Automation impact:** BLOCKER for automatic `FAILED` retry.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** The five production Logo invoice records are CREATED; no FAILED record was found. Provider non-2xx/non-creation semantics remain unproven.
 - **Audit E evidence:** Crash-after-send and non-2xx outcomes require different treatment from a proven pre-send failure; the current finance job has no general retry classification that can establish safe provider resend.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (non-2xx, timeout, and retry handling).
 - **Production incidence:** UNKNOWN.
@@ -215,6 +224,7 @@ Audit E added finance-orchestration evidence at repository baseline `af59454e008
 - **Exact current behavior:** The supplied timestamp becomes `PayoutBatch.paidAt` and ledger `settledAt`. Whether it matches the external transfer event is not verified by the application.
 - **Current impact:** Historical local payment time may differ from actual bank time; production incidence is UNKNOWN. The field is not labeled wrong until its intended semantics are approved.
 - **Automation impact:** `paidAt` cannot be treated as authoritative external-bank execution time without a contract and evidence.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** All three production payouts are DRAFT; none is PAID, so no local `paidAt`/payment-reference population can resolve this bank-time question.
 - **Evidence / relevant code locations:** `src/features/finance/paymentPreparationApi.ts` (`markPayoutBatchPaid`); `src/pages/AdminPaymentPreparationPage.tsx` (no time input); `backend/src/modules/finance/finance.service.ts` (`parseMarkPayoutBatchPaidInput`, `markPayoutBatchPaid`).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: whether `paidAt` means Admin confirmation, EFT initiation, EFT completion, or another event.
@@ -232,6 +242,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** BUSINESS_RULE_MISMATCH / DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** `BIWEEKLY` means configured UTC weekday in an even ISO week; no vendor-specific anchor exists.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** Both current finance profiles are WEEKLY/WEDNESDAY; no BIWEEKLY vendor is present. The future cadence contract remains unresolved.
 - **Exact current behavior:** ISO week 53/year boundaries can create a 21-day gap. Current profile does not prove “every 14 days.”
 - **Current impact:** Cadence expectations can diverge from schedule.
 - **Automation impact:** Blocks an exact biweekly/every-14-day promise.
@@ -264,6 +275,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** Scheduled DRAFT has `periodStart = null` and `periodEnd` at end of UTC run date; older unclaimed eligible sources can be selected.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** Both scheduled DRAFT settlements have `periodStart = NULL`, span at least 14 days of included ledger `createdAt`, and cross calendar-week boundaries. This is actual cumulative source coverage, not a closed weekly period.
 - **Exact current behavior:** “Weekly” describes a DRAFT opportunity, not necessarily a week of sales.
 - **Current impact:** One settlement can cover multiple older source periods.
 - **Automation impact:** Period reporting/payment claims need a decision before automation.
@@ -280,6 +292,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP / CURRENT_ARCHITECTURE_FACT.
 - **Status:** OPEN.
 - **Finding:** `preparePayoutBatch({ vendorId })` receives no settlement IDs, cycle key, period, or payment date.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** Of three DRAFT payouts, ledger-derived lineage maps two to one settlement each and one to two settlements. All 11 historical payout lines retain `financeLedgerEntryId` but have `settlementApprovalLineId = NULL`; each maps to exactly one settlement line/settlement through retained ledger evidence, with no ambiguity or orphan ledger link. Any future direct non-null settlement-line authority needs explicit backward compatibility or safe migration for these 11 rows.
 - **Exact current behavior:** It can pool eligible APPROVED sources across multiple manual/scheduled settlements, cycles, correction-source settlements, and dates.
 - **Current impact:** A payout is not cycle-bound even when UI language might suggest a payment period. Audit C established that pooled settlements can have different Logo invoice states—`CREATED`, `FAILED`, `UNKNOWN`, or no record. Audit D confirmed that the payment screen shows aggregate amounts and a source count, not complete per-settlement lineage or Logo evidence. This does not establish an invoice gate.
 - **Automation impact:** Grouping must be chosen before payment-ready automation.
@@ -296,6 +309,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** Job-run identity is unique by run date; failed/processing dates are not simply rerun.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** `SettlementScheduleJobRun` has zero rows. No persisted production PROCESSING, FAILED, or duplicate-run instance was found; the static recovery gap remains OPEN.
 - **Exact current behavior:** A later due run can cumulatively collect older unclaimed sources, but this is not an explicit retry/catch-up contract.
 - **Audit E evidence:** `SettlementScheduleJobRun.runDate` is unique by UTC date. PROCESSING and FAILED runs cannot resume through the same job command: any duplicate date is returned as already processed regardless of persisted status. The finance job has no lease, heartbeat, stale timeout, takeover, per-vendor checkpoint, or same-date resume. A crash before the final run update can leave committed vendor DRAFTs with a PROCESSING run and no durable per-vendor result. Later cumulative selection is not a defined recovery contract; see FIN-UI-015 and FIN-TEST-015.
 - **Current impact:** Operators cannot infer whether a missed run is retried, skipped, or folded into the next cycle.
@@ -329,6 +343,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** Debt is applied when payout is prepared; there is no established debt-cycle ownership/cutoff.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** `VendorBalanceEvent` has zero rows, so no production debt-after-DRAFT timing case was found. The cutoff decision remains unresolved.
 - **Exact current behavior:** Vendor debt offset is calculated and frozen at payout preparation. New debt after DRAFT does not recalculate that batch. REVIEW and Mark Paid revalidate its attached sources but do not perform a fresh vendor-wide debt calculation.
 - **Current impact:** The batch can progress with its original offset although the vendor's current outstanding debt differs. Whether that makes the batch stale, or requires cancellation/rebuild, remains an unresolved product decision.
 - **Automation impact:** BLOCKER for payment-ready semantics.
@@ -346,6 +361,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** Before-settlement correction credits are vendor-wide; pending deductions require vendor-wide scope/full coverage; scheduled settlement is date-range scoped.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** No Financial Correction authority, claim, credit, deduction, zero-net acknowledgement, or checked downstream correction row was found. This does not weaken the static scheduling-scope mismatch.
 - **Exact current behavior:** Correction sources have no scheduled-cycle attribution, and scheduled date-range cannot truthfully include complete vendor economics by silently ignoring them.
 - **Current impact:** Scheduled processing cannot include every authorized correction under current scope rules.
 - **Automation impact:** BLOCKER.
@@ -363,6 +379,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP / BACKEND_UI_MISMATCH.
 - **Status:** OPEN.
 - **Finding:** Settlement UI can say “Accounting Review” and “No payout amount,” yet payout preparation can create a `0.00` DRAFT and payout actions are primarily status-driven.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** All three production payouts have positive net amounts; no zero-net payout was observed. This does not select a zero-payout policy.
 - **Exact current behavior:** No approved contract establishes whether a zero batch should progress to REVIEW/PAID as accounting evidence or stop before payment workflow. Audit D confirmed that REVIEW and Mark Paid are status-driven, with no zero-net transition gate; this does not prove an external EFT exists for a zero batch.
 - **Current impact:** A zero-value batch can be presented within a payment process without clear meaning.
 - **Automation impact:** BLOCKER until disposition is approved.
@@ -380,6 +397,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** Negative payout paths appear in code/tests as operator-review conditions; there is no approved external negative-payment policy.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** All three production payouts have positive net amounts; no negative payout was observed. This does not select a negative-payout policy.
 - **Exact current behavior:** Preparation can represent negative ordinary payout amounts, and REVIEW/Mark Paid have no general negative-net gate. Correction-deduction preparation has its own insufficient-payable check. The authorized downstream disposition of a negative ordinary batch remains unresolved; full real-DB progression has not been proven.
 - **Current impact:** Admin/payment interpretation is ambiguous.
 - **Automation impact:** BLOCKER.
@@ -397,6 +415,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** IBAN exists in billing profile data, but payout preparation does not establish its completeness as a prerequisite.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** Both vendors have billing profiles and Logo customer-code/customer-ID bindings with e-invoice eligibility, but current IBAN presence is 0/2. Three DRAFT payouts exist. This strengthens the destination-evidence gap; it does **not** establish an IBAN-mandatory rule or prove an EFT was attempted.
 - **Exact current behavior:** Audit C confirmed IBAN is outside the frozen settlement billing snapshot used for Logo invoice requests. Audit D found IBAN to be optional, mutable `VendorBillingProfile` data. Payout preparation does not require or snapshot it; PAID payout history and events do not establish which payment destination was actually used. A later profile edit can differ from that historical destination. Payment Preparation does not show IBAN.
 - **Current impact:** “Payment ready” cannot be inferred solely from payout creation, and historical payout records do not prove the EFT destination.
 - **Automation impact:** Future payment-ready definition needs an approved identity/completeness rule.
@@ -413,6 +432,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** `UNKNOWN` blocks create retry and settlement cancellation. Record-service helpers can resolve `UNKNOWN` as created or failed, but Audit C found no production Admin route/UI invoking them.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** No UNKNOWN or FAILED invoice record exists among the five production Logo rows. The missing resolution workflow remains OPEN.
 - **Exact current behavior:** An `UNKNOWN` invoice record may remain operationally stranded; provider existence or non-existence is not inferred.
 - **Current impact:** Admin cannot complete a proven resolution through the current invoice workspace.
 - **Automation impact:** BLOCKER for automated Logo workflow and exception recovery.
@@ -430,6 +450,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** BLOCKED_BY_EXTERNAL_INFO.
 - **Finding:** Provider invoice identity, total, currency, and document metadata may be synced, but current finance progression does not require provider monetary equality or a proven legally issued provider state. A near-equal provider total is a candidate signal, not a mandatory acceptance gate.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE / BLOCKED_BY_EXTERNAL_INFO:** Five CREATED invoices, all older than 30 days and linked to APPROVED settlements, have provider invoice ID and UUID, but none has stored provider total/currency, ETTN, provider sync time, GIB/document status, or fetched document evidence; four have invoice number and reconciliation metadata/time. This does not invalidate the invoices or establish legal issuance criteria. One invoice-linked settlement participates in a DRAFT payout; none is linked to REVIEW/PAID.
 - **Exact current behavior:** Payout DRAFT, REVIEW, and PAID remain independent of Logo invoice completion; REVIEW and Mark Paid do not gate on per-settlement Logo state. A pooled payout can therefore progress while member settlements have unresolved or mixed invoice states. That independence is not classified as a bug before an invoice-gating policy is approved.
 - **Current impact:** Current data cannot by itself substantiate an invoice-backed `PAYMENT READY` claim.
 - **Automation impact:** BLOCKER for claiming invoice-backed payment readiness.
@@ -446,6 +467,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** DRAFT → REVIEW performs local revalidation and a status change, but `PayoutBatch` does not persist `reviewedBy` or `reviewedAt`; no dedicated durable REVIEW event was established.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** No production payout is in REVIEW or PAID; all three are DRAFT and older than 30 days. Reviewer evidence remains an OPEN design gap, not a currently observed REVIEW-row incident.
 - **Exact current behavior:** The creating and paying Admin can be persisted, but the reviewing Admin and exact review time are not. `updatedAt` is mutable and is not an authoritative review event.
 - **Current impact:** The system cannot later prove who performed the human review gate or exactly when.
 - **Automation impact:** BLOCKER if REVIEW remains a meaningful future human control boundary.
@@ -609,6 +631,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** MISSING_UI_EVIDENCE.
 - **Status:** OPEN.
 - **Finding:** Scheduled UI displays current vendor delay while historical SALE rows can retain individual delay snapshots.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** Both current profiles have delay zero. Among 155 SALE ledgers, frozen delay is zero on 59, 18 on 8, and 21 on 88; 96/155 differ from the current profile. Historical SALE delay authority must not be reinterpreted from mutable current settings.
 - **Exact current behavior:** Displayed profile value is not proof all candidates use it.
 - **Current impact:** Admin may assume a uniform delay that is not used for every row.
 - **Automation impact:** Eligibility explanation needs source-specific evidence.
@@ -641,6 +664,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** MISSING_UI_EVIDENCE / MISLEADING_UI.
 - **Status:** OPEN.
 - **Finding:** A 2xx JSON create response can produce local `CREATED` without an extracted provider identifier, and subsequent provider-list reconciliation can still fail. The UI can show successful/green Logo creation messaging. Readiness preview can also mark “Logo Ready” as completed before provider issuance is established.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** All five production Logo rows are locally CREATED with provider invoice ID and UUID, while stored provider monetary, status, and document evidence is incomplete as detailed in FIN-DESIGN-013. Missing fields alone do not establish invalidity or legal issuance status.
 - **Exact current behavior:** Local readiness, accepted create response, identified provider invoice, reconciled invoice, and legally issued invoice are not presented as proven equivalent states; legal issuance evidence remains UNKNOWN.
 - **Current impact:** Admin may interpret local success/readiness as stronger invoice evidence than currently established.
 - **Automation impact:** Payment-ready UI cannot use these labels as issuance authority.
@@ -673,6 +697,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** MISSING_UI_EVIDENCE.
 - **Status:** OPEN.
 - **Finding:** For a vendor-wide pooled payout, Payment Preparation shows aggregate amount and source count but does not consolidate all relevant settlement IDs, scheduled/manual origin, cycle identity, source-date coverage, per-settlement Logo state and identity, current versus batch-frozen debt, payment destination/IBAN, and blocker evidence.
+- **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** One current DRAFT payout derives from two settlements. Its historical lines lack direct settlement-line IDs but have unambiguous ledger-derived lineage, which a future dossier or migration must account for without silently changing payout history.
 - **Exact current behavior:** Some information exists elsewhere or in backend line references, but this payment surface does not present one complete payment dossier.
 - **Current impact:** Admin cannot substantiate a future “READY FOR PAYMENT” claim from this screen alone.
 - **Automation impact:** BLOCKER for a marketplace-style payment-ready queue.
@@ -689,6 +714,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** BACKEND_UI_MISMATCH.
 - **Status:** OPEN.
 - **Finding:** `SettlementScheduleJobRun.runDate` is unique. A duplicate-date request can return `ok: true` and vendor state `ALREADY_PROCESSED` without distinguishing an existing COMPLETED, FAILED, or PROCESSING run.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** No schedule-job run row exists, so no production FAILED/PROCESSING collision was available to inspect. The code/API mismatch remains OPEN.
 - **Exact current behavior:** The collision path reads the existing run status but builds vendor results from a fresh dry-run, marking them `ALREADY_PROCESSED` rather than returning authoritative persisted vendor outcomes.
 - **Current impact:** An operator or client may interpret unfinished, failed, or stale work as completed.
 - **Automation impact:** BLOCKER for truthful unattended recovery and operator status.
@@ -779,6 +805,7 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 ### FIN-TEST-009 — No real-DB multiple-cycle-to-pooled-payout test
 - **Domain:** Payout grouping tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
 - **Finding / exact current behavior:** No proven real-DB test builds multiple scheduled/manual approvals then one pooled payout with a complete payment-review dossier or source-period lineage.
+- **Audit F production evidence:** One production DRAFT payout pools two settlements, confirming actual pooling but not replacing the missing controlled real-DB regression or UI dossier test.
 - **Current impact:** Current vendor-wide grouping lacks integrated proof. **Automation impact:** Payment-period claims remain unvalidated.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`); payout tests under `src/`.
 - **Production incidence:** UNKNOWN. **Product decision required?** Yes, FIN-DESIGN-004. **External clarification required?** No.
@@ -883,6 +910,22 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - No general finance retry taxonomy reliably chooses AUTO RETRY versus ADMIN RESOLUTION for every failure. Schedule job metadata primarily persists error strings rather than complete structured failure classes. Deterministic validation, DB serialization or uniqueness collisions, stale PROCESSING, Logo UNKNOWN/non-2xx, payout source conflicts, new debt, zero/negative payout, and EFT uncertainty require distinct treatment; no new retry policy is selected here.
 - Roadmap-input capability categories: durable run and per-vendor execution identities, per-vendor checkpoints, exclusive claims, lease/ownership and stale takeover, structured failure classes, safe command replay, cross-step correlation, provider reconciliation, manual takeover, operator-visible exception queue, explicit kill-switch semantics, and retry-attempt evidence. **These are capability categories only; no schema or API design is approved.**
 - Evidence: `backend/src/modules/finance/finance.routes.ts` (Admin trigger); `backend/src/modules/finance/settlement-schedule-job.service.ts` (run state/replay); `backend/src/modules/finance/settlement-schedule.service.ts` (dry-run/create); `backend/src/modules/finance/settlement-approval.service.ts` and `backend/src/modules/finance/finance.service.ts` (local transactions); `backend/src/app.ts` (startup registrations); `backend/prisma/schema.prisma` (`SettlementScheduleJobRun`).
+
+## Audit F production-state and migration compatibility — observation only
+
+The following are Audit F-reported aggregates from a production PostgreSQL inspection conducted with `BEGIN READ ONLY` / `ROLLBACK` and `transaction_read_only = on`. Core finance schema and the recent refund-terminal and Financial Correction migrations were present; 103 applied migrations were observed earlier in that audit. This update makes no independent production connection and approves no backfill, migration, automation, or business rule.
+
+- **HEALTHY_STRUCTURAL_EVIDENCE:** Eleven SettlementApproval rows comprise eight APPROVED manual, one DRAFT manual, and two DRAFT scheduled. No APPROVED row lacked `approvedAt`; no CANCELLED row lacked `cancelledAt`; and no DRAFT row had either timestamp. `SettlementApprovalLine` has 63 rows with no missing ledger reference. Eleven PayoutBatchLine rows have no missing ledger reference or dangling non-null settlement-line reference. Five Logo invoice rows have no missing settlement; eight SettlementRefundAdjustment rows have no missing refund-ledger or referenced settlement.
+- **CONFIRMED_PRODUCTION_EXPOSURE:** Both active financial profiles are WEEKLY/WEDNESDAY with current delay zero and `autoSettlementDraftEnabled=true`; both auto-approval and auto-invoice flags are false. Both billing profiles have Logo customer code/ID and e-invoice eligibility. Current IBAN presence is 0/2, without any decision that IBAN is mandatory. The 155 SALE ledger rows include 96 frozen delay snapshots different from current profile delay; see FIN-UI-010.
+- **CONFIRMED_PRODUCTION_EXPOSURE / migration compatibility:** All three payouts are positive TRY DRAFTs older than 30 days; one pools two settlements. Their 11 historical lines have null direct `settlementApprovalLineId` while retaining unambiguous ledger-derived settlement lineage. Preserve or safely migrate those rows if direct settlement-line linkage later becomes authoritative; null linkage is not automatically a bug.
+- **CONFIRMED_PRODUCTION_EXPOSURE / outstanding obligation:** Eight SettlementRefundAdjustment rows comprise six APPLIED with zero remaining, one PARTIALLY_APPLIED with positive remaining, and one PENDING with positive remaining. The two outstanding records are older than 30 days, have original settlement lineage, no applied-settlement lineage yet, and their refund ledgers are not in active payouts. They must not be silently dropped or normalized by future work.
+- **Legacy evidence boundary:** There are 29 RefundRecord rows (28 processed, one pending), but zero RefundEvidenceSnapshot, RefundTerminalConflictEvidence, RefundTerminalEvidenceReview, and LegacyRefundFinanceReview rows. This is a real legacy refund population predating canonical terminal evidence persistence. Do not infer or backfill historical canonical evidence from those rows by assumption. FinancialCorrectionAuthority, FinancialCorrectionBaselineClaim, FinancialCorrectionCredit, FinancialCorrectionDeduction, FinancialCorrectionZeroNetAcknowledgement, and checked related correction settlement/payout/coverage rows are all zero; deployed schema does not imply an applied production correction population or make the feature unnecessary.
+- **Return/cancellation observations — BLOCKED_BY_PRODUCT_DECISION for interpretation:** Fifty-five ReturnRecord rows exist. Twenty-seven allocations have open-looking return records; 21 of those have DRAFT/APPROVED settlement linkage and five have active DRAFT/REVIEW payout linkage. In the reported return-status groups, settlement creation/approval occurred after return-known for 12 of 17 `approved/approved`, the one `approved/NULL`, the one `pending/NULL`, the one `requested/requested` with vendorDecision approved, and five of seven `requested/requested` without vendorDecision; active payout after return-known occurred in zero, one, one, one, and two respectively. These are temporal observations, **not** proof that each state is finance-blocking or a bug. The exact lifecycle/hold contract remains unresolved. Two allocations have `cancelRefundReviewStatus=PENDING_REVIEW` and finance ledgers, but neither has DRAFT/APPROVED settlement or active DRAFT/REVIEW payout linkage; these observed cases fail closed.
+- **NO_CURRENT_INSTANCE_FOUND:** SettlementScheduleJobRun has zero rows; no cancelled scheduled cycle, zero/negative payout, REVIEW/PAID payout, VendorBalanceEvent, Logo FAILED/UNKNOWN invoice, or applied Financial Correction population was found. The associated static findings remain open where applicable.
+- **HEALTHY_STRUCTURAL_EVIDENCE:** One critical `transfer_failed` FinanceIntegrityAlert exists and is resolved; unresolved alert count is zero. No new defect follows from that record alone.
+- **Retired-integration residue / migration compatibility:** Of 162 VendorAllocation rows, 64 retain legacy Odoo sale-order ID/name/sync fields. Historical ShipmentExecution provider counts are KARGONOMI 22, NAVLUNGO 14, TRY_OTO 11, KARGO_ENTEGRATOR 6, HEPSIJET 1; ShipmentShippingCost providers are `kargonomi` 21 and manual 1. Of 55 returns, three have provider `kargonomi`, 52 have null provider, and none has `navlungoReturnCreatedAt`. Vendor integration provider is `ayensoftware-smoke-681a536b` on one allocation and null on 161. These values do not reactivate retired integrations; the current business meaning of HEPSIJET and the smoke value is UNKNOWN. Preserve history absent a separately approved migration.
+- **Schema compatibility:** Production PostgreSQL still defines PayoutBatchStatus `DRAFT`, `REVIEW`, `APPROVED`, `CANCELLED`, `EXECUTION_PENDING`, `PAID_PLACEHOLDER`, and `PAID`; current payout rows use only DRAFT. Zero rows do not authorize enum removal. Observed constraints include unique `SettlementApproval.scheduledCycleKey`, unique `SettlementScheduleJobRun.runDate`, one active Logo invoice per settlement/provider via partial unique index, unique refund-evidence lineage, and unique per-vendor financial/billing profiles.
+- **CANNOT_PROVE_FROM_RETAINED_DATA / BLOCKED_BY_EXTERNAL_INFO:** Provider monetary mismatch for FIN-BUG-008 cannot be evaluated because all five CREATED Logo records lack stored provider total/currency. Historical refunded-SALE snapshots omit `refundOffsetAppliedBeforeSettlement`, and shifted fulfillment timestamps do not reconstruct exact historical monetary impact. No absent field or zero current incidence closes those findings or proves external invoice/EFT behavior.
 
 ## Known automation blockers
 
