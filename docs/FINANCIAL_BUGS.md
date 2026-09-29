@@ -160,6 +160,22 @@ Audit F supplied read-only production-state findings for this register. The repo
 - **Minimum future repair boundary:** Define approved invoice arithmetic representation and reconcile provider result against frozen settlement authority.
 - **Validation required before CLOSED:** Focused small-amount/multiple-line rounding tests, approved accounting contract, Logo behavior evidence, and provider-total reconciliation verification.
 
+### FIN-BUG-009 — Historical DRAFT payout lines cannot satisfy current REVIEW lineage validation
+
+- **Domain:** Payout transition and historical settlement lineage.
+- **Classification:** CONFIRMED_BUG — CODE-BACKED PRODUCTION EXPOSURE; no production transition attempt was observed.
+- **Status:** OPEN.
+- **Finding:** Current payout transition revalidation rejects any `PayoutBatchLine` without `settlementApprovalLineId`. Audit F reported three production DRAFT payouts whose 11 lines all have that direct link NULL.
+- **Exact current behavior:** DRAFT → REVIEW invokes this revalidation and would return the `settlement_approval_line_missing` blocker for those historical lines. Mark Paid requires REVIEW, invokes the same revalidation, and its paid-event builder also requires the direct settlement-line ID. An existing focused test expects REVIEW rejection when approved settlement backing is missing. No production REVIEW or Mark Paid attempt was executed, so an actual production HTTP/database failure is **not** claimed.
+- **Current impact:** The three existing DRAFT payouts have a code-backed incompatibility with the current REVIEW transition requirement. Audit F found `financeLedgerEntryId` on all 11 lines and exactly one ledger-derived SettlementApprovalLine/SettlementApproval mapping per line, with no ambiguity or orphan link. Two payouts derive from one settlement each; one pools two settlements. Deterministic derived lineage does not satisfy the current direct-link check.
+- **Automation impact:** BLOCKER for progression of these historical payouts and any automated payment-ready workflow that assumes all DRAFTs can enter REVIEW.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`validatePayoutBatchBeforeTransitionWithClient`, `markPayoutBatchReview`, `markPayoutBatchPaid`, `buildPayoutPaidEvents`); `src/payout-batch-preparation.test.ts` (missing approved settlement backing rejection); Audit F production-state evidence in this register. FIN-DESIGN-004 separately covers pooling and migration compatibility, not this current transition consequence.
+- **Production incidence:** CODE-BACKED PRODUCTION EXPOSURE for 3 DRAFT payouts / 11 lines; actual transition failure unobserved.
+- **Product decision required?** An auditable compatibility/remediation procedure must be approved before production mutation; no new finance amount or payment rule is selected here.
+- **External clarification required?** No provider behavior is needed to establish the local lineage mismatch. External EFT state remains UNKNOWN and must not be inferred.
+- **Minimum future repair boundary:** Preserve payout amounts, approved settlement and ledger authority, and audit history. Do not guess or silently backfill settlement lineage or mutate the three production DRAFT payouts. Any compatibility/remediation path must use the already proven deterministic ledger-derived lineage or another explicitly approved mechanism, with an auditable procedure before touching production.
+- **Validation required before CLOSED:** Approved remediation/compatibility design; isolated historical fixture with NULL `settlementApprovalLineId`; proof that ledger-derived lineage remains unique and unambiguous; REVIEW transition regression; Mark Paid transition compatibility test where applicable; PostgreSQL/integration proof; production read-only verification before mutation; and controlled production verification after any separately authorized remediation.
+
 ## Potential defect requiring proof
 
 ### FIN-RISK-001 — Multiple-return hold may be released by unrelated refund evidence
@@ -293,6 +309,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Status:** OPEN.
 - **Finding:** `preparePayoutBatch({ vendorId })` receives no settlement IDs, cycle key, period, or payment date.
 - **Audit F production evidence — CONFIRMED_PRODUCTION_EXPOSURE:** Of three DRAFT payouts, ledger-derived lineage maps two to one settlement each and one to two settlements. All 11 historical payout lines retain `financeLedgerEntryId` but have `settlementApprovalLineId = NULL`; each maps to exactly one settlement line/settlement through retained ledger evidence, with no ambiguity or orphan ledger link. Any future direct non-null settlement-line authority needs explicit backward compatibility or safe migration for these 11 rows.
+- **Audit G cross-reference:** FIN-BUG-009 records the distinct current REVIEW transition consequence of those NULL direct links; this entry remains about payout grouping and historical compatibility.
 - **Exact current behavior:** It can pool eligible APPROVED sources across multiple manual/scheduled settlements, cycles, correction-source settlements, and dates.
 - **Current impact:** A payout is not cycle-bound even when UI language might suggest a payment period. Audit C established that pooled settlements can have different Logo invoice states—`CREATED`, `FAILED`, `UNKNOWN`, or no record. Audit D confirmed that the payment screen shows aggregate amounts and a source count, not complete per-settlement lineage or Logo evidence. This does not establish an invoice gate.
 - **Automation impact:** Grouping must be chosen before payment-ready automation.
