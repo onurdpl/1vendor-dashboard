@@ -2519,6 +2519,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realFinance.getFinanceProfile({ vendorId, signal: options.signal, headers: options.headers })
         : Promise.resolve(getMockFinanceDashboard(vendorId).profile!),
+    adminProfile: (vendorId: string, options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getAdminVendorFinancialProfile(vendorId, { signal: options.signal })
+        : Promise.resolve(getMockFinanceDashboard(vendorId).profile!),
     vendorDebtHistory: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.getVendorDebtHistory({ vendorId, signal: options.signal, headers: options.headers })

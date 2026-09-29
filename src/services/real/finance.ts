@@ -310,6 +310,10 @@ export async function getFinanceProfile(options: { vendorId?: string | null; sig
     : apiClient.get<VendorFinancialProfile>('/finance/profile');
 }
 
+export async function getAdminVendorFinancialProfile(vendorId: string, options: { signal?: AbortSignal } = {}): Promise<VendorFinancialProfile> {
+  return apiClient.get<VendorFinancialProfile>(`/admin/vendors/${encodeURIComponent(vendorId)}/financial-profile`, options);
+}
+
 export async function getVendorDebtHistory(options: { vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<VendorDebtHistory> {
   const requestOptions = readVendorRequestOptions(options);
   return requestOptions

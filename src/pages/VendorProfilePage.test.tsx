@@ -37,6 +37,9 @@ const syncKargonomiWarehouseDetailsMock = vi.fn();
 const getFinanceProfileMock = vi.fn<
   (options?: { vendorId?: string | null; signal?: AbortSignal }) => Promise<VendorFinancialProfile>
 >();
+const getAdminVendorFinancialProfileMock = vi.fn<
+  (vendorId: string, options?: { signal?: AbortSignal }) => Promise<VendorFinancialProfile>
+>();
 const updateVendorFinancialProfileMock = vi.fn<
   (
     vendorId: string,
@@ -104,6 +107,8 @@ vi.mock('../features/finance/api', async () => {
     ...actual,
     getFinanceDashboard: () => getFinanceDashboardMock(),
     getFinanceProfile: (options?: { vendorId?: string | null; signal?: AbortSignal }) => getFinanceProfileMock(options),
+    getAdminVendorFinancialProfile: (vendorId: string, options?: { signal?: AbortSignal }) =>
+      getAdminVendorFinancialProfileMock(vendorId, options),
     updateVendorFinancialProfile: (
       vendorId: string,
       input: {
@@ -506,6 +511,9 @@ describe('VendorProfilePage', () => {
     getFinanceDashboardMock.mockResolvedValue({ profile: financeProfile });
     getFinanceProfileMock.mockReset();
     getFinanceProfileMock.mockResolvedValue(financeProfile);
+    getAdminVendorFinancialProfileMock.mockReset();
+    getAdminVendorFinancialProfileMock.mockImplementation((vendorId, options) =>
+      getFinanceProfileMock({ vendorId, signal: options?.signal }));
     updateVendorFinancialProfileMock.mockReset();
     updateVendorFinancialProfileMock.mockImplementation((vendorId, input) =>
       Promise.resolve({
@@ -2271,6 +2279,41 @@ describe('VendorProfilePage', () => {
     expect(within(financeSection!).getByText('14 days')).toBeInTheDocument();
     expect(createLogoIsbasiTestInvoiceMock).not.toHaveBeenCalled();
     expect(within(financeSection!).queryByRole('button', { name: 'Save finance policy' })).not.toBeInTheDocument();
+  }, 10000);
+
+  it('reads a persisted inactive Admin policy and saves unrelated settings without activation intent', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    const inactiveProfile = { ...financeProfile, commissionPercent: '17.00', settlementDelayDays: 35,
+      active: false, source: 'configured' as const };
+    getAdminVendorFinancialProfileMock.mockResolvedValue(inactiveProfile);
+    updateVendorFinancialProfileMock.mockImplementation(async (_vendorId, input) => ({
+      ...inactiveProfile, settlementDelayDays: input.settlementDelayDays,
+    }));
+
+    renderVendorProfilePage();
+    const section = (await screen.findByRole('heading', { name: 'Finance Policy' })).closest('section');
+    expect(section).not.toBeNull();
+    expect(await within(section!).findByText('17.00%')).toBeInTheDocument();
+    expect(within(section!).getByText('35 days')).toBeInTheDocument();
+    expect(within(section!).getByText('Needs review')).toBeInTheDocument();
+    expect(getAdminVendorFinancialProfileMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object));
+    expect(getFinanceProfileMock).not.toHaveBeenCalled();
+
+    await userEvent.click(within(section!).getByRole('button', { name: 'Edit finance policy' }));
+    expect(within(section!).getByLabelText('Commission %')).toHaveValue(17);
+    expect(within(section!).getByLabelText('Settlement delay days')).toHaveValue(35);
+    await userEvent.clear(within(section!).getByLabelText('Settlement delay days'));
+    await userEvent.type(within(section!).getByLabelText('Settlement delay days'), '28');
+    await userEvent.click(within(section!).getByRole('button', { name: 'Save finance policy' }));
+    await waitFor(() => expect(updateVendorFinancialProfileMock).toHaveBeenCalled());
+    expect(updateVendorFinancialProfileMock.mock.lastCall?.[1]).not.toHaveProperty('active');
+    expect(await within(section!).findByText('28 days')).toBeInTheDocument();
+    expect(within(section!).getByText('Needs review')).toBeInTheDocument();
   }, 10000);
 
   it('shows Logo binding as needing match when customer code exists without a customer id', async () => {

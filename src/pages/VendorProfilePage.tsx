@@ -14,7 +14,7 @@ import {
 import { VendorShippingConfigEditor } from '../components/VendorShippingConfigEditor';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getFinanceProfile, updateVendorFinancialProfile } from '../features/finance/api';
+import { getAdminVendorFinancialProfile, getFinanceProfile, updateVendorFinancialProfile } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
 import {
   createAdminVendorSupportTicket,
@@ -1173,8 +1173,10 @@ export function VendorProfilePage() {
     { enabled: canLoadProfile },
   );
   const financeQuery = useQueryResource(
-    queryKeys.vendorProfile.financeProfile(currentVendor.vendorId),
-    ({ signal }) => getFinanceProfile({ vendorId: currentVendor.vendorId, signal }),
+    queryKeys.vendorProfile.financeProfile(currentVendor.vendorId, isAdmin ? 'admin' : 'vendor'),
+    ({ signal }) => isAdmin
+      ? getAdminVendorFinancialProfile(currentVendor.vendorId, { signal })
+      : getFinanceProfile({ vendorId: currentVendor.vendorId, signal }),
     { enabled: canLoadProfile },
   );
   const billingQuery = useQueryResource(
@@ -1209,7 +1211,7 @@ export function VendorProfilePage() {
   );
 
   const shippingConfig = shippingQuery.data;
-  const financeProfile = savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
+  const financeProfile = isAdmin && savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
   const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
   const vendorStatus = savedVendorStatus?.vendorId === currentVendor.vendorId
     ? savedVendorStatus
@@ -1537,7 +1539,7 @@ export function VendorProfilePage() {
     (input: ReturnType<typeof buildFinancePolicyInput>) => updateVendorFinancialProfile(currentVendor.vendorId, input),
     {
       onSuccess: async (savedProfile) => {
-        queryClient.setQueryData(queryKeys.vendorProfile.financeProfile(currentVendor.vendorId), savedProfile);
+        queryClient.setQueryData(queryKeys.vendorProfile.financeProfile(currentVendor.vendorId, 'admin'), savedProfile);
         setSavedFinanceProfile(savedProfile);
         void queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.auditLogs(currentVendor.vendorId) });
         setFinancePolicyEditOpen(false);

@@ -16,6 +16,10 @@ export function getFinanceProfile(options: { vendorId?: string | null; signal?: 
   return runtimeServices.finance.profile(options.vendorId ?? undefined, { signal: options.signal });
 }
 
+export function getAdminVendorFinancialProfile(vendorId: string, options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.finance.adminProfile(vendorId, { signal: options.signal });
+}
+
 export function getVendorDebtHistory(options: { vendorId?: string | null; signal?: AbortSignal } = {}): Promise<VendorDebtHistory> {
   return runtimeServices.finance.vendorDebtHistory(options.vendorId ?? undefined, { signal: options.signal });
 }

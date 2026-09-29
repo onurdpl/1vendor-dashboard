@@ -15,6 +15,7 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import {
   cancelPayoutBatch,
   getPayoutBatch,
+  getAdminVendorFinancialProfile,
   getVendorFinanceDashboard,
   getVendorFinanceSummary,
   getVendorFinancialProfile,
@@ -772,7 +773,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const { vendorId } = request.params as { vendorId: string };
-      return getVendorFinancialProfile(vendorId);
+      return getAdminVendorFinancialProfile(vendorId);
     },
   );
 

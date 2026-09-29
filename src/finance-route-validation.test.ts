@@ -4,6 +4,7 @@ import { registerFinanceRoutes } from '../backend/src/modules/finance/finance.ro
 const upsertVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorFinanceSummaryMock = vi.hoisted(() => vi.fn());
 const getVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
+const getAdminVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorReturnFinanceRecordsMock = vi.hoisted(() => vi.fn());
 const getVendorDebtHistoryMock = vi.hoisted(() => vi.fn());
 const getSettlementScheduleDryRunMock = vi.hoisted(() => vi.fn());
@@ -124,6 +125,7 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getVendorFinanceDashboard: vi.fn(),
   getVendorFinanceSummary: getVendorFinanceSummaryMock,
   getVendorFinancialProfile: getVendorFinancialProfileMock,
+  getAdminVendorFinancialProfile: getAdminVendorFinancialProfileMock,
   getVendorReturnFinanceRecords: getVendorReturnFinanceRecordsMock,
   listPayoutBatches: vi.fn(),
   markPayoutBatchPaid: vi.fn(),
@@ -364,6 +366,9 @@ describe('finance route validation', () => {
       autoSettlementInvoiceEnabled: false,
       active: true,
       source: 'configured',
+    });
+    getAdminVendorFinancialProfileMock.mockResolvedValue({
+      vendorId: 'sporjinal', active: false, source: 'configured', commissionPercent: '17.00',
     });
     getVendorReturnFinanceRecordsMock.mockResolvedValue({
       records: [
@@ -838,6 +843,24 @@ describe('finance route validation', () => {
     expect(result).not.toHaveProperty('records');
     expect(result).not.toHaveProperty('payoutBatchSummary');
     expect(result).not.toHaveProperty('transactions');
+  });
+
+  it('uses the persisted-profile service for the existing Admin GET without changing vendor GET', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+    const result = await gets.get('/admin/vendors/:vendorId/financial-profile')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' } }, reply,
+    );
+    expect(result).toMatchObject({ active: false, source: 'configured', commissionPercent: '17.00' });
+    expect(getAdminVendorFinancialProfileMock).toHaveBeenCalledWith('sporjinal');
+    expect(getVendorFinancialProfileMock).not.toHaveBeenCalled();
+
+    getAdminVendorFinancialProfileMock.mockClear();
+    const denied = await gets.get('/admin/vendors/:vendorId/financial-profile')?.(
+      { authUser: { role: 'vendor' }, params: { vendorId: 'sporjinal' } }, createReply(),
+    );
+    expect(denied).toMatchObject({ status: 403 });
+    expect(getAdminVendorFinancialProfileMock).not.toHaveBeenCalled();
   });
 
   it('rejects finance profile requests without resolved vendor context', async () => {

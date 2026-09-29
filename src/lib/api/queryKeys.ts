@@ -100,7 +100,7 @@ export const queryKeys = {
     summary: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'summary', vendorId] as const,
     status: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'status', vendorId] as const,
     shippingConfig: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'shipping-config', vendorId] as const,
-    financeProfile: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'finance-profile', vendorId] as const,
+    financeProfile: (vendorId = getCurrentVendorContext().vendorId, audience: 'admin' | 'vendor' = 'vendor') => ['vendor-profile', 'finance-profile', audience, vendorId] as const,
     billingProfile: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'billing-profile', vendorId] as const,
     billingLegalSelfView: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'billing-legal-self-view', vendorId] as const,
     auditLogs: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'audit-logs', vendorId] as const,

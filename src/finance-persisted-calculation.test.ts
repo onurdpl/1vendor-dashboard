@@ -9,6 +9,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   vendorFinancialProfile: {
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
     upsert: vi.fn(),
   },
   vendorProfileAuditLog: {
@@ -26,7 +27,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { getVendorFinanceDashboard, getVendorFinanceSummary, upsertVendorFinancialProfile } = await import(
+const { getVendorFinanceDashboard, getVendorFinanceSummary, getVendorFinancialProfile, getAdminVendorFinancialProfile, upsertVendorFinancialProfile } = await import(
   '../backend/src/modules/finance/finance.service.js'
 );
 
@@ -245,6 +246,7 @@ describe('persisted vendor finance calculations', () => {
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.payoutBatch.findFirst.mockReset();
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
+    prismaMock.vendorFinancialProfile.findUnique.mockReset();
     prismaMock.vendorFinancialProfile.upsert.mockReset();
     prismaMock.vendorProfileAuditLog.createMany.mockReset();
     prismaMock.vendorProfileAuditLog.createMany.mockResolvedValue({ count: 0 });
@@ -254,7 +256,9 @@ describe('persisted vendor finance calculations', () => {
     prismaMock.financialCorrectionCreditSettlementLine.findMany.mockResolvedValue([]);
 
     prismaMock.payoutBatch.findFirst.mockResolvedValue(null);
-    prismaMock.vendorFinancialProfile.findFirst.mockImplementation(async () => activeProfile);
+    prismaMock.vendorFinancialProfile.findFirst.mockImplementation(async (args?: { where?: { active?: boolean } }) =>
+      args?.where?.active && !activeProfile?.active ? null : activeProfile);
+    prismaMock.vendorFinancialProfile.findUnique.mockImplementation(async () => activeProfile);
     prismaMock.vendorFinancialProfile.upsert.mockImplementation(async ({ create, update }) => {
       const next = activeProfile ? update : create;
       activeProfile = {
@@ -267,7 +271,7 @@ describe('persisted vendor finance calculations', () => {
         fixedShippingFee: next.fixedShippingFee === null ? null : Number(next.fixedShippingFee),
         settlementDelayDays:
           next.settlementDelayDays === undefined ? activeProfile?.settlementDelayDays ?? 21 : Number(next.settlementDelayDays),
-        active: Boolean(next.active),
+        active: next.active === undefined ? activeProfile?.active ?? true : Boolean(next.active),
       };
       return activeProfile;
     });
@@ -323,6 +327,41 @@ describe('persisted vendor finance calculations', () => {
 
       return matchingRows;
     });
+  });
+
+  it('separates inactive Admin reads from the vendor default view and preserves inactive ordinary saves', async () => {
+    activeProfile = {
+      id: 'profile-sporjinal', vendorId: 'sporjinal', commissionPercent: 17,
+      commissionVatPercent: 8, deductShippingEnabled: false, shippingMode: 'DISABLED',
+      fixedShippingFee: null, settlementDelayDays: 35, active: false,
+    };
+
+    expect(await getVendorFinancialProfile('sporjinal')).toMatchObject({ active: true, source: 'default' });
+    expect(await getAdminVendorFinancialProfile('sporjinal')).toMatchObject({
+      active: false, source: 'configured', commissionPercent: '17.00', settlementDelayDays: 35,
+    });
+
+    await upsertVendorFinancialProfile('sporjinal', { settlementDelayDays: 28 });
+    expect(activeProfile).toMatchObject({ active: false, commissionPercent: 17, settlementDelayDays: 28 });
+    expect(prismaMock.vendorFinancialProfile.upsert.mock.lastCall?.[0].update).not.toHaveProperty('active');
+
+    await upsertVendorFinancialProfile('sporjinal', {});
+    expect(activeProfile).toMatchObject({ active: false, commissionPercent: 17, settlementDelayDays: 28 });
+  });
+
+  it('preserves active updates, new-profile defaults and explicit Admin active input', async () => {
+    const created = await upsertVendorFinancialProfile('sporjinal', { commissionPercent: 12 });
+    expect(created).toMatchObject({ active: true, source: 'configured' });
+    expect(prismaMock.vendorFinancialProfile.upsert.mock.lastCall?.[0].create.active).toBe(true);
+
+    await upsertVendorFinancialProfile('sporjinal', { settlementDelayDays: 14 });
+    expect(activeProfile?.active).toBe(true);
+    expect(prismaMock.vendorFinancialProfile.upsert.mock.lastCall?.[0].update).not.toHaveProperty('active');
+
+    await upsertVendorFinancialProfile('sporjinal', { active: false });
+    expect(activeProfile?.active).toBe(false);
+    await upsertVendorFinancialProfile('sporjinal', { active: true });
+    expect(activeProfile?.active).toBe(true);
   });
 
   it('keeps existing sale rows on their profile snapshot after admin profile updates', async () => {

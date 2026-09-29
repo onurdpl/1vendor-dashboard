@@ -2275,6 +2275,11 @@ export async function getVendorFinancialProfile(vendorId: string): Promise<Vendo
   return mapProfile(profile, vendorId);
 }
 
+export async function getAdminVendorFinancialProfile(vendorId: string): Promise<VendorFinancialProfileDto> {
+  const profile = await prisma.vendorFinancialProfile.findUnique({ where: { vendorId } });
+  return mapProfile(profile, vendorId);
+}
+
 function normalizeShippingCostStatus(value: ShippingCostInputDto['status'] | undefined) {
   const normalized = (value ?? 'confirmed').toUpperCase();
   if (normalized === 'PENDING' || normalized === 'CONFIRMED' || normalized === 'DISPUTED' || normalized === 'IGNORED') {
@@ -4058,7 +4063,7 @@ export async function upsertVendorFinancialProfile(
     source?: string;
   } = {},
 ): Promise<VendorFinancialProfileDto> {
-  const existing = await getVendorFinancialProfile(vendorId);
+  const existing = await getAdminVendorFinancialProfile(vendorId);
   const commissionPercent = normalizePercent(input.commissionPercent, toNumber(existing.commissionPercent));
   const commissionVatPercent = normalizePercent(input.commissionVatPercent, toNumber(existing.commissionVatPercent));
   const shippingMode = normalizeShippingMode(input.shippingMode, existing.shippingMode);
@@ -4101,7 +4106,7 @@ export async function upsertVendorFinancialProfile(
       autoSettlementDraftEnabled: input.autoSettlementDraftEnabled ?? existing.autoSettlementDraftEnabled,
       autoSettlementApproveEnabled: input.autoSettlementApproveEnabled ?? existing.autoSettlementApproveEnabled,
       autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled ?? existing.autoSettlementInvoiceEnabled,
-      active: input.active ?? true,
+      ...(input.active === undefined ? {} : { active: input.active }),
     },
     create: {
       vendorId,

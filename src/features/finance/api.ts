@@ -3,6 +3,7 @@ export {
   attachShippingCost,
   createSettlementScheduleDrafts,
   getFinanceDashboard,
+  getAdminVendorFinancialProfile,
   getFinanceProfile,
   getReturnFinanceRecords,
   getSettlementScheduleAutoDraftJobStatus,

@@ -113,9 +113,9 @@ Audit F supplied read-only production-state findings for this register. The repo
 
 - **Domain:** Vendor financial profile.
 - **Classification:** CONFIRMED_BUG.
-- **Status:** OPEN.
-- **Finding:** Normal profile GET selects active profiles only. An existing inactive profile appears to the edit flow as no active profile; UI omits `active`; upsert uses `input.active ?? true` and may save defaults/form values over existing policy.
-- **Exact current behavior:** Saving finance settings can silently reactivate an intentionally inactive profile and replace prior settings.
+- **Status:** FIXED_NOT_VERIFIED.
+- **Finding:** Before the fix, normal profile GET selected active profiles only. An existing inactive profile appeared to the edit flow as no active profile; UI omitted `active`; upsert used `input.active ?? true` and could save defaults/form values over existing policy.
+- **Pre-fix behavior:** Saving finance settings could silently reactivate an intentionally inactive profile and replace prior settings.
 - **Current impact:** Vendor finance policy can change beyond the Admin's stated edit.
 - **Automation impact:** CRITICAL BLOCKER before any scheduler relies on `active=true`.
 - **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** Both production VendorFinancialProfile rows are active; no inactive profile currently exposes this edit-flow bug. Historical silent reactivation was not proven. The static defect remains OPEN.
@@ -126,6 +126,7 @@ Audit F supplied read-only production-state findings for this register. The repo
 - **External clarification required?** No.
 - **Minimum future repair boundary:** Correct inactive-profile read/update semantics and add targeted regression coverage; no implementation chosen here.
 - **Validation required before CLOSED:** Inactive profile read/edit/save regression with real persistence, unchanged inactive state and policy unless explicitly changed.
+- **Implementation evidence:** The Admin-specific GET now reads the persisted row regardless of `active`; the Admin page uses that GET and keeps its cache separate from the vendor-facing read. Ordinary upsert reads persisted settings and omits `active` from an existing-row update when input omits it, while new-row default and explicit Admin input remain unchanged. Focused service/route/UI tests and an isolated PostgreSQL 16 read/edit/reload/scheduler regression passed. The scheduler's `active=true` predicate and historical finance records were not changed; there was no schema change, migration, or backfill. Production runtime verification remains pending; do not treat Audit F's absence of inactive rows as a live regression case.
 
 ### FIN-BUG-007 — Concurrent Logo create can send the same invoice request more than once
 
@@ -635,9 +636,9 @@ These entries identify missing or unresolved contracts. They are **not** authori
 
 - **Domain:** Vendor finance-profile UI/API.
 - **Classification:** BACKEND_UI_MISMATCH.
-- **Status:** OPEN.
-- **Finding:** Policy activity can be displayed, but normal GET filters inactive records and edit payload has no explicit `active` field.
-- **Exact current behavior:** This contributes to FIN-BUG-006 reactivation risk.
+- **Status:** FIXED_NOT_VERIFIED.
+- **Finding:** Before the fix, policy activity could be displayed, but the Admin used an active-only GET while the edit payload had no explicit `active` field.
+- **Pre-fix behavior:** This contributed to FIN-BUG-006 reactivation risk.
 - **Current impact:** Admin cannot reliably preserve or intentionally edit inactive state in this flow.
 - **Automation impact:** CRITICAL when `active` controls scheduling.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`getVendorFinancialProfile`, upsert); `src/pages/VendorProfilePage.tsx` (form/payload).
@@ -646,6 +647,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **External clarification required?** No.
 - **Minimum future repair boundary:** Resolve FIN-BUG-006 and represent activity honestly in GET/edit flow.
 - **Validation required before CLOSED:** Inactive-profile API/UI/real-DB regression.
+- **Implementation evidence:** Admin profile reads now use the existing Admin GET and display the persisted inactive policy; ordinary form submissions still omit `active` and the server preserves it. Focused UI/route tests and the isolated PostgreSQL regression passed. Vendor-facing read behavior is unchanged. Production runtime verification remains pending.
 
 ### FIN-UI-010 — Current profile delay may not be candidate source delay
 
