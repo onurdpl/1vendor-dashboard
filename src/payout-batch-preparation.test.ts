@@ -17,6 +17,12 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
   },
+  payoutBatchLine: {
+    findFirst: vi.fn(),
+  },
+  settlementApprovalLine: {
+    findMany: vi.fn(),
+  },
   financialCorrectionCredit: {
     findFirst: vi.fn(),
   },
@@ -353,6 +359,10 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatch.findUnique.mockReset();
     prismaMock.payoutBatch.update.mockReset();
     prismaMock.payoutBatch.updateMany.mockReset();
+    prismaMock.payoutBatchLine.findFirst.mockReset();
+    prismaMock.payoutBatchLine.findFirst.mockResolvedValue(null);
+    prismaMock.settlementApprovalLine.findMany.mockReset();
+    prismaMock.settlementApprovalLine.findMany.mockResolvedValue([]);
     prismaMock.financialCorrectionCredit.findFirst.mockReset();
     prismaMock.financialCorrectionCredit.findFirst.mockResolvedValue(null);
     prismaMock.financialCorrectionCreditSettlementLine.findMany.mockReset();
@@ -1619,6 +1629,109 @@ describe('payout batch preparation', () => {
       ],
     });
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('reviews a legacy line only when its ledger has one exact approved settlement line', async () => {
+    const sale = buildEntry({ id: 'legacy-sale', entryType: 'sale', amount: 1000, batched: true,
+      activeSettlementApproval: true });
+    const line = { ...buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+      settlementApprovalLineId: null, settlementApprovalLine: null };
+    mockTransitionBatch(buildTransitionBatch([line]));
+    prismaMock.settlementApprovalLine.findMany.mockResolvedValue([sale.settlementApprovalLines[0]]);
+
+    await expect(markPayoutBatchReview('batch-review')).resolves.toMatchObject({ status: 'review' });
+    expect(prismaMock.settlementApprovalLine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { financeLedgerEntryId: sale.id }, take: 2,
+    }));
+    expect(prismaMock.payoutBatchLine.findFirst).toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
+      data: { status: 'REVIEW' },
+    }));
+  });
+
+  it('rejects ambiguous legacy lineage even when only one settlement is approved', async () => {
+    const sale = buildEntry({ id: 'legacy-ambiguous', entryType: 'sale', amount: 1000, batched: true,
+      activeSettlementApproval: true });
+    const cancelled = { ...sale.settlementApprovalLines[0], id: 'cancelled-line',
+      settlementApproval: { ...sale.settlementApprovalLines[0].settlementApproval, status: 'CANCELLED' } };
+    const line = { ...buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+      settlementApprovalLineId: null, settlementApprovalLine: null };
+    mockTransitionBatch(buildTransitionBatch([line]));
+    prismaMock.settlementApprovalLine.findMany.mockResolvedValue([
+      sale.settlementApprovalLines[0], cancelled,
+    ]);
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: expect.arrayContaining([expect.objectContaining({ code: 'settlement_approval_line_ambiguous' })]),
+    });
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('never replaces a present but invalid direct link with ledger-derived lineage', async () => {
+    const sale = buildEntry({ id: 'modern-invalid', entryType: 'sale', amount: 1000, batched: true,
+      activeSettlementApproval: true });
+    const line = { ...buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+      settlementApprovalLineId: 'broken-direct-line', settlementApprovalLine: null };
+    mockTransitionBatch(buildTransitionBatch([line]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: expect.arrayContaining([expect.objectContaining({ code: 'settlement_approval_line_missing' })]),
+    });
+    expect(prismaMock.settlementApprovalLine.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a unique legacy line whose settlement is cancelled', async () => {
+    const sale = buildEntry({ id: 'legacy-cancelled', entryType: 'sale', amount: 1000, batched: true,
+      settlementApprovalStatus: 'CANCELLED' });
+    const line = { ...buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+      settlementApprovalLineId: null, settlementApprovalLine: null };
+    mockTransitionBatch(buildTransitionBatch([line]));
+    prismaMock.settlementApprovalLine.findMany.mockResolvedValue([sale.settlementApprovalLines[0]]);
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: expect.arrayContaining([expect.objectContaining({ code: 'settlement_approval_not_approved' })]),
+    });
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('resolves each legacy line of a pooled payout independently', async () => {
+    const first = buildEntry({ id: 'legacy-pooled-a', entryType: 'sale', amount: 1000, batched: true,
+      activeSettlementApproval: true });
+    const second = buildEntry({ id: 'legacy-pooled-b', entryType: 'sale', amount: 2000, batched: true,
+      activeSettlementApproval: true });
+    const lines = [first, second].map((entry) => ({
+      ...buildTransitionLine({ entry, amountSnapshot: entry === first ? 900 : 1800 }),
+      settlementApprovalLineId: null, settlementApprovalLine: null,
+    }));
+    mockTransitionBatch(buildTransitionBatch(lines));
+    prismaMock.settlementApprovalLine.findMany.mockImplementation(async ({ where }) =>
+      [first, second].filter((entry) => entry.id === where.financeLedgerEntryId)
+        .map((entry) => entry.settlementApprovalLines[0]));
+
+    await expect(markPayoutBatchReview('batch-review')).resolves.toMatchObject({ status: 'review' });
+    expect(prismaMock.settlementApprovalLine.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the proven legacy settlement-line identity for Mark Paid events without backfilling', async () => {
+    const paidAt = '2026-06-02T08:30:00.000Z';
+    const sale = buildEntry({ id: 'legacy-paid', entryType: 'sale', amount: 1000, batched: true,
+      activeSettlementApproval: true });
+    const line = { ...buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+      settlementApprovalLineId: null, settlementApprovalLine: null };
+    const batch = buildTransitionBatch([line], 'REVIEW');
+    mockMarkPaidBatch(batch, { ...batch, status: 'PAID', paidAt: new Date(paidAt) });
+    prismaMock.settlementApprovalLine.findMany.mockResolvedValue([sale.settlementApprovalLines[0]]);
+
+    await expect(markPayoutBatchPaid('batch-review', { paidAt }, 'admin-user'))
+      .resolves.toMatchObject({ status: 'paid' });
+    expect(prismaMock.financeEvent.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        idempotencyKey: 'payout-batch:batch-review:mark-paid:approval-line-legacy-paid',
+        metadataJson: expect.objectContaining({ settlementApprovalLineId: 'approval-line-legacy-paid' }),
+      })], skipDuplicates: true,
+    });
   });
 
   it('blocks review when allocation enters cancel/refund review', async () => {

@@ -2340,8 +2340,8 @@ describe('settlement approval foundation', () => {
     await expect(cancelSettlementApproval('approval-1', 'admin-2')).resolves.toMatchObject({
       status: 'cancelled',
     });
-    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(prismaMock.$queryRaw.mock.invocationCallOrder[1])
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(prismaMock.$queryRaw.mock.invocationCallOrder[2])
       .toBeLessThan(prismaMock.settlementApproval.update.mock.invocationCallOrder[0]);
   });
 

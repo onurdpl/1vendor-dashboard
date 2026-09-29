@@ -2591,6 +2591,63 @@ export async function cancelSettlementApproval(
       if (linkedPayoutBatches.some((batch) => batch.status === 'PAID' || batch.paidAt)) {
         throw new Error('Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
       }
+      // The direct-link query above is authoritative for modern payout lines.
+      // Lock potential historical NULL-link batches too, including unpaid ones,
+      // so Mark Paid and settlement cancellation cannot pass each other.
+      const legacyPayoutLines = await tx.$queryRaw<Array<{
+        id: string;
+        financeLedgerEntryId: string;
+        amountSnapshot: Prisma.Decimal;
+        payoutVendorId: string;
+        payoutCurrency: string;
+        payoutStatus: string;
+        paidAt: Date | null;
+      }>>(Prisma.sql`
+        SELECT payout_line."id", payout_line."financeLedgerEntryId", payout_line."amountSnapshot",
+          payout_batch."vendorId" AS "payoutVendorId", payout_batch."currency" AS "payoutCurrency",
+          payout_batch."status"::text AS "payoutStatus", payout_batch."paidAt"
+        FROM "PayoutBatch" AS payout_batch
+        INNER JOIN "PayoutBatchLine" AS payout_line
+          ON payout_line."payoutBatchId" = payout_batch."id"
+        INNER JOIN "SettlementApprovalLine" AS settlement_line
+          ON settlement_line."financeLedgerEntryId" = payout_line."financeLedgerEntryId"
+        WHERE settlement_line."settlementApprovalId" = ${id}
+          AND payout_line."settlementApprovalLineId" IS NULL
+        ORDER BY payout_batch."id", payout_line."id"
+        FOR UPDATE OF payout_batch
+      `);
+      for (const payoutLine of legacyPayoutLines) {
+        if (payoutLine.payoutStatus !== 'PAID' && !payoutLine.paidAt) continue;
+        // Match the transition resolver: count all settlement-line candidates,
+        // including DRAFT/CANCELLED parents, before considering validity.
+        const candidates = await tx.settlementApprovalLine.findMany({
+          where: { financeLedgerEntryId: payoutLine.financeLedgerEntryId },
+          take: 2,
+          include: {
+            settlementApproval: { select: { id: true, vendorId: true, status: true, currency: true } },
+            financeLedgerEntry: { select: { id: true, vendorId: true, entryType: true } },
+          },
+        });
+        if (candidates.length !== 1) {
+          throw new Error('Settlement approval cannot be cancelled because paid historical payout lineage is ambiguous.');
+        }
+        const candidate = candidates[0];
+        const ledgerType = normalizeType(candidate.financeLedgerEntry.entryType);
+        const lineType = candidate.lineType.toUpperCase();
+        const amountSnapshot = Number(payoutLine.amountSnapshot);
+        if (candidate.settlementApprovalId !== id || candidate.settlementApproval.status !== 'APPROVED' ||
+            candidate.settlementApproval.vendorId !== payoutLine.payoutVendorId ||
+            candidate.settlementApproval.currency !== payoutLine.payoutCurrency ||
+            candidate.financeLedgerEntryId !== payoutLine.financeLedgerEntryId ||
+            candidate.financeLedgerEntry.vendorId !== payoutLine.payoutVendorId ||
+            !((ledgerType === 'sale' && lineType === 'SALE') ||
+              (ledgerType === 'refund' && ['REFUND', 'REFUND_ADJUSTMENT'].includes(lineType))) ||
+            !Number.isFinite(amountSnapshot) ||
+            toMinorUnits(amountSnapshot) !== candidate.payableImpactMinor) {
+          throw new Error('Settlement approval cannot be cancelled because paid historical payout lineage is inconsistent.');
+        }
+        throw new Error('Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
+      }
       if (existing.correctionCreditLines.some((line) => line.payoutLines.some((payoutLine) =>
         payoutLine.status !== 'CANCELLED' && payoutLine.payoutBatch.status !== 'CANCELLED'))) {
         throw new Error('Cancel the unpaid correction-credit payout before cancelling its settlement.');
