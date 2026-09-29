@@ -13,6 +13,8 @@ This SHA is where the initial findings were identified; it is not necessarily a 
 
 Audit C added Logo İşbaşı/accounting findings at repository baseline `f4e92d37de4465ab50a514d64a6ebe55c922ae83`. That SHA identifies the evidence reviewed for those additions; it does not replace the original audited baseline or assert a future HEAD.
 
+Audit D added payment-operations evidence at repository baseline `783064da24bb62150609b85cc3c274bd239b87b1`. It did not establish bank/EFT facts or approve a payment-ready rule.
+
 ## Confirmed functional defects
 
 ### FIN-BUG-001 — SALE refund impact bypasses settlement delay
@@ -193,6 +195,22 @@ Audit C added Logo İşbaşı/accounting findings at repository baseline `f4e92d
 - **Minimum future repair boundary:** Reproduce the race in a real PostgreSQL fixture before selecting serialization changes.
 - **Validation required before CLOSED:** Real PostgreSQL concurrent snapshot/cancellation test and, if a defect is confirmed, focused regression after approved repair.
 
+### FIN-RISK-004 — Payout `paidAt` may not represent actual EFT execution time
+
+- **Domain:** Payment time and PAID evidence.
+- **Classification:** NEEDS_RUNTIME_PROOF / POLICY_GAP.
+- **Status:** NEEDS_RUNTIME_PROOF.
+- **Finding:** Payment Preparation sends browser click-time as `paidAt`; Admin cannot enter the actual EFT execution time in that UI. Backend accepts any syntactically parseable date, with no established future-date or historical-distance bound.
+- **Exact current behavior:** The supplied timestamp becomes `PayoutBatch.paidAt` and ledger `settledAt`. Whether it matches the external transfer event is not verified by the application.
+- **Current impact:** Historical local payment time may differ from actual bank time; production incidence is UNKNOWN. The field is not labeled wrong until its intended semantics are approved.
+- **Automation impact:** `paidAt` cannot be treated as authoritative external-bank execution time without a contract and evidence.
+- **Evidence / relevant code locations:** `src/features/finance/paymentPreparationApi.ts` (`markPayoutBatchPaid`); `src/pages/AdminPaymentPreparationPage.tsx` (no time input); `backend/src/modules/finance/finance.service.ts` (`parseMarkPayoutBatchPaidInput`, `markPayoutBatchPaid`).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes: whether `paidAt` means Admin confirmation, EFT initiation, EFT completion, or another event.
+- **External clarification required?** Yes: bank/operator time evidence and reconciliation practice.
+- **Minimum future repair boundary:** Establish the intended time authority and validation/presentation before altering persistence or historical records.
+- **Validation required before CLOSED:** Approved time contract, focused API/UI/real-DB tests, and operational evidence where applicable.
+
 ## Design gaps and current-architecture facts
 
 These entries identify missing or unresolved contracts. They are **not** authorization to implement a new rule.
@@ -252,14 +270,14 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Status:** OPEN.
 - **Finding:** `preparePayoutBatch({ vendorId })` receives no settlement IDs, cycle key, period, or payment date.
 - **Exact current behavior:** It can pool eligible APPROVED sources across multiple manual/scheduled settlements, cycles, correction-source settlements, and dates.
-- **Current impact:** A payout is not cycle-bound even when UI language might suggest a payment period. Audit C also established that pooled settlements can have different Logo invoice states—`CREATED`, `FAILED`, `UNKNOWN`, or no record—and Payment Preparation has no payout-wide Logo readiness authority. This does not establish an invoice gate.
+- **Current impact:** A payout is not cycle-bound even when UI language might suggest a payment period. Audit C established that pooled settlements can have different Logo invoice states—`CREATED`, `FAILED`, `UNKNOWN`, or no record. Audit D confirmed that the payment screen shows aggregate amounts and a source count, not complete per-settlement lineage or Logo evidence. This does not establish an invoice gate.
 - **Automation impact:** Grouping must be chosen before payment-ready automation.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch` source selection and payout transitions); `src/features/finance/paymentPreparationApi.ts`; `src/pages/AdminPaymentPreparationPage.tsx` (no pooled Logo invoice readiness view); `backend/prisma/schema.prisma` (`SettlementCommissionInvoice`).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: vendor-wide versus cycle-bound, including multi-cycle pooling.
 - **External clarification required?** No.
 - **Minimum future repair boundary:** Approve grouping contract before altering source selection or period UI.
-- **Validation required before CLOSED:** Approved contract and multi-settlement real-DB/payout/UI verification.
+- **Validation required before CLOSED:** Approved contract and multi-settlement/mixed-cycle real-DB payout plus payment-dossier UI verification.
 
 ### FIN-DESIGN-005 — Missed/failed settlement-run recovery is undefined
 
@@ -299,8 +317,8 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** Debt is applied when payout is prepared; there is no established debt-cycle ownership/cutoff.
-- **Exact current behavior:** New debt after a DRAFT does not automatically recalculate that frozen payout.
-- **Current impact:** Payout amount and later debt position can differ until an explicit revalidation/cancellation/rebuild path is used.
+- **Exact current behavior:** Vendor debt offset is calculated and frozen at payout preparation. New debt after DRAFT does not recalculate that batch. REVIEW and Mark Paid revalidate its attached sources but do not perform a fresh vendor-wide debt calculation.
+- **Current impact:** The batch can progress with its original offset although the vendor's current outstanding debt differs. Whether that makes the batch stale, or requires cancellation/rebuild, remains an unresolved product decision.
 - **Automation impact:** BLOCKER for payment-ready semantics.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`, debt offset, REVIEW/PAID revalidation); vendor-balance service.
 - **Production incidence:** UNKNOWN.
@@ -331,7 +349,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP / BACKEND_UI_MISMATCH.
 - **Status:** OPEN.
 - **Finding:** Settlement UI can say “Accounting Review” and “No payout amount,” yet payout preparation can create a `0.00` DRAFT and payout actions are primarily status-driven.
-- **Exact current behavior:** No approved contract establishes whether a zero batch should progress to REVIEW/PAID as accounting evidence or stop before payment workflow.
+- **Exact current behavior:** No approved contract establishes whether a zero batch should progress to REVIEW/PAID as accounting evidence or stop before payment workflow. Audit D confirmed that REVIEW and Mark Paid are status-driven, with no zero-net transition gate; this does not prove an external EFT exists for a zero batch.
 - **Current impact:** A zero-value batch can be presented within a payment process without clear meaning.
 - **Automation impact:** BLOCKER until disposition is approved.
 - **Evidence / relevant code locations:** `src/pages/AdminSettlementApprovalsPage.tsx` (zero-payable copy); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`, payout transitions); payout tests under `src/`.
@@ -347,7 +365,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** Negative payout paths appear in code/tests as operator-review conditions; there is no approved external negative-payment policy.
-- **Exact current behavior:** Preparation can represent negative amounts, but their authorized downstream disposition is unresolved.
+- **Exact current behavior:** Preparation can represent negative ordinary payout amounts, and REVIEW/Mark Paid have no general negative-net gate. Correction-deduction preparation has its own insufficient-payable check. The authorized downstream disposition of a negative ordinary batch remains unresolved; full real-DB progression has not been proven.
 - **Current impact:** Admin/payment interpretation is ambiguous.
 - **Automation impact:** BLOCKER.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`, payout status transitions); payout tests under `src/`.
@@ -363,8 +381,8 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** IBAN exists in billing profile data, but payout preparation does not establish its completeness as a prerequisite.
-- **Exact current behavior:** Audit C confirmed IBAN is outside the frozen settlement billing snapshot used for Logo invoice requests. Payout preparation does not establish IBAN completeness as a prerequisite. A DRAFT payout is not proof an external EFT can be executed.
-- **Current impact:** “Payment ready” cannot be inferred solely from payout creation.
+- **Exact current behavior:** Audit C confirmed IBAN is outside the frozen settlement billing snapshot used for Logo invoice requests. Audit D found IBAN to be optional, mutable `VendorBillingProfile` data. Payout preparation does not require or snapshot it; PAID payout history and events do not establish which payment destination was actually used. A later profile edit can differ from that historical destination. Payment Preparation does not show IBAN.
+- **Current impact:** “Payment ready” cannot be inferred solely from payout creation, and historical payout records do not prove the EFT destination.
 - **Automation impact:** Future payment-ready definition needs an approved identity/completeness rule.
 - **Evidence / relevant code locations:** `backend/prisma/schema.prisma` (vendor billing/payment fields); `backend/src/modules/finance/settlement-billing-snapshot.service.ts` (snapshot omits IBAN); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`); `src/pages/VendorProfilePage.tsx` (billing profile).
 - **Production incidence:** UNKNOWN.
@@ -395,7 +413,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** BLOCKED_BY_EXTERNAL_INFO.
 - **Finding:** Provider invoice identity, total, currency, and document metadata may be synced, but current finance progression does not require provider monetary equality or a proven legally issued provider state. A near-equal provider total is a candidate signal, not a mandatory acceptance gate.
-- **Exact current behavior:** Payout DRAFT, REVIEW, and PAID remain independent of invoice completion. That independence is not classified as a bug before an invoice-gating policy is approved.
+- **Exact current behavior:** Payout DRAFT, REVIEW, and PAID remain independent of Logo invoice completion; REVIEW and Mark Paid do not gate on per-settlement Logo state. A pooled payout can therefore progress while member settlements have unresolved or mixed invoice states. That independence is not classified as a bug before an invoice-gating policy is approved.
 - **Current impact:** Current data cannot by itself substantiate an invoice-backed `PAYMENT READY` claim.
 - **Automation impact:** BLOCKER for claiming invoice-backed payment readiness.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-outgoing-invoice-sync-preview.service.ts` (provider matching, metadata, near-total signal); `backend/src/modules/finance/finance.service.ts` (payout transitions); `src/pages/AdminPaymentPreparationPage.tsx`.
@@ -404,6 +422,22 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **External clarification required?** Yes: Logo issuance/status and monetary field contracts; accounting/tax confirmation is also required.
 - **Minimum future repair boundary:** Define required provider evidence and approved monetary tolerance before implementing a payout gate or payment-ready claim.
 - **Validation required before CLOSED:** Provider and accounting contracts, approved product gate, mismatch/issuance tests, and pooled-payout integration/UI verification.
+
+### FIN-DESIGN-014 — Payout REVIEW has no durable reviewer identity or review timestamp
+
+- **Domain:** Payout human review gate.
+- **Classification:** DESIGN_GAP.
+- **Status:** OPEN.
+- **Finding:** DRAFT → REVIEW performs local revalidation and a status change, but `PayoutBatch` does not persist `reviewedBy` or `reviewedAt`; no dedicated durable REVIEW event was established.
+- **Exact current behavior:** The creating and paying Admin can be persisted, but the reviewing Admin and exact review time are not. `updatedAt` is mutable and is not an authoritative review event.
+- **Current impact:** The system cannot later prove who performed the human review gate or exactly when.
+- **Automation impact:** BLOCKER if REVIEW remains a meaningful future human control boundary.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`markPayoutBatchReview`); `backend/prisma/schema.prisma` (`PayoutBatch`); `backend/src/modules/finance/finance.routes.ts` (Admin route).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes: REVIEW's intended future semantic role remains unresolved.
+- **External clarification required?** No for local reviewer evidence; external EFT state remains a separate question.
+- **Minimum future repair boundary:** After REVIEW semantics are approved, give any retained human review boundary durable actor/time evidence.
+- **Validation required before CLOSED:** Approved REVIEW contract, focused actor/time and transition tests, relevant real-DB validation, and UI/audit verification.
 
 ## UI and API consistency findings
 
@@ -461,7 +495,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** MISLEADING_UI.
 - **Status:** OPEN.
 - **Finding:** Existing batch “Payment Period” can derive from batch creation month, while backend payout has no period/cycle input and may pool settlements.
-- **Exact current behavior:** Displayed month does not prove source coverage. Audit C also found no payout-wide presentation of Logo readiness across all pooled settlements.
+- **Exact current behavior:** The period key comes from the payout batch creation month, not its source dates. The batch may pool multiple settlement/cycle periods, while the screen shows a source count rather than complete per-settlement lineage. Audit C also found no payout-wide presentation of Logo readiness.
 - **Current impact:** Admin may misunderstand which sales/cycles are included and cannot infer invoice readiness for every included settlement from Payment Preparation.
 - **Automation impact:** Payment-ready explanations lack reliable period identity.
 - **Evidence / relevant code locations:** `src/pages/AdminPaymentPreparationPage.tsx` (`getPaymentPeriodKey`, “Payment Period”, no pooled Logo invoice view); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`); `backend/prisma/schema.prisma` (`SettlementCommissionInvoice`).
@@ -493,15 +527,15 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** MISLEADING_UI.
 - **Status:** OPEN.
 - **Finding:** Outstanding debt/debt offset can be labeled refund adjustment even when VendorBalance debt has Financial Correction or another supported provenance.
-- **Exact current behavior:** Wording can overstate refund origin.
-- **Current impact:** Admin may misdiagnose payment reduction.
+- **Exact current behavior:** Wording can overstate refund origin. The payment screen also presents batch-frozen debt offset/remaining-debt values without clearly distinguishing them from the current vendor balance after later debt arrives.
+- **Current impact:** Admin may misdiagnose payment reduction or read a frozen batch offset as the vendor's current balance.
 - **Automation impact:** Exception reason needs provenance before unattended routing.
 - **Evidence / relevant code locations:** `src/pages/AdminPaymentPreparationPage.tsx` and `src/pages/AdminScheduledSettlementsPage.tsx` (copy); `backend/src/modules/finance/finance.service.ts` (debt offset); VendorBalance source records.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No new monetary rule.
 - **External clarification required?** No.
-- **Minimum future repair boundary:** Use source-accurate debt/adjustment terminology.
-- **Validation required before CLOSED:** UI tests for refund-origin and correction-origin debt.
+- **Minimum future repair boundary:** Use source-accurate debt/adjustment terminology and distinguish batch-frozen amounts from any separately proven current balance.
+- **Validation required before CLOSED:** UI tests for refund-origin and correction-origin debt, including new debt after a DRAFT.
 
 ### FIN-UI-007 — Period labels imply bounded coverage although selection is cumulative
 
@@ -599,6 +633,38 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Minimum future repair boundary:** Once the provider contract is known, distinguish readiness, request persisted, create response accepted, provider invoice identified, reconciled/matched, and legally issued where such evidence exists. No new DB state is specified here.
 - **Validation required before CLOSED:** Provider contract evidence and focused UI/API tests for missing IDs, failed reconciliation, and each approved completion label.
 
+### FIN-UI-013 — Payment timeline presents non-authoritative event history
+
+- **Domain:** Payment Preparation and payout timeline.
+- **Classification:** MISLEADING_UI.
+- **Status:** OPEN.
+- **Finding:** The timeline uses mutable `updatedAt` as “Review started” and can show an “Approved” milestone for PAID even though the normal payout lifecycle has no payout APPROVED transition.
+- **Exact current behavior:** A later status update can change the displayed review time; the “Approved” date is also derived from `updatedAt`, not a persisted payout approval event.
+- **Current impact:** Admin may interpret derived timestamps and unsupported milestones as durable payment history.
+- **Automation impact:** Blocks reliable operator/audit presentation for a future payment-ready flow.
+- **Evidence / relevant code locations:** `src/pages/AdminPaymentPreparationPage.tsx` (timeline); `backend/src/modules/finance/finance.service.ts` (`markPayoutBatchReview`, `markPayoutBatchPaid`); `backend/prisma/schema.prisma` (`PayoutBatch`).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** REVIEW's future meaning remains open; accurate labeling of current evidence requires no new money rule.
+- **External clarification required?** No.
+- **Minimum future repair boundary:** Render only persisted/authoritative payout events or explicitly label derived presentation values; replacement design is not chosen here.
+- **Validation required before CLOSED:** Focused timeline tests for DRAFT, REVIEW, and PAID against durable event/time authority.
+
+### FIN-UI-014 — Payment Preparation lacks a complete pooled-payout payment dossier
+
+- **Domain:** Payment Preparation and Admin payment review.
+- **Classification:** MISSING_UI_EVIDENCE.
+- **Status:** OPEN.
+- **Finding:** For a vendor-wide pooled payout, Payment Preparation shows aggregate amount and source count but does not consolidate all relevant settlement IDs, scheduled/manual origin, cycle identity, source-date coverage, per-settlement Logo state and identity, current versus batch-frozen debt, payment destination/IBAN, and blocker evidence.
+- **Exact current behavior:** Some information exists elsewhere or in backend line references, but this payment surface does not present one complete payment dossier.
+- **Current impact:** Admin cannot substantiate a future “READY FOR PAYMENT” claim from this screen alone.
+- **Automation impact:** BLOCKER for a marketplace-style payment-ready queue.
+- **Evidence / relevant code locations:** `src/pages/AdminPaymentPreparationPage.tsx` (Payment Impact and Related Records); `backend/src/modules/finance/finance.service.ts` (`mapPayoutBatch`, `preparePayoutBatch`); `backend/prisma/schema.prisma` (`PayoutBatchLine`, `VendorBillingProfile`).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes for the eventual payment-ready evidence threshold and grouping; no final UI is prescribed.
+- **External clarification required?** Yes where Logo issuance or bank destination evidence is required by the eventual policy.
+- **Minimum future repair boundary:** Define the approved payment-ready evidence contract, then expose its provenance coherently without changing historical finance authority.
+- **Validation required before CLOSED:** Approved contract and pooled-payout backend/UI/browser evidence across mixed settlement and invoice states.
+
 ## Test-quality gaps
 
 Each entry describes absent or insufficiently proven coverage at this baseline, not a new business requirement.
@@ -677,16 +743,16 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 
 ### FIN-TEST-009 — No real-DB multiple-cycle-to-pooled-payout test
 - **Domain:** Payout grouping tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
-- **Finding / exact current behavior:** No proven real-DB test builds multiple scheduled/manual approvals then one pooled payout.
+- **Finding / exact current behavior:** No proven real-DB test builds multiple scheduled/manual approvals then one pooled payout with a complete payment-review dossier or source-period lineage.
 - **Current impact:** Current vendor-wide grouping lacks integrated proof. **Automation impact:** Payment-period claims remain unvalidated.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`); payout tests under `src/`.
 - **Production incidence:** UNKNOWN. **Product decision required?** Yes, FIN-DESIGN-004. **External clarification required?** No.
 - **Minimum future repair boundary:** Add integrated fixture without choosing future grouping semantics by assumption.
-- **Validation required before CLOSED:** Real-DB pooled sources and UI/source-reference verification under approved contract.
+- **Validation required before CLOSED:** Real-DB pooled mixed-cycle sources and UI payment-dossier/source-reference verification under approved contract.
 
 ### FIN-TEST-010 — No real-DB debt-after-DRAFT progression proof
 - **Domain:** Debt/payout timing tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
-- **Finding / exact current behavior:** No complete real-DB proof for new debt arriving between payout DRAFT and REVIEW/PAID.
+- **Finding / exact current behavior:** No complete real-DB proof for new debt arriving between payout DRAFT and REVIEW/PAID, while the batch's frozen offset remains unchanged and transition revalidation checks attached sources rather than fresh vendor-wide debt.
 - **Current impact:** Staleness/revalidation behavior is not fully established at transition boundary. **Automation impact:** Payment-ready blocker.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (debt offset, payout transitions); vendor-balance tests.
 - **Production incidence:** UNKNOWN. **Product decision required?** Yes, FIN-DESIGN-007. **External clarification required?** External EFT state UNKNOWN.
@@ -695,7 +761,7 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 
 ### FIN-TEST-011 — No complete real-DB zero/negative payout progression contract test
 - **Domain:** Payout amount disposition tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
-- **Finding / exact current behavior:** Mocked amount cases do not prove a full PostgreSQL lifecycle for zero and negative batches under approved disposition rules.
+- **Finding / exact current behavior:** Mocked amount cases do not prove a full PostgreSQL DRAFT → REVIEW → PAID lifecycle for zero and negative batches under approved disposition rules.
 - **Current impact:** Status-based actions and operator meaning remain uncertain. **Automation impact:** Blocks unattended progression.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (prepare and transitions); payout tests; `src/pages/AdminSettlementApprovalsPage.tsx` (zero copy).
 - **Production incidence:** UNKNOWN. **Product decision required?** Yes, FIN-DESIGN-009/010. **External clarification required?** External EFT behavior UNKNOWN.
@@ -723,7 +789,7 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Domain:** Logo monetary and payout-readiness tests.
 - **Classification:** TEST_COVERAGE_GAP.
 - **Status:** OPEN.
-- **Finding:** No focused coverage proves intended equivalence between aggregate Logo-line VAT and frozen settlement economics, provider-total mismatch handling, or a payout containing settlements with mixed Logo invoice states.
+- **Finding:** No focused coverage proves intended equivalence between aggregate Logo-line VAT and frozen settlement economics, provider-total mismatch handling, or a real PostgreSQL pooled payout containing settlements with mixed Logo invoice states and a payment-screen dossier.
 - **Exact current behavior:** Existing tests do not establish the future accounting or pooled-payment readiness contract.
 - **Current impact:** Monetary and operator-facing mismatches may remain unobserved; no payout invoice gate is inferred.
 - **Automation impact:** Blocks confidence in invoice-backed payment-ready automation.
@@ -734,13 +800,30 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Minimum future repair boundary:** Add focused and integrated tests only after corresponding accounting/product contracts are approved.
 - **Validation required before CLOSED:** Approved contracts, aggregate-rounding and provider-mismatch regressions, and mixed-state pooled-payout real-DB/UI proof.
 
+### FIN-TEST-014 — No complete payment-evidence, reviewer, and destination workflow test
+
+- **Domain:** General payout and Admin payment workflow.
+- **Classification:** TEST_COVERAGE_GAP.
+- **Status:** OPEN.
+- **Finding:** No complete test proves DRAFT, human REVIEW actor/time, historical payment destination, payment reference, `paidAt` semantics, pooled settlement lineage, and explicit PAID across a real PostgreSQL-backed general payout flow and Admin browser workflow.
+- **Exact current behavior:** Existing Financial Correction PostgreSQL/browser tests cover their correction paths, not this complete generic payment-evidence chain. Some desired evidence is not persisted yet; this entry does not make it a current business requirement.
+- **Current impact:** A future payment-ready claim would lack integrated evidence and regression proof.
+- **Automation impact:** BLOCKER for confidence in an approved payment-ready workflow.
+- **Evidence / relevant code locations:** `src/payout-batch-preparation.test.ts`; Financial Correction PostgreSQL suites under `src/`; real browser specs under `tests/e2e/`; `backend/src/modules/finance/finance.service.ts`; `src/pages/AdminPaymentPreparationPage.tsx`.
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes for REVIEW, destination, reference, and time semantics before complete expected outcomes can be asserted.
+- **External clarification required?** Yes for EFT evidence semantics; local test infrastructure does not itself establish bank truth.
+- **Minimum future repair boundary:** After those contracts are approved, add targeted real-DB and Admin browser coverage without using mocked bank success as proof of EFT.
+- **Validation required before CLOSED:** Approved contract, focused backend tests, real PostgreSQL generic payout flow, relevant browser verification, and operational evidence where applicable.
+
 ## External-information-only observations
 
 - **Audit C — Logo postal-code fallback:** The production Logo payload builder uses a hardcoded `34000` postal-code fallback because `billingPostalCode` is not modeled. **Status: EXTERNAL INFORMATION REQUIRED.** This is not classified as a legal or accounting defect without Logo/provider and accountant confirmation that the fallback is unacceptable. Evidence: `backend/src/modules/logo-isbasi/logo-isbasi-commission-preview.ts` (`readTemporaryBillingPostalCode`). No change to invoice or billing behavior is approved here.
+- **Audit D — bank/EFT evidence:** Repository state does not prove whether an external EFT was sent, completed, cancelled, rejected, returned, or duplicated. FIN-RISK-004 is an evidence/policy clarification, not a confirmed monetary bug. Repository-side design can continue while the bank/operator questions below are collected, but final EFT exception and reconciliation semantics require their answers.
 
 ## Known automation blockers
 
-Current blockers include FIN-BUG-001, FIN-BUG-002, FIN-BUG-003, FIN-BUG-006, FIN-DESIGN-001, FIN-DESIGN-002, FIN-DESIGN-003, FIN-DESIGN-004, FIN-DESIGN-005, FIN-DESIGN-007, FIN-DESIGN-008, FIN-DESIGN-009, and FIN-DESIGN-010. FIN-BUG-005 blocks robust multi-vendor scheduling; FIN-RISK-001 still requires runtime proof. Audit C adds FIN-BUG-007, FIN-BUG-008, FIN-RISK-002, FIN-DESIGN-012, and FIN-DESIGN-013 for Logo/invoice-backed automation. FIN-RISK-003 remains a proof requirement rather than a confirmed blocker until reproduced, although automation design must account for it. Further Audits D–G may add blockers.
+Current blockers include FIN-BUG-001, FIN-BUG-002, FIN-BUG-003, FIN-BUG-006, FIN-DESIGN-001, FIN-DESIGN-002, FIN-DESIGN-003, FIN-DESIGN-004, FIN-DESIGN-005, FIN-DESIGN-007, FIN-DESIGN-008, FIN-DESIGN-009, and FIN-DESIGN-010. FIN-BUG-005 blocks robust multi-vendor scheduling; FIN-RISK-001 still requires runtime proof. Audit C adds FIN-BUG-007, FIN-BUG-008, FIN-RISK-002, FIN-DESIGN-012, and FIN-DESIGN-013 for Logo/invoice-backed automation. Audit D adds FIN-DESIGN-014 and FIN-UI-014 for a future payment-ready human gate/dossier. FIN-RISK-003 remains a proof requirement rather than a confirmed blocker until reproduced; FIN-RISK-004 requires time/evidence policy clarification, not a presumed monetary fix. Further Audits E–G may add blockers.
 
 **This list is not an implementation queue yet.** Roadmap placement happens only after discovery is complete.
 
@@ -767,8 +850,15 @@ No answer is assigned here. The product owner must explicitly decide:
 - How later refund commission reversals and Financial Corrections are documented/accounted for in Logo.
 - Whether and how a settlement may be cancelled after an invoice is created.
 - What provider-total and VAT tolerance, if any, is permissible against frozen settlement economics.
+- What payout REVIEW means and whether it remains the future human control boundary.
+- What evidence authoritatively makes a payout READY FOR PAYMENT; no new DB state is assumed.
+- Whether new debt or newly approved settlement/correction sources after payout DRAFT make that batch stale.
+- Whether stale DRAFT payouts expire or require explicit cancellation/rebuild.
+- Whether payout must freeze its payment destination/IBAN and whether a payment reference is mandatory.
+- What `paidAt` represents: Admin confirmation, EFT initiation, EFT completion, or another event.
+- How to handle an EFT sent externally while the local payout remains REVIEW.
 
-**THESE ARE NOT BUG FIXES. UNRESOLVED PRODUCT DECISIONS MUST NOT BE IMPLEMENTED BY ASSUMPTION.** PAID remains explicit Admin confirmation of external payment.
+**THESE MUST NOT BE IMPLEMENTED BY ASSUMPTION.** These are not bug fixes. PAID remains explicit Admin confirmation of external payment.
 
 ## External questions register — unanswered
 
@@ -799,6 +889,21 @@ Accounting/tax clarification required:
 - Is the hardcoded `34000` postal-code fallback acceptable on an invoice?
 
 No provider or accounting answer is assumed by recording these questions.
+
+Bank/operator clarification required:
+
+1. What operational evidence proves EFT was SENT?
+2. What evidence proves EFT COMPLETED?
+3. Is a unique bank/EFT reference reliably available?
+4. At what point is an EFT considered irreversible?
+5. Can a sent transfer still be cancelled?
+6. How are rejected or returned transfers handled?
+7. What is the procedure when EFT was sent but the local payout remains REVIEW?
+8. What is the procedure if local PAID was recorded but EFT later failed or was returned?
+9. What payment evidence/reference should be stored for reconciliation?
+10. Is a zero-value payout ever considered a payment operation?
+
+These questions remain unanswered. Repository-side design may continue while answers are collected; final EFT exception and reconciliation semantics require them.
 
 ## Maintenance rule
 
