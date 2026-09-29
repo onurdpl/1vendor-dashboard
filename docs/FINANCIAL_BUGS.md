@@ -118,7 +118,7 @@ Audit F supplied read-only production-state findings for this register. The repo
 - **Pre-fix behavior:** Saving finance settings could silently reactivate an intentionally inactive profile and replace prior settings.
 - **Current impact:** Vendor finance policy can change beyond the Admin's stated edit.
 - **Automation impact:** CRITICAL BLOCKER before any scheduler relies on `active=true`.
-- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** Both production VendorFinancialProfile rows are active; no inactive profile currently exposes this edit-flow bug. Historical silent reactivation was not proven. The static defect remains OPEN.
+- **Audit F production evidence — NO_CURRENT_INSTANCE_FOUND:** Both production VendorFinancialProfile rows were active; no inactive profile exposed this edit-flow bug. Historical silent reactivation was not proven.
 - **Audit E evidence:** Schedule profile enumeration filters for `active=true`; the inactive-profile edit/reactivation defect therefore directly affects which vendors a future worker would consider.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`getVendorFinancialProfile`, `upsertVendorFinancialProfile`, `input.active ?? true`); `src/pages/VendorProfilePage.tsx` (finance-policy form/payload); `backend/prisma/schema.prisma` (`VendorFinancialProfile`).
 - **Production incidence:** UNKNOWN.
@@ -127,6 +127,7 @@ Audit F supplied read-only production-state findings for this register. The repo
 - **Minimum future repair boundary:** Correct inactive-profile read/update semantics and add targeted regression coverage; no implementation chosen here.
 - **Validation required before CLOSED:** Inactive profile read/edit/save regression with real persistence, unchanged inactive state and policy unless explicitly changed.
 - **Implementation evidence:** The Admin-specific GET now reads the persisted row regardless of `active`; the Admin page uses that GET and keeps its cache separate from the vendor-facing read. Ordinary upsert reads persisted settings and omits `active` from an existing-row update when input omits it, while new-row default and explicit Admin input remain unchanged. Focused service/route/UI tests and an isolated PostgreSQL 16 read/edit/reload/scheduler regression passed. The scheduler's `active=true` predicate and historical finance records were not changed; there was no schema change, migration, or backfill. Production runtime verification remains pending; do not treat Audit F's absence of inactive rows as a live regression case.
+- **Deployment/runtime verification:** Implementation commit `f6d3e450e0f156ed299382c827ceb6a1611b47ed` is deployed to production; the deployed Git SHA was directly verified. A production PostgreSQL check was performed inside `BEGIN READ ONLY` and rolled back: 2 `VendorFinancialProfile` rows were active and 0 were inactive. Therefore no safe naturally occurring inactive-profile case was available to exercise the regression. No profile was deactivated or created for testing, and no production mutation occurred. Local focused tests (133/133), isolated PostgreSQL regression (2/2), full suite (3,461 passed; 144 skipped), backend typecheck/build, frontend build, and `git diff --check` remain the implementation proof. Runtime closure remains pending until a safe naturally occurring inactive profile exists.
 
 ### FIN-BUG-007 — Concurrent Logo create can send the same invoice request more than once
 
@@ -648,6 +649,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Minimum future repair boundary:** Resolve FIN-BUG-006 and represent activity honestly in GET/edit flow.
 - **Validation required before CLOSED:** Inactive-profile API/UI/real-DB regression.
 - **Implementation evidence:** Admin profile reads now use the existing Admin GET and display the persisted inactive policy; ordinary form submissions still omit `active` and the server preserves it. Focused UI/route tests and the isolated PostgreSQL regression passed. Vendor-facing read behavior is unchanged. Production runtime verification remains pending.
+- **Deployment/runtime verification:** Implementation commit `f6d3e450e0f156ed299382c827ceb6a1611b47ed` is deployed to production; the deployed Git SHA was directly verified. Production read-only discovery found 2 active profiles and 0 inactive profiles, so no safe naturally occurring FIN-UI-009 runtime case was available. No production profile was deactivated or created, and no production mutation occurred. Local focused/PostgreSQL/full-suite evidence remains the implementation proof; runtime closure remains pending until a safe naturally occurring inactive profile exists.
 
 ### FIN-UI-010 — Current profile delay may not be candidate source delay
 
