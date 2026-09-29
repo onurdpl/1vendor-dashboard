@@ -9,7 +9,9 @@ Status:
 - Do not mark an item fixed without implementation and validation evidence.
 
 Current audited repository baseline: `456a7ec9d759b48649057ff01f4be53c315ad281`.
-This SHA is where the current findings were identified; it is not necessarily a future HEAD. Production incidence is **UNKNOWN** unless explicitly stated otherwise. Evidence paths below refer to this audited baseline. Initial entries are `OPEN`, except the potential multi-return issue, which is `NEEDS_RUNTIME_PROOF`. Allowed statuses are `OPEN`, `NEEDS_RUNTIME_PROOF`, `BLOCKED_BY_PRODUCT_DECISION`, `BLOCKED_BY_EXTERNAL_INFO`, `FIXED_NOT_VERIFIED`, and `CLOSED`. IDs are stable and must not be renumbered.
+This SHA is where the initial findings were identified; it is not necessarily a future HEAD. Production incidence is **UNKNOWN** unless explicitly stated otherwise. Evidence paths for initial findings refer to this audited baseline. Initial entries are `OPEN`, except the potential multi-return issue, which is `NEEDS_RUNTIME_PROOF`. Allowed statuses are `OPEN`, `NEEDS_RUNTIME_PROOF`, `BLOCKED_BY_PRODUCT_DECISION`, `BLOCKED_BY_EXTERNAL_INFO`, `FIXED_NOT_VERIFIED`, and `CLOSED`. IDs are stable and must not be renumbered.
+
+Audit C added Logo İşbaşı/accounting findings at repository baseline `f4e92d37de4465ab50a514d64a6ebe55c922ae83`. That SHA identifies the evidence reviewed for those additions; it does not replace the original audited baseline or assert a future HEAD.
 
 ## Confirmed functional defects
 
@@ -109,6 +111,38 @@ This SHA is where the current findings were identified; it is not necessarily a 
 - **Minimum future repair boundary:** Correct inactive-profile read/update semantics and add targeted regression coverage; no implementation chosen here.
 - **Validation required before CLOSED:** Inactive profile read/edit/save regression with real persistence, unchanged inactive state and policy unless explicitly changed.
 
+### FIN-BUG-007 — Concurrent Logo create can send the same invoice request more than once
+
+- **Domain:** Logo İşbaşı invoice execution.
+- **Classification:** CONFIRMED_BUG.
+- **Status:** OPEN.
+- **Finding:** Two create operations can load the same executable `PENDING` or `FAILED` local invoice record before either external request completes. No pre-send row lock, atomic execution claim, `EXECUTING` state, or demonstrated provider idempotency key prevents both HTTP requests from leaving the application.
+- **Exact current behavior:** The partial unique DB index protects against a second active **local** invoice record for the settlement/provider, not a second provider POST for the same record.
+- **Current impact:** Duplicate external create requests are possible. Whether Logo actually issues two invoices is UNKNOWN.
+- **Automation impact:** CRITICAL BLOCKER before unattended Logo create.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (status read, validation, provider send); `backend/src/modules/finance/settlement-commission-invoice-record.service.ts` (status updates); `backend/prisma/migrations/20260610170000_add_settlement_commission_invoice_model/migration.sql` (active-record partial unique index).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** No new business rule established by this concurrency defect.
+- **External clarification required?** Yes: Logo provider idempotency and duplicate-create behavior.
+- **Minimum future repair boundary:** Durable exclusive execution ownership plus provider-safe idempotency/reconciliation semantics.
+- **Validation required before CLOSED:** Focused service tests, real PostgreSQL concurrency test, provider contract evidence, and relevant integration verification.
+
+### FIN-BUG-008 — Aggregated Logo line VAT can diverge from settlement line-rounded VAT
+
+- **Domain:** Commission invoice monetary representation.
+- **Classification:** CONFIRMED_BUG — local contract mismatch.
+- **Status:** OPEN.
+- **Finding:** Settlement commission VAT is calculated and rounded at financial-line level, then summed. The Logo payload sends one aggregate commission line and one VAT rate. VAT calculated on that aggregate is not guaranteed to equal the frozen sum of individually rounded VAT amounts.
+- **Exact current behavior:** Two small commission lines can each round to a VAT amount whose sum differs from VAT rounded once on their aggregate commission. Actual Logo rounding behavior remains UNKNOWN.
+- **Current impact:** Potential invoice-total mismatch between frozen settlement economics and the provider document; actual production mismatch is unproven.
+- **Automation impact:** BLOCKER before treating invoice monetary equivalence as authoritative.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/payout-calculator.ts` (per-line commission VAT rounding); `backend/src/modules/finance/settlement-approval.service.ts` (line totals summed); `backend/src/modules/finance/settlement-logo-request-snapshot-builder.service.ts` and `backend/src/modules/logo-isbasi/logo-isbasi-commission-preview.ts` (single aggregate Logo line and VAT rate).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes: accounting-approved invoice representation and tolerance.
+- **External clarification required?** Yes: Logo VAT rounding behavior.
+- **Minimum future repair boundary:** Define approved invoice arithmetic representation and reconcile provider result against frozen settlement authority.
+- **Validation required before CLOSED:** Focused small-amount/multiple-line rounding tests, approved accounting contract, Logo behavior evidence, and provider-total reconciliation verification.
+
 ## Potential defect requiring proof
 
 ### FIN-RISK-001 — Multiple-return hold may be released by unrelated refund evidence
@@ -126,6 +160,38 @@ This SHA is where the current findings were identified; it is not necessarily a 
 - **External clarification required?** UNKNOWN; use local/schema evidence first.
 - **Minimum future repair boundary:** Establish a valid multi-return fixture and test hold behavior before choosing any code change.
 - **Validation required before CLOSED:** Runtime or production-safe schema/fixture proof of reachability, focused hold test, then implementation/integration validation if defect confirmed.
+
+### FIN-RISK-002 — Non-2xx Logo create response is retryable FAILED without proven non-creation
+
+- **Domain:** Logo external execution and recovery.
+- **Classification:** NEEDS_EXTERNAL_PROOF / DESIGN RISK.
+- **Status:** BLOCKED_BY_EXTERNAL_INFO.
+- **Finding:** Thrown network/timeout ambiguity maps to `UNKNOWN`, but every explicit non-2xx provider response is persisted as `FAILED` and may be retried. Repository evidence does not prove that every non-2xx means Logo did not create an invoice.
+- **Exact current behavior:** A `FAILED` record can be retried; whether a prior non-2xx response followed an external creation is UNKNOWN.
+- **Current impact:** A retry may theoretically duplicate an externally created invoice; no production duplicate is established.
+- **Automation impact:** BLOCKER for automatic `FAILED` retry.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (non-2xx, timeout, and retry handling).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** No retry policy should be selected before provider semantics are established.
+- **External clarification required?** Yes: Logo error taxonomy and timeout/create semantics.
+- **Minimum future repair boundary:** Classify provider outcomes using proven non-creation or reconcile ambiguous results before retry.
+- **Validation required before CLOSED:** Provider contract evidence, focused response-classification tests, and safe retry/reconciliation integration verification.
+
+### FIN-RISK-003 — Logo request snapshot creation versus settlement cancellation serialization is unproven
+
+- **Domain:** Settlement and invoice reservation concurrency.
+- **Classification:** NEEDS_RUNTIME_PROOF.
+- **Status:** NEEDS_RUNTIME_PROOF.
+- **Finding:** Logo request snapshot build/insert and settlement cancellation are not proven to share an atomic serialization boundary. A newly created `PENDING` record immediately becomes a settlement cancellation blocker.
+- **Exact current behavior:** A concurrent cancellation/request-snapshot race is possible from the separate checks, but its durable outcome has not been reproduced against PostgreSQL; this is not classified as a confirmed bug.
+- **Current impact:** Potential inconsistency in settlement cancellation versus invoice reservation; production incidence is unproven.
+- **Automation impact:** Proof requirement for unattended snapshot creation, not a confirmed blocker until reproduced; automation design must account for it.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-request-snapshot-builder.service.ts`; `backend/src/modules/finance/settlement-commission-invoice-record.service.ts` (record insertion); `backend/src/modules/finance/settlement-approval.service.ts` (cancellation invoice check).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Reservation/cancellation policy remains unresolved if the race is confirmed.
+- **External clarification required?** No; establish local DB behavior first.
+- **Minimum future repair boundary:** Reproduce the race in a real PostgreSQL fixture before selecting serialization changes.
+- **Validation required before CLOSED:** Real PostgreSQL concurrent snapshot/cancellation test and, if a defect is confirmed, focused regression after approved repair.
 
 ## Design gaps and current-architecture facts
 
@@ -186,9 +252,9 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Status:** OPEN.
 - **Finding:** `preparePayoutBatch({ vendorId })` receives no settlement IDs, cycle key, period, or payment date.
 - **Exact current behavior:** It can pool eligible APPROVED sources across multiple manual/scheduled settlements, cycles, correction-source settlements, and dates.
-- **Current impact:** A payout is not cycle-bound even when UI language might suggest a payment period.
+- **Current impact:** A payout is not cycle-bound even when UI language might suggest a payment period. Audit C also established that pooled settlements can have different Logo invoice states—`CREATED`, `FAILED`, `UNKNOWN`, or no record—and Payment Preparation has no payout-wide Logo readiness authority. This does not establish an invoice gate.
 - **Automation impact:** Grouping must be chosen before payment-ready automation.
-- **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch` source selection); `src/features/finance/paymentPreparationApi.ts`.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch` source selection and payout transitions); `src/features/finance/paymentPreparationApi.ts`; `src/pages/AdminPaymentPreparationPage.tsx` (no pooled Logo invoice readiness view); `backend/prisma/schema.prisma` (`SettlementCommissionInvoice`).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: vendor-wide versus cycle-bound, including multi-cycle pooling.
 - **External clarification required?** No.
@@ -297,15 +363,47 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** DESIGN_GAP.
 - **Status:** OPEN.
 - **Finding:** IBAN exists in billing profile data, but payout preparation does not establish its completeness as a prerequisite.
-- **Exact current behavior:** A DRAFT payout is not proof an external EFT can be executed.
+- **Exact current behavior:** Audit C confirmed IBAN is outside the frozen settlement billing snapshot used for Logo invoice requests. Payout preparation does not establish IBAN completeness as a prerequisite. A DRAFT payout is not proof an external EFT can be executed.
 - **Current impact:** “Payment ready” cannot be inferred solely from payout creation.
 - **Automation impact:** Future payment-ready definition needs an approved identity/completeness rule.
-- **Evidence / relevant code locations:** `backend/prisma/schema.prisma` (vendor billing/payment fields); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`); `src/pages/VendorProfilePage.tsx` (billing profile).
+- **Evidence / relevant code locations:** `backend/prisma/schema.prisma` (vendor billing/payment fields); `backend/src/modules/finance/settlement-billing-snapshot.service.ts` (snapshot omits IBAN); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`); `src/pages/VendorProfilePage.tsx` (billing profile).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes for a future payment-ready gate.
 - **External clarification required?** UNKNOWN if external bank requirements become in scope; none are asserted here.
 - **Minimum future repair boundary:** Define readiness separately from payout DRAFT and identify authoritative payment identity.
 - **Validation required before CLOSED:** Approved policy and backend/UI readiness tests; no real EFT test implied.
+
+### FIN-DESIGN-012 — Logo UNKNOWN state lacks a reachable Admin resolution workflow
+
+- **Domain:** Logo reconciliation and operations.
+- **Classification:** DESIGN_GAP.
+- **Status:** OPEN.
+- **Finding:** `UNKNOWN` blocks create retry and settlement cancellation. Record-service helpers can resolve `UNKNOWN` as created or failed, but Audit C found no production Admin route/UI invoking them.
+- **Exact current behavior:** An `UNKNOWN` invoice record may remain operationally stranded; provider existence or non-existence is not inferred.
+- **Current impact:** Admin cannot complete a proven resolution through the current invoice workspace.
+- **Automation impact:** BLOCKER for automated Logo workflow and exception recovery.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-commission-invoice-record.service.ts` (`resolveUnknownAsCreated`, `resolveUnknownAsFailed`); `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (`UNKNOWN` retry block); `backend/src/modules/finance/finance.routes.ts` and `src/pages/AdminSettlementApprovalsPage.tsx` (no resolution action); `backend/src/modules/finance/settlement-approval.service.ts` (cancellation block).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Operational disposition and evidence standard remain unresolved.
+- **External clarification required?** Yes: provider lookup and issuance semantics are needed to define resolution evidence.
+- **Minimum future repair boundary:** Explicit authorized reconciliation workflow with durable evidence and safe state transition.
+- **Validation required before CLOSED:** Provider contract evidence; Admin authorization, state-transition, retry, and cancellation-path tests, including relevant integration verification.
+
+### FIN-DESIGN-013 — Provider monetary and issuance evidence is informational rather than authoritative
+
+- **Domain:** Logo reconciliation and payment readiness.
+- **Classification:** DESIGN_GAP.
+- **Status:** BLOCKED_BY_EXTERNAL_INFO.
+- **Finding:** Provider invoice identity, total, currency, and document metadata may be synced, but current finance progression does not require provider monetary equality or a proven legally issued provider state. A near-equal provider total is a candidate signal, not a mandatory acceptance gate.
+- **Exact current behavior:** Payout DRAFT, REVIEW, and PAID remain independent of invoice completion. That independence is not classified as a bug before an invoice-gating policy is approved.
+- **Current impact:** Current data cannot by itself substantiate an invoice-backed `PAYMENT READY` claim.
+- **Automation impact:** BLOCKER for claiming invoice-backed payment readiness.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-outgoing-invoice-sync-preview.service.ts` (provider matching, metadata, near-total signal); `backend/src/modules/finance/finance.service.ts` (payout transitions); `src/pages/AdminPaymentPreparationPage.tsx`.
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes: whether/when invoice evidence gates payout progression.
+- **External clarification required?** Yes: Logo issuance/status and monetary field contracts; accounting/tax confirmation is also required.
+- **Minimum future repair boundary:** Define required provider evidence and approved monetary tolerance before implementing a payout gate or payment-ready claim.
+- **Validation required before CLOSED:** Provider and accounting contracts, approved product gate, mismatch/issuance tests, and pooled-payout integration/UI verification.
 
 ## UI and API consistency findings
 
@@ -363,10 +461,10 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Classification:** MISLEADING_UI.
 - **Status:** OPEN.
 - **Finding:** Existing batch “Payment Period” can derive from batch creation month, while backend payout has no period/cycle input and may pool settlements.
-- **Exact current behavior:** Displayed month does not prove source coverage.
-- **Current impact:** Admin may misunderstand which sales/cycles are included.
+- **Exact current behavior:** Displayed month does not prove source coverage. Audit C also found no payout-wide presentation of Logo readiness across all pooled settlements.
+- **Current impact:** Admin may misunderstand which sales/cycles are included and cannot infer invoice readiness for every included settlement from Payment Preparation.
 - **Automation impact:** Payment-ready explanations lack reliable period identity.
-- **Evidence / relevant code locations:** `src/pages/AdminPaymentPreparationPage.tsx` (`getPaymentPeriodKey`, “Payment Period”); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`).
+- **Evidence / relevant code locations:** `src/pages/AdminPaymentPreparationPage.tsx` (`getPaymentPeriodKey`, “Payment Period”, no pooled Logo invoice view); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`); `backend/prisma/schema.prisma` (`SettlementCommissionInvoice`).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes if a true period must be represented.
 - **External clarification required?** No.
@@ -485,6 +583,22 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Minimum future repair boundary:** Approve business calendar and align date labels/formatting to it.
 - **Validation required before CLOSED:** Cross-timezone boundary display tests under approved rule.
 
+### FIN-UI-012 — Logo CREATED/Completed presentation can overstate proven invoice completion
+
+- **Domain:** Admin settlement and Logo UI.
+- **Classification:** MISSING_UI_EVIDENCE / MISLEADING_UI.
+- **Status:** OPEN.
+- **Finding:** A 2xx JSON create response can produce local `CREATED` without an extracted provider identifier, and subsequent provider-list reconciliation can still fail. The UI can show successful/green Logo creation messaging. Readiness preview can also mark “Logo Ready” as completed before provider issuance is established.
+- **Exact current behavior:** Local readiness, accepted create response, identified provider invoice, reconciled invoice, and legally issued invoice are not presented as proven equivalent states; legal issuance evidence remains UNKNOWN.
+- **Current impact:** Admin may interpret local success/readiness as stronger invoice evidence than currently established.
+- **Automation impact:** Payment-ready UI cannot use these labels as issuance authority.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (2xx to `CREATED`, post-create reconciliation); `src/pages/AdminSettlementApprovalsPage.tsx` (success/green messaging and “Logo Ready” workflow status).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes for the future invoice-completion threshold; accurate stage wording alone adds no monetary rule.
+- **External clarification required?** Yes: Logo create response and legal issuance semantics.
+- **Minimum future repair boundary:** Once the provider contract is known, distinguish readiness, request persisted, create response accepted, provider invoice identified, reconciled/matched, and legally issued where such evidence exists. No new DB state is specified here.
+- **Validation required before CLOSED:** Provider contract evidence and focused UI/API tests for missing IDs, failed reconciliation, and each approved completion label.
+
 ## Test-quality gaps
 
 Each entry describes absent or insufficiently proven coverage at this baseline, not a new business requirement.
@@ -588,9 +702,45 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Minimum future repair boundary:** Decide zero/negative disposition before writing transition expectations.
 - **Validation required before CLOSED:** Approved rule and full real-DB transition/UI proof.
 
+### FIN-TEST-012 — No real-DB Logo concurrent-create or crash-boundary coverage
+
+- **Domain:** Logo create execution tests.
+- **Classification:** TEST_COVERAGE_GAP.
+- **Status:** OPEN.
+- **Finding:** Current Logo tests are principally mocked/service-level. No dedicated real PostgreSQL proof was found for two create attempts on one record, external-send/local-persistence crash boundaries, or local state after competing transitions.
+- **Exact current behavior:** Test coverage does not establish exclusive provider-send ownership or crash-safe persistence.
+- **Current impact:** FIN-BUG-007 and ambiguous create recovery lack DB-real regression proof.
+- **Automation impact:** Blocks confidence in unattended create/retry.
+- **Evidence / relevant code locations:** `src/settlement-logo-commission-invoice-create.test.ts`; `src/settlement-commission-invoice-record.test.ts`; `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts`.
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** No new business rule for the concurrency test; provider recovery policy remains separate.
+- **External clarification required?** Yes for provider-safe retries, not for reproducing local concurrency.
+- **Minimum future repair boundary:** Add real-DB concurrency and crash-boundary coverage after an approved execution repair.
+- **Validation required before CLOSED:** Relevant real PostgreSQL concurrent-create and competing-transition tests plus provider-safe integration evidence.
+
+### FIN-TEST-013 — No aggregate VAT, provider mismatch, or mixed-invoice pooled-payout coverage
+
+- **Domain:** Logo monetary and payout-readiness tests.
+- **Classification:** TEST_COVERAGE_GAP.
+- **Status:** OPEN.
+- **Finding:** No focused coverage proves intended equivalence between aggregate Logo-line VAT and frozen settlement economics, provider-total mismatch handling, or a payout containing settlements with mixed Logo invoice states.
+- **Exact current behavior:** Existing tests do not establish the future accounting or pooled-payment readiness contract.
+- **Current impact:** Monetary and operator-facing mismatches may remain unobserved; no payout invoice gate is inferred.
+- **Automation impact:** Blocks confidence in invoice-backed payment-ready automation.
+- **Evidence / relevant code locations:** `src/settlement-logo-request-snapshot-builder.test.ts`; `src/settlement-logo-outgoing-invoice-sync-preview.test.ts`; `backend/src/modules/finance/settlement-logo-request-snapshot-builder.service.ts`; `backend/src/modules/finance/finance.service.ts`; `src/pages/AdminPaymentPreparationPage.tsx`.
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes: accounting arithmetic/tolerance and pooled-payout invoice policy.
+- **External clarification required?** Yes: Logo VAT arithmetic and provider monetary/issuance semantics.
+- **Minimum future repair boundary:** Add focused and integrated tests only after corresponding accounting/product contracts are approved.
+- **Validation required before CLOSED:** Approved contracts, aggregate-rounding and provider-mismatch regressions, and mixed-state pooled-payout real-DB/UI proof.
+
+## External-information-only observations
+
+- **Audit C — Logo postal-code fallback:** The production Logo payload builder uses a hardcoded `34000` postal-code fallback because `billingPostalCode` is not modeled. **Status: EXTERNAL INFORMATION REQUIRED.** This is not classified as a legal or accounting defect without Logo/provider and accountant confirmation that the fallback is unacceptable. Evidence: `backend/src/modules/logo-isbasi/logo-isbasi-commission-preview.ts` (`readTemporaryBillingPostalCode`). No change to invoice or billing behavior is approved here.
+
 ## Known automation blockers
 
-Current blockers include FIN-BUG-001, FIN-BUG-002, FIN-BUG-003, FIN-BUG-006, FIN-DESIGN-001, FIN-DESIGN-002, FIN-DESIGN-003, FIN-DESIGN-004, FIN-DESIGN-005, FIN-DESIGN-007, FIN-DESIGN-008, FIN-DESIGN-009, and FIN-DESIGN-010. FIN-BUG-005 blocks robust multi-vendor scheduling; FIN-RISK-001 still requires runtime proof. Findings from future Audits C–G are unresolved and may add blockers.
+Current blockers include FIN-BUG-001, FIN-BUG-002, FIN-BUG-003, FIN-BUG-006, FIN-DESIGN-001, FIN-DESIGN-002, FIN-DESIGN-003, FIN-DESIGN-004, FIN-DESIGN-005, FIN-DESIGN-007, FIN-DESIGN-008, FIN-DESIGN-009, and FIN-DESIGN-010. FIN-BUG-005 blocks robust multi-vendor scheduling; FIN-RISK-001 still requires runtime proof. Audit C adds FIN-BUG-007, FIN-BUG-008, FIN-RISK-002, FIN-DESIGN-012, and FIN-DESIGN-013 for Logo/invoice-backed automation. FIN-RISK-003 remains a proof requirement rather than a confirmed blocker until reproduced, although automation design must account for it. Further Audits D–G may add blockers.
 
 **This list is not an implementation queue yet.** Roadmap placement happens only after discovery is complete.
 
@@ -610,8 +760,45 @@ No answer is assigned here. The product owner must explicitly decide:
 - Whether future/end-of-day eligibility may be drafted before real-time maturity.
 - Whether unresolved terminal refund evidence must block new automation.
 - What, if anything, constitutes payment-ready identity/completeness, including IBAN.
+- At which approved boundary, if any, Logo invoice evidence is required: before payout DRAFT, before REVIEW, before external EFT, another boundary, or independent of payout.
+- What provider evidence counts as invoice completion, and whether mixed invoice states may exist in one payment-ready pooled payout.
+- The operational disposition of Logo `FAILED` and `UNKNOWN` outcomes.
+- How zero or negative commission is documented for invoicing.
+- How later refund commission reversals and Financial Corrections are documented/accounted for in Logo.
+- Whether and how a settlement may be cancelled after an invoice is created.
+- What provider-total and VAT tolerance, if any, is permissible against frozen settlement economics.
 
-**UNRESOLVED PRODUCT DECISIONS MUST NOT BE IMPLEMENTED BY ASSUMPTION.** PAID remains explicit Admin confirmation of external payment.
+**THESE ARE NOT BUG FIXES. UNRESOLVED PRODUCT DECISIONS MUST NOT BE IMPLEMENTED BY ASSUMPTION.** PAID remains explicit Admin confirmation of external payment.
+
+## External questions register — unanswered
+
+Logo İşbaşı clarification required:
+
+1. Does invoice create support a client idempotency key?
+2. Is there a unique external or merchant reference field?
+3. What happens when an identical create POST is repeated?
+4. Can an invoice be queried reliably by our reference after a timeout?
+5. Can provider creation succeed despite a timeout or non-2xx response?
+6. What does a successful 2xx create response mean?
+7. Which identifier and status prove actual/legal issuance?
+8. Which identifiers are guaranteed unique, and within what tenant scope?
+9. Which cancellation, void, amendment, credit-note, and refund-document operations exist?
+10. How does Logo round VAT for one aggregated line?
+11. How are zero/negative totals and mixed VAT rates handled?
+12. Is the current hardcoded `34000` postal-code fallback acceptable for a production invoice?
+
+Accounting/tax clarification required:
+
+- What event triggers the marketplace commission invoice, and how does its timing relate to vendor payment?
+- How must Logo `FAILED` and `UNKNOWN` outcomes be treated operationally/accountingly?
+- What documentation is required for a later refund commission reversal or Financial Correction?
+- What happens to an issued invoice when its settlement is cancelled?
+- How are zero/negative commission and mixed VAT handled?
+- What VAT/total variance, if any, is acceptable between the frozen settlement and provider document?
+- May a pooled payout have multiple settlement invoices in different states and still be considered payment-ready?
+- Is the hardcoded `34000` postal-code fallback acceptable on an invoice?
+
+No provider or accounting answer is assumed by recording these questions.
 
 ## Maintenance rule
 
