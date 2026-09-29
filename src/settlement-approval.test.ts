@@ -1042,6 +1042,82 @@ describe('settlement approval foundation', () => {
     expect(preview.summary.candidateQualityWarnings).not.toContain('Vendor-wide preview can include historical or test rows.');
   });
 
+  it('reports an integrity-filtered selected order as excluded without changing preview money', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-alert', entryType: 'sale', amount: 1000, sourceShopifyOrderNumber: '#1074' }),
+      buildLedgerRow({ id: 'sale-safe', entryType: 'sale', amount: 500, sourceShopifyOrderNumber: '#1073' }),
+    ]);
+    prismaMock.financeIntegrityAlert.findMany.mockImplementation(async ({ where }) =>
+      where.OR[0].vendorAllocationId === 'alloc-sale-alert'
+        ? [{ category: 'multiple_active_sale_ledgers' }]
+        : [],
+    );
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1074', '#1073'],
+    });
+
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual(['sale-safe']);
+    expect(preview.summary).toMatchObject({
+      eligibleRowCount: 1,
+      grossSalesMinor: 50000,
+      refundTotalMinor: 0,
+      commissionMinor: 5000,
+      commissionVatMinor: 1000,
+      netPayableMinor: 44000,
+    });
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        requestedIdentifier: '#1074',
+        financeLedgerEntryId: 'sale-alert',
+        matched: true,
+        candidateIncluded: false,
+        excludedReason: 'Money movement blocked by blocking finance integrity alert: multiple_active_sale_ledgers.',
+      }),
+      expect.objectContaining({
+        requestedIdentifier: '#1073',
+        financeLedgerEntryId: 'sale-safe',
+        candidateIncluded: true,
+        excludedReason: null,
+      }),
+    ]);
+  });
+
+  it('reports the final included ledger row when one allocation of a selected order has an alert', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-alert', entryType: 'sale', amount: 1000, sourceShopifyOrderNumber: '#1074' }),
+      buildLedgerRow({ id: 'sale-safe', entryType: 'sale', amount: 500, sourceShopifyOrderNumber: '#1074' }),
+    ]);
+    prismaMock.financeIntegrityAlert.findMany.mockImplementation(async ({ where }) =>
+      where.OR[0].vendorAllocationId === 'alloc-sale-alert'
+        ? [{ category: 'multiple_active_sale_ledgers' }]
+        : [],
+    );
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1074'],
+    });
+
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual(['sale-safe']);
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        requestedIdentifier: '#1074',
+        financeLedgerEntryId: 'sale-safe',
+        candidateIncluded: true,
+        excludedReason: null,
+      }),
+    ]);
+    expect(preview.summary).toMatchObject({
+      eligibleRowCount: 1,
+      grossSalesMinor: 50000,
+      commissionMinor: 5000,
+      commissionVatMinor: 1000,
+      netPayableMinor: 44000,
+    });
+  });
+
   it('previews only rows matching selected allocation ids and reports unmatched allocations', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildLedgerRow({ id: 'sale-selected', entryType: 'sale', amount: 1000 }),
@@ -1895,6 +1971,51 @@ describe('settlement approval foundation', () => {
     expect(approval.lines[0]).toMatchObject({
       financeLedgerEntryId: 'sale-1074',
     });
+  });
+
+  it('keeps an integrity-filtered selected order out of draft membership', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-alert', entryType: 'sale', amount: 1000, sourceShopifyOrderNumber: '#1074' }),
+      buildLedgerRow({ id: 'sale-safe', entryType: 'sale', amount: 500, sourceShopifyOrderNumber: '#1073' }),
+    ]);
+    prismaMock.financeIntegrityAlert.findMany.mockImplementation(async ({ where }) =>
+      where.OR[0].vendorAllocationId === 'alloc-sale-alert'
+        ? [{ category: 'multiple_active_sale_ledgers' }]
+        : [],
+    );
+    prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+    prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
+      ...buildApproval({ id: 'settlement-approval-selected', status: 'DRAFT' }),
+      ...data,
+      id: 'settlement-approval-selected',
+      correctionCreditLines: [],
+      correctionDeductionLines: [],
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-${index}`,
+        settlementApprovalId: 'settlement-approval-selected',
+        ...line,
+      })),
+    }));
+
+    const approval = await createDraftApproval({
+      vendorId: 'vendor-a',
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1074', '#1073'],
+    });
+
+    expect(prismaMock.settlementApproval.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          grossSalesMinor: 50000,
+          commissionMinor: 5000,
+          commissionVatMinor: 1000,
+          netPayableMinor: 44000,
+          lines: { create: [expect.objectContaining({ financeLedgerEntryId: 'sale-safe' })] },
+        }),
+      }),
+    );
+    expect(approval.lines.map((line) => line.financeLedgerEntryId)).toEqual(['sale-safe']);
   });
 
   it('approves only draft approvals without invoice or payout execution', async () => {

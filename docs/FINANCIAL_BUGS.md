@@ -79,17 +79,17 @@ Audit F supplied read-only production-state findings for this register. The repo
 
 - **Domain:** Settlement preview diagnostics.
 - **Classification:** CONFIRMED_BUG.
-- **Status:** OPEN.
-- **Finding:** Selected-order diagnostic can set `candidateIncluded = true` while a blocking `FinanceIntegrityAlert` later removes the row from actual preview candidates.
-- **Exact current behavior:** Diagnostic and financial preview disagree for the same selected source.
-- **Current impact:** Admin cannot reliably see why a source was excluded.
+- **Status:** FIXED_NOT_VERIFIED — implementation and focused/full local tests passed; deployed read-only runtime verification remains outstanding.
+- **Finding:** The selected-order diagnostic previously set `candidateIncluded = true` while a blocking `FinanceIntegrityAlert` removed the row from actual preview candidates.
+- **Exact current behavior:** Diagnostic inclusion now derives from final filtered preview-line membership. A selected row removed by the existing integrity-alert filter reports excluded through the existing `excludedReason` field, using the observed alert category; a surviving row reports included. Economic eligibility, line membership, and settlement amounts are unchanged.
+- **Current impact:** The local diagnostic/preview contradiction is repaired; production incidence and deployed behavior remain UNKNOWN.
 - **Automation impact:** Explanation/triage blocker; not itself proof of duplicate monetary authority.
-- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (selected-order diagnostic construction and candidate selection/filtering); `backend/prisma/schema.prisma` (`FinanceIntegrityAlert`).
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (final line IDs and observed alert category passed to selected-order diagnostics); `src/settlement-approval.test.ts` (selected alert, same-order multi-row, and DRAFT membership regressions); `backend/prisma/schema.prisma` (`FinanceIntegrityAlert`). No API shape, Prisma schema, migration, or production-data change.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No identified new product rule.
 - **External clarification required?** No.
-- **Minimum future repair boundary:** Derive diagnostic inclusion from the same final blocker-aware candidate decision as preview.
-- **Validation required before CLOSED:** Selected-order plus blocking-alert regression comparing diagnostic and resulting candidate list.
+- **Minimum future repair boundary:** Implemented locally within selected-order diagnostics; no economic-selection repair was made.
+- **Validation required before CLOSED:** Focused selected-order/blocking-alert and broader preview/DRAFT tests passed locally. After deployment, read-only runtime comparison of diagnostic and resulting preview lines/totals for a naturally occurring suitable case remains required where available; do not manufacture a production finance mutation.
 
 ### FIN-BUG-005 — One correction deduction can abort a whole scheduled dry-run
 
@@ -787,13 +787,13 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Validation required before CLOSED:** Reachability proof and focused hold regression.
 
 ### FIN-TEST-005 — No selected-order/alert diagnostic consistency test
-- **Domain:** Preview diagnostic tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
-- **Finding / exact current behavior:** No paired assertion proves `candidateIncluded` matches final preview after a blocking FinanceIntegrityAlert.
-- **Current impact:** FIN-BUG-004 is unguarded. **Automation impact:** Exception explanation risk.
-- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (diagnostic/filter); preview tests.
+- **Domain:** Preview diagnostic tests. **Classification:** TEST_COVERAGE_GAP. **Status:** FIXED_NOT_VERIFIED — focused regression exists and passed locally; deployed parent-defect verification remains outstanding.
+- **Finding / exact current behavior:** `src/settlement-approval.test.ts` now pairs a blocking allocation alert with final preview lines and selected-order diagnostics, including unaffected and same-order sibling rows; a DRAFT regression checks unchanged membership and money.
+- **Current impact:** This local test gap is covered; FIN-BUG-004 remains pending deployed runtime verification. **Automation impact:** No automation is authorized by this test.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (diagnostic/filter); `src/settlement-approval.test.ts` (focused regression).
 - **Production incidence:** UNKNOWN. **Product decision required?** No. **External clarification required?** No.
-- **Minimum future repair boundary:** Add blocking-alert selected-order fixture.
-- **Validation required before CLOSED:** Diagnostic and actual candidate list agree in focused test.
+- **Minimum future repair boundary:** Completed in focused local tests without a monetary-predicate change.
+- **Validation required before CLOSED:** Focused diagnostic/final-line and DRAFT membership tests passed; parent runtime verification remains outstanding.
 
 ### FIN-TEST-006 — Refund-tab classification not proven against detail issues
 - **Domain:** Admin settlement UI tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.

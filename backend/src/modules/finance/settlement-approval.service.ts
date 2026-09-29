@@ -1492,11 +1492,14 @@ function getActiveApprovalLine(row: SettlementApprovalLedgerRow) {
 function buildMatchedOrderDiagnostic(
   requestedIdentifier: string,
   row: SettlementApprovalLedgerRow,
+  finalLineIds: ReadonlySet<string>,
+  blockingAlertCategoriesByRowId: ReadonlyMap<string, string>,
   asOfDate?: Date | null,
 ): SelectedOrderDiagnosticDto {
   const explanation = buildSettlementEligibilityExplanation(row, asOfDate);
   const activeApprovalLine = getActiveApprovalLine(row);
-  const candidateIncluded = rowIsEligible(row, undefined, asOfDate) && !activeApprovalLine;
+  const candidateIncluded = finalLineIds.has(row.id);
+  const blockingAlertCategory = blockingAlertCategoriesByRowId.get(row.id);
 
   return {
     requestedIdentifier,
@@ -1505,7 +1508,11 @@ function buildMatchedOrderDiagnostic(
     matchedShopifyOrderId: row.vendorAllocation?.sourceShopifyOrderId ?? null,
     financeLedgerEntryId: row.id,
     candidateIncluded,
-    excludedReason: candidateIncluded ? null : explanation.eligibilityReason,
+    excludedReason: candidateIncluded
+      ? null
+      : blockingAlertCategory && !activeApprovalLine
+        ? `Money movement blocked by blocking finance integrity alert: ${blockingAlertCategory}.`
+        : explanation.eligibilityReason,
     lockedApprovalId: activeApprovalLine?.settlementApproval.id ?? null,
     lockedApprovalStatus: activeApprovalLine?.settlementApproval.status ?? null,
     currentSettlementStatus: row.settlementStatus,
@@ -1575,6 +1582,8 @@ function buildSelectedOrderDiagnostics(
   rows: SettlementApprovalLedgerRow[],
   input: SettlementApprovalInput,
   crossVendorRows: SettlementApprovalLedgerRow[] = [],
+  finalLineIds: ReadonlySet<string>,
+  blockingAlertCategoriesByRowId: ReadonlyMap<string, string>,
   asOfDate?: Date | null,
 ): SelectedOrderDiagnosticDto[] {
   const requestedOrders = normalizeSelectionValues([
@@ -1587,12 +1596,19 @@ function buildSelectedOrderDiagnostics(
 
   return requestedOrders.map((requestedIdentifier) => {
     const matchedRows = rows.filter((row) => orderMatchesIdentifier(row, requestedIdentifier));
-    const includedRow = matchedRows.find((row) => rowIsEligible(row, undefined, asOfDate) && !rowHasActiveApproval(row));
+    const includedRow = matchedRows.find((row) => finalLineIds.has(row.id));
     const eligibleLockedRow = matchedRows.find((row) => rowIsEligible(row, undefined, asOfDate) && rowHasActiveApproval(row));
-    const firstMatchedRow = includedRow ?? eligibleLockedRow ?? matchedRows[0];
+    const alertBlockedRow = matchedRows.find((row) => blockingAlertCategoriesByRowId.has(row.id));
+    const firstMatchedRow = includedRow ?? eligibleLockedRow ?? alertBlockedRow ?? matchedRows[0];
 
     if (firstMatchedRow) {
-      return buildMatchedOrderDiagnostic(requestedIdentifier, firstMatchedRow, asOfDate);
+      return buildMatchedOrderDiagnostic(
+        requestedIdentifier,
+        firstMatchedRow,
+        finalLineIds,
+        blockingAlertCategoriesByRowId,
+        asOfDate,
+      );
     }
 
     return buildUnmatchedOrderDiagnostic(requestedIdentifier, rows, crossVendorRows, asOfDate);
@@ -1996,14 +2012,18 @@ async function buildApprovalPreview(
   const candidateSelection = filterRowsByCandidateSelection(rows as SettlementApprovalLedgerRow[], input);
   const eligibleRows = candidateSelection.rows.filter((row) => rowIsEligible(row, undefined, input.asOfDate));
   const integritySafeRows: SettlementApprovalLedgerRow[] = [];
+  const blockingAlertCategoriesByRowId = new Map<string, string>();
   for (const row of eligibleRows) {
     const blockingAlerts = await getBlockingIntegrityAlertsForRow(tx, row);
     if (blockingAlerts.length === 0) {
       integritySafeRows.push(row);
+    } else {
+      blockingAlertCategoriesByRowId.set(row.id, blockingAlerts[0].category);
     }
   }
   const unapprovedRows = integritySafeRows.filter((row) => !rowHasActiveApproval(row));
   const lines = unapprovedRows.map((row) => buildLine(row, input.asOfDate));
+  const finalLineIds = new Set(lines.map((line) => line.financeLedgerEntryId));
   // Explicit order/allocation/date scopes must not silently pull in an unrelated credit.
   const correctionCredits = candidateSelection.candidateScope === 'vendor_wide'
     ? await getAvailableFinancialCorrectionCredits(tx, input.vendorId)
@@ -2049,6 +2069,8 @@ async function buildApprovalPreview(
       rows as SettlementApprovalLedgerRow[],
       input,
       crossVendorRows as SettlementApprovalLedgerRow[],
+      finalLineIds,
+      blockingAlertCategoriesByRowId,
       input.asOfDate,
     ),
     summary: {
