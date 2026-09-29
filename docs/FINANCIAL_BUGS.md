@@ -15,6 +15,8 @@ Audit C added Logo İşbaşı/accounting findings at repository baseline `f4e92d
 
 Audit D added payment-operations evidence at repository baseline `783064da24bb62150609b85cc3c274bd239b87b1`. It did not establish bank/EFT facts or approve a payment-ready rule.
 
+Audit E added finance-orchestration evidence at repository baseline `af59454e0084f20473e3a64a6cff38b5779d4712`. It did not enable a scheduler, approve unattended financial transitions, or establish provider/bank retry guarantees.
+
 ## Confirmed functional defects
 
 ### FIN-BUG-001 — SALE refund impact bypasses settlement delay
@@ -26,6 +28,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** The same source can enter a DRAFT before delivery/waiting-period maturity and then be rejected at approval. An existing test expects an unfulfilled refunded SALE to be included; this is not just missing coverage.
 - **Current impact:** Preview/DRAFT and approval give conflicting eligibility answers.
 - **Automation impact:** BLOCKER; preview/DRAFT is not final economic authority.
+- **Audit E evidence:** A future worker cannot safely promote scheduled preview or DRAFT inclusion to approval authority; approval still performs its own revalidation and can reject this same refunded SALE.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (`rowIsEligible`, preview candidate filtering, approval revalidation); `backend/src/modules/finance/finance.service.ts` (settlement status derivation); settlement eligibility tests under `src/`.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No decision established for this predicate mismatch; preserve legitimate REFUND authority.
@@ -42,6 +45,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** A cancelled cycle may appear READY while an attempted replacement fails on PostgreSQL insertion.
 - **Current impact:** Operator-facing readiness contradicts durable cycle identity.
 - **Automation impact:** BLOCKER for unattended DRAFT creation and cycle retry.
+- **Audit E evidence:** The scheduled DRAFT transaction rechecks active approvals, but cancellation retains the unconditionally unique cycle key. Neither a repeated job date nor a fresh preview can make that key reusable.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-schedule.service.ts` (`findExistingScheduledApproval`, dry-run and create flow); `backend/src/modules/finance/settlement-approval.service.ts` (scheduled precheck, cancellation); `backend/prisma/schema.prisma` (`SettlementApproval.scheduledCycleKey @unique`).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: permanently consumed identity, a new replacement identity, or active-only uniqueness are unresolved alternatives.
@@ -58,6 +62,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** `delivery + settlementDelayDays` can move forward after a delivered shipment refresh.
 - **Current impact:** Previously matured sources can appear not yet mature.
 - **Automation impact:** BLOCKER until a stable delivery-time authority is established.
+- **Audit E evidence:** Replaying scheduled selection cannot stabilize an eligibility cutoff whose underlying delivery timestamp may move after provider refresh.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (SALE timing); `backend/src/modules/shopify/fulfillment-ingestion.service.ts` (`shipmentUpdatedAt` writes); `backend/prisma/schema.prisma` (`Fulfillment.shipmentUpdatedAt`).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** A stable authoritative delivered-event rule needs approval if the repository does not already establish one.
@@ -90,6 +95,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** One affected vendor can prevent useful results for unrelated vendors.
 - **Current impact:** Scheduled visibility fails across vendors rather than isolating the exception.
 - **Automation impact:** BLOCKER for robust multi-vendor automation. This is not permission to ignore the correction.
+- **Audit E evidence:** Individual DRAFT-creation exceptions are caught and later vendors continue. The preliminary dry-run, and the second dry-run before creation, have no per-vendor exception boundary; an exception there aborts the multi-vendor execution before later vendors are reached.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-schedule.service.ts` (multi-vendor dry-run loop); `backend/src/modules/finance/settlement-approval.service.ts` (date-range preview and correction scope checks).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes for how correction sources enter future scheduling; exception isolation itself does not authorize bypassing them.
@@ -106,6 +112,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** Saving finance settings can silently reactivate an intentionally inactive profile and replace prior settings.
 - **Current impact:** Vendor finance policy can change beyond the Admin's stated edit.
 - **Automation impact:** CRITICAL BLOCKER before any scheduler relies on `active=true`.
+- **Audit E evidence:** Schedule profile enumeration filters for `active=true`; the inactive-profile edit/reactivation defect therefore directly affects which vendors a future worker would consider.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`getVendorFinancialProfile`, `upsertVendorFinancialProfile`, `input.active ?? true`); `src/pages/VendorProfilePage.tsx` (finance-policy form/payload); `backend/prisma/schema.prisma` (`VendorFinancialProfile`).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No identified new business rule; inactive-state preservation is required.
@@ -122,6 +129,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** The partial unique DB index protects against a second active **local** invoice record for the settlement/provider, not a second provider POST for the same record.
 - **Current impact:** Duplicate external create requests are possible. Whether Logo actually issues two invoices is UNKNOWN.
 - **Automation impact:** CRITICAL BLOCKER before unattended Logo create.
+- **Audit E evidence:** The external POST has no durable exclusive pre-send claim. A crash after provider send but before local result persistence can leave apparently executable local state despite an UNKNOWN external outcome; unattended replay is unsafe. Provider idempotency remains UNKNOWN.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (status read, validation, provider send); `backend/src/modules/finance/settlement-commission-invoice-record.service.ts` (status updates); `backend/prisma/migrations/20260610170000_add_settlement_commission_invoice_model/migration.sql` (active-record partial unique index).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No new business rule established by this concurrency defect.
@@ -172,6 +180,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** A `FAILED` record can be retried; whether a prior non-2xx response followed an external creation is UNKNOWN.
 - **Current impact:** A retry may theoretically duplicate an externally created invoice; no production duplicate is established.
 - **Automation impact:** BLOCKER for automatic `FAILED` retry.
+- **Audit E evidence:** Crash-after-send and non-2xx outcomes require different treatment from a proven pre-send failure; the current finance job has no general retry classification that can establish safe provider resend.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (non-2xx, timeout, and retry handling).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No retry policy should be selected before provider semantics are established.
@@ -188,6 +197,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Exact current behavior:** A concurrent cancellation/request-snapshot race is possible from the separate checks, but its durable outcome has not been reproduced against PostgreSQL; this is not classified as a confirmed bug.
 - **Current impact:** Potential inconsistency in settlement cancellation versus invoice reservation; production incidence is unproven.
 - **Automation impact:** Proof requirement for unattended snapshot creation, not a confirmed blocker until reproduced; automation design must account for it.
+- **Audit E evidence:** A PENDING snapshot is a durable local intent and active-invoice uniqueness prevents another active record, but that constraint alone does not prove snapshot insertion and settlement cancellation serialize correctly.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-logo-request-snapshot-builder.service.ts`; `backend/src/modules/finance/settlement-commission-invoice-record.service.ts` (record insertion); `backend/src/modules/finance/settlement-approval.service.ts` (cancellation invoice check).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Reservation/cancellation policy remains unresolved if the race is confirmed.
@@ -201,6 +211,7 @@ Audit D added payment-operations evidence at repository baseline `783064da24bb62
 - **Classification:** NEEDS_RUNTIME_PROOF / POLICY_GAP.
 - **Status:** NEEDS_RUNTIME_PROOF.
 - **Finding:** Payment Preparation sends browser click-time as `paidAt`; Admin cannot enter the actual EFT execution time in that UI. Backend accepts any syntactically parseable date, with no established future-date or historical-distance bound.
+- **Audit E evidence:** No local retry or orchestration state can reconstruct an external EFT sent while the application was unavailable. Bank/operator evidence remains necessary; PAID remains an explicit Admin action.
 - **Exact current behavior:** The supplied timestamp becomes `PayoutBatch.paidAt` and ledger `settledAt`. Whether it matches the external transfer event is not verified by the application.
 - **Current impact:** Historical local payment time may differ from actual bank time; production incidence is UNKNOWN. The field is not labeled wrong until its intended semantics are approved.
 - **Automation impact:** `paidAt` cannot be treated as authoritative external-bank execution time without a contract and evidence.
@@ -286,6 +297,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Status:** OPEN.
 - **Finding:** Job-run identity is unique by run date; failed/processing dates are not simply rerun.
 - **Exact current behavior:** A later due run can cumulatively collect older unclaimed sources, but this is not an explicit retry/catch-up contract.
+- **Audit E evidence:** `SettlementScheduleJobRun.runDate` is unique by UTC date. PROCESSING and FAILED runs cannot resume through the same job command: any duplicate date is returned as already processed regardless of persisted status. The finance job has no lease, heartbeat, stale timeout, takeover, per-vendor checkpoint, or same-date resume. A crash before the final run update can leave committed vendor DRAFTs with a PROCESSING run and no durable per-vendor result. Later cumulative selection is not a defined recovery contract; see FIN-UI-015 and FIN-TEST-015.
 - **Current impact:** Operators cannot infer whether a missed run is retried, skipped, or folded into the next cycle.
 - **Automation impact:** BLOCKER for unattended scheduler recovery.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-schedule.service.ts` (job run, cycle key, dry-run/create); `backend/prisma/schema.prisma` (`SettlementScheduleJobRun`).
@@ -320,6 +332,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Exact current behavior:** Vendor debt offset is calculated and frozen at payout preparation. New debt after DRAFT does not recalculate that batch. REVIEW and Mark Paid revalidate its attached sources but do not perform a fresh vendor-wide debt calculation.
 - **Current impact:** The batch can progress with its original offset although the vendor's current outstanding debt differs. Whether that makes the batch stale, or requires cancellation/rebuild, remains an unresolved product decision.
 - **Automation impact:** BLOCKER for payment-ready semantics.
+- **Audit E evidence:** Payout preparation uses a vendor row lock and Serializable transaction with active-source checks, protecting local selection. It has no deterministic preparation-request identity: a retry after a successful but unobserved commit cannot identify its prior batch from a logical run key, and newly approved sources or debt can change the selection.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`, debt offset, REVIEW/PAID revalidation); vendor-balance service.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: debt cutoff and stale-payout disposition.
@@ -336,6 +349,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Exact current behavior:** Correction sources have no scheduled-cycle attribution, and scheduled date-range cannot truthfully include complete vendor economics by silently ignoring them.
 - **Current impact:** Scheduled processing cannot include every authorized correction under current scope rules.
 - **Automation impact:** BLOCKER.
+- **Audit E evidence:** A pending deduction's vendor-wide requirement can raise during the scheduled date-range dry-run before a job-run row or per-vendor failure record is created; this is an exception-isolation problem as well as a scope mismatch (FIN-BUG-005).
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (correction scope/selection); `backend/src/modules/finance/settlement-schedule.service.ts` (date-range call).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: correction source attribution and treatment in scheduled cycles.
@@ -352,6 +366,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Exact current behavior:** No approved contract establishes whether a zero batch should progress to REVIEW/PAID as accounting evidence or stop before payment workflow. Audit D confirmed that REVIEW and Mark Paid are status-driven, with no zero-net transition gate; this does not prove an external EFT exists for a zero batch.
 - **Current impact:** A zero-value batch can be presented within a payment process without clear meaning.
 - **Automation impact:** BLOCKER until disposition is approved.
+- **Audit E evidence:** The orchestration layer provides no structured policy blocker or retry class that would safely distinguish a zero accounting batch from an external payment instruction. No disposition is selected here.
 - **Evidence / relevant code locations:** `src/pages/AdminSettlementApprovalsPage.tsx` (zero-payable copy); `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`, payout transitions); payout tests under `src/`.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes.
@@ -368,6 +383,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Exact current behavior:** Preparation can represent negative ordinary payout amounts, and REVIEW/Mark Paid have no general negative-net gate. Correction-deduction preparation has its own insufficient-payable check. The authorized downstream disposition of a negative ordinary batch remains unresolved; full real-DB progression has not been proven.
 - **Current impact:** Admin/payment interpretation is ambiguous.
 - **Automation impact:** BLOCKER.
+- **Audit E evidence:** A future worker cannot infer automatic retry, REVIEW, or payment handling from a negative batch amount. No external negative-payment behavior is assumed.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`preparePayoutBatch`, payout status transitions); payout tests under `src/`.
 - **Production incidence:** UNKNOWN; real-DB progression is not proven.
 - **Product decision required?** Yes.
@@ -400,6 +416,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Exact current behavior:** An `UNKNOWN` invoice record may remain operationally stranded; provider existence or non-existence is not inferred.
 - **Current impact:** Admin cannot complete a proven resolution through the current invoice workspace.
 - **Automation impact:** BLOCKER for automated Logo workflow and exception recovery.
+- **Audit E evidence:** UNKNOWN blocks create retry and has no complete reachable operator-resolution workflow; autonomous recovery after an ambiguous provider send is therefore unavailable.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-commission-invoice-record.service.ts` (`resolveUnknownAsCreated`, `resolveUnknownAsFailed`); `backend/src/modules/finance/settlement-logo-commission-invoice-create.service.ts` (`UNKNOWN` retry block); `backend/src/modules/finance/finance.routes.ts` and `src/pages/AdminSettlementApprovalsPage.tsx` (no resolution action); `backend/src/modules/finance/settlement-approval.service.ts` (cancellation block).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Operational disposition and evidence standard remain unresolved.
@@ -432,6 +449,7 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Exact current behavior:** The creating and paying Admin can be persisted, but the reviewing Admin and exact review time are not. `updatedAt` is mutable and is not an authoritative review event.
 - **Current impact:** The system cannot later prove who performed the human review gate or exactly when.
 - **Automation impact:** BLOCKER if REVIEW remains a meaningful future human control boundary.
+- **Audit E evidence:** REVIEW is currently an Admin-triggered operational boundary. Calling the same transition from a worker would materially alter its meaning while still leaving no durable reviewer/time evidence; no automatic REVIEW rule is approved.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/finance.service.ts` (`markPayoutBatchReview`); `backend/prisma/schema.prisma` (`PayoutBatch`); `backend/src/modules/finance/finance.routes.ts` (Admin route).
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** Yes: REVIEW's intended future semantic role remains unresolved.
@@ -665,6 +683,22 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Minimum future repair boundary:** Define the approved payment-ready evidence contract, then expose its provenance coherently without changing historical finance authority.
 - **Validation required before CLOSED:** Approved contract and pooled-payout backend/UI/browser evidence across mixed settlement and invoice states.
 
+### FIN-UI-015 — Duplicate finance job request can misrepresent FAILED/PROCESSING as already processed
+
+- **Domain:** Settlement schedule job and Admin API.
+- **Classification:** BACKEND_UI_MISMATCH.
+- **Status:** OPEN.
+- **Finding:** `SettlementScheduleJobRun.runDate` is unique. A duplicate-date request can return `ok: true` and vendor state `ALREADY_PROCESSED` without distinguishing an existing COMPLETED, FAILED, or PROCESSING run.
+- **Exact current behavior:** The collision path reads the existing run status but builds vendor results from a fresh dry-run, marking them `ALREADY_PROCESSED` rather than returning authoritative persisted vendor outcomes.
+- **Current impact:** An operator or client may interpret unfinished, failed, or stale work as completed.
+- **Automation impact:** BLOCKER for truthful unattended recovery and operator status.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-schedule-job.service.ts` (`runSettlementScheduleAutoDraftJob`, `buildVendorResults`); `backend/prisma/schema.prisma` (`SettlementScheduleJobRun.runDate @unique`).
+- **Production incidence:** UNKNOWN. **Predates proposed automation?** Yes.
+- **Product decision required?** Yes for failed/stale-run recovery semantics; accurate status reporting does not select them.
+- **External clarification required?** No.
+- **Minimum future repair boundary:** Report authoritative persisted run status and vendor outcome instead of collapsing every run-date collision into successful already-processed behavior. Do not choose retry or takeover semantics here.
+- **Validation required before CLOSED:** Real PostgreSQL duplicate-run tests for COMPLETED, FAILED, and PROCESSING; approved stale-run recovery behavior; API/UI status verification.
+
 ## Test-quality gaps
 
 Each entry describes absent or insufficiently proven coverage at this baseline, not a new business requirement.
@@ -740,6 +774,7 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Production incidence:** UNKNOWN. **Product decision required?** Yes if cycle completeness desired. **External clarification required?** No.
 - **Minimum future repair boundary:** Add overlap/race fixture after grouping policy is clear.
 - **Validation required before CLOSED:** Real PostgreSQL source-claim and resulting cycle behavior.
+- **Audit E evidence:** Manual and scheduled DRAFT creation share a vendor row lock and Serializable creation transaction, but the preview-to-write interval and cycle result after manual consumption remain unproven in a real DB race.
 
 ### FIN-TEST-009 — No real-DB multiple-cycle-to-pooled-payout test
 - **Domain:** Payout grouping tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
@@ -749,6 +784,7 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Production incidence:** UNKNOWN. **Product decision required?** Yes, FIN-DESIGN-004. **External clarification required?** No.
 - **Minimum future repair boundary:** Add integrated fixture without choosing future grouping semantics by assumption.
 - **Validation required before CLOSED:** Real-DB pooled mixed-cycle sources and UI payment-dossier/source-reference verification under approved contract.
+- **Audit E evidence:** Vendor-locked payout preparation protects local candidate selection but has no logical payment-run idempotency key; the proposed fixture should distinguish economic source non-duplication from replaying the same preparation request.
 
 ### FIN-TEST-010 — No real-DB debt-after-DRAFT progression proof
 - **Domain:** Debt/payout timing tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
@@ -783,6 +819,7 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **External clarification required?** Yes for provider-safe retries, not for reproducing local concurrency.
 - **Minimum future repair boundary:** Add real-DB concurrency and crash-boundary coverage after an approved execution repair.
 - **Validation required before CLOSED:** Relevant real PostgreSQL concurrent-create and competing-transition tests plus provider-safe integration evidence.
+- **Audit E evidence:** Include the send-before-local-persistence crash window and confirm whether the same PENDING/FAILED record remains executable; do not treat a mocked provider response as proof of provider idempotency.
 
 ### FIN-TEST-013 — No aggregate VAT, provider mismatch, or mixed-invoice pooled-payout coverage
 
@@ -816,14 +853,40 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Minimum future repair boundary:** After those contracts are approved, add targeted real-DB and Admin browser coverage without using mocked bank success as proof of EFT.
 - **Validation required before CLOSED:** Approved contract, focused backend tests, real PostgreSQL generic payout flow, relevant browser verification, and operational evidence where applicable.
 
+### FIN-TEST-015 — No real-DB finance job crash/replay/two-instance coverage
+
+- **Domain:** Finance orchestration testing.
+- **Classification:** TEST_COVERAGE_GAP.
+- **Status:** OPEN.
+- **Finding:** Current finance job tests use mocked persistence and do not establish real PostgreSQL behavior for stale PROCESSING, FAILED same-date replay, crash after PROCESSING insertion, partial vendor success A/failure B/success C, crash before final run update, simultaneous starts from two backend instances, authoritative collision status, or per-vendor recovery.
+- **Exact current behavior:** Existing local finance-transition tests do not prove this job orchestration layer; no per-vendor checkpoint or same-date recovery is implemented.
+- **Current impact:** Duplicate-start and partial-run behavior cannot be treated as DB-verified operational recovery.
+- **Automation impact:** Required validation gap for unattended finance execution; this is not a new production bug classification.
+- **Evidence / relevant code locations:** `src/settlement-schedule-job.test.ts` (mocked job persistence); `backend/src/modules/finance/settlement-schedule-job.service.ts`; `backend/prisma/schema.prisma` (`SettlementScheduleJobRun`).
+- **Production incidence:** UNKNOWN.
+- **Product decision required?** Yes for expected retry and recovery results before closure tests can assert them.
+- **External clarification required?** No.
+- **Minimum future repair boundary:** Isolated PostgreSQL orchestration and crash/replay tests after recovery semantics are approved, including relevant multi-instance/concurrency coverage.
+- **Validation required before CLOSED:** Approved recovery contract plus passing isolated PostgreSQL tests for the listed states and truthful API results.
+
 ## External-information-only observations
 
 - **Audit C — Logo postal-code fallback:** The production Logo payload builder uses a hardcoded `34000` postal-code fallback because `billingPostalCode` is not modeled. **Status: EXTERNAL INFORMATION REQUIRED.** This is not classified as a legal or accounting defect without Logo/provider and accountant confirmation that the fallback is unacceptable. Evidence: `backend/src/modules/logo-isbasi/logo-isbasi-commission-preview.ts` (`readTemporaryBillingPostalCode`). No change to invoice or billing behavior is approved here.
 - **Audit D — bank/EFT evidence:** Repository state does not prove whether an external EFT was sent, completed, cancelled, rejected, returned, or duplicated. FIN-RISK-004 is an evidence/policy clarification, not a confirmed monetary bug. Repository-side design can continue while the bank/operator questions below are collected, but final EFT exception and reconciliation semantics require their answers.
 
+## Audit E orchestration facts — no automation approval
+
+- The finance auto-draft job is triggered through an authenticated Admin route. No finance startup scheduler registration was found. It creates settlement DRAFTs only; it does not approve settlements, create Logo invoices, prepare payouts, enter REVIEW, or mark PAID.
+- Settlement DRAFT creation and payout preparation use PostgreSQL-backed vendor row locks and Serializable transactions. These local economic protections are useful foundations, not an end-to-end orchestrator.
+- Current classification: **PARTIAL_JOB_STATE; NO_END_TO_END_STATE**. A date-keyed job row records aggregate results, but no durable cross-step execution state correlates settlement, approval, Logo, and payout. There is no per-vendor checkpoint or finance lease/heartbeat.
+- The maximum evidence-supported unattended boundary is **READ-ONLY SCHEDULE SELECTION / DRY-RUN AS ADVISORY DIAGNOSTICS ONLY**. Even dry-run may fail to return a complete all-vendor result when one vendor preview throws. This is **not** permission to enable the existing write job or any later financial transition.
+- No general finance retry taxonomy reliably chooses AUTO RETRY versus ADMIN RESOLUTION for every failure. Schedule job metadata primarily persists error strings rather than complete structured failure classes. Deterministic validation, DB serialization or uniqueness collisions, stale PROCESSING, Logo UNKNOWN/non-2xx, payout source conflicts, new debt, zero/negative payout, and EFT uncertainty require distinct treatment; no new retry policy is selected here.
+- Roadmap-input capability categories: durable run and per-vendor execution identities, per-vendor checkpoints, exclusive claims, lease/ownership and stale takeover, structured failure classes, safe command replay, cross-step correlation, provider reconciliation, manual takeover, operator-visible exception queue, explicit kill-switch semantics, and retry-attempt evidence. **These are capability categories only; no schema or API design is approved.**
+- Evidence: `backend/src/modules/finance/finance.routes.ts` (Admin trigger); `backend/src/modules/finance/settlement-schedule-job.service.ts` (run state/replay); `backend/src/modules/finance/settlement-schedule.service.ts` (dry-run/create); `backend/src/modules/finance/settlement-approval.service.ts` and `backend/src/modules/finance/finance.service.ts` (local transactions); `backend/src/app.ts` (startup registrations); `backend/prisma/schema.prisma` (`SettlementScheduleJobRun`).
+
 ## Known automation blockers
 
-Current blockers include FIN-BUG-001, FIN-BUG-002, FIN-BUG-003, FIN-BUG-006, FIN-DESIGN-001, FIN-DESIGN-002, FIN-DESIGN-003, FIN-DESIGN-004, FIN-DESIGN-005, FIN-DESIGN-007, FIN-DESIGN-008, FIN-DESIGN-009, and FIN-DESIGN-010. FIN-BUG-005 blocks robust multi-vendor scheduling; FIN-RISK-001 still requires runtime proof. Audit C adds FIN-BUG-007, FIN-BUG-008, FIN-RISK-002, FIN-DESIGN-012, and FIN-DESIGN-013 for Logo/invoice-backed automation. Audit D adds FIN-DESIGN-014 and FIN-UI-014 for a future payment-ready human gate/dossier. FIN-RISK-003 remains a proof requirement rather than a confirmed blocker until reproduced; FIN-RISK-004 requires time/evidence policy clarification, not a presumed monetary fix. Further Audits E–G may add blockers.
+Current blockers include FIN-BUG-001, FIN-BUG-002, FIN-BUG-003, FIN-BUG-006, FIN-DESIGN-001, FIN-DESIGN-002, FIN-DESIGN-003, FIN-DESIGN-004, FIN-DESIGN-005, FIN-DESIGN-007, FIN-DESIGN-008, FIN-DESIGN-009, and FIN-DESIGN-010. FIN-BUG-005 blocks robust multi-vendor scheduling; FIN-RISK-001 still requires runtime proof. Audit C adds FIN-BUG-007, FIN-BUG-008, FIN-RISK-002, FIN-DESIGN-012, and FIN-DESIGN-013 for Logo/invoice-backed automation. Audit D adds FIN-DESIGN-014 and FIN-UI-014 for a future payment-ready human gate/dossier. Audit E adds FIN-UI-015 as an orchestration/operator-truth blocker and FIN-TEST-015 as required validation coverage, **not** a production bug. FIN-RISK-003 remains a proof requirement rather than a confirmed blocker until reproduced; FIN-RISK-004 requires time/evidence policy clarification, not a presumed monetary fix. Later Audits F–G may add blockers.
 
 **This list is not an implementation queue yet.** Roadmap placement happens only after discovery is complete.
 
@@ -836,6 +899,13 @@ No answer is assigned here. The product owner must explicitly decide:
 - Whether payout is vendor-wide or cycle-bound, and whether multiple settlement cycles may be pooled.
 - Whether cancelled cycles can be replaced and how their identity is preserved.
 - Whether missed/failed cycles are retried, skipped, or caught up in a later run.
+- Which finance stages, if any, may operate unattended; whether automatic settlement approval has an eligible subset and a system actor.
+- Whether REVIEW remains a human boundary or has another explicitly approved meaning.
+- How a FAILED or stale PROCESSING run is retried or taken over, and who owns its exceptions; the current date-unique row does not define this.
+- Whether manual work or automation takes precedence when both attempt the same settlement, Logo, or payout step.
+- How abandoned Settlement DRAFTs and Payout DRAFT/REVIEW batches are handled; no expiry is assumed.
+- What durable payout preparation replay/grouping identity, if any, represents one logical payment run.
+- Who owns reconciliation and resolution of ambiguous Logo outcomes before another external send.
 - How zero and negative payout amounts are disposed of and whether either enters REVIEW/PAID.
 - The debt cutoff after payout DRAFT and how stale unpaid batches are handled.
 - How Financial Correction sources are attributed to a settlement cycle, if at all.
@@ -858,7 +928,7 @@ No answer is assigned here. The product owner must explicitly decide:
 - What `paidAt` represents: Admin confirmation, EFT initiation, EFT completion, or another event.
 - How to handle an EFT sent externally while the local payout remains REVIEW.
 
-**THESE MUST NOT BE IMPLEMENTED BY ASSUMPTION.** These are not bug fixes. PAID remains explicit Admin confirmation of external payment.
+**THESE DECISIONS MUST NOT BE IMPLEMENTED BY ASSUMPTION.** These are not bug fixes. PAID remains explicit Admin confirmation of external payment.
 
 ## External questions register — unanswered
 
