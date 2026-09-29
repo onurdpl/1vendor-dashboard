@@ -830,6 +830,88 @@ describe('settlement approval foundation', () => {
     );
   });
 
+  it('excludes a refund-aware sale before its frozen delay and admits it at the exact cutoff', async () => {
+    const sale = buildLedgerRow({
+      id: 'sale-refund-delay-boundary',
+      entryType: 'sale',
+      amount: 100,
+      deliveredAt: new Date('2026-06-01T00:00:00.000Z'),
+      settlementDelayDaysSnapshot: 21,
+      sourceShopifyOrderNumber: '#2010',
+      refundRecords: [{ id: 'refund-boundary', sourceShopifyRefundId: 'refund-boundary', amount: 20 }],
+    });
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([sale]);
+
+    const beforeCutoff = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2010'],
+      asOfDate: new Date('2026-06-21T23:59:59.999Z'),
+    });
+    expect(beforeCutoff.lines).toEqual([]);
+    expect(beforeCutoff.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        candidateIncluded: false,
+        derivedSettlementStatus: 'accruing',
+        excludedReason: 'Settlement delay period has not elapsed',
+      }),
+    ]);
+
+    const atCutoff = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2010'],
+      asOfDate: new Date('2026-06-22T00:00:00.000Z'),
+    });
+    expect(atCutoff.lines).toEqual([
+      expect.objectContaining({
+        financeLedgerEntryId: 'sale-refund-delay-boundary',
+        lineType: 'SALE',
+        amountMinor: 10000,
+        commissionMinor: 1000,
+        commissionVatMinor: 200,
+        payableImpactMinor: 8800,
+        derivedSettlementStatus: 'partially_refunded',
+      }),
+    ]);
+    expect(atCutoff.summary).toMatchObject({
+      grossSalesMinor: 10000,
+      commissionMinor: 1000,
+      commissionVatMinor: 200,
+      netPayableMinor: 8800,
+    });
+  });
+
+  it('uses each refund-aware sale frozen delay snapshot', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-refund-frozen-14', entryType: 'sale', amount: 100,
+        deliveredAt: new Date('2026-06-01T00:00:00.000Z'), settlementDelayDaysSnapshot: 14,
+        sourceShopifyOrderNumber: '#2011',
+        refundRecords: [{ id: 'refund-frozen-14', sourceShopifyRefundId: 'refund-frozen-14', amount: 10 }],
+      }),
+      buildLedgerRow({
+        id: 'sale-refund-frozen-28', entryType: 'sale', amount: 100,
+        deliveredAt: new Date('2026-06-01T00:00:00.000Z'), settlementDelayDaysSnapshot: 28,
+        sourceShopifyOrderNumber: '#2012',
+        refundRecords: [{ id: 'refund-frozen-28', sourceShopifyRefundId: 'refund-frozen-28', amount: 10 }],
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2011', '#2012'],
+      asOfDate: new Date('2026-06-22T00:00:00.000Z'),
+    });
+
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual(['sale-refund-frozen-14']);
+    expect(preview.selectedOrderDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ requestedIdentifier: '#2011', candidateIncluded: true }),
+      expect.objectContaining({
+        requestedIdentifier: '#2012', candidateIncluded: false,
+        excludedReason: 'Settlement delay period has not elapsed',
+      }),
+    ]));
+  });
+
   it('blocks sale settlement eligibility when delivery date is missing', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildLedgerRow({
@@ -1894,6 +1976,50 @@ describe('settlement approval foundation', () => {
     });
   });
 
+  it('does not create a draft from only an immature refund-aware sale', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-refund-delay-pending', entryType: 'sale', amount: 1000,
+        deliveredAt: new Date('2026-06-01T00:00:00.000Z'), settlementDelayDaysSnapshot: 21,
+        refundRecords: [{ id: 'refund-delay-pending', sourceShopifyRefundId: 'refund-delay-pending', amount: 100 }],
+      }),
+    ]);
+
+    await expect(createDraftApproval({
+      vendorId: 'vendor-a', asOfDate: new Date('2026-06-21T23:59:59.999Z'),
+    })).rejects.toThrow('No eligible settlement rows are available for approval.');
+    expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['PENDING', 'PARTIALLY_APPLIED'] as const)(
+    'does not let an immature refund-aware sale fund a %s refund adjustment',
+    async (status) => {
+      prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+        buildLedgerRow({
+          id: `sale-refund-adjustment-${status}`, entryType: 'sale', amount: 1000,
+          deliveredAt: new Date('2026-06-01T00:00:00.000Z'), settlementDelayDaysSnapshot: 21,
+          refundRecords: [{ id: `refund-${status}`, sourceShopifyRefundId: `refund-${status}`, amount: 100 }],
+        }),
+      ]);
+      prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([{
+        id: `adjustment-${status}`, originalOrderId: `order-${status}`,
+        refundRecordId: `refund-record-${status}`, refundFinanceLedgerEntryId: `refund-ledger-${status}`,
+        originalSettlementApprovalId: null, originalSettlementCommissionInvoiceId: null,
+        status, amountMinor: 40000, originalAmountMinor: 40000,
+        appliedAmountMinor: status === 'PARTIALLY_APPLIED' ? 10000 : 0,
+        remainingAmountMinor: status === 'PARTIALLY_APPLIED' ? 30000 : 40000,
+        currencyCode: 'TRY', reason: 'Existing refund adjustment.',
+      }]);
+
+      await expect(createDraftApproval({
+        vendorId: 'vendor-a', asOfDate: new Date('2026-06-21T23:59:59.999Z'),
+      })).rejects.toThrow('Adjustment-only settlement drafts are not supported yet.');
+      expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
+      expect(prismaMock.settlementRefundAdjustmentApplication.create).not.toHaveBeenCalled();
+      expect(prismaMock.settlementRefundAdjustment.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
   it('creates a draft from the same selected order candidate set used by preview', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildLedgerRow({
@@ -2062,6 +2188,28 @@ describe('settlement approval foundation', () => {
           reason: 'Ledger has been voided or superseded and cannot be approved.',
         }),
       ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps approval fail-closed for a stale refund-aware sale before its settlement delay', async () => {
+    const approval = buildApproval({ id: 'approval-1', status: 'DRAFT' });
+    approval.lines[0].sourceSnapshotJson = { financeLedgerEntryId: 'sale-1', refundCount: 1 };
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(approval);
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1', entryType: 'sale', amount: 1000,
+        deliveredAt: new Date('2999-01-01T00:00:00.000Z'),
+        activeApproval: true, activeApprovalId: 'approval-1',
+        refundRecords: [{ id: 'refund-existing', sourceShopifyRefundId: 'refund-existing', amount: 100 }],
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      name: 'SettlementApprovalRevalidationError',
+      reasons: [expect.objectContaining({
+        financeLedgerEntryId: 'sale-1', code: 'settlement_delay_not_satisfied',
+      })],
     });
     expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
   });
@@ -2593,7 +2741,7 @@ describe('settlement approval foundation', () => {
     ]);
   });
 
-  it('captures derived partially refunded explanation when stored status differs', async () => {
+  it('does not let refund-aware sale status bypass missing delivery evidence', async () => {
     const row = buildLedgerRow({
       id: 'sale-with-refund',
       entryType: 'sale',
@@ -2608,10 +2756,10 @@ describe('settlement approval foundation', () => {
     expect(line.sourceSnapshotJson).toEqual(
       expect.objectContaining({
         storedSettlementStatus: 'ACCRUING',
-        derivedSettlementStatus: 'partially_refunded',
+        derivedSettlementStatus: 'accruing',
         payoutStatus: 'PENDING',
-        eligibilityDecision: 'included',
-        eligibilityReason: 'Derived partially refunded because refund records exist.',
+        eligibilityDecision: 'excluded',
+        eligibilityReason: 'Missing delivery date for settlement eligibility',
         refundDetected: true,
         refundCount: 1,
         fulfillmentEvidencePresent: false,

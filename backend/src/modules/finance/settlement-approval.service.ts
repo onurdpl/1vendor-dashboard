@@ -489,6 +489,9 @@ function resolveSettlementStatus(
     return storedStatus;
   }
 
+  if (type === 'sale' && !evaluateSaleSettlementDelay(row, asOfDate ?? undefined).eligible) {
+    return 'accruing';
+  }
   if (type === 'refund' || sumRefundImpact(row.vendorAllocation?.refundRecords) > 0) {
     return 'partially_refunded';
   }
@@ -496,7 +499,7 @@ function resolveSettlementStatus(
     return 'held';
   }
   if (type === 'sale') {
-    return evaluateSaleSettlementDelay(row, asOfDate ?? undefined).eligible ? 'payable' : 'accruing';
+    return 'payable';
   }
   return storedStatus || 'pending';
 }

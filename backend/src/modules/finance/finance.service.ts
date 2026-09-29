@@ -871,6 +871,9 @@ export function getSettlementStatus(entry: {
     return storedStatus;
   }
 
+  if (type === 'sale' && !evaluateSaleSettlementDelay(entry).eligible) {
+    return 'accruing';
+  }
   if (type === 'refund' || sumRefundImpact(entry.vendorAllocation?.refundRecords) > 0) {
     return 'partially_refunded';
   }
@@ -878,7 +881,7 @@ export function getSettlementStatus(entry: {
     return 'held';
   }
   if (type === 'sale') {
-    return evaluateSaleSettlementDelay(entry).eligible ? 'payable' : 'accruing';
+    return 'payable';
   }
   return storedStatus;
 }

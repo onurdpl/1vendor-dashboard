@@ -112,6 +112,7 @@ function buildSaleFixture(input: {
 	  fulfilled?: boolean;
 	  deliveredAt?: string | null;
 	  settlementDelayDaysSnapshot?: number;
+	  refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount?: number }>;
 	  allocationStatus?: string;
 	  voidedAt?: Date | null;
 	  voidReason?: string | null;
@@ -173,7 +174,7 @@ function buildSaleFixture(input: {
       sourceShopifyOrderId: input.orderId,
       sourceShopifyOrderNumber: input.orderNumber,
       returnRecords: [],
-      refundRecords: [],
+      refundRecords: input.refundRecords ?? [],
     },
   };
 }
@@ -411,6 +412,25 @@ describe('persisted vendor finance calculations', () => {
     expect(historicalSale?.settlement).toMatchObject({
       status: 'payable',
       payoutReady: true,
+    });
+  });
+
+  it('does not project an immature refund-aware sale as payout ready', async () => {
+    ledgerRows = [buildSaleFixture({
+      id: 'fin-refund-aware-delay-pending', amount: 1000,
+      orderId: 'refund-aware-delay-pending', orderNumber: '#2020',
+      commissionPercentSnapshot: 10, commissionVatPercentSnapshot: 20,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      deliveredAt: '2999-01-01T00:00:00.000Z', settlementDelayDaysSnapshot: 21,
+      refundRecords: [{ id: 'refund-aware', sourceShopifyRefundId: 'refund-aware', amount: 100 }],
+    })];
+
+    const dashboard = await getVendorFinanceDashboard('sporjinal');
+
+    expect(dashboard.records[0].settlement).toMatchObject({
+      status: 'accruing',
+      payoutReady: false,
+      note: 'Accruing until delivery evidence and settlement delay are satisfied.',
     });
   });
 

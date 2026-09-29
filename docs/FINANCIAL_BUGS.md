@@ -25,19 +25,19 @@ Audit F supplied read-only production-state findings for this register. The repo
 
 - **Domain:** Settlement eligibility.
 - **Classification:** CONFIRMED_BUG.
-- **Status:** OPEN.
-- **Finding:** A SALE with positive refund impact can become `partially_refunded` before delivery/delay evaluation in preview or DRAFT selection; `rowIsEligible` accepts it. Approval later evaluates delivery delay for every SALE.
-- **Exact current behavior:** The same source can enter a DRAFT before delivery/waiting-period maturity and then be rejected at approval. An existing test expects an unfulfilled refunded SALE to be included; this is not just missing coverage.
-- **Current impact:** Preview/DRAFT and approval give conflicting eligibility answers.
-- **Automation impact:** BLOCKER; preview/DRAFT is not final economic authority.
-- **Audit F production evidence — CANNOT_PROVE_FROM_RETAINED_DATA:** Thirteen refunded SALE ledgers participate in settlements; ten had a RefundRecord before settlement creation. None of those ten settlements was created before its currently retained `settlementEligibleAt`, and none of their APPROVED subset was approved before it. Historical snapshots recorded refund detected/included and `partially_refunded`, but omit `refundOffsetAppliedBeforeSettlement`. No delay-bypass monetary incident was proven; the code defect remains OPEN.
-- **Audit E evidence:** A future worker cannot safely promote scheduled preview or DRAFT inclusion to approval authority; approval still performs its own revalidation and can reject this same refunded SALE.
-- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (`rowIsEligible`, preview candidate filtering, approval revalidation); `backend/src/modules/finance/finance.service.ts` (settlement status derivation); settlement eligibility tests under `src/`.
+- **Status:** FIXED_NOT_VERIFIED — implementation and focused/full local tests passed; production runtime verification remains outstanding.
+- **Finding:** A SALE with positive refund impact previously became `partially_refunded` before delivery/delay evaluation in preview or DRAFT selection; `rowIsEligible` accepted it while approval later evaluated delivery delay for every SALE.
+- **Exact current behavior:** Refund-aware SALE status now evaluates the existing frozen SALE delay predicate before deriving `partially_refunded`. An immature SALE remains `accruing` and is excluded from manual and scheduled preview/DRAFT selection; at the exact existing cutoff it can enter with the unchanged monetary calculation. Legitimate REFUND handling is unchanged, and approval retains its independent fail-closed revalidation.
+- **Current impact:** The locally reproduced preview/DRAFT versus approval eligibility contradiction is repaired. Production incidence and case-specific runtime behavior remain UNKNOWN.
+- **Automation impact:** The known local predicate blocker is repaired but not CLOSED pending safe production runtime verification.
+- **Audit F production evidence — CANNOT_PROVE_FROM_RETAINED_DATA:** Thirteen refunded SALE ledgers participate in settlements; ten had a RefundRecord before settlement creation. None of those ten settlements was created before its currently retained `settlementEligibleAt`, and none of their APPROVED subset was approved before it. Historical snapshots recorded refund detected/included and `partially_refunded`, but omit `refundOffsetAppliedBeforeSettlement`. No delay-bypass monetary incident was proven; this retained-data result does not provide runtime verification of the fix.
+- **Audit E evidence:** Before this repair, a future worker could not safely promote scheduled preview or DRAFT inclusion to approval authority; approval still performs its own revalidation and remains the final fail-closed check.
+- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (refund-aware SALE status ordering before `rowIsEligible`); `backend/src/modules/finance/finance.service.ts` (matching `payoutReady` projection ordering); `src/settlement-approval.test.ts`; `src/finance-persisted-calculation.test.ts`; `src/settlement-schedule.test.ts`; `src/fin-bug-001-settlement-delay-parity.postgres.test.ts`. Focused tests passed 97/97; the isolated PostgreSQL 16 regression passed 2/2 on the canonical fresh bootstrap; the full suite passed 3,468 with 146 skipped. Manual and scheduled selection parity, exact-cutoff behavior, frozen `settlementDelayDaysSnapshot`, non-consumption of an immature SALE's refund adjustment, and unchanged eligible-line arithmetic are covered. No settlement formula, refund/refund-adjustment arithmetic, approval rule, API shape, Prisma schema, migration, backfill, or historical record changed. FIN-BUG-003 remains OPEN and delivery timestamp authority is untouched.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No decision established for this predicate mismatch; preserve legitimate REFUND authority.
 - **External clarification required?** No identified external question for the local mismatch.
-- **Minimum future repair boundary:** Align SALE refund-impact eligibility with the authoritative delivery-delay predicate without altering legitimate REFUND authority; implementation is not chosen here.
-- **Validation required before CLOSED:** Paired preview/DRAFT/approval regression, including unfulfilled and refunded SALE cases and applicable real-DB validation.
+- **Minimum future repair boundary:** Implemented locally by ordering the existing SALE delay predicate before refund-aware SALE status derivation; do not broaden this into FIN-BUG-003 delivery-authority work.
+- **Validation required before CLOSED:** Safe production deployment and naturally occurring case-specific runtime verification; do not synthesize finance history solely for closure.
 
 ### FIN-BUG-002 — Cancelled scheduled cycle appears reusable but its DB key remains reserved
 
@@ -765,13 +765,13 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Validation required before CLOSED:** PostgreSQL cancelled-key/replacement/concurrency result matching approved semantics.
 
 ### FIN-TEST-002 — No paired refunded-SALE preview/DRAFT/approval delay test
-- **Domain:** Settlement eligibility tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
-- **Finding / exact current behavior:** Existing inclusion expectation is not paired with approval delivery-delay authority.
-- **Current impact:** FIN-BUG-001 mismatch is not guarded end to end. **Automation impact:** Eligibility regression risk.
-- **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (`rowIsEligible`, approval checks); settlement tests under `src/`.
+- **Domain:** Settlement eligibility tests. **Classification:** TEST_COVERAGE_GAP. **Status:** FIXED_NOT_VERIFIED — focused and isolated PostgreSQL coverage passes; production runtime verification remains outstanding.
+- **Finding / exact current behavior:** Paired coverage now proves refund-aware SALE behavior before the cutoff and at the exact cutoff across manual preview/DRAFT, scheduled preview/DRAFT, approval revalidation, finance `payoutReady`, frozen historical delay, and pending refund-adjustment handling.
+- **Current impact:** The FIN-BUG-001 predicate mismatch now has deterministic lower-level and PostgreSQL-real regression protection. **Automation impact:** The known local eligibility regression gap is repaired but not CLOSED pending runtime evidence.
+- **Evidence / relevant code locations:** `src/settlement-approval.test.ts`; `src/finance-persisted-calculation.test.ts`; `src/settlement-schedule.test.ts`; `src/fin-bug-001-settlement-delay-parity.postgres.test.ts`; `.github/workflows/ci.yml` (guarded PostgreSQL 16 suite execution). Focused tests passed 97/97, isolated PostgreSQL passed 2/2, and the full suite passed 3,468 with 146 skipped.
 - **Production incidence:** UNKNOWN. **Product decision required?** No new rule. **External clarification required?** No.
-- **Minimum future repair boundary:** Add same-fixture preview/DRAFT/approval assertions.
-- **Validation required before CLOSED:** Focused boundary test plus applicable real-DB transition.
+- **Minimum future repair boundary:** Implemented without changing product rules, monetary formulas, schema, or historical data.
+- **Validation required before CLOSED:** Safe production deployment and naturally occurring case-specific runtime verification.
 
 ### FIN-TEST-003 — No delivered-refresh cutoff stability regression
 - **Domain:** Delivery eligibility tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
