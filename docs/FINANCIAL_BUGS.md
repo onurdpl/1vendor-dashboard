@@ -79,17 +79,18 @@ Audit F supplied read-only production-state findings for this register. The repo
 
 - **Domain:** Settlement preview diagnostics.
 - **Classification:** CONFIRMED_BUG.
-- **Status:** FIXED_NOT_VERIFIED — implementation and focused/full local tests passed; deployed read-only runtime verification remains outstanding.
+- **Status:** FIXED_NOT_VERIFIED — implementation and focused/full local tests passed; production deployment was verified, but case-specific runtime verification remains outstanding.
 - **Finding:** The selected-order diagnostic previously set `candidateIncluded = true` while a blocking `FinanceIntegrityAlert` removed the row from actual preview candidates.
 - **Exact current behavior:** Diagnostic inclusion now derives from final filtered preview-line membership. A selected row removed by the existing integrity-alert filter reports excluded through the existing `excludedReason` field, using the observed alert category; a surviving row reports included. Economic eligibility, line membership, and settlement amounts are unchanged.
-- **Current impact:** The local diagnostic/preview contradiction is repaired; production incidence and deployed behavior remain UNKNOWN.
+- **Current impact:** The local diagnostic/preview contradiction is repaired; historical production incidence and live alert-filtered behavior remain UNKNOWN.
 - **Automation impact:** Explanation/triage blocker; not itself proof of duplicate monetary authority.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (final line IDs and observed alert category passed to selected-order diagnostics); `src/settlement-approval.test.ts` (selected alert, same-order multi-row, and DRAFT membership regressions); `backend/prisma/schema.prisma` (`FinanceIntegrityAlert`). No API shape, Prisma schema, migration, or production-data change.
+- **Reported production deployment and read-only discovery:** The supplied deployment check directly verified production `git rev-parse HEAD` as implementation commit `9d8d778053c00a35af1e7251d0b65566e434e13d`. A separate production PostgreSQL inspection used `BEGIN READ ONLY` and `ROLLBACK`; it found one `FinanceIntegrityAlert`, linked through both `vendorAllocationId` and `allocationEconomicTransferId`, with `status=resolved`, `category=transfer_failed`, `severity=critical`, and `resolvedAt` present. Zero active/unresolved alerts were observed. No synthetic alert, reopened alert, settlement/order mutation, or financial-history mutation was used for verification. These are supplied observations, not production access performed for this documentation update.
 - **Production incidence:** UNKNOWN.
 - **Product decision required?** No identified new product rule.
 - **External clarification required?** No.
 - **Minimum future repair boundary:** Implemented locally within selected-order diagnostics; no economic-selection repair was made.
-- **Validation required before CLOSED:** Focused selected-order/blocking-alert and broader preview/DRAFT tests passed locally. After deployment, read-only runtime comparison of diagnostic and resulting preview lines/totals for a naturally occurring suitable case remains required where available; do not manufacture a production finance mutation.
+- **Validation required before CLOSED:** Focused selected-order/blocking-alert and broader preview/DRAFT tests passed locally, and deployment of the implementation commit was verified. No suitable active/unresolved alert case existed in the reported production inspection, so the live diagnostic/preview comparison was not exercised. Read-only runtime comparison of diagnostic, resulting preview lines, and totals remains pending until a safe naturally occurring case exists; do not manufacture a production finance mutation.
 
 ### FIN-BUG-005 — One correction deduction can abort a whole scheduled dry-run
 
@@ -791,9 +792,10 @@ Each entry describes absent or insufficiently proven coverage at this baseline, 
 - **Finding / exact current behavior:** `src/settlement-approval.test.ts` now pairs a blocking allocation alert with final preview lines and selected-order diagnostics, including unaffected and same-order sibling rows; a DRAFT regression checks unchanged membership and money.
 - **Current impact:** This local test gap is covered; FIN-BUG-004 remains pending deployed runtime verification. **Automation impact:** No automation is authorized by this test.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (diagnostic/filter); `src/settlement-approval.test.ts` (focused regression).
+- **Reported deployment/runtime evidence:** Implementation commit `9d8d778053c00a35af1e7251d0b65566e434e13d` was directly verified as deployed. The supplied read-only production inspection found one resolved integrity alert and zero active/unresolved cases, so FIN-TEST-005 remains local regression proof; no live FIN-BUG-004 alert-filtering case was exercised or synthesized.
 - **Production incidence:** UNKNOWN. **Product decision required?** No. **External clarification required?** No.
 - **Minimum future repair boundary:** Completed in focused local tests without a monetary-predicate change.
-- **Validation required before CLOSED:** Focused diagnostic/final-line and DRAFT membership tests passed; parent runtime verification remains outstanding.
+- **Validation required before CLOSED:** Focused diagnostic/final-line and DRAFT membership tests passed; parent case-specific runtime verification remains outstanding until a safe naturally occurring alert case can be observed read-only.
 
 ### FIN-TEST-006 — Refund-tab classification not proven against detail issues
 - **Domain:** Admin settlement UI tests. **Classification:** TEST_COVERAGE_GAP. **Status:** OPEN.
