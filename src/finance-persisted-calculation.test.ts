@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   payoutBatch: {
@@ -330,6 +330,10 @@ describe('persisted vendor finance calculations', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('separates inactive Admin reads from the vendor default view and preserves inactive ordinary saves', async () => {
     activeProfile = {
       id: 'profile-sporjinal', vendorId: 'sporjinal', commissionPercent: 17,
@@ -415,22 +419,37 @@ describe('persisted vendor finance calculations', () => {
     });
   });
 
-  it('does not project an immature refund-aware sale as payout ready', async () => {
+  it('projects refund-aware payout readiness deterministically before, at and after the frozen cutoff', async () => {
     ledgerRows = [buildSaleFixture({
       id: 'fin-refund-aware-delay-pending', amount: 1000,
       orderId: 'refund-aware-delay-pending', orderNumber: '#2020',
       commissionPercentSnapshot: 10, commissionVatPercentSnapshot: 20,
       createdAt: '2026-09-01T00:00:00.000Z',
-      deliveredAt: '2999-01-01T00:00:00.000Z', settlementDelayDaysSnapshot: 21,
+      deliveredAt: '2026-09-01T00:00:00.000Z', settlementDelayDaysSnapshot: 21,
       refundRecords: [{ id: 'refund-aware', sourceShopifyRefundId: 'refund-aware', amount: 100 }],
     })];
+    vi.useFakeTimers({ toFake: ['Date'] });
 
-    const dashboard = await getVendorFinanceDashboard('sporjinal');
-
-    expect(dashboard.records[0].settlement).toMatchObject({
+    vi.setSystemTime(new Date('2026-09-21T23:59:59.999Z'));
+    const beforeCutoff = await getVendorFinanceDashboard('sporjinal');
+    expect(beforeCutoff.records[0].settlement).toMatchObject({
       status: 'accruing',
       payoutReady: false,
       note: 'Accruing until delivery evidence and settlement delay are satisfied.',
+    });
+
+    vi.setSystemTime(new Date('2026-09-22T00:00:00.000Z'));
+    const atCutoff = await getVendorFinanceDashboard('sporjinal');
+    expect(atCutoff.records[0].settlement).toMatchObject({
+      status: 'partially_refunded',
+      payoutReady: true,
+    });
+
+    vi.setSystemTime(new Date('2026-09-22T00:00:00.001Z'));
+    const afterCutoff = await getVendorFinanceDashboard('sporjinal');
+    expect(afterCutoff.records[0].settlement).toMatchObject({
+      status: 'partially_refunded',
+      payoutReady: true,
     });
   });
 

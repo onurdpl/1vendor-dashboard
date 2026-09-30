@@ -830,7 +830,7 @@ describe('settlement approval foundation', () => {
     );
   });
 
-  it('excludes a refund-aware sale before its frozen delay and admits it at the exact cutoff', async () => {
+  it('excludes a refund-aware sale before its frozen delay and admits it at and after the cutoff', async () => {
     const sale = buildLedgerRow({
       id: 'sale-refund-delay-boundary',
       entryType: 'sale',
@@ -878,6 +878,19 @@ describe('settlement approval foundation', () => {
       commissionVatMinor: 200,
       netPayableMinor: 8800,
     });
+
+    const afterCutoff = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2010'],
+      asOfDate: new Date('2026-06-22T00:00:00.001Z'),
+    });
+    expect(afterCutoff.lines).toEqual([
+      expect.objectContaining({
+        financeLedgerEntryId: 'sale-refund-delay-boundary',
+        derivedSettlementStatus: 'partially_refunded',
+        payableImpactMinor: 8800,
+      }),
+    ]);
   });
 
   it('uses each refund-aware sale frozen delay snapshot', async () => {
