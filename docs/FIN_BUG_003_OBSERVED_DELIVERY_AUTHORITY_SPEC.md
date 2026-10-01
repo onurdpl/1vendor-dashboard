@@ -2,6 +2,8 @@
 
 Status: implementation design only. No application, test, schema, migration, provider, or production change is authorized by this document. Evidence baseline: `main` at `eb1f3f6efc38021aeaefb783b4bff5cf60f1c326`. [FIN-BUG-003](FINANCIAL_BUGS.md) remains **OPEN**. The register is the status authority.
 
+**Approved source-selection foundation, later than this document's evidence baseline:** each vendor has one current outbound method (KARGONOMI or VENDOR_INTEGRATION), with one stable provider identity when Vendor Integration is selected; outbound and return configuration are separate. The vendor-level Phase 1 design is [specified separately](FIN_BUG_003_VENDOR_OUTBOUND_CONFIG_SPEC.md). A later Phase 2 snapshots that selection on allocation creation. This does not resolve delivery evidence conflicts, partial/multiple shipments, provider actual-time precedence, legacy finance cutover, or authorize a finance reader change.
+
 ## 1. Problem
 
 The SALE settlement-delay clock can move after an allocation is delivered. A later shipment refresh may push `Fulfillment.shipmentUpdatedAt` forward and make a previously mature SALE appear immature. This affects future settlement membership and payout-readiness presentation. It does not authorize changing historical APPROVED settlements, PAID payouts, SALE amount/rate snapshots, or the separate FIN-BUG-001 rule.
@@ -59,7 +61,7 @@ Use a database-enforced unique claim for one canonical first observation per all
 
 ## 8. Source-authority unresolved points
 
-Before any source writes **canonical** delivery authority or finance consumes it, Product/operations must choose how an allocation's outbound source is identified when Vendor Integration, Kargonomi, and Shopify/manual fulfillment evidence coexist. The current schema has no selector and shared projections can be overwritten. Neither “first DELIVERED wins” nor “latest source wins” is approved. The decision must cover conflicting statuses, later cancellation/return-to-sender, vendor reassignment, and whether more than one shipment/partial quantity can exist for an allocation. Unknown or conflicting lineage fails closed rather than selecting a provider by code path or arrival order.
+The vendor-current outbound method/provider and later immutable allocation snapshot are now approved as the intended source-selection foundation; see the separate Phase 1 specification above. **Neither is implemented in the current schema.** Before any source writes **canonical** delivery authority or finance consumes it, Product/operations must still decide how conflicting Vendor Integration, Kargonomi, and Shopify/manual evidence is handled, including later cancellation/return-to-sender, vendor reassignment, and multiple shipments/partial quantities. Shared projections can currently be overwritten. Neither “first DELIVERED wins” nor “latest source wins” is approved. Unknown or conflicting lineage fails closed rather than selecting a provider by code path or arrival order.
 
 For a provider with a trustworthy **actual** deliveredAt, Product must decide whether finance uses that actual time or Sporgym's observed time, and how a later correction to the provider time affects already prepared/approved finance. The approved observed fallback applies only when the source lacks a trustworthy actual time. Do not silently replace an immutable observed authority with a later provider time.
 
@@ -92,7 +94,7 @@ Change the **one shared** `resolveSettlementDeliveryDate` / `evaluateSaleSettlem
 
 ## 12. Incremental implementation plan
 
-1. **Authority boundary decision (gate):** approve outbound source selection, conflicting-source handling, and legacy/no-evidence policy. Resolve actual-time precedence separately if that source type will be enabled. No finance activation before these decisions.
+1. **Authority boundary gate:** implement the approved vendor outbound selection and allocation snapshot in their separate phases; approve conflicting-source handling and legacy/no-evidence policy before finance cutover. Resolve actual-time precedence separately if that source type will be enabled. No finance activation before these gates.
 2. **Durable evidence foundation:** additive table/constraint and server-side insert-once service; no backfill, no finance reader switch. Review database-concurrent behavior in isolation.
 3. **Provider-neutral intake:** add a bounded DELIVERED path for authorized Vendor Integration clients and adapters; wire only sources whose delivered-state mapping and allocation lineage are proven. Preserve Kargonomi and Shopify operations; no Sopyo-specific finance branch.
 4. **Shared finance cutover:** migrate the common evaluator and all projections/query shapes together behind a controlled gate; preserve SALE delay snapshot and existing refund/correction arithmetic. Missing/conflicting evidence follows the separately approved legacy policy.
@@ -105,7 +107,7 @@ No implementation, Shopify/Sopyo/Kargonomi request, return-shipping change, exte
 
 ## 14. Remaining product/external questions
 
-1. Which source is authoritative for outbound DELIVERED per allocation, and how are coexisting/conflicting Shopify, Kargonomi, and Vendor Integration states reconciled?
+1. Given the approved creation-time allocation outbound-source snapshot, how are coexisting/conflicting Shopify, Kargonomi, and Vendor Integration delivery states reconciled without overriding that snapshot?
 2. Does one allocation-wide delivered observation suffice where multiple shipments, partial quantities, reassignment or replacement shipment occurs? If not, what shipment/quantity scope is required?
 3. For a source with proven actual deliveredAt, which time starts the clock, and how are later corrections handled without silently changing frozen financial history?
 4. What is the exact fail-closed or controlled-compatibility rule for pre-cutover delivered rows without first-observation evidence, including existing DRAFTs?
