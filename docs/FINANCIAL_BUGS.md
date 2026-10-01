@@ -64,6 +64,7 @@ Audit F supplied read-only production-state findings for this register. The repo
 - **Classification:** CONFIRMED_BUG.
 - **Status:** OPEN.
 - **Finding:** Delay calculation uses `Fulfillment.shipmentUpdatedAt` as delivery-time basis, while provider refresh can update that timestamp after the shipment is delivered.
+- **Approved observed-delivery rule (supplied product decision):** When the approved outbound source verifies DELIVERED but provides no trustworthy actual customer-delivery time, the settlement clock may start at Sporgym's **first verified observation** of DELIVERED. This is not the customer's actual delivery time; later polls, refreshes, replays, and unrelated shipment updates must not move that observation forward. The reported Sopyo API observations showed `order_status=2` for shipped and `order_status=6` after the panel was marked delivered, with `cargo_info` retained; Sopyo support reportedly confirmed that it exposes status but no delivery timestamp. These are supplied external findings, not a new repository/API verification in this update.
 - **Exact current behavior:** `delivery + settlementDelayDays` can move forward after a delivered shipment refresh.
 - **Current impact:** Previously matured sources can appear not yet mature.
 - **Automation impact:** BLOCKER until a stable delivery-time authority is established.
@@ -71,10 +72,11 @@ Audit F supplied read-only production-state findings for this register. The repo
 - **Audit E evidence:** Replaying scheduled selection cannot stabilize an eligibility cutoff whose underlying delivery timestamp may move after provider refresh.
 - **Evidence / relevant code locations:** `backend/src/modules/finance/settlement-approval.service.ts` (SALE timing); `backend/src/modules/shopify/fulfillment-ingestion.service.ts` (`shipmentUpdatedAt` writes); `backend/prisma/schema.prisma` (`Fulfillment.shipmentUpdatedAt`).
 - **Production incidence:** UNKNOWN.
-- **Product decision required?** A stable authoritative delivered-event rule needs approval if the repository does not already establish one.
-- **External clarification required?** UNKNOWN if provider evidence cannot establish the original delivered event locally; do not invent it.
+- **Product decision required?** The status-only first-observed fallback is approved. Still unresolved: which coexisting outbound source is authoritative for each allocation, actual provider-delivery time versus observed time and correction policy, multiple/partial shipment handling, and treatment of existing delivered rows lacking durable first-observation evidence.
+- **External clarification required?** Not for the approved status-only first-observation fallback. UNKNOWN for any future provider-supplied actual-delivery-time authority or correction semantics; do not infer it from update timestamps.
 - **Minimum future repair boundary:** Establish/preserve authoritative delivered-event time separately from subsequent refresh time.
-- **Validation required before CLOSED:** Repeated-delivered-refresh regression proving cutoff stability, integration/real-DB evidence where applicable, and approved authority rule.
+- **Remaining implementation/design dependency:** Persist immutable allocation-scoped delivery observation with source provenance and database-enforced first-write uniqueness; add provider-neutral DELIVERED intake where needed; switch every SALE-delay finance consumer through one shared authority only after source-selection and legacy-data decisions. See `docs/FIN_BUG_003_OBSERVED_DELIVERY_AUTHORITY_SPEC.md`. No code, schema, migration, backfill, or production data was changed by this specification.
+- **Validation required before CLOSED:** Remaining source-selection and legacy-data decisions, repeated-delivered-refresh regression proving cutoff stability, finance-path parity, relevant integration/real-DB evidence, and controlled production verification where applicable.
 
 ### FIN-BUG-004 — Selected-order diagnostic can contradict actual preview inclusion
 
