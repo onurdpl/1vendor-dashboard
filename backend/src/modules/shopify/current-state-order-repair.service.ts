@@ -9,6 +9,7 @@ import {
 import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
+import { resolveAllocationOutboundSnapshot } from '../orders/allocation-outbound-snapshot.service.js';
 import { canonicalRefundToWebhookPayload } from '../reconciliation/canonical-refund-reconciliation.service.js';
 import { applyCanonicalReturnsInTransaction } from '../reconciliation/canonical-return-reconciliation.service.js';
 import { applyCanonicalCancellationInTransaction } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
@@ -567,6 +568,7 @@ async function applyBaseOrderInTransaction(
       });
       const allocationId = `alloc-${vendorId}-${snapshot.sourceShopifyOrderId}`;
       allocationIds.add(allocationId);
+      const outboundSnapshot = await resolveAllocationOutboundSnapshot(tx, vendorId);
       const allocation = await tx.vendorAllocation.upsert({
         where: { id: allocationId },
         update: {
@@ -579,6 +581,7 @@ async function applyBaseOrderInTransaction(
           sourceShopifyOrderNumber: snapshot.sourceShopifyOrderNumber,
           originalVendorId: vendorId,
           assignedVendorId: vendorId,
+          ...outboundSnapshot,
           allocationStatus: 'ACTIVE',
           fulfillmentStatus: 'Pending',
           shippingStatus: 'Awaiting Shipment',

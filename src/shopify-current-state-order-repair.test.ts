@@ -7,6 +7,9 @@ import type {
   FetchCanonicalShopifyRefundsForOrderResult,
 } from '../backend/src/modules/shopify/shopify-admin.types.js';
 import { CanonicalShopifySnapshotParseError } from '../backend/src/modules/shopify/shopify-admin.service.js';
+vi.mock('../backend/src/modules/finance/sale-ledger.service.js', () => ({
+  upsertSaleLedgerForAllocation: vi.fn(async () => ({})),
+}));
 import {
   createCurrentStateOrderRepairService,
   CurrentStateOrderRepairError,
@@ -489,6 +492,45 @@ describe('Shopify current-state order repair', () => {
       finance: 'Existing',
     });
     expect(tx.shopifyOrder.update).toHaveBeenCalledOnce();
+  });
+
+  it('snapshots explicit outbound authority in the create arm of a current-state repair', async () => {
+    const tx = {
+      shopifyOrder: {
+        findUnique: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'order-db-new' })),
+      },
+      shopifyOrderLineItem: { upsert: vi.fn(async () => ({ id: 'line-db-new' })) },
+      vendorShippingConfig: { findUnique: vi.fn(async () => ({
+        outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      })) },
+      vendorAllocation: { upsert: vi.fn(async () => ({ id: 'alloc-yalispor-7856043819345' })) },
+      vendorAllocationLineItem: { upsert: vi.fn(async () => ({})) },
+      allocationAssignmentHistory: { upsert: vi.fn(async () => ({})) },
+    };
+
+    await __currentStateOrderRepairTesting.applyBaseOrderInTransaction(
+      tx as never,
+      { order: canonicalOrder(), refundCollection: canonicalRefundCollection([]), refunds: [], returns: [] },
+    );
+
+    expect(tx.vendorShippingConfig.findUnique).toHaveBeenCalledWith({
+      where: { vendorId: 'yalispor' },
+      select: { outboundMethod: true, selectedIntegrationProvider: true },
+    });
+    expect(tx.vendorAllocation.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+        outboundIntegrationProviderSnapshot: 'SOPYO',
+      }),
+      update: expect.not.objectContaining({
+        outboundMethodSnapshot: expect.anything(),
+        outboundIntegrationProviderSnapshot: expect.anything(),
+      }),
+    }));
+    const update = tx.vendorAllocation.upsert.mock.calls[0]?.[0]?.update;
+    expect(update).not.toHaveProperty('outboundMethodSnapshot');
+    expect(update).not.toHaveProperty('outboundIntegrationProviderSnapshot');
   });
 
   it('defaults to dry-run and performs no mutation or audit write', async () => {

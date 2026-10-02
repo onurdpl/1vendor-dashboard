@@ -1,5 +1,6 @@
 import { prisma } from '../../db/prisma.js';
 import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
+import { resolveAllocationOutboundSnapshot } from '../orders/allocation-outbound-snapshot.service.js';
 import type {
   ParsedShopifyOrderLineItem,
   ParsedShopifyOrderPayload,
@@ -897,6 +898,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
 
         const allocationId = `alloc-${lineItem.vendorId}-${parsedOrder.sourceShopifyOrderId}`;
         allocationIds.add(allocationId);
+        const outboundSnapshot = await resolveAllocationOutboundSnapshot(tx, lineItem.vendorId);
 
         const allocation = await tx.vendorAllocation.upsert({
           where: {
@@ -912,6 +914,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
             originalVendorId: lineItem.vendorId,
             assignedVendorId: lineItem.vendorId,
+            ...outboundSnapshot,
             allocationStatus: 'ACTIVE',
             cancellationReason: null,
             reassignmentRequired: false,

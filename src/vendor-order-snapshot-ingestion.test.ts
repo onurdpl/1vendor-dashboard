@@ -23,6 +23,9 @@ const prismaMock = vi.hoisted(() => ({
   vendorAllocation: {
     upsert: vi.fn(),
   },
+  vendorShippingConfig: {
+    findUnique: vi.fn(),
+  },
   vendorAllocationLineItem: {
     upsert: vi.fn(),
   },
@@ -78,6 +81,7 @@ function mockSuccessfulDbWrites() {
   prismaMock.shopifyOrder.update.mockResolvedValue({});
   prismaMock.shopifyOrderLineItem.upsert.mockResolvedValue({ id: 'shopify-line-db-1' });
   prismaMock.vendorAllocation.upsert.mockResolvedValue({ id: 'alloc-sporjinal-2001' });
+  prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(null);
   prismaMock.vendorAllocationLineItem.upsert.mockResolvedValue({});
   prismaMock.allocationAssignmentHistory.upsert.mockResolvedValue({});
   prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
@@ -357,6 +361,8 @@ describe('vendor order snapshot ingestion', () => {
       shippingStatus: 'shipped',
       carrier: 'Test Carrier',
       trackingNumber: 'TRACK-123',
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+      outboundIntegrationProviderSnapshot: 'SOPYO',
     };
     prismaMock.vendorAllocation.upsert.mockImplementationOnce(
       async ({ update }: { update: Record<string, unknown> }) => {
@@ -388,6 +394,8 @@ describe('vendor order snapshot ingestion', () => {
       shippingStatus: 'shipped',
       carrier: 'Test Carrier',
       trackingNumber: 'TRACK-123',
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+      outboundIntegrationProviderSnapshot: 'SOPYO',
     });
     expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -401,9 +409,14 @@ describe('vendor order snapshot ingestion', () => {
           shippingStatus: expect.anything(),
           carrier: expect.anything(),
           trackingNumber: expect.anything(),
+          outboundMethodSnapshot: expect.anything(),
+          outboundIntegrationProviderSnapshot: expect.anything(),
         }),
       }),
     );
+    const replayUpdate = prismaMock.vendorAllocation.upsert.mock.calls[0]?.[0]?.update;
+    expect(replayUpdate).not.toHaveProperty('outboundMethodSnapshot');
+    expect(replayUpdate).not.toHaveProperty('outboundIntegrationProviderSnapshot');
   });
 
   it('preserves existing pending reassignment state during Shopify order ingestion replay', async () => {
@@ -618,9 +631,44 @@ describe('vendor order snapshot ingestion', () => {
           shippingStatus: 'Awaiting Shipment',
           carrier: null,
           trackingNumber: null,
+          outboundMethodSnapshot: null,
+          outboundIntegrationProviderSnapshot: null,
         }),
       }),
     );
+  });
+
+  it('snapshots explicit Vendor Integration authority only on allocation creation', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce({
+      outboundMethod: 'VENDOR_INTEGRATION',
+      selectedIntegrationProvider: 'SOPYO',
+    });
+
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-integration-snapshot' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2006),
+    });
+
+    expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+          outboundIntegrationProviderSnapshot: 'SOPYO',
+        }),
+        update: expect.not.objectContaining({
+          outboundMethodSnapshot: expect.anything(),
+          outboundIntegrationProviderSnapshot: expect.anything(),
+        }),
+      }),
+    );
+    const update = prismaMock.vendorAllocation.upsert.mock.calls[0]?.[0]?.update;
+    expect(update).not.toHaveProperty('outboundMethodSnapshot');
+    expect(update).not.toHaveProperty('outboundIntegrationProviderSnapshot');
+    expect(prismaMock.vendorShippingConfig.findUnique).toHaveBeenCalledWith({
+      where: { vendorId: 'sporjinal' },
+      select: { outboundMethod: true, selectedIntegrationProvider: true },
+    });
   });
 
   it('accepts a newly provisioned vendor id from Shopify seller_info when the vendor exists', async () => {

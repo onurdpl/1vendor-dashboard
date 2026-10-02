@@ -9,6 +9,7 @@ import {
   type VendorAllocation,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { resolveAllocationOutboundSnapshot } from './allocation-outbound-snapshot.service.js';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import { buildSaleLedgerEntryId } from '../finance/sale-ledger.service.js';
 import {
@@ -586,6 +587,7 @@ export async function splitAllocationForLineItemReject(
       sourceLedgerAmount: sourceLedger.amount,
     });
 
+    const outboundSnapshot = await resolveAllocationOutboundSnapshot(tx, freshSource.assignedVendorId);
     const childAllocation = await tx.vendorAllocation.create({
       data: {
         id: childAllocationId,
@@ -593,6 +595,7 @@ export async function splitAllocationForLineItemReject(
         sourceShopifyOrderNumber: freshSource.sourceShopifyOrderNumber,
         originalVendorId: freshSource.originalVendorId,
         assignedVendorId: freshSource.assignedVendorId,
+        ...outboundSnapshot,
         allocationStatus: AllocationStatus.VENDOR_BLOCKED,
         reassignmentRequired: true,
         cancellationReason: reason,

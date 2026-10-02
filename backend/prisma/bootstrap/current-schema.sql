@@ -2192,7 +2192,10 @@ CREATE TABLE public."VendorAllocation" (
     "vendorInvoiceReceivedAt" timestamp(3) without time zone,
     "lastVendorIntegrationInvoiceRequestId" text,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    "updatedAt" timestamp(3) without time zone NOT NULL
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "outboundMethodSnapshot" public."VendorOutboundMethod",
+    "outboundIntegrationProviderSnapshot" public."VendorIntegrationProviderCode",
+    CONSTRAINT "VendorAllocation_outbound_snapshot_check" CHECK (((("outboundMethodSnapshot" IS NULL) AND ("outboundIntegrationProviderSnapshot" IS NULL)) OR (("outboundMethodSnapshot" IS NOT NULL) AND ("outboundMethodSnapshot" = 'KARGONOMI'::public."VendorOutboundMethod") AND ("outboundIntegrationProviderSnapshot" IS NULL)) OR (("outboundMethodSnapshot" IS NOT NULL) AND ("outboundMethodSnapshot" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("outboundIntegrationProviderSnapshot" IS NOT NULL))))
 );
 
 

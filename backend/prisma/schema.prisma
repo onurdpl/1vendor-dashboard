@@ -708,6 +708,8 @@ model VendorAllocation {
   sourceShopifyOrderNumber               String
   originalVendorId                       String
   assignedVendorId                       String
+  outboundMethodSnapshot                 VendorOutboundMethod?
+  outboundIntegrationProviderSnapshot    VendorIntegrationProviderCode?
   allocationStatus                       AllocationStatus                        @default(ACTIVE)
   cancellationReason                     CancellationReason?
   reassignmentRequired                   Boolean                                 @default(false)

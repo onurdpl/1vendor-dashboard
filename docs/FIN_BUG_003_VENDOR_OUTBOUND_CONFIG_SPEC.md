@@ -1,12 +1,12 @@
 # FIN-BUG-003 — Vendor Outbound Configuration, Phase 1 Specification
 
-Status: **Phase 1 implemented locally; deployment is not asserted here**. Repository evidence baseline for this specification: `main` at `774fccf69e93fc401199e6c2edc5272988f6c936`. The [finance defect register](FINANCIAL_BUGS.md) is the status authority; FIN-BUG-003 remains **OPEN**. Phase 1 establishes vendor-level outbound configuration and an onboarding gate only. Allocation snapshots, DELIVERED evidence and finance cutover are separate later phases.
+Status: **Phase 1 production-verified per supplied deployment evidence; Phase 2 allocation snapshot implemented in the repository**. Repository evidence baseline for this specification: `main` at `774fccf69e93fc401199e6c2edc5272988f6c936`. The [finance defect register](FINANCIAL_BUGS.md) is the status authority; FIN-BUG-003 remains **OPEN**. Phase 1 establishes vendor-level outbound configuration and an onboarding gate only. Phase 2 adds creation-time allocation snapshots; DELIVERED evidence and finance cutover remain separate later phases.
 
 The later approved rollout decision supersedes this specification's earlier open connection-readiness question: an inactive vendor selecting VENDOR_INTEGRATION/SOPYO may save the selection before connection setup, but activation requires a same-vendor, enabled, unrevoked SOPYO-coded client with `orders:read` and `shipment:write`. The implementation adds nullable `VendorShippingConfig.outboundMethod`, `selectedIntegrationProvider`, and `VendorIntegrationClient.providerCode`. New clients must explicitly supply controlled `SOPYO`; pre-existing clients retain NULL and their existing API behavior. No provider-name inference, old-client edit, token reissue, historical backfill, allocation snapshot, delivery observation, or finance cutover was added. The Admin shipping editor saves outbound selection separately from operational Kargonomi settings; `preferredProvider` keeps its former role.
 
 ## 1. Problem
 
-The system cannot identify a vendor's selected outbound shipment authority as either Kargonomi or a specific Vendor Integration provider. `VendorShippingConfig.preferredProvider` is a mutable shipment-execution default and is also read by Kargonomi return auto-create; Vendor Integration clients are credentials, not a selected business provider. No allocation has an immutable outbound-source snapshot. Consequently, FIN-BUG-003 cannot safely attribute future delivery evidence to the correct outbound source.
+At this specification's original evidence baseline, the system could not identify a vendor's selected outbound shipment authority as either Kargonomi or a specific Vendor Integration provider. `VendorShippingConfig.preferredProvider` is a mutable shipment-execution default and is also read by Kargonomi return auto-create; Vendor Integration clients are credentials, not a selected business provider. Phase 1 has since added explicit vendor selection, and Phase 2 adds snapshots for new allocations without backfilling old ones. FIN-BUG-003 still cannot safely attribute future delivery evidence until the later evidence and finance phases are approved and implemented.
 
 ## 2. Approved business rules
 
@@ -70,6 +70,8 @@ Additive nullable fields begin unconfigured for existing vendors and profiles. N
 ## 12. Phase 2 snapshot interface
 
 The Phase 1 pair is designed to supply, later, `outboundMethodSnapshot` and `outboundIntegrationProviderSnapshot` on `VendorAllocation` at creation. Phase 2 must map **all** live allocation creation paths—normal Shopify order ingestion, current-state repair, and allocation split—plus economic transfer/reassignment semantics before editing them. It must not read current vendor config to reinterpret an older allocation. An additive allocation schema is not needed in Phase 1: introducing unused snapshot fields now would expand migration and test scope without establishing creation-time authority. No finance reader consumes Phase 1 fields.
+
+Phase 2 implementation adds those two nullable allocation columns, resolves them only from the explicit current vendor selection, and writes them only on the CREATE arms of Shopify ingestion, canonical current-state repair, and allocation split. Split is a genuinely new allocation and takes the assigned vendor's current selection rather than copying the source allocation's older snapshot. Economic transfer changes assignment on an existing allocation and does not create or rewrite its creation-time snapshot. Unconfigured vendors retain NULL/NULL; historical allocations are not backfilled. No finance reader consumes the new fields yet.
 
 ## 13. Phase 1 tests
 
