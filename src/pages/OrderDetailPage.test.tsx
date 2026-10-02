@@ -5310,7 +5310,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
     expect(providerSelect).toHaveValue('kargonomi');
-    expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
+    expect(within(providerSelect).getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Try OTO' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO origin city')).not.toBeInTheDocument();
@@ -5361,7 +5361,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('option', { name: 'Navlungo' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Hepsijet' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Kargo Entegratör' })).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
+    expect(within(providerSelect).getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
   });
@@ -5435,7 +5435,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
-    expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
+    expect(within(providerSelect).getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'kargonomi');
     const warehouseInput = await screen.findByLabelText('Warehouse ID');
     const carrierInput = await screen.findByLabelText(/Kargonomi carrier\/provider ID/);

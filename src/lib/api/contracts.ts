@@ -633,6 +633,8 @@ export type VendorShippingWarehouse = {
 
 export type VendorShippingConfig = {
   vendorId: string;
+  outboundMethod: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
+  selectedIntegrationProvider: 'SOPYO' | null;
   preferredProvider: ShippingProvider;
   shippingEnabled: boolean;
   defaultDesi: string;
@@ -646,6 +648,8 @@ export type VendorShippingConfig = {
 };
 
 export type VendorShippingConfigUpdate = {
+  outboundMethod?: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
+  selectedIntegrationProvider?: 'SOPYO' | null;
   preferredProvider?: ShippingProvider;
   shippingEnabled?: boolean;
   defaultDesi?: number;
@@ -3144,6 +3148,7 @@ export type VendorIntegrationProviderAuditLog = {
 export type VendorIntegrationProviderSummary = {
   clientId: string;
   providerName: string;
+  providerCode: 'SOPYO' | null;
   vendorIdentifier: string;
   scopes: string[];
   enabled: boolean;
@@ -3176,6 +3181,7 @@ export type VendorIntegrationScope = 'orders:read' | 'status:write' | 'shipment:
 export type VendorIntegrationTokenCreateInput = {
   vendorIdentifier: string;
   providerName: string;
+  providerCode: 'SOPYO';
   scopes: VendorIntegrationScope[];
 };
 
@@ -3183,6 +3189,7 @@ export type VendorIntegrationTokenCreateResult = {
   clientId: string;
   vendorIdentifier: string;
   providerName: string;
+  providerCode: 'SOPYO';
   scopes: string[];
   token: string;
   tokenWarning: string;

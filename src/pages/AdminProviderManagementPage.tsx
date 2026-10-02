@@ -364,6 +364,7 @@ export function AdminProviderManagementPage() {
                       <div className="provider-card-header">
                         <div className="provider-card-identity">
                           <h4>{provider.providerName}</h4>
+                          <small>{provider.providerCode ?? 'Legacy client — no provider code'}</small>
                           <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
                         </div>
                         <div className="provider-card-field">

@@ -8,17 +8,17 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "a209f3af708b644fa80ad6806eed39a6551c25e9f616f1d15cc0734cf492eda4"
+    "sha256": "8b6b10fa7c308cccb661d9e35df9e4bdba5409931baf773a6fbccd3d21f16787"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "903c3d650b7f2e9a00bdb90bc87d7a0fd4a315eb58e21b473a57924c3e7c051c"
+    "sha256": "b966d3ebed9740503525f2562c44b9fa86a9c23d158a569b069d7f8f0a4feadb"
   },
   "catalog": {
-    "sha256": "7b2f3ece52462e8c2f5951b077e6e46ab5cc665cbb217008caa7d7f2b85e0404"
+    "sha256": "9d4971a6a6355aca1e86723cfb2d3c7186b0b3f5adb9343ab1e3138522b5e224"
   },
-  "migrationCutoff": "20261003120000_add_review_payout_correction_evidence",
-  "baselineMigrationFilesSha256": "c781a49f21187b671d2226526755eeab78944ae8ae7f5e44ba2cbd8e86ae75fc",
+  "migrationCutoff": "20261004120000_add_vendor_outbound_provider_identity",
+  "baselineMigrationFilesSha256": "4e3108ba301e05f06603a2cff2bd11ef93b427dd48a438779c38f869339f24fb",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -122,6 +122,7 @@
     "20260930120000_add_approved_settlement_correction_credit",
     "20261001120000_add_approved_settlement_correction_deduction",
     "20261002120000_add_draft_payout_correction_evidence",
-    "20261003120000_add_review_payout_correction_evidence"
+    "20261003120000_add_review_payout_correction_evidence",
+    "20261004120000_add_vendor_outbound_provider_identity"
   ]
 }

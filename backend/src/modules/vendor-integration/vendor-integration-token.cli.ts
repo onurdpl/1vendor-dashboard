@@ -17,6 +17,7 @@ function readRequiredArg(name: string) {
 export async function runVendorIntegrationTokenCli() {
   const vendorIdentifier = readRequiredArg('vendorIdentifier');
   const providerName = readRequiredArg('providerName');
+  const providerCode = readRequiredArg('providerCode');
   const scopes = readRequiredArg('scopes')
     .split(',')
     .map((scope) => scope.trim())
@@ -25,6 +26,7 @@ export async function runVendorIntegrationTokenCli() {
   const created = await createVendorIntegrationClientToken({
     vendorIdentifier,
     providerName,
+    providerCode,
     scopes,
   });
 
@@ -32,6 +34,7 @@ export async function runVendorIntegrationTokenCli() {
   console.log(`clientId=${created.clientId}`);
   console.log(`vendorIdentifier=${created.vendorIdentifier}`);
   console.log(`providerName=${created.providerName}`);
+  console.log(`providerCode=${created.providerCode}`);
   console.log(`scopes=${created.scopes.join(',')}`);
   console.log('Store this plaintext token securely. Sporgym stores only its hash.');
   console.log(`token=${created.token}`);

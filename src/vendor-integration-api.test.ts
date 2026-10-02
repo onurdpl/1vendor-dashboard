@@ -1693,6 +1693,7 @@ describe('vendor integration API foundation', () => {
       {
         vendorIdentifier: 'sporjinal',
         providerName: 'Provider A',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
       },
       prismaMock,
@@ -1709,11 +1710,22 @@ describe('vendor integration API foundation', () => {
     expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).not.toHaveProperty('token');
   });
 
+  it('requires an explicit supported code without inferring one from providerName', async () => {
+    await expect(createVendorIntegrationClientToken({
+      vendorIdentifier: 'sporjinal', providerName: 'Sopyo API', providerCode: null, scopes: ['orders:read'],
+    }, prismaMock)).rejects.toThrow('providerCode must be SOPYO.');
+    await expect(createVendorIntegrationClientToken({
+      vendorIdentifier: 'sporjinal', providerName: 'Other', providerCode: 'sopyo', scopes: ['orders:read'],
+    }, prismaMock)).rejects.toThrow('providerCode must be SOPYO.');
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
   it('rejects unauthenticated admin token creation requests', async () => {
     const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
       },
     });
@@ -1729,6 +1741,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
       },
     });
@@ -1744,6 +1757,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
       },
     });
@@ -1759,6 +1773,7 @@ describe('vendor integration API foundation', () => {
       id: 'client-created',
       vendorIdentifier: 'sporjinal',
       providerName: 'ayensoftware-test',
+      providerCode: 'SOPYO',
       scopes: ['orders:read', 'status:write'],
     });
 
@@ -1767,6 +1782,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read', 'status:write'],
       },
     });
@@ -1777,6 +1793,7 @@ describe('vendor integration API foundation', () => {
         clientId: 'client-created',
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read', 'status:write'],
         token: expect.stringMatching(/^spg_vi_/),
       }),
@@ -1796,6 +1813,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'unknown-vendor',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
       },
     });
@@ -1814,6 +1832,7 @@ describe('vendor integration API foundation', () => {
       id: 'client-created',
       vendorIdentifier: 'sporjinal',
       providerName: 'ayensoftware-test',
+      providerCode: 'SOPYO',
       scopes: ['orders:read'],
     });
 
@@ -1822,6 +1841,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
       },
     });
@@ -1832,6 +1852,7 @@ describe('vendor integration API foundation', () => {
         clientId: 'client-created',
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
         token: expect.stringMatching(/^spg_vi_/),
         tokenWarning: expect.stringContaining('shown only once'),
@@ -1846,6 +1867,7 @@ describe('vendor integration API foundation', () => {
         clientId: 'client-created',
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
       }),
       'vendor integration admin action',
     );
@@ -1863,6 +1885,7 @@ describe('vendor integration API foundation', () => {
       id: 'client-created',
       vendorIdentifier: 'sporjinal',
       providerName: 'ayensoftware-test',
+      providerCode: 'SOPYO',
       scopes: ['invoice:write', 'orders:read', 'shipment:write', 'status:write'],
     });
 
@@ -1871,6 +1894,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
       },
     });
@@ -1895,6 +1919,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read', 'orders:delete'],
       },
     });
@@ -1910,6 +1935,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: [],
       },
     });
@@ -1925,6 +1951,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read', 123],
       },
     });
@@ -1939,6 +1966,7 @@ describe('vendor integration API foundation', () => {
       id: 'client-created',
       vendorIdentifier: 'sporjinal',
       providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
       scopes: ['orders:read', 'status:write'],
     });
 
@@ -1947,6 +1975,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['status:write', ' orders:read ', 'orders:read'],
       },
     });
@@ -1969,6 +1998,7 @@ describe('vendor integration API foundation', () => {
       id: 'client-created',
       vendorIdentifier: 'sporjinal',
       providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
       scopes: ['orders:read'],
     });
 
@@ -1977,6 +2007,7 @@ describe('vendor integration API foundation', () => {
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
+        providerCode: 'SOPYO',
         scopes: ['orders:read'],
       },
     });

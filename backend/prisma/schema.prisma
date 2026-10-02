@@ -269,6 +269,15 @@ enum ShippingProvider {
   ARAS
 }
 
+enum VendorOutboundMethod {
+  KARGONOMI
+  VENDOR_INTEGRATION
+}
+
+enum VendorIntegrationProviderCode {
+  SOPYO
+}
+
 enum ShipmentExecutionStatus {
   PENDING
   CREATED
@@ -591,6 +600,7 @@ model VendorIntegrationClient {
   id               String                           @id @default(cuid())
   vendorIdentifier String
   providerName     String
+  providerCode     VendorIntegrationProviderCode?
   tokenHash        String                           @unique
   enabled          Boolean                          @default(true)
   scopes           String[]
@@ -2007,6 +2017,8 @@ model VendorShippingConfig {
   id                 String                    @id @default(cuid())
   vendorId           String                    @unique
   preferredProvider  ShippingProvider          @default(HEPSIJET)
+  outboundMethod     VendorOutboundMethod?
+  selectedIntegrationProvider VendorIntegrationProviderCode?
   shippingEnabled    Boolean                   @default(true)
   defaultDesi        Decimal                   @default(3.00) @db.Decimal(10, 2)
   cargoIntegrationId String?

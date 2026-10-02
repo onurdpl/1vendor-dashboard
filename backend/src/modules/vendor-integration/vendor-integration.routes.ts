@@ -36,6 +36,7 @@ import {
 type TokenCreateBody = {
   vendorIdentifier?: string;
   providerName?: string;
+  providerCode?: unknown;
   scopes?: unknown[];
 };
 
@@ -141,6 +142,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
         const created = await createVendorIntegrationClientToken({
           vendorIdentifier,
           providerName,
+          providerCode: request.body?.providerCode,
           scopes,
         });
 
@@ -148,6 +150,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
           clientId: created.clientId,
           vendorIdentifier: created.vendorIdentifier,
           providerName: created.providerName,
+          providerCode: created.providerCode,
           scopes: created.scopes,
         });
 
@@ -155,6 +158,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
           clientId: created.clientId,
           vendorIdentifier: created.vendorIdentifier,
           providerName: created.providerName,
+          providerCode: created.providerCode,
           scopes: created.scopes,
           token: created.token,
           tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',

@@ -119,10 +119,12 @@ type VendorProfileShellStatusItem = {
 };
 type IntegrationTokenFormState = {
   providerName: string;
+  providerCode: '' | 'SOPYO';
   scopes: VendorIntegrationScope[];
 };
 const EMPTY_INTEGRATION_TOKEN_FORM: IntegrationTokenFormState = {
   providerName: '',
+  providerCode: '',
   scopes: DEFAULT_VENDOR_INTEGRATION_SCOPES,
 };
 
@@ -1243,6 +1245,10 @@ export function VendorProfilePage() {
   }, [currentVendor.vendorId, integrationProvidersQuery.data?.providers]);
   const latestIntegrationProvider = integrationProviders[0] ?? null;
   const activeIntegrationProvider = integrationProviders.find((provider) => provider.enabled && !provider.revokedAt) ?? null;
+  const outboundConnectionReady = shippingConfig?.outboundMethod === 'VENDOR_INTEGRATION'
+    && integrationProviders.some((provider) => provider.providerCode === shippingConfig.selectedIntegrationProvider
+      && provider.enabled && !provider.revokedAt
+      && provider.scopes.includes('orders:read') && provider.scopes.includes('shipment:write'));
   const displayedIntegrationProvider = activeIntegrationProvider ?? latestIntegrationProvider;
   const integrationTokenStatus = getProviderTokenStatus(displayedIntegrationProvider);
   const latestAuditBySection = useMemo(() => {
@@ -1584,6 +1590,7 @@ export function VendorProfilePage() {
       runtimeServices.vendorIntegration.createToken({
         vendorIdentifier: currentVendor.vendorId,
         providerName: integrationTokenForm.providerName.trim(),
+        providerCode: integrationTokenForm.providerCode as 'SOPYO',
         scopes: integrationTokenForm.scopes,
       }),
     {
@@ -1593,6 +1600,7 @@ export function VendorProfilePage() {
         setIntegrationTokenFormError(null);
         setIntegrationTokenForm({
           providerName: result.providerName,
+          providerCode: result.providerCode,
           scopes: normalizeIntegrationScopes(result.scopes),
         });
         await queryClient.invalidateQueries({ queryKey: queryKeys.admin.vendorIntegration.providers() });
@@ -1965,6 +1973,10 @@ export function VendorProfilePage() {
     event.preventDefault();
     if (!integrationTokenForm.providerName.trim()) {
       setIntegrationTokenFormError('Provider name is required.');
+      return;
+    }
+    if (integrationTokenForm.providerCode !== 'SOPYO') {
+      setIntegrationTokenFormError('Select a supported provider code.');
       return;
     }
     if (integrationTokenForm.scopes.length === 0) {
@@ -4194,6 +4206,12 @@ export function VendorProfilePage() {
               <strong>{displayedIntegrationProvider?.clientId ?? (integrationProvidersQuery.isInitialLoading ? 'Loading' : 'Not created')}</strong>
             </div>
             <div>
+              <span>Outbound API connection</span>
+              <StatusBadge tone={outboundConnectionReady ? 'success' : 'warning'}>
+                {outboundConnectionReady ? 'Connected' : 'Not connected'}
+              </StatusBadge>
+            </div>
+            <div>
               <span>Token status</span>
               <StatusBadge tone={integrationProvidersQuery.isInitialLoading ? 'warning' : integrationTokenStatus.tone}>
                 {integrationProvidersQuery.isInitialLoading ? 'Loading' : integrationTokenStatus.label}
@@ -4272,6 +4290,15 @@ export function VendorProfilePage() {
                     disabled={integrationTokenMutation.isPending}
                     required
                   />
+                </label>
+                <label className="vendor-profile-billing-form-wide">
+                  Provider code
+                  <select value={integrationTokenForm.providerCode} onChange={(event) => setIntegrationTokenForm((current) => ({
+                    ...current, providerCode: event.target.value as IntegrationTokenFormState['providerCode'],
+                  }))} required>
+                    <option value="">Select provider</option>
+                    <option value="SOPYO">Sopyo</option>
+                  </select>
                 </label>
                 {VENDOR_INTEGRATION_SCOPE_OPTIONS.map((scope) => (
                   <label className="vendor-profile-checkbox-field" key={scope.value}>

@@ -7,6 +7,7 @@ import {
   type VendorShippingWarehouse,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
+import { resolveVendorOutboundSelection } from '../vendor-integration/vendor-provider-code.js';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import {
@@ -196,6 +197,8 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
   if (!config) {
     return {
       vendorId,
+      outboundMethod: null,
+      selectedIntegrationProvider: null,
       preferredProvider: 'hepsijet',
       shippingEnabled: true,
       defaultDesi: '3.00',
@@ -211,6 +214,8 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
 
   return {
     vendorId: config.vendorId,
+    outboundMethod: config.outboundMethod ?? null,
+    selectedIntegrationProvider: config.selectedIntegrationProvider ?? null,
     preferredProvider: mapProvider(config.preferredProvider),
     shippingEnabled: config.shippingEnabled,
     defaultDesi: toAmountString(toNumber(config.defaultDesi)),
@@ -2310,11 +2315,26 @@ export async function upsertVendorShippingConfig(
     throw new Error('defaultWarehouseId must be numeric.');
   }
   const config = await prisma.$transaction(async (tx) => {
+    const outboundSelectionChanged = input.outboundMethod !== undefined || input.selectedIntegrationProvider !== undefined;
+    let lockedOutboundSelection: ReturnType<typeof resolveVendorOutboundSelection> | null = null;
+    if (outboundSelectionChanged) {
+      await tx.$queryRaw`SELECT "id" FROM "Vendor" WHERE "id" = ${vendorId} FOR UPDATE`;
+      const currentSelection = await tx.vendorShippingConfig.findUnique({
+        where: { vendorId },
+        select: { outboundMethod: true, selectedIntegrationProvider: true },
+      });
+      lockedOutboundSelection = resolveVendorOutboundSelection(input, {
+        outboundMethod: currentSelection?.outboundMethod ?? null,
+        selectedIntegrationProvider: currentSelection?.selectedIntegrationProvider ?? null,
+      });
+    }
     const savedConfig = await tx.vendorShippingConfig.upsert({
       where: {
         vendorId,
       },
       update: {
+        outboundMethod: lockedOutboundSelection?.outboundMethod,
+        selectedIntegrationProvider: lockedOutboundSelection?.selectedIntegrationProvider,
         preferredProvider: input.preferredProvider === undefined ? undefined : preferredProvider,
         shippingEnabled: input.shippingEnabled,
         defaultDesi: input.defaultDesi === undefined ? undefined : defaultDesi,
@@ -2328,6 +2348,8 @@ export async function upsertVendorShippingConfig(
       },
       create: {
         vendorId,
+        outboundMethod: lockedOutboundSelection?.outboundMethod ?? null,
+        selectedIntegrationProvider: lockedOutboundSelection?.selectedIntegrationProvider ?? null,
         preferredProvider,
         shippingEnabled: input.shippingEnabled ?? defaultConfig.shippingEnabled,
         defaultDesi,

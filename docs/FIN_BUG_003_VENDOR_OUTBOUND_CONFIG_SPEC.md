@@ -1,6 +1,8 @@
 # FIN-BUG-003 — Vendor Outbound Configuration, Phase 1 Specification
 
-Status: **implementation specification, not implementation or deployment approval**. Repository evidence baseline: `main` at `774fccf69e93fc401199e6c2edc5272988f6c936`. The [finance defect register](FINANCIAL_BUGS.md) is the status authority; FIN-BUG-003 remains **OPEN**. Phase 1 establishes vendor-level outbound configuration and an onboarding gate only. Allocation snapshots, DELIVERED evidence and finance cutover are separate later phases.
+Status: **Phase 1 implemented locally; deployment is not asserted here**. Repository evidence baseline for this specification: `main` at `774fccf69e93fc401199e6c2edc5272988f6c936`. The [finance defect register](FINANCIAL_BUGS.md) is the status authority; FIN-BUG-003 remains **OPEN**. Phase 1 establishes vendor-level outbound configuration and an onboarding gate only. Allocation snapshots, DELIVERED evidence and finance cutover are separate later phases.
+
+The later approved rollout decision supersedes this specification's earlier open connection-readiness question: an inactive vendor selecting VENDOR_INTEGRATION/SOPYO may save the selection before connection setup, but activation requires a same-vendor, enabled, unrevoked SOPYO-coded client with `orders:read` and `shipment:write`. The implementation adds nullable `VendorShippingConfig.outboundMethod`, `selectedIntegrationProvider`, and `VendorIntegrationClient.providerCode`. New clients must explicitly supply controlled `SOPYO`; pre-existing clients retain NULL and their existing API behavior. No provider-name inference, old-client edit, token reissue, historical backfill, allocation snapshot, delivery observation, or finance cutover was added. The Admin shipping editor saves outbound selection separately from operational Kargonomi settings; `preferredProvider` keeps its former role.
 
 ## 1. Problem
 
@@ -19,7 +21,7 @@ The system cannot identify a vendor's selected outbound shipment authority as ei
 
 `VendorShippingConfig` is one row per vendor, with mutable `preferredProvider`, `shippingEnabled`, desi, warehouse, VAT and provider metadata. `ShippingProvider` includes KARGONOMI and legacy/other shipping-execution values, but not VENDOR_INTEGRATION. A missing row is projected by `getVendorShippingConfig` as an effective HEPSIJET default; that projection is **not** an approved outbound method. Shipment preview chooses request `provider` before current `preferredProvider`; retry retains the execution provider but reloads operational config. Generic Vendor Integration shipment writeback neither reads this config nor arbitrates against `ShipmentExecution`.
 
-Admin provisioning creates `Vendor.status=inactive`; Admin status PUT can activate without shipping readiness. `Vendor.status` is the existing operational activation field. There is no separate persisted “profile complete” or “ready for sale” transition. Normal `orders/create` currently requires a mapped vendor ID to exist, not active status or shipping config. Current-state repair checks an active finance profile but not this outbound selection. Allocation split and economic transfer have their own checks. Phase 1 must not silently reinterpret any of these as an approved new order-intake gate.
+Admin provisioning creates `Vendor.status=inactive`; at this specification's evidence baseline, Admin status PUT could activate without shipping readiness. Phase 1 now gates inactive-to-active transition on explicit outbound selection and the approved Vendor Integration connection predicate. `Vendor.status` remains the operational activation field; there is no separate persisted “profile complete” or “ready for sale” transition. Normal `orders/create` requires a mapped vendor ID to exist, not active status or shipping config. Current-state repair checks an active finance profile but not this outbound selection. Allocation split and economic transfer have their own checks. Phase 1 does not reinterpret any of these as a new order-intake gate.
 
 ## 4. Vendor-level outbound authority
 
@@ -33,7 +35,7 @@ The pair is the vendor's **current** selection, not historical allocation author
 
 Use a small controlled provider-code catalog/allowlist in server validation, rather than a large provider-management platform or arbitrary client-entered display text. SOPYO is a known example; this spec does not invent other provider codes or claim a Sopyo adapter is implemented. A provider code must retain its meaning across token rotation, client revocation, display-name changes and future allocation snapshots. The UI may show a friendly label, but the API/persistence uses the stable code. Credentials, scopes and active/revoked state remain on `VendorIntegrationClient`; `providerName` on an existing client does not select the vendor's outbound method.
 
-The selected code must be validated against the supported catalog. Whether a live client with appropriate scopes must already exist before completion is **not approved**; Phase 1 must not smuggle that in as a business gate. Expose client readiness separately from selection until its operational requirement is decided.
+The selected code must be validated against the supported catalog. The later approved rule requires an explicitly coded, usable client at inactive-to-active transition for VENDOR_INTEGRATION, but not when the selection is saved. Client readiness remains separate from business selection.
 
 ## 6. Admin profile/onboarding flow
 
@@ -53,7 +55,7 @@ Retain `preferredProvider` as the existing **operation-time shipping-execution p
 
 ## 9. Backend API changes
 
-Extend existing `GET /shipping/config` and Admin-only `PUT /admin/vendors/:vendorId/shipping-config` with the outbound method and selected provider code. GET distinguishes persisted **unconfigured/null** from the effective legacy `preferredProvider` default. PUT validates the pair server-side, rejects unsupported method/provider values, requires provider code for VENDOR_INTEGRATION, and clears/rejects an incompatible provider when KARGONOMI is intentionally selected. Existing partial updates to unrelated config must not erase a valid selection or accidentally complete an unconfigured one. Keep token creation/revocation routes unchanged; they manage credentials, not selection. Keep vendor access and Admin permission conventions unchanged.
+Extend existing `GET /shipping/config` and Admin-only `PUT /admin/vendors/:vendorId/shipping-config` with the outbound method and selected provider code. GET distinguishes persisted **unconfigured/null** from the effective legacy `preferredProvider` default. PUT validates the pair server-side, rejects unsupported method/provider values, requires provider code for VENDOR_INTEGRATION, and clears/rejects an incompatible provider when KARGONOMI is intentionally selected. Existing partial updates to unrelated config must not erase a valid selection or accidentally complete an unconfigured one. The later approved decision adds an explicit controlled `providerCode` to new token/client creation while leaving revocation and old clients unchanged. Keep vendor access and Admin permission conventions unchanged.
 
 The activation/status API response should expose a bounded, actionable readiness error for missing/invalid outbound selection, without secrets or raw provider payloads. No new public order or finance API is needed for Phase 1.
 
@@ -89,7 +91,7 @@ No allocation snapshot, first-observed delivery time, provider DELIVERED endpoin
 ## 16. Remaining technical unknowns and gates
 
 - The exact stable provider-code catalog and its operational ownership; SOPYO is evidenced as an example, not proof of a deployed adapter.
-- Whether token/scope readiness must gate onboarding is unresolved and must not be inferred from the current client table.
+- The later approved connection-readiness rule gates inactive-to-active transition for VENDOR_INTEGRATION, but does not block saving the selection first. Existing NULL-code clients cannot satisfy the new predicate.
 - Existing active-vendor rollout sequence and operator ownership, including vendors without a persisted shipping config. Do not convert the HEPSIJET fallback into selected authority.
 - Atomicity/concurrency mechanics for config-save versus status activation are engineering decisions, to be proven in PostgreSQL.
 - Phase 2 handling of allocation split, economic transfer, existing operational overrides, multi-shipment/partial delivery and conflicting sources remains outside Phase 1.

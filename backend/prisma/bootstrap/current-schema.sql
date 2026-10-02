@@ -574,6 +574,25 @@ CREATE TYPE public."VendorBalanceEventType" AS ENUM (
 
 
 --
+-- Name: VendorIntegrationProviderCode; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."VendorIntegrationProviderCode" AS ENUM (
+    'SOPYO'
+);
+
+
+--
+-- Name: VendorOutboundMethod; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."VendorOutboundMethod" AS ENUM (
+    'KARGONOMI',
+    'VENDOR_INTEGRATION'
+);
+
+
+--
 -- Name: VendorProfileSnapshotImpact; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -2297,7 +2316,8 @@ CREATE TABLE public."VendorIntegrationClient" (
     "lastUsedAt" timestamp(3) without time zone,
     "revokedAt" timestamp(3) without time zone,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    "updatedAt" timestamp(3) without time zone NOT NULL
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "providerCode" public."VendorIntegrationProviderCode"
 );
 
 
@@ -2394,7 +2414,10 @@ CREATE TABLE public."VendorShippingConfig" (
     "shippingVatPercent" numeric(5,2) DEFAULT 18.00 NOT NULL,
     "providerMetadata" jsonb,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    "updatedAt" timestamp(3) without time zone NOT NULL
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "outboundMethod" public."VendorOutboundMethod",
+    "selectedIntegrationProvider" public."VendorIntegrationProviderCode",
+    CONSTRAINT "VendorShippingConfig_outbound_selection_check" CHECK (((("outboundMethod" IS NULL) AND ("selectedIntegrationProvider" IS NULL)) OR (("outboundMethod" IS NOT NULL) AND ("outboundMethod" = 'KARGONOMI'::public."VendorOutboundMethod") AND ("selectedIntegrationProvider" IS NULL)) OR (("outboundMethod" IS NOT NULL) AND ("outboundMethod" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("selectedIntegrationProvider" IS NOT NULL))))
 );
 
 

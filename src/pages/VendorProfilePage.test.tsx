@@ -172,6 +172,8 @@ vi.mock('../services/runtime-services', () => ({
 
 const shippingConfig: VendorShippingConfig = {
   vendorId: 'demo-vendor-a',
+  outboundMethod: null,
+  selectedIntegrationProvider: null,
   preferredProvider: 'navlungo',
   shippingEnabled: true,
   defaultDesi: '3.00',
@@ -212,6 +214,7 @@ const vendorIntegrationProviders: VendorIntegrationProviderManagement = {
     {
       clientId: 'client-demo-vendor-a',
       providerName: 'Demo ERP',
+      providerCode: null,
       vendorIdentifier: 'demo-vendor-a',
       scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
       enabled: true,
@@ -1779,6 +1782,7 @@ describe('VendorProfilePage', () => {
       clientId: 'client-created-vendor',
       vendorIdentifier: 'created-vendor',
       providerName: 'Onboarding ERP',
+      providerCode: 'SOPYO',
       scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
       token: 'spg_vi_created_once',
       tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',
@@ -1791,12 +1795,14 @@ describe('VendorProfilePage', () => {
     const integrationSection = integrationHeading.closest('section');
     expect(integrationSection).not.toBeNull();
     await user.type(within(integrationSection!).getByLabelText('Provider name'), '  Onboarding ERP  ');
+    await user.selectOptions(within(integrationSection!).getByLabelText('Provider code'), 'SOPYO');
     await user.click(within(integrationSection!).getByRole('button', { name: 'Create Integration Token' }));
 
     await waitFor(() =>
       expect(createVendorIntegrationTokenMock).toHaveBeenCalledWith({
         vendorIdentifier: 'created-vendor',
         providerName: 'Onboarding ERP',
+        providerCode: 'SOPYO',
         scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
       }),
     );
@@ -1831,6 +1837,7 @@ describe('VendorProfilePage', () => {
     const integrationSection = integrationHeading.closest('section');
     expect(integrationSection).not.toBeNull();
     await user.type(within(integrationSection!).getByLabelText('Provider name'), 'Demo ERP');
+    await user.selectOptions(within(integrationSection!).getByLabelText('Provider code'), 'SOPYO');
     await user.click(within(integrationSection!).getByRole('button', { name: 'Create Integration Token' }));
 
     expect(await within(integrationSection!).findByRole('alert')).toHaveTextContent(
@@ -1893,6 +1900,24 @@ describe('VendorProfilePage', () => {
       ),
     );
     expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
+  });
+
+  it('saves explicit outbound Sopyo selection independently of Kargonomi warehouse setup', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, preferredProvider: 'kargonomi', defaultWarehouseId: null });
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+    await user.selectOptions(await screen.findByLabelText('Outbound method'), 'VENDOR_INTEGRATION');
+    await user.selectOptions(screen.getByLabelText('Integration Provider'), 'SOPYO');
+    await user.click(screen.getByRole('button', { name: 'Save outbound selection' }));
+    await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a', {
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+    }));
   });
 
   it('shows a safe shipping setup error when admin save fails', async () => {

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
+import { parseVendorIntegrationProviderCode } from './vendor-provider-code.js';
 
 export const ALLOWED_VENDOR_INTEGRATION_SCOPES = [
   'orders:read',
@@ -13,6 +14,7 @@ const allowedVendorIntegrationScopes = new Set<string>(ALLOWED_VENDOR_INTEGRATIO
 export type CreateVendorIntegrationClientInput = {
   vendorIdentifier: string;
   providerName: string;
+  providerCode: unknown;
   scopes: unknown[];
 };
 
@@ -20,6 +22,7 @@ export type CreatedVendorIntegrationClientToken = {
   clientId: string;
   vendorIdentifier: string;
   providerName: string;
+  providerCode: 'SOPYO';
   scopes: string[];
   token: string;
 };
@@ -57,6 +60,7 @@ export async function createVendorIntegrationClientToken(
 ): Promise<CreatedVendorIntegrationClientToken> {
   const vendorIdentifier = input.vendorIdentifier.trim();
   const providerName = input.providerName.trim();
+  const providerCode = parseVendorIntegrationProviderCode(input.providerCode);
   const scopes = normalizeVendorIntegrationScopes(input.scopes);
 
   if (!vendorIdentifier) {
@@ -89,6 +93,7 @@ export async function createVendorIntegrationClientToken(
     data: {
       vendorIdentifier,
       providerName,
+      providerCode,
       scopes,
       tokenHash,
     },
@@ -96,6 +101,7 @@ export async function createVendorIntegrationClientToken(
       id: true,
       vendorIdentifier: true,
       providerName: true,
+      providerCode: true,
       scopes: true,
     },
   });
@@ -104,6 +110,7 @@ export async function createVendorIntegrationClientToken(
     clientId: client.id,
     vendorIdentifier: client.vendorIdentifier,
     providerName: client.providerName,
+    providerCode: providerCode,
     scopes: client.scopes,
     token,
   };

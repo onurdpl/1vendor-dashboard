@@ -1,4 +1,4 @@
-import { VendorProfileSnapshotImpact } from '@prisma/client';
+import { VendorOutboundMethod, VendorProfileSnapshotImpact } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import {
   auditVendorProfileChanges,
@@ -156,7 +156,7 @@ export async function updateVendorStatus(
   const restricted = isVendorRestrictedStatus(status);
   const restrictedAt = statusChanged || reasonChanged ? new Date() : existing.restrictedAt;
 
-  const updated = await prisma.vendor.update({
+  const update = (db: Pick<typeof prisma, 'vendor'>) => db.vendor.update({
     where: {
       id: vendorId,
     },
@@ -175,6 +175,37 @@ export async function updateVendorStatus(
       restrictedAt: true,
     },
   });
+  const updated = status === 'active' && isVendorRestrictedStatus(existing.status)
+    ? await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Vendor" WHERE "id" = ${vendorId} FOR UPDATE`;
+        const shipping = await tx.vendorShippingConfig.findUnique({
+          where: { vendorId },
+          select: { outboundMethod: true, selectedIntegrationProvider: true },
+        });
+        if (!shipping?.outboundMethod) {
+          throw new Error('Outbound shipping must be configured before vendor activation.');
+        }
+        if (shipping.outboundMethod === VendorOutboundMethod.VENDOR_INTEGRATION) {
+          if (!shipping.selectedIntegrationProvider) {
+            throw new Error('Integration provider must be selected before vendor activation.');
+          }
+          const client = await tx.vendorIntegrationClient.findFirst({
+            where: {
+              vendorIdentifier: vendorId,
+              providerCode: shipping.selectedIntegrationProvider,
+              enabled: true,
+              revokedAt: null,
+              scopes: { hasEvery: ['orders:read', 'shipment:write'] },
+            },
+            select: { id: true },
+          });
+          if (!client) {
+            throw new Error('An active integration connection with orders:read and shipment:write is required before vendor activation.');
+          }
+        }
+        return update(tx);
+      })
+    : await update(prisma);
 
   await auditVendorProfileChanges({
     vendorId,

@@ -18,6 +18,8 @@ type ShippingConfigDraftProvider = ShippingProvider | 'navlungo';
 
 type ShippingConfigDraft = {
   preferredProvider: ShippingConfigDraftProvider;
+  outboundMethod: '' | 'KARGONOMI' | 'VENDOR_INTEGRATION';
+  selectedIntegrationProvider: '' | 'SOPYO';
   cargoIntegrationId: string;
   defaultWarehouseId: string;
   defaultDesi: string;
@@ -211,6 +213,8 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
 
   return {
     preferredProvider,
+    outboundMethod: config?.outboundMethod ?? '',
+    selectedIntegrationProvider: config?.selectedIntegrationProvider ?? '',
     cargoIntegrationId: config?.cargoIntegrationId ?? '',
     defaultWarehouseId: config?.defaultWarehouseId ?? config?.warehouses.find((warehouse) => warehouse.isDefault)?.warehouseId ?? '',
     defaultDesi: config?.defaultDesi ?? '3.00',
@@ -270,6 +274,9 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
 
 function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   const errors: string[] = [];
+  if (draft.outboundMethod === 'VENDOR_INTEGRATION' && draft.selectedIntegrationProvider !== 'SOPYO') {
+    errors.push('Select an integration provider for outbound shipping.');
+  }
 
   if (!draft.preferredProvider) {
     errors.push('Provider is required.');
@@ -347,6 +354,8 @@ function buildShippingConfigUpdate(
     ?? currentConfig?.warehouses[0];
   const baseUpdate = {
     preferredProvider: draft.preferredProvider,
+    outboundMethod: draft.outboundMethod || null,
+    selectedIntegrationProvider: draft.outboundMethod === 'VENDOR_INTEGRATION' ? draft.selectedIntegrationProvider || null : null,
     shippingEnabled: currentConfig?.shippingEnabled ?? true,
     defaultDesi: Number(draft.defaultDesi),
     shippingVatPercent: Number(currentConfig?.shippingVatPercent ?? 18),
@@ -667,6 +676,46 @@ export function VendorShippingConfigEditor({
         </span>
       </div>
       <div className="shipping-config-editor-grid">
+        <section className="shipping-config-section-card field-full" aria-label="Outbound shipping configuration">
+          <div className="shipping-config-section-heading"><strong>Outbound Shipping</strong></div>
+          <label className="field">
+            <span>Outbound method</span>
+            <select value={shippingConfigDraft.outboundMethod} onChange={(event) => setShippingConfigDraft((current) => ({
+              ...current,
+              outboundMethod: event.target.value as ShippingConfigDraft['outboundMethod'],
+              selectedIntegrationProvider: event.target.value === 'VENDOR_INTEGRATION' ? current.selectedIntegrationProvider : '',
+            }))}>
+              <option value="">Not configured</option>
+              <option value="KARGONOMI">Kargonomi</option>
+              <option value="VENDOR_INTEGRATION">Vendor Integration</option>
+            </select>
+          </label>
+          {shippingConfigDraft.outboundMethod === 'VENDOR_INTEGRATION' ? (
+            <label className="field">
+              <span>Integration Provider</span>
+              <select value={shippingConfigDraft.selectedIntegrationProvider} onChange={(event) => setShippingConfigDraft((current) => ({
+                ...current, selectedIntegrationProvider: event.target.value as ShippingConfigDraft['selectedIntegrationProvider'],
+              }))}>
+                <option value="">Select provider</option>
+                <option value="SOPYO">Sopyo</option>
+              </select>
+            </label>
+          ) : null}
+          <small>Outbound selection is separate from Kargonomi return and shipping-execution settings.</small>
+          <button type="button" className="button button-secondary" disabled={isSavingShippingConfig}
+            onClick={() => {
+              if (shippingConfigDraft.outboundMethod === 'VENDOR_INTEGRATION' && shippingConfigDraft.selectedIntegrationProvider !== 'SOPYO') {
+                setShippingConfigFeedback({ tone: 'error', message: 'Select an integration provider for outbound shipping.' });
+                return;
+              }
+              void updateShippingConfigMutation({
+                outboundMethod: shippingConfigDraft.outboundMethod || null,
+                selectedIntegrationProvider: shippingConfigDraft.outboundMethod === 'VENDOR_INTEGRATION' ? 'SOPYO' : null,
+              }).catch(() => undefined);
+            }}>
+            Save outbound selection
+          </button>
+        </section>
         {!isKargonomiConfigDraft ? shippingProviderSelectField : null}
         {isKargonomiConfigDraft ? (
           <>

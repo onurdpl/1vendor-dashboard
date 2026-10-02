@@ -39,6 +39,7 @@ export async function listAdminVendorIntegrationProviders(
     select: {
       id: true,
       providerName: true,
+      providerCode: true,
       vendorIdentifier: true,
       scopes: true,
       enabled: true,
@@ -102,6 +103,7 @@ export async function listAdminVendorIntegrationProviders(
       return {
         clientId: client.id,
         providerName: client.providerName,
+        providerCode: client.providerCode,
         vendorIdentifier: client.vendorIdentifier,
         scopes: client.scopes,
         enabled: client.enabled,

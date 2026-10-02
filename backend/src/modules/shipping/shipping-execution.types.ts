@@ -88,6 +88,8 @@ export type VendorShippingWarehouseDto = {
 
 export type VendorShippingConfigDto = {
   vendorId: string;
+  outboundMethod: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
+  selectedIntegrationProvider: 'SOPYO' | null;
   preferredProvider: ShippingProviderDto;
   shippingEnabled: boolean;
   defaultDesi: string;
@@ -575,6 +577,8 @@ export type ShipmentExecutionPreviewDto = {
 };
 
 export type VendorShippingConfigUpdateDto = {
+  outboundMethod?: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
+  selectedIntegrationProvider?: 'SOPYO' | null;
   preferredProvider?: ShippingProviderDto;
   shippingEnabled?: boolean;
   defaultDesi?: number;

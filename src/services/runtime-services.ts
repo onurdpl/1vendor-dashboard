@@ -169,6 +169,7 @@ function getMockVendorIntegrationProviderManagement(): VendorIntegrationProvider
       {
         clientId: 'mock-provider-sporjinal',
         providerName: 'Mock Provider',
+        providerCode: 'SOPYO',
         vendorIdentifier: 'sporjinal',
         scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
         enabled: true,
@@ -213,6 +214,7 @@ function getMockVendorIntegrationTokenCreateResult(
     clientId: `mock-${vendorIdentifier || 'vendor'}-integration-client`,
     vendorIdentifier,
     providerName,
+    providerCode: input.providerCode,
     scopes: [...input.scopes],
     token: `spg_vi_mock_${vendorIdentifier || 'vendor'}_${Date.now()}`,
     tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',
@@ -2061,6 +2063,8 @@ export const runtimeServices = {
       return {
         vendorId,
         preferredProvider: 'kargonomi' as const,
+        outboundMethod: null,
+        selectedIntegrationProvider: null,
         shippingEnabled: true,
         defaultDesi: '3.00',
         cargoIntegrationId: null,
@@ -2092,6 +2096,8 @@ export const runtimeServices = {
       return {
         vendorId,
         preferredProvider: input.preferredProvider ?? 'kargonomi',
+        outboundMethod: input.outboundMethod ?? null,
+        selectedIntegrationProvider: input.selectedIntegrationProvider ?? null,
         shippingEnabled: input.shippingEnabled ?? true,
         defaultDesi: (input.defaultDesi ?? 3).toFixed(2),
         cargoIntegrationId: input.cargoIntegrationId ?? null,
@@ -2121,6 +2127,8 @@ export const runtimeServices = {
       const syncedConfig = {
         vendorId,
         preferredProvider: 'kargonomi' as const,
+        outboundMethod: null,
+        selectedIntegrationProvider: null,
         shippingEnabled: true,
         defaultDesi: '3.00',
         cargoIntegrationId: null,

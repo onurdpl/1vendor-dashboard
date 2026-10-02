@@ -7,6 +7,10 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     update: vi.fn(),
   },
+  vendorShippingConfig: { findUnique: vi.fn() },
+  vendorIntegrationClient: { findFirst: vi.fn() },
+  $queryRaw: vi.fn(),
+  $transaction: vi.fn(),
   vendorProfileAuditLog: {
     createMany: vi.fn(),
     findFirst: vi.fn(),
@@ -62,6 +66,10 @@ describe('vendor status service', () => {
     prismaMock.vendorProfileAuditLog.findFirst.mockResolvedValue(null);
     prismaMock.vendor.findUnique.mockResolvedValue(vendorRecord('active'));
     prismaMock.vendor.update.mockResolvedValue(vendorRecord('active'));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(null);
+    prismaMock.vendorIntegrationClient.findFirst.mockResolvedValue(null);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
   });
 
   it('allows active status to be saved without a restriction reason', async () => {
@@ -227,6 +235,7 @@ describe('vendor status service', () => {
 
   it('clears current restriction fields when activating a vendor', async () => {
     prismaMock.vendor.findUnique.mockResolvedValue(vendorRecord('inactive'));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({ outboundMethod: 'KARGONOMI', selectedIntegrationProvider: null });
     prismaMock.vendor.update.mockResolvedValue(vendorRecord('active'));
 
     const result = await updateVendorStatus('vendor-a', { status: 'active' }, { actor });
@@ -250,6 +259,35 @@ describe('vendor status service', () => {
         changedAt: null,
       }),
     );
+  });
+
+  it('requires an explicit outbound method for inactive-to-active transition', async () => {
+    prismaMock.vendor.findUnique.mockResolvedValue(vendorRecord('inactive'));
+    await expect(updateVendorStatus('vendor-a', { status: 'active' }, { actor })).rejects.toThrow(
+      'Outbound shipping must be configured before vendor activation.',
+    );
+    expect(prismaMock.vendor.update).not.toHaveBeenCalled();
+  });
+
+  it('requires a matching coded, usable connection for Vendor Integration activation', async () => {
+    prismaMock.vendor.findUnique.mockResolvedValue(vendorRecord('inactive'));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+    });
+    await expect(updateVendorStatus('vendor-a', { status: 'active' }, { actor })).rejects.toThrow(
+      'An active integration connection with orders:read and shipment:write is required before vendor activation.',
+    );
+    expect(prismaMock.vendorIntegrationClient.findFirst).toHaveBeenCalledWith({
+      where: {
+        vendorIdentifier: 'vendor-a', providerCode: 'SOPYO', enabled: true, revokedAt: null,
+        scopes: { hasEvery: ['orders:read', 'shipment:write'] },
+      },
+      select: { id: true },
+    });
+    expect(prismaMock.vendor.update).not.toHaveBeenCalled();
+
+    prismaMock.vendorIntegrationClient.findFirst.mockResolvedValue({ id: 'new-coded-client' });
+    await expect(updateVendorStatus('vendor-a', { status: 'active' }, { actor })).resolves.toMatchObject({ status: 'active' });
   });
 
   it('returns current restriction state from the Vendor record instead of audit history', async () => {
