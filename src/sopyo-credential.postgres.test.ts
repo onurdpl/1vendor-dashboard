@@ -102,9 +102,18 @@ describeWithPostgres('Sopyo credential storage on isolated PostgreSQL', () => {
     };
     await save(id, 'fake-token-first', db);
     await save(id, 'fake-token-replacement', db);
+    expect(await db.vendorShippingConfig.findUniqueOrThrow({ where: { id: config.id } })).toEqual(before.config);
+    await db.vendorShippingConfig.update({
+      where: { id: config.id },
+      data: { outboundMethod: 'KARGONOMI', selectedIntegrationProvider: null },
+    });
+    expect(await has(id, db)).toBe(true);
+    expect(await get(id, db)).toBe('fake-token-replacement');
     expect(await db.vendorIntegrationClient.findUniqueOrThrow({ where: { id: client.id } })).toEqual(before.client);
     expect(await db.vendorIntegrationClient.findUniqueOrThrow({ where: { id: codedClient.id } })).toEqual(before.codedClient);
-    expect(await db.vendorShippingConfig.findUniqueOrThrow({ where: { id: config.id } })).toEqual(before.config);
+    expect(await db.vendorShippingConfig.findUniqueOrThrow({ where: { id: config.id } })).toMatchObject({
+      outboundMethod: 'KARGONOMI', selectedIntegrationProvider: null,
+    });
     expect(await db.vendorAllocation.findUniqueOrThrow({ where: { id: allocation.id } })).toEqual(before.allocation);
     expect(await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: id } })).toEqual(before.observation);
   });

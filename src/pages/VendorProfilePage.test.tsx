@@ -86,6 +86,8 @@ const vendorIntegrationProvidersMock = vi.fn<() => Promise<VendorIntegrationProv
 const createVendorIntegrationTokenMock = vi.fn<
   (input: VendorIntegrationTokenCreateInput) => Promise<VendorIntegrationTokenCreateResult>
 >();
+const sopyoCredentialStateMock = vi.fn<(vendorId: string) => Promise<{ configured: boolean }>>();
+const saveSopyoCredentialMock = vi.fn<(vendorId: string, token: string) => Promise<{ configured: boolean }>>();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -164,6 +166,8 @@ vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     vendorIntegration: {
       providers: () => vendorIntegrationProvidersMock(),
+      sopyoCredentialState: (vendorId: string) => sopyoCredentialStateMock(vendorId),
+      saveSopyoCredential: (vendorId: string, token: string) => saveSopyoCredentialMock(vendorId, token),
       createToken: (input: VendorIntegrationTokenCreateInput) => createVendorIntegrationTokenMock(input),
       revokeProviderToken: vi.fn(),
     },
@@ -813,6 +817,10 @@ describe('VendorProfilePage', () => {
     createAdminVendorSupportTicketMock.mockReset();
     vendorIntegrationProvidersMock.mockReset();
     vendorIntegrationProvidersMock.mockResolvedValue(emptyVendorIntegrationProviders);
+    sopyoCredentialStateMock.mockReset();
+    sopyoCredentialStateMock.mockResolvedValue({ configured: false });
+    saveSopyoCredentialMock.mockReset();
+    saveSopyoCredentialMock.mockResolvedValue({ configured: true });
     createVendorIntegrationTokenMock.mockReset();
     createVendorIntegrationTokenMock.mockResolvedValue({
       clientId: 'client-demo-vendor-a',
@@ -1749,6 +1757,53 @@ describe('VendorProfilePage', () => {
     expect(vendorIntegrationProvidersMock).toHaveBeenCalled();
   });
 
+  it('adds and replaces a Sopyo credential without redisplaying the submitted secret', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+    const section = await screen.findByLabelText('Sopyo API connection');
+    expect(await within(section).findByText('Status: Not configured')).toBeInTheDocument();
+    await user.click(within(section).getByRole('button', { name: 'Add token' }));
+    const input = within(section).getByLabelText('Sopyo API token') as HTMLInputElement;
+    expect(input.type).toBe('password');
+    expect(input.value).toBe('');
+    await user.type(input, 'fake-test-sopyo-secret');
+    await user.click(within(section).getByRole('button', { name: 'Save token' }));
+    await waitFor(() => expect(saveSopyoCredentialMock).toHaveBeenCalledWith('demo-vendor-a', 'fake-test-sopyo-secret'));
+    expect(await within(section).findByText('Status: Configured')).toBeInTheDocument();
+    expect(within(section).queryByLabelText('Sopyo API token')).not.toBeInTheDocument();
+    expect(section.textContent).not.toContain('fake-test-sopyo-secret');
+    await user.click(within(section).getByRole('button', { name: 'Replace token' }));
+    expect((within(section).getByLabelText('Sopyo API token') as HTMLInputElement).value).toBe('');
+    await user.type(within(section).getByLabelText('Sopyo API token'), 'fake-test-replacement');
+    await user.click(within(section).getByRole('button', { name: 'Save token' }));
+    await waitFor(() => expect(saveSopyoCredentialMock).toHaveBeenCalledWith('demo-vendor-a', 'fake-test-replacement'));
+    expect(section.textContent).not.toContain('fake-test-replacement');
+    expect(within(section).getByRole('button', { name: 'Replace token' })).toBeInTheDocument();
+    expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
+    expect(updateVendorStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing Sopyo credential management available after outbound config changes', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    sopyoCredentialStateMock.mockResolvedValue({ configured: true });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, outboundMethod: 'KARGONOMI' });
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+    const section = await screen.findByLabelText('Sopyo API connection');
+    expect(await within(section).findByText('Status: Configured')).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Replace token' })).toBeInTheDocument();
+  });
+
   it('creates an onboarding token for a restricted vendor and only displays the plaintext once', async () => {
     const user = userEvent.setup();
     const clipboardWriteMock = vi.fn().mockResolvedValue(undefined);
@@ -1860,6 +1915,8 @@ describe('VendorProfilePage', () => {
     expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
     expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
     expect(vendorIntegrationProvidersMock).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Sopyo API connection')).not.toBeInTheDocument();
+    expect(sopyoCredentialStateMock).not.toHaveBeenCalled();
   });
 
   it('saves admin shipping setup for the requested route vendor', async () => {

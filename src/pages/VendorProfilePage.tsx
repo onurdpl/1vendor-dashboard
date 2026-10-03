@@ -1168,6 +1168,13 @@ export function VendorProfilePage() {
   const [integrationTokenFormError, setIntegrationTokenFormError] = useState<string | null>(null);
   const [createdIntegrationToken, setCreatedIntegrationToken] = useState<VendorIntegrationTokenCreateResult | null>(null);
   const [integrationTokenCopyStatus, setIntegrationTokenCopyStatus] = useState<string | null>(null);
+  const [sopyoTokenOpen, setSopyoTokenOpen] = useState(false);
+  const [sopyoToken, setSopyoToken] = useState('');
+  const [sopyoTokenPending, setSopyoTokenPending] = useState(false);
+  const [sopyoTokenError, setSopyoTokenError] = useState<string | null>(null);
+  const [savedSopyoConfiguredVendorId, setSavedSopyoConfiguredVendorId] = useState<string | null>(null);
+  const sopyoCredentialVendorRef = useRef(currentVendor.vendorId);
+  sopyoCredentialVendorRef.current = currentVendor.vendorId;
 
   const shippingQuery = useQueryResource(
     queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
@@ -1211,6 +1218,12 @@ export function VendorProfilePage() {
     ({ signal }) => runtimeServices.vendorIntegration.providers({ signal }),
     { enabled: canLoadProfile && isAdminVendorRoute && isAdmin },
   );
+  const sopyoCredentialQuery = useQueryResource(
+    queryKeys.admin.vendorIntegration.sopyoCredential(currentVendor.vendorId),
+    ({ signal }) => runtimeServices.vendorIntegration.sopyoCredentialState(currentVendor.vendorId, { signal }),
+    { enabled: canLoadProfile && isAdminVendorRoute && isAdmin, placeholderData: () => undefined },
+  );
+  const sopyoConfigured = savedSopyoConfiguredVendorId === currentVendor.vendorId || sopyoCredentialQuery.data?.configured === true;
 
   const shippingConfig = shippingQuery.data;
   const financeProfile = isAdmin && savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
@@ -1273,7 +1286,11 @@ export function VendorProfilePage() {
     setIntegrationTokenFormError(null);
     setCreatedIntegrationToken(null);
     setIntegrationTokenCopyStatus(null);
-  }, [currentVendor.vendorId]);
+    setSopyoTokenOpen(false);
+    setSopyoToken('');
+    setSopyoTokenError(null);
+    setSavedSopyoConfiguredVendorId(null);
+  }, [currentVendor.vendorId, isAdmin]);
   const latestBillingAudit = latestAuditBySection.get('billing_legal_profile') ?? null;
   const latestLogoBindingAudit = latestAuditBySection.get('logo_binding') ?? null;
   const latestFinanceAudit = latestAuditBySection.get('finance_policy') ?? null;
@@ -1986,6 +2003,31 @@ export function VendorProfilePage() {
     setCreatedIntegrationToken(null);
     setIntegrationTokenCopyStatus(null);
     void integrationTokenMutation.mutateAsync(undefined).catch(() => undefined);
+  }
+
+  async function handleSopyoTokenSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!sopyoToken.trim()) {
+      setSopyoTokenError('Sopyo API token is required.');
+      return;
+    }
+    setSopyoTokenPending(true);
+    setSopyoTokenError(null);
+    const vendorId = currentVendor.vendorId;
+    try {
+      await runtimeServices.vendorIntegration.saveSopyoCredential(vendorId, sopyoToken);
+      if (sopyoCredentialVendorRef.current !== vendorId) return;
+      setSavedSopyoConfiguredVendorId(vendorId);
+      setSopyoToken('');
+      setSopyoTokenOpen(false);
+      showFeedback('Sopyo API connection configured.', 'success');
+    } catch {
+      if (sopyoCredentialVendorRef.current === vendorId) {
+        setSopyoTokenError('Sopyo API token could not be saved. Please retry.');
+      }
+    } finally {
+      setSopyoTokenPending(false);
+    }
   }
 
   async function handleCopyCreatedIntegrationToken() {
@@ -4266,6 +4308,58 @@ export function VendorProfilePage() {
               </StatusBadge>
             </div>
           </div>
+          {isAdminVendorRoute ? (
+            <section aria-label="Sopyo API connection" className="vendor-profile-billing-form">
+              <div className="vendor-profile-billing-form-heading">
+                <div>
+                  <h3>Sopyo API connection</h3>
+                  <p>The saved API token is never displayed again. This connection is independent of the current outbound shipping selection.</p>
+                </div>
+              </div>
+              {sopyoCredentialQuery.isError ? (
+                <SectionErrorRetry
+                  title="Sopyo connection status unavailable"
+                  description="Unable to read Sopyo connection status."
+                  onRetry={() => void sopyoCredentialQuery.refetch()}
+                />
+              ) : sopyoCredentialQuery.isInitialLoading ? (
+                <p>Loading Sopyo connection status...</p>
+              ) : (
+                <>
+                  <p>Status: {sopyoConfigured ? 'Configured' : 'Not configured'}</p>
+                  {sopyoTokenOpen ? (
+                    <form onSubmit={(event) => void handleSopyoTokenSubmit(event)}>
+                      <label>
+                        Sopyo API token
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          value={sopyoToken}
+                          onChange={(event) => { setSopyoToken(event.target.value); setSopyoTokenError(null); }}
+                          disabled={sopyoTokenPending}
+                        />
+                      </label>
+                      {sopyoTokenError ? <p role="alert" className="vendor-profile-billing-error">{sopyoTokenError}</p> : null}
+                      <OperationalActionGroup>
+                        <button type="submit" className="button button-primary" disabled={sopyoTokenPending || !sopyoToken.trim()}>
+                          {sopyoTokenPending ? 'Saving...' : 'Save token'}
+                        </button>
+                        <button type="button" className="button button-secondary" disabled={sopyoTokenPending} onClick={() => {
+                          setSopyoToken('');
+                          setSopyoTokenError(null);
+                          setSopyoTokenOpen(false);
+                        }}>Cancel</button>
+                      </OperationalActionGroup>
+                    </form>
+                  ) : (
+                    <button type="button" className="button button-secondary" onClick={() => setSopyoTokenOpen(true)}>
+                      {sopyoConfigured ? 'Replace token' : 'Add token'}
+                    </button>
+                  )}
+                </>
+              )}
+            </section>
+          ) : null}
           {isAdminVendorRoute ? (
             <form
               aria-label="Create integration token"

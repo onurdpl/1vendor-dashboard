@@ -32,6 +32,7 @@ export const queryKeys = {
     },
     vendorIntegration: {
       providers: () => ['admin', 'vendor-integration', 'providers'] as const,
+      sopyoCredential: (vendorId: string) => ['admin', 'vendor-integration', 'sopyo-credential', vendorId] as const,
     },
     orders: {
       breakdown: (shopifyOrderId: string) => ['admin', 'orders', 'breakdown', shopifyOrderId] as const,

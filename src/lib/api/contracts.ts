@@ -3194,3 +3194,5 @@ export type VendorIntegrationTokenCreateResult = {
   token: string;
   tokenWarning: string;
 };
+
+export type SopyoCredentialState = { configured: boolean };

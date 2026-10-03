@@ -70,6 +70,7 @@ import type {
   VendorIntegrationProviderRevokeResult,
   VendorIntegrationTokenCreateInput,
   VendorIntegrationTokenCreateResult,
+  SopyoCredentialState,
   VendorOrdersWorkflow,
   VendorOrdersWorkflowSummary,
 } from '../lib/api/contracts';
@@ -96,6 +97,7 @@ type OrdersReadRequestOptions = ReadRequestOptions & { workflow?: VendorOrdersWo
 type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope };
 
 const mockSupportTickets: SupportTicket[] = [];
+const mockSopyoConfiguredVendors = new Set<string>();
 
 function buildOperationsQueueSummary(items: OperationsQueueItem[]): OperationsQueueDashboard['summary'] {
   return {
@@ -2948,6 +2950,16 @@ export const runtimeServices = {
         : Promise.resolve(getMockAdminOperationsAttention()),
   },
   vendorIntegration: {
+    sopyoCredentialState: (vendorId: string, options: ReadRequestOptions = {}): Promise<SopyoCredentialState> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendorIntegration.getSopyoCredentialState(vendorId, { signal: options.signal })
+        : Promise.resolve({ configured: mockSopyoConfiguredVendors.has(vendorId) }),
+    saveSopyoCredential: (vendorId: string, token: string): Promise<SopyoCredentialState> => {
+      if (runtimeConfig.apiMode === 'real') return realVendorIntegration.saveSopyoCredential(vendorId, token);
+      if (!token.trim()) return Promise.reject(new Error('Sopyo API token is required.'));
+      mockSopyoConfiguredVendors.add(vendorId);
+      return Promise.resolve({ configured: true });
+    },
     providers: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realVendorIntegration.getVendorIntegrationProviderManagement({ signal: options.signal })

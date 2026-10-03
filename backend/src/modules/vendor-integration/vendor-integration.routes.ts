@@ -27,6 +27,7 @@ import {
   updateVendorIntegrationOrderStatus,
 } from './vendor-integration.status.service.js';
 import { createVendorIntegrationClientToken } from './vendor-integration.tokens.js';
+import { hasSopyoCredential, saveOrReplaceSopyoCredential } from './sopyo-credential.service.js';
 import './vendor-integration.types.js';
 import {
   ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES,
@@ -268,6 +269,49 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
       }
 
       return listAdminVendorIntegrationProviders();
+    },
+  );
+
+  app.get<{ Params: { vendorId: string } }>(
+    '/admin/vendors/:vendorId/sopyo-credential',
+    { preHandler: adminAuthPreHandlers },
+    async (request, reply) => {
+      const forbidden = requireAdminRole(request, reply);
+      if (forbidden) return forbidden;
+
+      const vendorId = request.params.vendorId?.trim();
+      if (!vendorId) return reply.code(400).send({ message: 'Vendor ID is required.' });
+      const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { id: true } });
+      if (!vendor) return reply.code(404).send({ message: 'Vendor not found.' });
+      return { configured: await hasSopyoCredential(vendorId) };
+    },
+  );
+
+  app.post<{ Params: { vendorId: string }; Body: { token?: unknown } }>(
+    '/admin/vendors/:vendorId/sopyo-credential',
+    { preHandler: adminAuthPreHandlers },
+    async (request, reply) => {
+      const forbidden = requireAdminRole(request, reply);
+      if (forbidden) return forbidden;
+
+      const vendorId = request.params.vendorId?.trim();
+      if (!vendorId) return reply.code(400).send({ message: 'Vendor ID is required.' });
+      const token = request.body?.token;
+      if (typeof token !== 'string' || !token.trim()) {
+        return reply.code(400).send({ message: 'Sopyo API token is required.' });
+      }
+
+      try {
+        await saveOrReplaceSopyoCredential(vendorId, token);
+        logAdminVendorIntegrationAction(app, 'SOPYO_CREDENTIAL_SAVED', request, { vendorId });
+        return { configured: true };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Vendor not found.') {
+          return reply.code(404).send({ message: 'Vendor not found.' });
+        }
+        // Never serialize provider credentials or unexpected error details.
+        return reply.code(503).send({ message: 'Sopyo credential could not be saved.' });
+      }
     },
   );
 

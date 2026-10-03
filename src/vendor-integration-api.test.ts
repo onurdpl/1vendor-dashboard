@@ -10,6 +10,10 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     update: vi.fn(),
   },
+  sopyoVendorCredential: {
+    findUnique: vi.fn(),
+    upsert: vi.fn(),
+  },
   vendorIntegrationAuditLog: {
     create: vi.fn(),
     findMany: vi.fn(),
@@ -148,7 +152,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createRegisteredRoutes() {
+function createRegisteredRoutes(env?: Parameters<typeof registerVendorIntegrationRoutes>[1]) {
   const hooks = new Map<string, (request: Record<string, unknown>, reply: { statusCode: number }) => Promise<void>>();
   const gets = new Map<string, {
     options?: { preHandler: Array<(request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>> };
@@ -173,7 +177,7 @@ function createRegisteredRoutes() {
     }),
   };
 
-  registerVendorIntegrationRoutes(app as never);
+  registerVendorIntegrationRoutes(app as never, env);
 
   return { gets, posts, hooks, app };
 }
@@ -416,6 +420,93 @@ describe('vendor integration API foundation', () => {
     prismaMock.$queryRaw.mockResolvedValue([]);
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     process.env.ADMIN_PROBE_TOKEN = 'admin-test-token';
+    process.env.SOPYO_CREDENTIAL_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString('base64');
+    prismaMock.sopyoVendorCredential.findUnique.mockResolvedValue(null);
+  });
+
+  it('keeps Sopyo credential state and save/replace Admin-only, with no secret in responses or logs', async () => {
+    const path = '/admin/vendors/:vendorId/sopyo-credential';
+    const params = { vendorId: 'sporjinal' };
+    const original = 'fake-test-sopyo-token';
+    const replacement = 'fake-test-sopyo-replacement';
+    let stored: Record<string, unknown> | null = null;
+    prismaMock.sopyoVendorCredential.findUnique.mockImplementation(async () => stored);
+    prismaMock.sopyoVendorCredential.upsert.mockImplementation(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+      stored = { ...(stored ?? create), ...update, id: 'credential-1', vendorId: 'sporjinal', createdAt: new Date(), updatedAt: new Date() };
+      return { id: 'credential-1', vendorId: 'sporjinal', createdAt: stored.createdAt, updatedAt: stored.updatedAt };
+    });
+
+    const empty = await injectAdminRoute('GET', path, { authUser: adminUser, params });
+    expect(empty.payload).toEqual({ configured: false });
+    const saved = await injectAdminRoute('POST', path, { authUser: adminUser, params, body: { token: original } });
+    expect(saved.payload).toEqual({ configured: true });
+    expect(saved.statusCode).toBe(200);
+    expect(JSON.stringify(saved.payload)).not.toMatch(/token|ciphertext|authTag|iv/);
+    expect(JSON.stringify(saved.app.log.info.mock.calls)).not.toContain(original);
+    const configured = await injectAdminRoute('GET', path, { authUser: adminUser, params });
+    expect(configured.payload).toEqual({ configured: true });
+    expect(JSON.stringify(configured.payload)).not.toMatch(/token|ciphertext|authTag|iv/);
+
+    const replaced = await injectAdminRoute('POST', path, { authUser: adminUser, params, body: { token: replacement } });
+    expect(replaced.payload).toEqual({ configured: true });
+    const { getDecryptedSopyoCredentialForInternalUse } = await import('../backend/src/modules/vendor-integration/sopyo-credential.service.js');
+    expect(await getDecryptedSopyoCredentialForInternalUse('sporjinal')).toBe(replacement);
+    expect(JSON.stringify(stored)).not.toContain(original);
+    expect(JSON.stringify(stored)).not.toContain(replacement);
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationClient.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects vendor and unauthenticated Sopyo credential reads and writes before persistence', async () => {
+    const path = '/admin/vendors/:vendorId/sopyo-credential';
+    for (const authUser of [undefined, { id: 'vendor-1', role: 'vendor' }]) {
+      for (const method of ['GET', 'POST'] as const) {
+        const response = await injectAdminRoute(method, path, {
+          authUser, params: { vendorId: 'sporjinal' }, body: { token: 'fake-test-secret' },
+        });
+        expect(response.statusCode).toBe(403);
+        expect(response.payload).toEqual({ message: 'Forbidden' });
+      }
+    }
+    expect(prismaMock.sopyoVendorCredential.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.sopyoVendorCredential.upsert).not.toHaveBeenCalled();
+  });
+
+  it('registers session authentication on both Sopyo Admin routes', async () => {
+    const registered = createRegisteredRoutes({ JWT_SECRET: 'fake-test-jwt-secret' } as never);
+    const path = '/admin/vendors/:vendorId/sopyo-credential';
+    for (const route of [registered.gets.get(path), registered.posts.get(path)]) {
+      expect(route?.options?.preHandler).toHaveLength(1);
+      const reply = createReply();
+      await route?.options?.preHandler[0]?.({
+        headers: {}, method: 'GET', url: path, id: 'req-no-session', log: { info: vi.fn() },
+      }, reply);
+      expect(reply.statusCode).toBe(401);
+      expect(reply.sent).toBe(true);
+    }
+  });
+
+  it('rejects blank or invalid Sopyo token input without echoing it', async () => {
+    const path = '/admin/vendors/:vendorId/sopyo-credential';
+    for (const token of [undefined, null, 42, '   ']) {
+      const response = await injectAdminRoute('POST', path, {
+        authUser: adminUser, params: { vendorId: 'sporjinal' }, body: { token },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.payload).toEqual({ message: 'Sopyo API token is required.' });
+    }
+    expect(prismaMock.sopyoVendorCredential.upsert).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on credential storage errors without exposing token or error internals', async () => {
+    prismaMock.sopyoVendorCredential.upsert.mockRejectedValueOnce(new Error('fake-test-secret database detail'));
+    const response = await injectAdminRoute('POST', '/admin/vendors/:vendorId/sopyo-credential', {
+      authUser: adminUser, params: { vendorId: 'sporjinal' }, body: { token: 'fake-test-secret' },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.payload).toEqual({ message: 'Sopyo credential could not be saved.' });
+    expect(JSON.stringify(response.payload)).not.toContain('fake-test-secret');
   });
 
   it('allows requests under the configured vendor integration rate limit', async () => {
