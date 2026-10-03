@@ -417,6 +417,7 @@ model Vendor {
   financeEntries               FinanceLedgerEntry[]
   shippingCosts                ShipmentShippingCost[]
   shippingConfig               VendorShippingConfig?
+  sopyoCredential              SopyoVendorCredential?
   shippingWarehouses           VendorShippingWarehouse[]
   shipmentExecutions           ShipmentExecution[]
   financialProfile             VendorFinancialProfile?
@@ -2052,6 +2053,17 @@ model VendorShippingConfig {
   warehouses         VendorShippingWarehouse[]
 
   @@index([vendorId, shippingEnabled])
+}
+
+model SopyoVendorCredential {
+  id         String   @id @default(cuid())
+  vendorId   String   @unique
+  ciphertext Bytes
+  iv         Bytes
+  authTag    Bytes
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  vendor     Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 }
 
 model VendorShippingWarehouse {

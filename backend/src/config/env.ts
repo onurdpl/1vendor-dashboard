@@ -88,6 +88,7 @@ export type AppEnv = {
   LOGO_ISBASI_CREATE_ENABLED?: boolean;
   LOGO_ISBASI_CREATE_ENVIRONMENT?: string;
   LOGO_ISBASI_EXPECTED_TENANT_ID?: string;
+  SOPYO_CREDENTIAL_ENCRYPTION_KEY?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -473,5 +474,6 @@ export function loadEnv(): AppEnv {
     LOGO_ISBASI_CREATE_ENABLED: logoIsbasiCreateEnabled,
     LOGO_ISBASI_CREATE_ENVIRONMENT: logoIsbasiCreateEnvironment,
     LOGO_ISBASI_EXPECTED_TENANT_ID: logoIsbasiExpectedTenantId,
+    SOPYO_CREDENTIAL_ENCRYPTION_KEY: process.env.SOPYO_CREDENTIAL_ENCRYPTION_KEY || undefined,
   } as AppEnv;
 }

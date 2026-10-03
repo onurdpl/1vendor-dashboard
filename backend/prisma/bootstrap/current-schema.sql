@@ -2121,6 +2121,21 @@ CREATE TABLE public."ShopifyRefundLineItem" (
 
 
 --
+-- Name: SopyoVendorCredential; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SopyoVendorCredential" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    ciphertext bytea NOT NULL,
+    iv bytea NOT NULL,
+    "authTag" bytea NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
 -- Name: SupportTicket; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2975,6 +2990,14 @@ ALTER TABLE ONLY public."ShopifyRefundLineItem"
 
 ALTER TABLE ONLY public."ShopifyRefund"
     ADD CONSTRAINT "ShopifyRefund_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SopyoVendorCredential SopyoVendorCredential_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoVendorCredential"
+    ADD CONSTRAINT "SopyoVendorCredential_pkey" PRIMARY KEY (id);
 
 
 --
@@ -4514,6 +4537,13 @@ CREATE UNIQUE INDEX "ShopifyRefundLineItem_shopifyRefundId_sourceRefundLineItemI
 --
 
 CREATE UNIQUE INDEX "ShopifyRefund_sourceShopifyRefundId_key" ON public."ShopifyRefund" USING btree ("sourceShopifyRefundId");
+
+
+--
+-- Name: SopyoVendorCredential_vendorId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SopyoVendorCredential_vendorId_key" ON public."SopyoVendorCredential" USING btree ("vendorId");
 
 
 --
@@ -6201,6 +6231,14 @@ ALTER TABLE ONLY public."ShopifyRefundLineItem"
 
 ALTER TABLE ONLY public."ShopifyRefund"
     ADD CONSTRAINT "ShopifyRefund_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SopyoVendorCredential SopyoVendorCredential_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoVendorCredential"
+    ADD CONSTRAINT "SopyoVendorCredential_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
