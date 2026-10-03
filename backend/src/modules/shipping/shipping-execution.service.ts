@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { resolveVendorOutboundSelection } from '../vendor-integration/vendor-provider-code.js';
+import { recordVerifiedDeliveredObservation } from './allocation-delivered-observation.service.js';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import {
@@ -3161,6 +3162,30 @@ async function persistProviderShipmentResult(input: {
       });
     }
 
+    if (
+      provider === ShippingProvider.KARGONOMI &&
+      status === ShipmentExecutionStatus.DELIVERED &&
+      readString(result.responseSnapshot, ['providerStatus', 'status'])?.trim().toLowerCase() ===
+        'webservice_shipment_delivered' &&
+      execution.providerShipmentId
+    ) {
+      const frozenSource = await tx.vendorAllocation.findUnique({
+        where: { id: allocation.id },
+        select: { outboundMethodSnapshot: true, outboundIntegrationProviderSnapshot: true },
+      });
+      if (frozenSource?.outboundMethodSnapshot === 'KARGONOMI' &&
+          frozenSource.outboundIntegrationProviderSnapshot === null) {
+        await recordVerifiedDeliveredObservation({
+          allocationId: allocation.id,
+          source: {
+            method: 'KARGONOMI',
+            shipmentExecutionId: execution.id,
+            sourceReference: execution.providerShipmentId,
+          },
+        }, tx);
+      }
+    }
+
     if (result.shippingCost !== null) {
       const providerReference = result.providerShipmentId ?? result.trackingNumber ?? execution.id;
       await tx.shipmentShippingCost.upsert({
@@ -3507,6 +3532,9 @@ export async function refreshKargonomiShipmentProviderData(
       },
     );
     const status = mapProviderStatus(result.shipmentStatus);
+    const exactDeliveredStatus =
+      readString(result.responseSnapshot, ['providerStatus', 'status'])?.trim().toLowerCase() ===
+      'webservice_shipment_delivered';
 
     const updated = await prisma.$transaction(async (tx) => {
       const execution = await tx.shipmentExecution.update({
@@ -3557,6 +3585,23 @@ export async function refreshKargonomiShipmentProviderData(
           syncStatus: 'carrier_refreshed',
         },
       });
+
+      if (
+        exactDeliveredStatus &&
+        status === ShipmentExecutionStatus.DELIVERED &&
+        existing.allocation.outboundMethodSnapshot === 'KARGONOMI' &&
+        existing.allocation.outboundIntegrationProviderSnapshot === null &&
+        execution.providerShipmentId
+      ) {
+        await recordVerifiedDeliveredObservation({
+          allocationId: existing.allocationId,
+          source: {
+            method: 'KARGONOMI',
+            shipmentExecutionId: execution.id,
+            sourceReference: execution.providerShipmentId,
+          },
+        }, tx);
+      }
 
       return execution;
     });

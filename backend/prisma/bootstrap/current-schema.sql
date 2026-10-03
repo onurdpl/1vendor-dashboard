@@ -737,6 +737,64 @@ END;
 $$;
 
 
+--
+-- Name: prevent_allocation_delivered_observation_change(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.prevent_allocation_delivered_observation_change() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'Allocation delivered observation is immutable';
+END;
+$$;
+
+
+--
+-- Name: validate_allocation_delivered_observation_source(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.validate_allocation_delivered_observation_source() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  allocation_row "VendorAllocation"%ROWTYPE;
+BEGIN
+  SELECT * INTO allocation_row FROM "VendorAllocation" WHERE "id" = NEW."vendorAllocationId" FOR UPDATE;
+  IF NOT FOUND OR allocation_row."outboundMethodSnapshot" IS DISTINCT FROM NEW."outboundMethod"
+    OR allocation_row."outboundIntegrationProviderSnapshot" IS DISTINCT FROM NEW."outboundIntegrationProvider" THEN
+    RAISE EXCEPTION 'Delivered observation source does not match allocation snapshot';
+  END IF;
+
+  IF NEW."outboundMethod" = 'KARGONOMI' AND NOT EXISTS (
+    SELECT 1 FROM "ShipmentExecution" execution
+    WHERE execution."id" = NEW."shipmentExecutionId"
+      AND execution."allocationId" = NEW."vendorAllocationId"
+      AND execution."vendorId" = allocation_row."assignedVendorId"
+      AND execution."provider" = 'KARGONOMI'
+      AND execution."shipmentStatus" = 'DELIVERED'
+      AND execution."providerShipmentId" = NEW."sourceReference"
+  ) THEN
+    RAISE EXCEPTION 'Delivered observation lacks matching Kargonomi execution';
+  END IF;
+
+  IF NEW."outboundMethod" = 'VENDOR_INTEGRATION' AND NOT EXISTS (
+    SELECT 1 FROM "VendorIntegrationClient" client
+    WHERE client."id" = NEW."vendorIntegrationClientId"
+      AND client."vendorIdentifier" = allocation_row."assignedVendorId"
+      AND client."providerCode" = NEW."outboundIntegrationProvider"
+      AND client."enabled" = true
+      AND client."revokedAt" IS NULL
+      AND 'shipment:write' = ANY(client."scopes")
+  ) THEN
+    RAISE EXCEPTION 'Delivered observation lacks matching active integration client';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
 SET default_table_access_method = heap;
 
 --
@@ -752,6 +810,24 @@ CREATE TABLE public."AllocationAssignmentHistory" (
     reason text,
     "actorUserId" text,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: AllocationDeliveredObservation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."AllocationDeliveredObservation" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "firstObservedDeliveredAt" timestamp(3) without time zone DEFAULT timezone('UTC'::text, clock_timestamp()) NOT NULL,
+    "outboundMethod" public."VendorOutboundMethod" NOT NULL,
+    "outboundIntegrationProvider" public."VendorIntegrationProviderCode",
+    "sourceReference" text NOT NULL,
+    "shipmentExecutionId" text,
+    "vendorIntegrationClientId" text,
+    CONSTRAINT "AllocationDeliveredObservation_reference_check" CHECK ((length(btrim("sourceReference")) > 0)),
+    CONSTRAINT "AllocationDeliveredObservation_source_check" CHECK (((("outboundMethod" = 'KARGONOMI'::public."VendorOutboundMethod") AND ("outboundIntegrationProvider" IS NULL) AND ("shipmentExecutionId" IS NOT NULL) AND ("vendorIntegrationClientId" IS NULL)) OR (("outboundMethod" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("outboundIntegrationProvider" IS NOT NULL) AND ("shipmentExecutionId" IS NULL) AND ("vendorIntegrationClientId" IS NOT NULL))))
 );
 
 
@@ -2478,6 +2554,14 @@ ALTER TABLE ONLY public."AllocationAssignmentHistory"
 
 
 --
+-- Name: AllocationDeliveredObservation AllocationDeliveredObservation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationDeliveredObservation"
+    ADD CONSTRAINT "AllocationDeliveredObservation_pkey" PRIMARY KEY (id);
+
+
+--
 -- Name: AllocationEconomicTransfer AllocationEconomicTransfer_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3051,6 +3135,27 @@ ALTER TABLE ONLY public."Vendor"
 
 ALTER TABLE ONLY public."WebhookEvent"
     ADD CONSTRAINT "WebhookEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: AllocationDeliveredObservation_shipmentExecutionId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationDeliveredObservation_shipmentExecutionId_idx" ON public."AllocationDeliveredObservation" USING btree ("shipmentExecutionId");
+
+
+--
+-- Name: AllocationDeliveredObservation_vendorAllocationId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "AllocationDeliveredObservation_vendorAllocationId_key" ON public."AllocationDeliveredObservation" USING btree ("vendorAllocationId");
+
+
+--
+-- Name: AllocationDeliveredObservation_vendorIntegrationClientId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationDeliveredObservation_vendorIntegrationClientId_idx" ON public."AllocationDeliveredObservation" USING btree ("vendorIntegrationClientId");
 
 
 --
@@ -4881,6 +4986,20 @@ CREATE INDEX "ZeroNetAck_vendor_idx" ON public."FinancialCorrectionZeroNetAcknow
 
 
 --
+-- Name: AllocationDeliveredObservation AllocationDeliveredObservation_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "AllocationDeliveredObservation_immutable" BEFORE DELETE OR UPDATE ON public."AllocationDeliveredObservation" FOR EACH ROW EXECUTE FUNCTION public.prevent_allocation_delivered_observation_change();
+
+
+--
+-- Name: AllocationDeliveredObservation AllocationDeliveredObservation_source_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "AllocationDeliveredObservation_source_guard" BEFORE INSERT ON public."AllocationDeliveredObservation" FOR EACH ROW EXECUTE FUNCTION public.validate_allocation_delivered_observation_source();
+
+
+--
 -- Name: FinancialCorrectionApprovedDeductionCoverage FinancialCorrectionApprovedDeductionCoverage_source_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -4938,6 +5057,30 @@ ALTER TABLE ONLY public."AllocationAssignmentHistory"
 
 ALTER TABLE ONLY public."AllocationAssignmentHistory"
     ADD CONSTRAINT "AllocationAssignmentHistory_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: AllocationDeliveredObservation AllocationDeliveredObservation_shipmentExecutionId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationDeliveredObservation"
+    ADD CONSTRAINT "AllocationDeliveredObservation_shipmentExecutionId_fkey" FOREIGN KEY ("shipmentExecutionId") REFERENCES public."ShipmentExecution"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationDeliveredObservation AllocationDeliveredObservation_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationDeliveredObservation"
+    ADD CONSTRAINT "AllocationDeliveredObservation_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationDeliveredObservation AllocationDeliveredObservation_vendorIntegrationClientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationDeliveredObservation"
+    ADD CONSTRAINT "AllocationDeliveredObservation_vendorIntegrationClientId_fkey" FOREIGN KEY ("vendorIntegrationClientId") REFERENCES public."VendorIntegrationClient"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

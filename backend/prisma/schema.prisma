@@ -612,6 +612,7 @@ model VendorIntegrationClient {
   statusEvents     VendorIntegrationStatusEvent[]
   shipmentEvents   VendorIntegrationShipmentEvent[]
   invoiceEvents    VendorIntegrationInvoiceEvent[]
+  deliveredObservations AllocationDeliveredObservation[]
 
   @@index([vendorIdentifier])
   @@index([enabled, revokedAt])
@@ -770,6 +771,7 @@ model VendorAllocation {
   refundTerminalEvidenceReviews          RefundTerminalEvidenceReview[]
   refundTerminalConflictEvidence         RefundTerminalConflictEvidence[]
   legacyRefundFinanceReviews             LegacyRefundFinanceReview[]
+  deliveredObservation                   AllocationDeliveredObservation?
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -788,6 +790,23 @@ model AllocationFullRefundTerminalFact {
   vendorAllocation     VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([shopifyOrderGid])
+}
+
+model AllocationDeliveredObservation {
+  id                           String                         @id @default(cuid())
+  vendorAllocationId           String                         @unique
+  firstObservedDeliveredAt     DateTime                       @default(dbgenerated("timezone('UTC', clock_timestamp())"))
+  outboundMethod               VendorOutboundMethod
+  outboundIntegrationProvider  VendorIntegrationProviderCode?
+  sourceReference              String
+  shipmentExecutionId          String?
+  vendorIntegrationClientId    String?
+  vendorAllocation             VendorAllocation               @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
+  shipmentExecution            ShipmentExecution?             @relation(fields: [shipmentExecutionId], references: [id], onDelete: Restrict)
+  vendorIntegrationClient      VendorIntegrationClient?       @relation(fields: [vendorIntegrationClientId], references: [id], onDelete: Restrict)
+
+  @@index([shipmentExecutionId])
+  @@index([vendorIntegrationClientId])
 }
 
 model CustomerCancellationRequest {
@@ -2079,6 +2098,7 @@ model ShipmentExecution {
   createdAt                  DateTime                @default(now())
   updatedAt                  DateTime                @updatedAt
   allocation                 VendorAllocation        @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  deliveredObservations      AllocationDeliveredObservation[]
   vendor                     Vendor                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@unique([allocationId, provider])
