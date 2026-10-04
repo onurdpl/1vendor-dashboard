@@ -814,6 +814,18 @@ function normalizeSettlementStatus(status: string | null | undefined): Settlemen
   return 'pending';
 }
 
+type SaleDeliveryAuthoritySnapshot = {
+  id?: string | null;
+  outboundMethodSnapshot?: string | null;
+  outboundIntegrationProviderSnapshot?: string | null;
+  deliveredObservation?: {
+    vendorAllocationId: string;
+    outboundMethod: string;
+    outboundIntegrationProvider: string | null;
+    firstObservedDeliveredAt: Date;
+  } | null;
+};
+
 export function getSettlementStatus(entry: {
   id?: string | null;
   entryType: string;
@@ -836,7 +848,7 @@ export function getSettlementStatus(entry: {
       returnLifecycleStatus?: string | null;
       sourceShopifyRefundId?: string | null;
     }>;
-  } & CustomerCancellationFinanceHoldSnapshot) | null;
+  } & CustomerCancellationFinanceHoldSnapshot & SaleDeliveryAuthoritySnapshot) | null;
 }): SettlementDto['status'] {
   const type = normalizeType(entry.entryType);
   if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
@@ -914,7 +926,7 @@ function buildSettlement(entry: {
       returnLifecycleStatus?: string | null;
       sourceShopifyRefundId?: string | null;
     }>;
-  } & CustomerCancellationFinanceHoldSnapshot) | null;
+  } & CustomerCancellationFinanceHoldSnapshot & SaleDeliveryAuthoritySnapshot) | null;
 }): SettlementDto {
   const status = getSettlementStatus(entry);
   const review = getActiveSettlementReview(entry);
@@ -1001,7 +1013,7 @@ function isEntryEligibleForPayoutBatch(entry: {
       returnLifecycleStatus?: string | null;
       sourceShopifyRefundId?: string | null;
     }>;
-  } & CustomerCancellationFinanceHoldSnapshot) | null;
+  } & CustomerCancellationFinanceHoldSnapshot & SaleDeliveryAuthoritySnapshot) | null;
 }, options: { requireApprovedSettlementSnapshot?: boolean } = {}) {
   const requireApprovedSettlementSnapshot = options.requireApprovedSettlementSnapshot ?? true;
   const type = normalizeType(entry.entryType);
@@ -1379,6 +1391,9 @@ export async function getVendorFinanceDashboard(
             },
             fulfillmentStatus: true,
             shippingStatus: true,
+            outboundMethodSnapshot: true,
+            outboundIntegrationProviderSnapshot: true,
+            deliveredObservation: true,
             order: {
               select: {
                 cancelledAt: true,
@@ -1538,6 +1553,7 @@ export async function getVendorFinanceDashboard(
         createdAt: true,
         vendorAllocation: {
           select: {
+            id: true,
             sourceShopifyOrderId: true,
             sourceShopifyOrderNumber: true,
             allocationStatus: true,
@@ -1547,6 +1563,9 @@ export async function getVendorFinanceDashboard(
             },
             fulfillmentStatus: true,
             shippingStatus: true,
+            outboundMethodSnapshot: true,
+            outboundIntegrationProviderSnapshot: true,
+            deliveredObservation: true,
             order: {
               select: {
                 cancelledAt: true,
@@ -2064,6 +2083,7 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
         settlementDelayDaysSnapshot: true,
         vendorAllocation: {
           select: {
+            id: true,
             allocationStatus: true,
             cancelRefundReviewStatus: true,
             customerCancellationRequestItems: {
@@ -2071,6 +2091,9 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
             },
             fulfillmentStatus: true,
             shippingStatus: true,
+            outboundMethodSnapshot: true,
+            outboundIntegrationProviderSnapshot: true,
+            deliveredObservation: true,
             order: {
               select: {
                 cancelledAt: true,
@@ -2487,6 +2510,7 @@ export async function preparePayoutBatch(
         include: {
           vendorAllocation: {
             include: {
+              deliveredObservation: true,
               customerCancellationRequestItems: {
                 select: customerCancellationFinanceHoldSelect,
               },
@@ -3020,6 +3044,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
             include: {
               vendorAllocation: {
                 include: {
+                  deliveredObservation: true,
                   customerCancellationRequestItems: {
                     select: customerCancellationFinanceHoldSelect,
                   },

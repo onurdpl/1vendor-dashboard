@@ -16,6 +16,14 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     updatedAt: new Date('2026-05-13T10:30:00.000Z'),
     fulfillmentStatus: 'Fulfilled',
     shippingStatus: 'Delivered',
+    outboundMethodSnapshot: 'KARGONOMI',
+    outboundIntegrationProviderSnapshot: null,
+    deliveredObservation: {
+      vendorAllocationId: 'alloc-1',
+      outboundMethod: 'KARGONOMI',
+      outboundIntegrationProvider: null,
+      firstObservedDeliveredAt: new Date('2026-05-13T10:20:00.000Z'),
+    },
     order: baseOrder,
     lineItems: [{ lineAmount: 3399 }],
     fulfillment: {
@@ -227,6 +235,7 @@ describe('sale ledger foundation', () => {
         lineItems: [{ lineAmount: 3450 }],
         shippingStatus: 'Awaiting Shipment',
         fulfillment: null,
+        deliveredObservation: null,
       }),
       existingLedger: buildMutableLedger({ amount: '3399.00' }),
     });

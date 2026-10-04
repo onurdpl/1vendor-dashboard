@@ -3,10 +3,14 @@ export const MISSING_DELIVERY_DATE_REASON = 'Missing delivery date for settlemen
 export const SETTLEMENT_DELAY_PENDING_REASON = 'Settlement delay period has not elapsed';
 
 type SettlementDelayAllocationInput = {
-  shippingStatus?: string | null;
-  fulfillment?: {
-    fulfilledAt?: Date | null;
-    shipmentUpdatedAt?: Date | null;
+  id?: string | null;
+  outboundMethodSnapshot?: string | null;
+  outboundIntegrationProviderSnapshot?: string | null;
+  deliveredObservation?: {
+    vendorAllocationId: string;
+    outboundMethod: string;
+    outboundIntegrationProvider: string | null;
+    firstObservedDeliveredAt: Date;
   } | null;
 };
 
@@ -32,16 +36,18 @@ function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
-function isDelivered(allocation: SettlementDelayAllocationInput | null | undefined) {
-  return normalize(allocation?.shippingStatus).includes('delivered');
-}
-
 export function resolveSettlementDeliveryDate(allocation: SettlementDelayAllocationInput | null | undefined) {
-  if (!isDelivered(allocation)) {
+  const observation = allocation?.deliveredObservation;
+  if (!allocation?.id || !observation ||
+      observation.vendorAllocationId !== allocation.id ||
+      !allocation.outboundMethodSnapshot ||
+      observation.outboundMethod !== allocation.outboundMethodSnapshot ||
+      observation.outboundIntegrationProvider !== allocation.outboundIntegrationProviderSnapshot ||
+      !(observation.firstObservedDeliveredAt instanceof Date) ||
+      !Number.isFinite(observation.firstObservedDeliveredAt.getTime())) {
     return null;
   }
-
-  return allocation?.fulfillment?.shipmentUpdatedAt ?? null;
+  return observation.firstObservedDeliveredAt;
 }
 
 export function evaluateSaleSettlementDelay(input: SettlementDelayInput, now = new Date()) {

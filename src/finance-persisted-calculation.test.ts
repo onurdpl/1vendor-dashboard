@@ -90,6 +90,14 @@ type LedgerFixture = {
   payoutBatchLines?: Array<unknown>;
   vendorAllocation: {
     id: string;
+    outboundMethodSnapshot: string | null;
+    outboundIntegrationProviderSnapshot: string | null;
+    deliveredObservation: {
+      vendorAllocationId: string;
+      outboundMethod: string;
+      outboundIntegrationProvider: string | null;
+      firstObservedDeliveredAt: Date;
+    } | null;
     allocationStatus: string;
     fulfillmentStatus: string;
     shippingStatus: string;
@@ -164,6 +172,14 @@ function buildSaleFixture(input: {
     childAllocationSplitEvents: input.childAllocationSplitEvents ?? [],
 	    vendorAllocation: {
 	      id: `alloc-${input.orderId}`,
+	      outboundMethodSnapshot: 'KARGONOMI',
+	      outboundIntegrationProviderSnapshot: null,
+	      deliveredObservation: deliveredAt ? {
+	        vendorAllocationId: `alloc-${input.orderId}`,
+	        outboundMethod: 'KARGONOMI',
+	        outboundIntegrationProvider: null,
+	        firstObservedDeliveredAt: deliveredAt,
+	      } : null,
 	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
@@ -230,6 +246,9 @@ describe('persisted vendor finance calculations', () => {
         settlementHoldReason: null,
         vendorAllocation: {
           id: 'alloc-refund',
+          outboundMethodSnapshot: null,
+          outboundIntegrationProviderSnapshot: null,
+          deliveredObservation: null,
           allocationStatus: 'ACTIVE',
           fulfillmentStatus: 'Fulfilled',
           shippingStatus: 'Delivered',
@@ -313,6 +332,9 @@ describe('persisted vendor finance calculations', () => {
                 allocationStatus: row.vendorAllocation.allocationStatus,
                 fulfillmentStatus: row.vendorAllocation.fulfillmentStatus,
                 shippingStatus: row.vendorAllocation.shippingStatus,
+                outboundMethodSnapshot: row.vendorAllocation.outboundMethodSnapshot,
+                outboundIntegrationProviderSnapshot: row.vendorAllocation.outboundIntegrationProviderSnapshot,
+                deliveredObservation: row.vendorAllocation.deliveredObservation,
                 fulfillment: row.vendorAllocation.fulfillment,
                 returnRecords: row.vendorAllocation.returnRecords,
                 refundRecords: row.vendorAllocation.refundRecords,

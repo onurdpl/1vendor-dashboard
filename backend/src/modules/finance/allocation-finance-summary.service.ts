@@ -97,6 +97,9 @@ const allocationFinanceSummarySelect = {
       cancelRefundReviewStatus: true,
       fulfillmentStatus: true,
       shippingStatus: true,
+      outboundMethodSnapshot: true,
+      outboundIntegrationProviderSnapshot: true,
+      deliveredObservation: true,
       order: {
         select: {
           cancelledAt: true,

@@ -183,12 +183,6 @@ function mapShippingModeSnapshot(mode: string | null | undefined) {
   return ShippingDeductionMode.DISABLED;
 }
 
-function isFulfilledForSettlement(allocation: {
-  shippingStatus?: string | null;
-}) {
-  return Boolean(allocation.shippingStatus?.trim().toLowerCase().includes('delivered'));
-}
-
 function hasShipmentExecutionEvidence(execution: {
   providerShipmentId: string | null;
   trackingNumber: string | null;
@@ -227,6 +221,7 @@ async function loadAllocationForTransfer(
       order: true,
       lineItems: true,
       fulfillment: true,
+      deliveredObservation: true,
       shipmentExecutions: {
         orderBy: {
           createdAt: 'desc',
@@ -489,15 +484,14 @@ async function createTargetSaleLedger(input: {
     financialProfileIdSnapshot: activeProfile?.id ?? null,
     settlementDelayDaysSnapshot: normalizeSettlementDelayDays(activeProfile?.settlementDelayDays),
   };
-  const fulfilled = isFulfilledForSettlement(allocation);
   const settlementTiming = evaluateSaleSettlementDelay({
     entryType: 'sale',
     settlementDelayDaysSnapshot: profileSnapshot.settlementDelayDaysSnapshot,
     vendorAllocation: allocation,
   });
-  const payableAt = fulfilled ? settlementTiming.eligibleAt : null;
+  const payableAt = settlementTiming.eligibleAt;
   const settlementFields = {
-    settlementStatus: fulfilled && settlementTiming.eligible ? SettlementStatus.PAYABLE : SettlementStatus.ACCRUING,
+    settlementStatus: settlementTiming.eligible ? SettlementStatus.PAYABLE : SettlementStatus.ACCRUING,
     accruedAt: sourceLedger.accruedAt ?? allocation.createdAt,
     payableAt,
     settlementEligibleAt: payableAt,

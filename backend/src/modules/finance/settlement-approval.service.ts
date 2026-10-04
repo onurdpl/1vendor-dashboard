@@ -150,6 +150,14 @@ type SettlementApprovalLedgerRow = {
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus: string | null;
     shippingStatus: string | null;
+    outboundMethodSnapshot: string | null;
+    outboundIntegrationProviderSnapshot: string | null;
+    deliveredObservation: {
+      vendorAllocationId: string;
+      outboundMethod: string;
+      outboundIntegrationProvider: string | null;
+      firstObservedDeliveredAt: Date;
+    } | null;
     sourceShopifyOrderId: string;
     sourceShopifyOrderNumber: string;
     order?: {
@@ -591,9 +599,7 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
     eligibilityReason = MISSING_DELIVERY_DATE_REASON;
   } else if (settlementDelay.applies && settlementDelay.blockerReason === SETTLEMENT_DELAY_PENDING_REASON) {
     eligibilityReason = SETTLEMENT_DELAY_PENDING_REASON;
-  } else if (derivedSettlementStatus === 'payable' && fulfillmentEvidencePresent) {
-    eligibilityReason = 'Derived payable because delivery evidence satisfies settlement delay.';
-  } else if (derivedSettlementStatus === 'payable' && shippingEvidencePresent) {
+  } else if (derivedSettlementStatus === 'payable' && settlementDelay.applies && settlementDelay.eligible) {
     eligibilityReason = 'Derived payable because delivery evidence satisfies settlement delay.';
   }
 
@@ -1199,6 +1205,9 @@ async function loadCurrentLedgerRowForApprovalLine(
           },
           fulfillmentStatus: true,
           shippingStatus: true,
+          outboundMethodSnapshot: true,
+          outboundIntegrationProviderSnapshot: true,
+          deliveredObservation: true,
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
           order: {
@@ -1742,6 +1751,9 @@ async function buildApprovalPreview(
           },
           fulfillmentStatus: true,
           shippingStatus: true,
+          outboundMethodSnapshot: true,
+          outboundIntegrationProviderSnapshot: true,
+          deliveredObservation: true,
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
           order: {
@@ -1910,6 +1922,9 @@ async function buildApprovalPreview(
             },
             fulfillmentStatus: true,
             shippingStatus: true,
+            outboundMethodSnapshot: true,
+            outboundIntegrationProviderSnapshot: true,
+            deliveredObservation: true,
             sourceShopifyOrderId: true,
             sourceShopifyOrderNumber: true,
             order: {

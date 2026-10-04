@@ -159,6 +159,14 @@ function buildEntry(input: {
     createdAt: new Date('2026-05-13T09:00:00Z'),
     vendorAllocation: {
       id: `alloc-${input.id}`,
+      outboundMethodSnapshot: 'KARGONOMI',
+      outboundIntegrationProviderSnapshot: null,
+      deliveredObservation: deliveredAt ? {
+        vendorAllocationId: `alloc-${input.id}`,
+        outboundMethod: 'KARGONOMI',
+        outboundIntegrationProvider: null,
+        firstObservedDeliveredAt: deliveredAt,
+      } : null,
       allocationStatus: input.allocationStatus ?? 'ACTIVE',
       cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       customerCancellationRequestItems: input.customerCancellationRequestStatus

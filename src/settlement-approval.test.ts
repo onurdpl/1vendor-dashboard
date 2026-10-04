@@ -158,6 +158,14 @@ function buildLedgerRow(input: {
     createdAt,
 	    vendorAllocation: {
 	      id: `alloc-${input.id}`,
+	      outboundMethodSnapshot: 'KARGONOMI',
+	      outboundIntegrationProviderSnapshot: null,
+	      deliveredObservation: deliveredAt ? {
+	        vendorAllocationId: `alloc-${input.id}`,
+	        outboundMethod: 'KARGONOMI',
+	        outboundIntegrationProvider: null,
+	        firstObservedDeliveredAt: deliveredAt,
+	      } : null,
 	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
 	      cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       customerCancellationRequestItems: input.customerCancellationRequestStatus
@@ -422,6 +430,26 @@ describe('settlement approval foundation', () => {
     ]);
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('explains observed delivery as the SALE authority after operational status changes', async () => {
+    const row = buildLedgerRow({ id: 'sale-observed-returned', entryType: 'sale', amount: 1000 });
+    row.vendorAllocation.shippingStatus = 'Returned';
+    row.vendorAllocation.fulfillmentStatus = 'Pending';
+    row.vendorAllocation.fulfillment.fulfilledAt = null;
+    row.vendorAllocation.fulfillment.shipmentUpdatedAt = new Date('2030-01-01T00:00:00.000Z');
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([row]);
+
+    const preview = await previewApproval('vendor-a');
+    expect(preview.lines).toEqual([
+      expect.objectContaining({
+        financeLedgerEntryId: row.id,
+        eligibilityDecision: 'included',
+        eligibilityReason: 'Derived payable because delivery evidence satisfies settlement delay.',
+        fulfillmentEvidencePresent: false,
+        shippingEvidencePresent: false,
+      }),
+    ]);
   });
 
   it('filters settlement preview candidates to active finance ledger rows', async () => {

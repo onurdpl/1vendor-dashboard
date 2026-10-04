@@ -283,12 +283,6 @@ function mapShippingModeSnapshot(mode: string | null | undefined) {
   return ShippingDeductionMode.DISABLED;
 }
 
-function isFulfilledForSettlement(allocation: {
-  shippingStatus?: string | null;
-}) {
-  return Boolean(allocation.shippingStatus?.trim().toLowerCase().includes('delivered'));
-}
-
 export async function upsertSaleLedgerForAllocation(
   tx: FinanceLedgerTransaction,
   allocationId: string,
@@ -301,6 +295,7 @@ export async function upsertSaleLedgerForAllocation(
       order: true,
       lineItems: true,
       fulfillment: true,
+      deliveredObservation: true,
     },
   });
 
@@ -349,15 +344,14 @@ export async function upsertSaleLedgerForAllocation(
     financialProfileIdSnapshot: activeProfile?.id ?? null,
     settlementDelayDaysSnapshot: normalizeSettlementDelayDays(activeProfile?.settlementDelayDays),
   };
-  const fulfilled = isFulfilledForSettlement(allocation);
   const settlementTiming = evaluateSaleSettlementDelay({
     entryType: 'sale',
     settlementDelayDaysSnapshot: profileSnapshot.settlementDelayDaysSnapshot,
     vendorAllocation: allocation,
   });
-  const payableAt = fulfilled ? settlementTiming.eligibleAt : null;
+  const payableAt = settlementTiming.eligibleAt;
   const settlementFields = {
-    settlementStatus: fulfilled && settlementTiming.eligible ? SettlementStatus.PAYABLE : SettlementStatus.ACCRUING,
+    settlementStatus: settlementTiming.eligible ? SettlementStatus.PAYABLE : SettlementStatus.ACCRUING,
     accruedAt: allocation.createdAt,
     payableAt,
     settlementEligibleAt: payableAt,
