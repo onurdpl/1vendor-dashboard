@@ -3,7 +3,7 @@ import { prisma } from '../../db/prisma.js';
 import { mapShopifyShippingAddress, normalizeShopifyShipmentPhone } from '../shopify/order-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.service.js';
-import { createSopyoDeliveryClient, type SopyoCreateOrderInput } from './sopyo-delivery.client.js';
+import { createSopyoDeliveryClient, type SopyoCreateAmbiguousReason, type SopyoCreateOrderInput } from './sopyo-delivery.client.js';
 
 const TEST_AMOUNT = '4299.00';
 const allocationSelect = {
@@ -47,9 +47,13 @@ export type SopyoOneShotPreSend = {
 };
 
 export type SopyoOneShotResult =
-  | { status: 'SUCCESS' | 'ALREADY_EXISTS' | 'FOUND_AFTER_AMBIGUOUS_POST'; sopyoOrderId: number; sopyoOrderCode: string; sopyoOrderType: string }
-  | { status: 'CONFLICT' | 'AMBIGUOUS' | 'NOT_FOUND_AFTER_AMBIGUOUS_POST' | 'AMBIGUOUS_AFTER_POST' }
+  | { status: 'SUCCESS' | 'ALREADY_EXISTS'; sopyoOrderId: number; sopyoOrderCode: string; sopyoOrderType: string }
+  | ({ status: 'FOUND_AFTER_AMBIGUOUS_POST'; sopyoOrderId: number; sopyoOrderCode: string; sopyoOrderType: string } & SopyoCreateAmbiguousDiagnostic)
+  | { status: 'CONFLICT' | 'AMBIGUOUS' }
+  | ({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST' | 'AMBIGUOUS_AFTER_POST' } & SopyoCreateAmbiguousDiagnostic)
   | { status: 'REJECTED'; httpStatus: number; message: string };
+
+type SopyoCreateAmbiguousDiagnostic = { ambiguousReason: SopyoCreateAmbiguousReason; httpStatus?: number };
 
 export class SopyoOneShotBlockedError extends Error {
   constructor(readonly code: string) {
@@ -243,15 +247,20 @@ export async function runSopyoOneShotOrderCreateTest(options: {
 
   // A timeout, transport error, malformed 201, or 5xx may have created an order.
   // Look up once, but never send a second POST in this invocation.
+  const diagnostic: SopyoCreateAmbiguousDiagnostic = {
+    ambiguousReason: created.ambiguousReason,
+    ...('httpStatus' in created ? { httpStatus: created.httpStatus } : {}),
+  };
   try {
     const after = await client.ordersByCode(bearer, payload.order_code);
-    if (after.length === 0) return { status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST' };
-    if (after.length !== 1 || after[0]!.orderType !== 'SOPYOAPI') return { status: 'AMBIGUOUS_AFTER_POST' };
+    if (after.length === 0) return { status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST', ...diagnostic };
+    if (after.length !== 1 || after[0]!.orderType !== 'SOPYOAPI') return { status: 'AMBIGUOUS_AFTER_POST', ...diagnostic };
     return {
       status: 'FOUND_AFTER_AMBIGUOUS_POST', sopyoOrderId: after[0]!.id,
       sopyoOrderCode: after[0]!.orderCode, sopyoOrderType: after[0]!.orderType!,
+      ...diagnostic,
     };
   } catch {
-    return { status: 'AMBIGUOUS_AFTER_POST' };
+    return { status: 'AMBIGUOUS_AFTER_POST', ...diagnostic };
   }
 }

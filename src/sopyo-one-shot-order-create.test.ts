@@ -85,6 +85,21 @@ function mockSopyo(options: {
   return { fetcher: fetcher as unknown as typeof fetch, calls: fetcher, outbound };
 }
 
+function ambiguousCreateApi(create: () => Promise<Response>) {
+  const calls = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/auth/login')) return json({ access_token: { token: 'bearer-secret', type: 'bearer' } });
+    if (init.method === 'GET') return json(list([]));
+    return create();
+  });
+  return { fetcher: calls as unknown as typeof fetch, calls };
+}
+
+function expectOneCreateAndTwoLookups(calls: ReturnType<typeof ambiguousCreateApi>['calls']) {
+  expect(calls.mock.calls.filter(([url, init]) => String(url).endsWith('/api/v2/orders') &&
+    (init as RequestInit).method === 'POST')).toHaveLength(1);
+  expect(calls.mock.calls.filter(([, init]) => (init as RequestInit).method === 'GET')).toHaveLength(2);
+}
+
 async function run(input: {
   database?: ReturnType<typeof db>;
   fetcher?: typeof fetch;
@@ -210,9 +225,9 @@ describe('controlled Sopyo one-shot order create', () => {
     expect(incompatible.outbound).toHaveLength(0);
   });
 
-  it('sanitizes provider rejection without logging returned PII or secrets', async () => {
+  it.each([400, 422])('sanitizes parseable HTTP %i rejection without logging returned PII or secrets', async (httpStatus) => {
     const api = mockSopyo({
-      createStatus: 422,
+      createStatus: httpStatus,
       createBody: { message: 'customer@example.invalid was rejected with bearer-secret', errors: {
         'shipping_info.address': ['private home address'],
       } },
@@ -221,7 +236,7 @@ describe('controlled Sopyo one-shot order create', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const result = await run({ fetcher: api.fetcher });
-      expect(result).toEqual({ status: 'REJECTED', httpStatus: 422, message: 'Provider validation rejected: shipping_info.address.' });
+      expect(result).toEqual({ status: 'REJECTED', httpStatus, message: 'Provider validation rejected: shipping_info.address.' });
       expect(JSON.stringify(result)).not.toContain('customer@example.invalid');
       expect(JSON.stringify(result)).not.toContain('bearer-secret');
       expect(log).not.toHaveBeenCalled();
@@ -246,8 +261,68 @@ describe('controlled Sopyo one-shot order create', () => {
       throw new Error('network timeout with private data');
     });
     const result = await run({ fetcher: fetcher as unknown as typeof fetch });
-    expect(result).toMatchObject({ status: 'FOUND_AFTER_AMBIGUOUS_POST', sopyoOrderId: 88 });
+    expect(result).toMatchObject({ status: 'FOUND_AFTER_AMBIGUOUS_POST', sopyoOrderId: 88,
+      ambiguousReason: 'TRANSPORT_ERROR' });
     expect(outbound).toHaveLength(1);
     expect(lookupCount).toBe(2);
+  });
+
+  it('classifies a transport exception without exposing its message or sending a second POST', async () => {
+    const api = ambiguousCreateApi(async () => { throw new Error('customer@example.invalid bearer-secret'); });
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST', ambiguousReason: 'TRANSPORT_ERROR' });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('classifies only its own fired timeout signal as REQUEST_TIMEOUT', async () => {
+    const timeoutSignal = AbortSignal.abort(new DOMException('customer@example.invalid bearer-secret', 'TimeoutError'));
+    const signalSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutSignal);
+    try {
+      const api = ambiguousCreateApi(async () => { throw new Error('private timeout detail'); });
+      const result = await run({ fetcher: api.fetcher });
+      expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST', ambiguousReason: 'REQUEST_TIMEOUT' });
+      expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret|private timeout detail/);
+      expectOneCreateAndTwoLookups(api.calls);
+    } finally {
+      signalSpy.mockRestore();
+    }
+  });
+
+  it.each([500, 408, 409, 425, 429])('preserves safe HTTP %i ambiguous status without its body', async (httpStatus) => {
+    const api = ambiguousCreateApi(async () => json({ message: 'customer@example.invalid bearer-secret' }, httpStatus));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'HTTP_RETRYABLE_STATUS', httpStatus });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('classifies JSON parse failure with known status and no raw response text', async () => {
+    const api = ambiguousCreateApi(async () => new Response('customer@example.invalid bearer-secret', { status: 201 }));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'RESPONSE_PARSE_ERROR', httpStatus: 201 });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('classifies malformed HTTP 201 success fields without returning the body', async () => {
+    const api = ambiguousCreateApi(async () => json({ data: { id: 'bad',
+      message: 'customer@example.invalid bearer-secret' } }, 201));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'MALFORMED_SUCCESS_RESPONSE', httpStatus: 201 });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('distinguishes a parseable unexpected non-201 status from a retryable status', async () => {
+    const api = ambiguousCreateApi(async () => json({ message: 'customer@example.invalid bearer-secret' }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200 });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret/);
+    expectOneCreateAndTwoLookups(api.calls);
   });
 });

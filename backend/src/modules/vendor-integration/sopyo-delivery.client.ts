@@ -14,6 +14,14 @@ export type SopyoOrder = { id: number; orderStatus: number; trackingNumber: stri
 
 export type SopyoOrderByCode = { id: number; orderCode: string; orderType: string | null };
 
+export type SopyoCreateAmbiguousReason =
+  | 'TRANSPORT_ERROR'
+  | 'REQUEST_TIMEOUT'
+  | 'HTTP_RETRYABLE_STATUS'
+  | 'RESPONSE_PARSE_ERROR'
+  | 'MALFORMED_SUCCESS_RESPONSE'
+  | 'UNEXPECTED_HTTP_STATUS';
+
 export type SopyoCreateOrderInput = {
   order_code: string;
   order_status: 1;
@@ -27,7 +35,8 @@ export type SopyoCreateOrderInput = {
 export type SopyoCreateOrderResult =
   | { kind: 'CREATED'; id: number; orderCode: string; orderType: string }
   | { kind: 'REJECTED'; httpStatus: number; message: string }
-  | { kind: 'AMBIGUOUS' };
+  | { kind: 'AMBIGUOUS'; ambiguousReason: 'TRANSPORT_ERROR' | 'REQUEST_TIMEOUT' }
+  | { kind: 'AMBIGUOUS'; ambiguousReason: Exclude<SopyoCreateAmbiguousReason, 'TRANSPORT_ERROR' | 'REQUEST_TIMEOUT'>; httpStatus: number };
 
 const CREATE_FIELDS = [
   'order_code', 'order_status', 'total_price', 'customer_info', 'customer_info.email',
@@ -144,34 +153,37 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
 
     async createOrderOnce(accessToken: string, input: SopyoCreateOrderInput): Promise<SopyoCreateOrderResult> {
       let response: Response;
+      const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
       try {
         response = await fetcher(`${BASE_URL}/api/v2/orders`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify(input),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal,
         });
       } catch {
         // The provider may have accepted a request before the connection failed.
-        return { kind: 'AMBIGUOUS' };
+        return { kind: 'AMBIGUOUS', ambiguousReason: signal.aborted ? 'REQUEST_TIMEOUT' : 'TRANSPORT_ERROR' };
       }
       if (response.status >= 500 || [408, 409, 425, 429].includes(response.status)) {
-        return { kind: 'AMBIGUOUS' };
+        return { kind: 'AMBIGUOUS', ambiguousReason: 'HTTP_RETRYABLE_STATUS', httpStatus: response.status };
       }
       let body: unknown;
       try {
         body = await response.json() as unknown;
       } catch {
-        return { kind: 'AMBIGUOUS' };
+        return { kind: 'AMBIGUOUS', ambiguousReason: 'RESPONSE_PARSE_ERROR', httpStatus: response.status };
       }
       if (response.status >= 400 && response.status < 500) {
         return { kind: 'REJECTED', httpStatus: response.status, message: sanitizedCreateMessage(body) };
       }
-      if (response.status !== 201) return { kind: 'AMBIGUOUS' };
+      if (response.status !== 201) {
+        return { kind: 'AMBIGUOUS', ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: response.status };
+      }
       if (!isRecord(body) || !isRecord(body.data) || !Number.isSafeInteger(body.data.id) ||
           (body.data.id as number) <= 0 || typeof body.data.order_code !== 'string' ||
           typeof body.data.order_type !== 'string') {
-        return { kind: 'AMBIGUOUS' };
+        return { kind: 'AMBIGUOUS', ambiguousReason: 'MALFORMED_SUCCESS_RESPONSE', httpStatus: 201 };
       }
       return {
         kind: 'CREATED', id: body.data.id as number,
