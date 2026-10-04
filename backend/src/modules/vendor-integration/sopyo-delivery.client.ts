@@ -35,7 +35,7 @@ export type SopyoCreateOrderInput = {
   order_status: 1;
   total_price: number;
   customer_info: { email: string; name: string };
-  shipping_info: { full_name: string; gsm: string; city: string; address: string; district?: string };
+  shipping_info: { full_name: string; gsm: string; city: string; address: string; district: string; neighborhood: string };
   billing_info: { full_name: string; gsm: string; city: string; district?: string };
   order_items: Array<{ stock_code: string; product_name: string; quantity: 1; total_price: number }>;
 };

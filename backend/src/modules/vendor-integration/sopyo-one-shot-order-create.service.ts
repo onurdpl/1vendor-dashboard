@@ -185,7 +185,9 @@ function buildPayload(allocation: SelectedAllocation, rawPayload: string): Sopyo
     shipping_info: {
       full_name: shippingName, gsm: shippingPhone, city: shippingCity,
       address: shippingAddress,
-      ...(shippingDistrict ? { district: shippingDistrict } : {}),
+      district: shippingDistrict,
+      // Sopyo-only compatibility fallback: Shopify exposes no distinct shipping neighborhood here.
+      neighborhood: shippingDistrict,
     },
     // There is no canonical Shopify billing-line composition helper. Omit address.
     billing_info: {

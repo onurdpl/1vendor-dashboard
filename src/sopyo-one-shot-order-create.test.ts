@@ -183,13 +183,14 @@ describe('controlled Sopyo one-shot order create', () => {
       order_code: ALLOCATION_ID, order_status: 1, total_price: 4299,
       customer_info: { name: 'Customer Person', email: 'customer@example.invalid' },
       shipping_info: { full_name: 'Shipping Recipient', gsm: '05551112233', city: 'Istanbul',
-        address: `Street 1, ${SHIPPING_ADDRESS2}`, district: 'Kartal' },
+        address: `Street 1, ${SHIPPING_ADDRESS2}`, district: 'Kartal', neighborhood: 'Kartal' },
       billing_info: { full_name: 'Billing Person', gsm: '05554445566', city: 'Istanbul' },
       order_items: [{ stock_code: 'SELECTED-SKU', product_name: 'Selected Product', quantity: 1, total_price: 4299 }],
     });
     expect(api.outbound[0]!.shipping_info.full_name).not.toBe(api.outbound[0]!.customer_info.name);
-    expect(api.outbound[0]!.shipping_info).not.toHaveProperty('neighborhood');
+    expect(api.outbound[0]!.shipping_info.neighborhood).toBe(api.outbound[0]!.shipping_info.district);
     expect(api.outbound[0]!.billing_info).not.toHaveProperty('address');
+    expect(api.outbound[0]!.billing_info).not.toHaveProperty('neighborhood');
     expect(api.outbound[0]!.order_items).toHaveLength(1);
     expect(preSend).toHaveBeenCalledWith(expect.objectContaining({
       allocationId: ALLOCATION_ID, numericTotal: 4299, shippingNamePresent: true,

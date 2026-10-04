@@ -89,6 +89,12 @@ query {
 - This split is not persisted back to `ShopifyOrder`, does not change Shopify ingestion storage, and does not change vendor-facing order APIs or UI display.
 - If `splitAddress2()` cannot identify a neighborhood/district, Sporgym must not guess by parsing apartment or free-text address content.
 
+### Temporary Sopyo order-create shipping neighborhood compatibility
+- Live Sopyo order-create validation required `shipping_info.neighborhood` (`shipping info.neighborhood alanı gereklidir.`).
+- **Current retained Shopify evidence and the address helper do not provide a distinct, semantically explicit shipping neighborhood.** Only after the official address2 split safely derives `shipping_info.district`, the controlled Sopyo one-shot payload sets `shipping_info.neighborhood` to that same district. If district cannot be derived, creation remains blocked. If authoritative explicit Shopify neighborhood evidence becomes available, the approved rule is to prefer it, but that source and branch are not implemented or testable today.
+- This is a **temporary Sopyo-only compatibility rule**, not a claim that district and neighborhood are semantically identical, not a generic Turkey-address rule, and not a rule for future integration providers. Do not move it into the shared Shopify address helper or apply it to billing.
+- For each future provider, verify its own address-field contract from its documentation or live evidence; if it requires neighborhood, establish that provider's expected semantics independently. Revisit this fallback if Shopify provides a reliable explicit neighborhood field or Sopyo changes its contract.
+
 ## Order Vendor Mapping
 - `orders/create` webhook payload does not include metafields.
 - Order metafield `custom.seller_info` must be fetched separately through Shopify Admin API.
