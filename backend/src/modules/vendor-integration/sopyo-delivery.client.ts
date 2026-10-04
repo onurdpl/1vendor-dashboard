@@ -22,6 +22,14 @@ export type SopyoCreateAmbiguousReason =
   | 'MALFORMED_SUCCESS_RESPONSE'
   | 'UNEXPECTED_HTTP_STATUS';
 
+export type SopyoUnexpectedResponseDiagnostic = {
+  responseBodyType: 'NON_JSON' | 'JSON_NO_SAFE_DIAGNOSTIC' | 'JSON_SAFE_DIAGNOSTIC';
+  providerStatus?: boolean | 'success' | 'error' | 'failed' | 'validation_error';
+  providerSuccess?: boolean;
+  providerMessage?: string;
+  providerValidationFields?: string[];
+};
+
 export type SopyoCreateOrderInput = {
   order_code: string;
   order_status: 1;
@@ -36,7 +44,7 @@ export type SopyoCreateOrderResult =
   | { kind: 'CREATED'; id: number; orderCode: string; orderType: string }
   | { kind: 'REJECTED'; httpStatus: number; message: string }
   | { kind: 'AMBIGUOUS'; ambiguousReason: 'TRANSPORT_ERROR' | 'REQUEST_TIMEOUT' }
-  | { kind: 'AMBIGUOUS'; ambiguousReason: Exclude<SopyoCreateAmbiguousReason, 'TRANSPORT_ERROR' | 'REQUEST_TIMEOUT'>; httpStatus: number };
+  | ({ kind: 'AMBIGUOUS'; ambiguousReason: Exclude<SopyoCreateAmbiguousReason, 'TRANSPORT_ERROR' | 'REQUEST_TIMEOUT'>; httpStatus: number } & Partial<SopyoUnexpectedResponseDiagnostic>);
 
 const CREATE_FIELDS = [
   'order_code', 'order_status', 'total_price', 'customer_info', 'customer_info.email',
@@ -47,6 +55,84 @@ const CREATE_FIELDS = [
   'order_items', 'order_items.stock_code', 'order_items.product_name', 'order_items.quantity',
   'order_items.total_price',
 ];
+const CREATE_FIELD_SET = new Set(CREATE_FIELDS);
+const SAFE_PROVIDER_MESSAGES = new Map([
+  ['validation error', 'Validation error'],
+  ['validation failed', 'Validation failed'],
+  ['invalid request', 'Invalid request'],
+  ['bad request', 'Bad request'],
+]);
+
+function safeProviderStatus(value: unknown): SopyoUnexpectedResponseDiagnostic['providerStatus'] {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+  const status = value.trim().toLowerCase();
+  if (status === 'success' || status === 'error' || status === 'failed' || status === 'validation_error') return status;
+  return undefined;
+}
+
+function safeProviderMessage(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  // Never echo arbitrary provider text: it may contain a rejected customer value.
+  return SAFE_PROVIDER_MESSAGES.get(value.trim().toLowerCase());
+}
+
+function safeValidationFields(body: Record<string, unknown>): string[] {
+  const fields = new Set<string>();
+  let visited = 0;
+  function inspect(value: unknown, prefix = '', depth = 0): void {
+    if (depth > 8 || ++visited > 200) return;
+    if (Array.isArray(value)) {
+      for (const item of value) inspect(item, prefix, depth + 1);
+      return;
+    }
+    if (!isRecord(value)) return;
+    for (const key of ['field', 'path']) {
+      if (typeof value[key] === 'string' && CREATE_FIELD_SET.has(value[key])) fields.add(value[key]);
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'field' || key === 'path') continue;
+      if (key === 'fields' || key === 'details' || key === 'validation') {
+        inspect(child, prefix, depth + 1);
+        continue;
+      }
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (CREATE_FIELD_SET.has(path)) {
+        if (isRecord(child) || Array.isArray(child)) {
+          const previousSize = fields.size;
+          inspect(child, path, depth + 1);
+          if (fields.size === previousSize) fields.add(path);
+        } else {
+          fields.add(path);
+        }
+      } else if (CREATE_FIELDS.some((field) => field.startsWith(`${path}.`))) {
+        inspect(child, path, depth + 1);
+      }
+    }
+  }
+  inspect(body.errors);
+  if (isRecord(body.error)) inspect(body.error);
+  return [...fields].sort();
+}
+
+function safeUnexpectedResponseDiagnostic(body: unknown): SopyoUnexpectedResponseDiagnostic {
+  if (!isRecord(body)) return { responseBodyType: 'JSON_NO_SAFE_DIAGNOSTIC' };
+  const providerStatus = safeProviderStatus(body.status);
+  const providerSuccess = typeof body.success === 'boolean' ? body.success : undefined;
+  const providerMessage = safeProviderMessage(body.message) ??
+    safeProviderMessage(body.error) ??
+    (isRecord(body.error) ? safeProviderMessage(body.error.message) : undefined);
+  const providerValidationFields = safeValidationFields(body);
+  const hasSafeDiagnostic = providerStatus !== undefined || providerSuccess !== undefined ||
+    providerMessage !== undefined || providerValidationFields.length > 0;
+  return {
+    responseBodyType: hasSafeDiagnostic ? 'JSON_SAFE_DIAGNOSTIC' : 'JSON_NO_SAFE_DIAGNOSTIC',
+    ...(providerStatus !== undefined ? { providerStatus } : {}),
+    ...(providerSuccess !== undefined ? { providerSuccess } : {}),
+    ...(providerMessage !== undefined ? { providerMessage } : {}),
+    ...(providerValidationFields.length > 0 ? { providerValidationFields } : {}),
+  };
+}
 
 function sanitizedCreateMessage(body: unknown): string {
   // A provider message may echo customer data. Retain only fixed schema field names.
@@ -171,14 +257,19 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
       let body: unknown;
       try {
         body = await response.json() as unknown;
-      } catch {
+      } catch (error) {
+        if (response.status === 200 && error instanceof SyntaxError) {
+          return { kind: 'AMBIGUOUS', ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+            responseBodyType: 'NON_JSON' };
+        }
         return { kind: 'AMBIGUOUS', ambiguousReason: 'RESPONSE_PARSE_ERROR', httpStatus: response.status };
       }
       if (response.status >= 400 && response.status < 500) {
         return { kind: 'REJECTED', httpStatus: response.status, message: sanitizedCreateMessage(body) };
       }
       if (response.status !== 201) {
-        return { kind: 'AMBIGUOUS', ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: response.status };
+        return { kind: 'AMBIGUOUS', ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: response.status,
+          ...(response.status === 200 ? safeUnexpectedResponseDiagnostic(body) : {}) };
       }
       if (!isRecord(body) || !isRecord(body.data) || !Number.isSafeInteger(body.data.id) ||
           (body.data.id as number) <= 0 || typeof body.data.order_code !== 'string' ||

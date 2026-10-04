@@ -3,7 +3,7 @@ import { prisma } from '../../db/prisma.js';
 import { mapShopifyShippingAddress, normalizeShopifyShipmentPhone } from '../shopify/order-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.service.js';
-import { createSopyoDeliveryClient, type SopyoCreateAmbiguousReason, type SopyoCreateOrderInput } from './sopyo-delivery.client.js';
+import { createSopyoDeliveryClient, type SopyoCreateAmbiguousReason, type SopyoCreateOrderInput, type SopyoUnexpectedResponseDiagnostic } from './sopyo-delivery.client.js';
 
 const TEST_AMOUNT = '4299.00';
 const allocationSelect = {
@@ -53,7 +53,8 @@ export type SopyoOneShotResult =
   | ({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST' | 'AMBIGUOUS_AFTER_POST' } & SopyoCreateAmbiguousDiagnostic)
   | { status: 'REJECTED'; httpStatus: number; message: string };
 
-type SopyoCreateAmbiguousDiagnostic = { ambiguousReason: SopyoCreateAmbiguousReason; httpStatus?: number };
+type SopyoCreateAmbiguousDiagnostic = { ambiguousReason: SopyoCreateAmbiguousReason; httpStatus?: number } &
+  Partial<SopyoUnexpectedResponseDiagnostic>;
 
 export class SopyoOneShotBlockedError extends Error {
   constructor(readonly code: string) {
@@ -245,11 +246,16 @@ export async function runSopyoOneShotOrderCreateTest(options: {
     return { status: 'REJECTED', httpStatus: created.httpStatus, message: created.message };
   }
 
-  // A timeout, transport error, malformed 201, or 5xx may have created an order.
+  // A timeout, transport error, malformed response, unexpected status, or 5xx may have created an order.
   // Look up once, but never send a second POST in this invocation.
   const diagnostic: SopyoCreateAmbiguousDiagnostic = {
     ambiguousReason: created.ambiguousReason,
     ...('httpStatus' in created ? { httpStatus: created.httpStatus } : {}),
+    ...('responseBodyType' in created ? { responseBodyType: created.responseBodyType } : {}),
+    ...('providerStatus' in created ? { providerStatus: created.providerStatus } : {}),
+    ...('providerSuccess' in created ? { providerSuccess: created.providerSuccess } : {}),
+    ...('providerMessage' in created ? { providerMessage: created.providerMessage } : {}),
+    ...('providerValidationFields' in created ? { providerValidationFields: created.providerValidationFields } : {}),
   };
   try {
     const after = await client.ordersByCode(bearer, payload.order_code);

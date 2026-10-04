@@ -321,8 +321,98 @@ describe('controlled Sopyo one-shot order create', () => {
     const api = ambiguousCreateApi(async () => json({ message: 'customer@example.invalid bearer-secret' }, 200));
     const result = await run({ fetcher: api.fetcher });
     expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
-      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200 });
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      responseBodyType: 'JSON_NO_SAFE_DIAGNOSTIC' });
     expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret/);
     expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('reports only allowlisted status and exact safe message from an unexpected HTTP 200', async () => {
+    const api = ambiguousCreateApi(async () => json({ status: false, success: false, message: 'Validation error' }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      responseBodyType: 'JSON_SAFE_DIAGNOSTIC', providerStatus: false,
+      providerSuccess: false, providerMessage: 'Validation error' });
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('extracts only allowlisted field paths from an unexpected HTTP 200 validation object', async () => {
+    const api = ambiguousCreateApi(async () => json({ errors: {
+      shipping_info: { identification_no: 'customer@example.invalid' },
+      'billing_info.address': ['private home address'],
+      'customer@example.invalid': 'bearer-secret',
+    } }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      responseBodyType: 'JSON_SAFE_DIAGNOSTIC',
+      providerValidationFields: ['billing_info.address', 'shipping_info.identification_no'] });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret|private home address/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('extracts only field names from an unexpected HTTP 200 validation array', async () => {
+    const api = ambiguousCreateApi(async () => json({ errors: [
+      { field: 'shipping_info.neighborhood', rejectedValue: 'private home address' },
+      { path: 'billing_info.address', message: 'customer@example.invalid bearer-secret' },
+      { field: 'customer@example.invalid', message: 'private' },
+    ] }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      responseBodyType: 'JSON_SAFE_DIAGNOSTIC',
+      providerValidationFields: ['billing_info.address', 'shipping_info.neighborhood'] });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret|private home address/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('suppresses PII-like status, message, error, and validation values on HTTP 200', async () => {
+    const api = ambiguousCreateApi(async () => json({
+      status: 'customer@example.invalid', message: 'Validation error for customer@example.invalid',
+      error: { message: 'bearer-secret', fields: [{ field: 'shipping_info.gsm', value: '05551112233' }] },
+      errors: { 'billing_info.address': { value: 'private home address' } },
+    }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      responseBodyType: 'JSON_SAFE_DIAGNOSTIC',
+      providerValidationFields: ['billing_info.address', 'shipping_info.gsm'] });
+    expect(JSON.stringify({ SOPYO_CREATE_TEST: result.status, ...result }))
+      .not.toMatch(/customer@example.invalid|bearer-secret|05551112233|private home address/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('reports NON_JSON for an unexpected HTTP 200 without exposing its body', async () => {
+    const api = ambiguousCreateApi(async () => new Response('customer@example.invalid bearer-secret', { status: 200 }));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      responseBodyType: 'NON_JSON' });
+    expect(JSON.stringify(result)).not.toMatch(/customer@example.invalid|bearer-secret/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('reports JSON_NO_SAFE_DIAGNOSTIC for unrelated unexpected HTTP 200 JSON', async () => {
+    const api = ambiguousCreateApi(async () => json({ data: { customer: 'customer@example.invalid' } }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toEqual({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      responseBodyType: 'JSON_NO_SAFE_DIAGNOSTIC' });
+    expect(JSON.stringify(result)).not.toContain('customer@example.invalid');
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('keeps HTTP 201 success and ordinary rejection behavior unchanged', async () => {
+    const success = mockSopyo();
+    expect(await run({ fetcher: success.fetcher })).toEqual({ status: 'SUCCESS',
+      sopyoOrderId: 12345, sopyoOrderCode: ALLOCATION_ID, sopyoOrderType: 'SOPYOAPI' });
+    expect(success.outbound).toHaveLength(1);
+    const rejected = mockSopyo({ createStatus: 422, createBody: { errors: {
+      'shipping_info.address': ['private home address'],
+    } } });
+    expect(await run({ fetcher: rejected.fetcher })).toEqual({ status: 'REJECTED',
+      httpStatus: 422, message: 'Provider validation rejected: shipping_info.address.' });
+    expect(rejected.outbound).toHaveLength(1);
   });
 });
