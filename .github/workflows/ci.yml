@@ -72,7 +72,7 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_test?schema=public
 
-      - name: Test Financial Correction PostgreSQL suites
+      - name: Test isolated finance and Sopyo PostgreSQL suites
         run: |
           set -euo pipefail
 
@@ -102,6 +102,7 @@ jobs:
             ' "$report" "$file"
           done <<'SUITES'
           fin_bug_001_validation FIN_BUG_001_TEST_DATABASE_ISOLATED src/fin-bug-001-settlement-delay-parity.postgres.test.ts
+          sopyo_delivery_validation SOPYO_DELIVERY_TEST_DATABASE_ISOLATED src/sopyo-delivery-poll.postgres.test.ts
           phase2b_validation PHASE2B_TEST_DATABASE_ISOLATED src/financial-correction-zero-net.postgres.test.ts
           phase2c_bootstrap PHASE2C_TEST_DATABASE_ISOLATED src/financial-correction-paid-debt.postgres.test.ts
           phase2d_validation PHASE2D_TEST_DATABASE_ISOLATED src/financial-correction-paid-credit.postgres.test.ts

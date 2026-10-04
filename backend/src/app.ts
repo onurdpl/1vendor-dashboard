@@ -36,6 +36,7 @@ import { registerShippingExecutionRoutes } from './modules/shipping/shipping-exe
 import { registerSupportRoutes } from './modules/support/support.routes.js';
 import { registerVendorIntegrationDocsRoutes } from './modules/vendor-integration/vendor-integration.docs.routes.js';
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
+import { registerSopyoDeliveryPollScheduler } from './modules/vendor-integration/sopyo-delivery-poll.service.js';
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
 import { registerVendorDirectoryRoutes } from './modules/vendors/vendor-directory.routes.js';
 import { registerVendorProfileAuditLogRoutes } from './modules/vendors/vendor-profile-audit-log.routes.js';
@@ -508,6 +509,7 @@ export function createApp() {
   registerCanonicalReconciliationScheduler(app, env);
   registerScheduledReconciliationScheduler(app, env);
   registerAbandonedApprovedReturnAutoCancelScheduler(app, env);
+  registerSopyoDeliveryPollScheduler(app, env);
 
   if (env.NODE_ENV !== 'production') {
     const authService = createAuthService(env);
