@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Prisma } from '../backend/node_modules/@prisma/client/index.js';
-import { runSopyoOneShotOrderCreateTest } from '../backend/src/modules/vendor-integration/sopyo-one-shot-order-create.service.js';
+import { composeSopyoBillingAddress, runSopyoOneShotOrderCreateTest } from '../backend/src/modules/vendor-integration/sopyo-one-shot-order-create.service.js';
 import type { SopyoCreateOrderInput } from '../backend/src/modules/vendor-integration/sopyo-delivery.client.js';
 
 const ALLOCATION_ID = 'alloc-yalispor-8256823525713';
@@ -120,6 +120,15 @@ async function run(input: {
 }
 
 describe('controlled Sopyo one-shot order create', () => {
+  it('composes only retained nonblank billing address lines in their original order', () => {
+    expect(composeSopyoBillingAddress(' Billing Street ', BILLING_ADDRESS2))
+      .toBe(`Billing Street, ${BILLING_ADDRESS2}`);
+    expect(composeSopyoBillingAddress(' Billing Street ', null)).toBe('Billing Street');
+    expect(composeSopyoBillingAddress(null, ` ${BILLING_ADDRESS2} `)).toBe(BILLING_ADDRESS2);
+    expect(() => composeSopyoBillingAddress(' ', null))
+      .toThrow('BILLING_ADDRESS_MISSING');
+  });
+
   it('blocks wrong outbound authority, cancelled orders, missing SKU and changed money before external calls', async () => {
     const api = mockSopyo();
     const wrong = fixture();
@@ -175,7 +184,7 @@ describe('controlled Sopyo one-shot order create', () => {
     expect(api.outbound).toHaveLength(0);
   });
 
-  it('uses raw shipping recipient, only selected allocation line, fixed test amount/status, and no unsupported address inventions', async () => {
+  it('uses retained billing lines, raw shipping recipient, selected allocation line, and fixed test amount/status', async () => {
     const api = mockSopyo();
     const preSend = vi.fn();
     const result = await run({ fetcher: api.fetcher, onPreSend: preSend });
@@ -187,17 +196,16 @@ describe('controlled Sopyo one-shot order create', () => {
       shipping_info: { full_name: 'Shipping Recipient', gsm: '05551112233', city: 'Istanbul',
         address: `Street 1, ${SHIPPING_ADDRESS2}`, district: 'Kartal', neighborhood: 'Kartal' },
       billing_info: { full_name: 'Billing Person', gsm: '05554445566', city: 'Istanbul',
-        district: 'Kadıköy', neighborhood: 'Kadıköy' },
+        address: `Billing Street, ${BILLING_ADDRESS2}`, district: 'Kadıköy', neighborhood: 'Kadıköy' },
       order_items: [{ stock_code: 'SELECTED-SKU', product_name: 'Selected Product', quantity: 1, total_price: 4299 }],
     });
     expect(api.outbound[0]!.shipping_info.full_name).not.toBe(api.outbound[0]!.customer_info.name);
     expect(api.outbound[0]!.shipping_info.neighborhood).toBe(api.outbound[0]!.shipping_info.district);
-    expect(api.outbound[0]!.billing_info).not.toHaveProperty('address');
     expect(api.outbound[0]!.billing_info.neighborhood).toBe(api.outbound[0]!.billing_info.district);
     expect(api.outbound[0]!.order_items).toHaveLength(1);
     expect(preSend).toHaveBeenCalledWith(expect.objectContaining({
       allocationId: ALLOCATION_ID, numericTotal: 4299, shippingNamePresent: true,
-      billingSourceAddressPresent: true, billingPayloadAddressIncluded: false,
+      billingSourceAddressPresent: true, billingPayloadAddressIncluded: true,
     }));
     expect(JSON.stringify(preSend.mock.calls)).not.toContain('Shipping Recipient');
     expect(JSON.stringify(preSend.mock.calls)).not.toContain('customer@example.invalid');
@@ -209,6 +217,40 @@ describe('controlled Sopyo one-shot order create', () => {
     const api = mockSopyo();
     await expect(run({ database: db(fixture(), raw), fetcher: api.fetcher }))
       .rejects.toMatchObject({ code: 'SHIPPING_NAME_MISSING' });
+    expect(api.calls).not.toHaveBeenCalled();
+  });
+
+  it('uses only billing address2 when it is the sole retained billing line', async () => {
+    const raw = rawOrder();
+    raw.billing_address.address1 = ' ';
+    const api = mockSopyo();
+    expect(await run({ database: db(fixture(), raw), fetcher: api.fetcher }))
+      .toMatchObject({ status: 'SUCCESS' });
+    expect(api.outbound).toHaveLength(1);
+    expect(api.outbound[0]!.billing_info.address).toBe(BILLING_ADDRESS2);
+    expect(api.outbound[0]!.billing_info.district).toBe('Kadıköy');
+  });
+
+  it('can compose billing address1 alone but still blocks when billing district cannot be derived', async () => {
+    const raw = rawOrder();
+    raw.billing_address.address2 = ' ';
+    const stored = fixture();
+    stored.order.billingDistrict = 'Istanbul';
+    expect(composeSopyoBillingAddress(raw.billing_address.address1, raw.billing_address.address2))
+      .toBe('Billing Street');
+    const api = mockSopyo();
+    await expect(run({ database: db(stored, raw), fetcher: api.fetcher }))
+      .rejects.toMatchObject({ code: 'BILLING_DISTRICT_UNRESOLVED' });
+    expect(api.calls).not.toHaveBeenCalled();
+  });
+
+  it('blocks missing billing lines before any Sopyo call and never substitutes shipping address', async () => {
+    const raw = rawOrder();
+    raw.billing_address.address1 = ' ';
+    raw.billing_address.address2 = ' ';
+    const api = mockSopyo();
+    await expect(run({ database: db(fixture(), raw), fetcher: api.fetcher }))
+      .rejects.toMatchObject({ code: 'BILLING_ADDRESS_MISSING' });
     expect(api.calls).not.toHaveBeenCalled();
   });
 
