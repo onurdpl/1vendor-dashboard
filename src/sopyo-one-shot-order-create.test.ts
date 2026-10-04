@@ -6,6 +6,7 @@ import type { SopyoCreateOrderInput } from '../backend/src/modules/vendor-integr
 const ALLOCATION_ID = 'alloc-yalispor-8256823525713';
 const SOURCE_ORDER_ID = '8256823525713';
 const SHIPPING_ADDRESS2 = 'Apt 2 \u2060Kartal';
+const BILLING_ADDRESS2 = 'Suite 3 \u2060Kadıköy';
 
 function fixture(vendorId = 'yalispor') {
   return {
@@ -21,7 +22,7 @@ function fixture(vendorId = 'yalispor') {
       customerPhone: '05551112233', shippingAddress: `Street 1, ${SHIPPING_ADDRESS2}`,
       shippingCity: 'Istanbul', shippingDistrict: SHIPPING_ADDRESS2,
       billingFullName: 'Billing Person', billingPhone: '05554445566',
-      billingCity: 'Istanbul', billingDistrict: 'Suite 3',
+      billingCity: 'Istanbul', billingDistrict: BILLING_ADDRESS2,
     },
     lineItems: [{
       quantity: 1, lineAmount: new Prisma.Decimal('4299.00'),
@@ -45,7 +46,8 @@ function rawOrder() {
     },
     billing_address: {
       name: 'Billing Person', phone: '0555 444 55 66',
-      address1: 'Billing Street', address2: 'Suite 3', city: 'Istanbul', province: 'Istanbul', zip: '34001',
+      address1: 'Billing Street', address2: BILLING_ADDRESS2, country_code: 'TR',
+      city: 'Istanbul', province: 'Istanbul', zip: '34001',
     },
   };
 }
@@ -184,13 +186,14 @@ describe('controlled Sopyo one-shot order create', () => {
       customer_info: { name: 'Customer Person', email: 'customer@example.invalid' },
       shipping_info: { full_name: 'Shipping Recipient', gsm: '05551112233', city: 'Istanbul',
         address: `Street 1, ${SHIPPING_ADDRESS2}`, district: 'Kartal', neighborhood: 'Kartal' },
-      billing_info: { full_name: 'Billing Person', gsm: '05554445566', city: 'Istanbul' },
+      billing_info: { full_name: 'Billing Person', gsm: '05554445566', city: 'Istanbul',
+        district: 'Kadıköy', neighborhood: 'Kadıköy' },
       order_items: [{ stock_code: 'SELECTED-SKU', product_name: 'Selected Product', quantity: 1, total_price: 4299 }],
     });
     expect(api.outbound[0]!.shipping_info.full_name).not.toBe(api.outbound[0]!.customer_info.name);
     expect(api.outbound[0]!.shipping_info.neighborhood).toBe(api.outbound[0]!.shipping_info.district);
     expect(api.outbound[0]!.billing_info).not.toHaveProperty('address');
-    expect(api.outbound[0]!.billing_info).not.toHaveProperty('neighborhood');
+    expect(api.outbound[0]!.billing_info.neighborhood).toBe(api.outbound[0]!.billing_info.district);
     expect(api.outbound[0]!.order_items).toHaveLength(1);
     expect(preSend).toHaveBeenCalledWith(expect.objectContaining({
       allocationId: ALLOCATION_ID, numericTotal: 4299, shippingNamePresent: true,
@@ -227,6 +230,26 @@ describe('controlled Sopyo one-shot order create', () => {
     const api = mockSopyo();
     await expect(run({ database: db(stored), fetcher: api.fetcher }))
       .rejects.toMatchObject({ code: 'SHIPPING_DISTRICT_SNAPSHOT_MISMATCH' });
+    expect(api.calls).not.toHaveBeenCalled();
+  });
+
+  it('blocks before authentication when billing address2 has no safe district; province is not a fallback', async () => {
+    const raw = rawOrder();
+    raw.billing_address.address2 = 'Suite 3';
+    const stored = fixture();
+    stored.order.billingDistrict = 'Suite 3';
+    const api = mockSopyo();
+    await expect(run({ database: db(stored, raw), fetcher: api.fetcher }))
+      .rejects.toMatchObject({ code: 'BILLING_DISTRICT_UNRESOLVED' });
+    expect(api.calls).not.toHaveBeenCalled();
+  });
+
+  it('blocks if retained billing address2 conflicts with the persisted district snapshot', async () => {
+    const stored = fixture();
+    stored.order.billingDistrict = 'Unrelated district';
+    const api = mockSopyo();
+    await expect(run({ database: db(stored), fetcher: api.fetcher }))
+      .rejects.toMatchObject({ code: 'BILLING_DISTRICT_SNAPSHOT_MISMATCH' });
     expect(api.calls).not.toHaveBeenCalled();
   });
 

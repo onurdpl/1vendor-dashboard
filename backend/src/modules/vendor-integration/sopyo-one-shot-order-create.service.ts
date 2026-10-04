@@ -1,6 +1,6 @@
 import { Prisma, VendorIntegrationProviderCode, VendorOutboundMethod } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
-import { mapShopifyShippingAddress, normalizeShopifyShipmentPhone } from '../shopify/order-ingestion.service.js';
+import { mapShopifyBillingAddress, mapShopifyShippingAddress, normalizeShopifyShipmentPhone } from '../shopify/order-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import { splitShopifyWorldwideAddress2 } from '../shopify/shopify-worldwide-address.service.js';
 import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.service.js';
@@ -175,7 +175,21 @@ function buildPayload(allocation: SelectedAllocation, rawPayload: string): Sopyo
     fail('SHIPPING_DISTRICT_EVIDENCE_CONFLICT');
   }
   const shippingDistrict = splitShipping.district;
-  const billingDistrict = explicitDistrict(billing, allocation.order.billingDistrict);
+  const composedBilling = mapShopifyBillingAddress(source as ShopifyOrdersCreateWebhookPayload);
+  if (composedBilling.billingDistrict !== allocation.order.billingDistrict) {
+    fail('BILLING_DISTRICT_SNAPSHOT_MISMATCH');
+  }
+  const splitBilling = splitShopifyWorldwideAddress2({
+    address2: nonblank(billing.address2), countryCode: nonblank(billing.country_code) ?? nonblank(billing.country),
+  });
+  if (splitBilling.splitSource !== 'shopify_worldwide' || !splitBilling.district) {
+    fail('BILLING_DISTRICT_UNRESOLVED');
+  }
+  const explicitBillingDistrict = explicitDistrict(billing, allocation.order.billingDistrict);
+  if (explicitBillingDistrict && explicitBillingDistrict !== splitBilling.district) {
+    fail('BILLING_DISTRICT_EVIDENCE_CONFLICT');
+  }
+  const billingDistrict = splitBilling.district;
   const line = allocation.lineItems[0]!;
   return {
     order_code: allocation.id,
@@ -192,7 +206,9 @@ function buildPayload(allocation: SelectedAllocation, rawPayload: string): Sopyo
     // There is no canonical Shopify billing-line composition helper. Omit address.
     billing_info: {
       full_name: billingName, gsm: billingPhone, city: billingCity,
-      ...(billingDistrict ? { district: billingDistrict } : {}),
+      district: billingDistrict,
+      // Sopyo-only compatibility fallback; no distinct billing neighborhood is proven.
+      neighborhood: billingDistrict,
     },
     order_items: [{
       stock_code: nonblank(line.shopifyOrderLineItem.sku)!,
