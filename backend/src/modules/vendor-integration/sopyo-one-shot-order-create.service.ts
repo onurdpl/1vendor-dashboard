@@ -236,7 +236,7 @@ export async function runSopyoOneShotOrderCreateTest(options: {
     billingSourceAddressPresent: true,
     billingPayloadAddressIncluded: 'address' in payload.billing_info,
   });
-  const created = await client.createOrderOnce(bearer, payload);
+  const created = await client.createOrderOnce(bearer, payload, credential);
   if (created.kind === 'CREATED') {
     return created.orderCode === payload.order_code && created.orderType === 'SOPYOAPI'
       ? { status: 'SUCCESS', sopyoOrderId: created.id, sopyoOrderCode: created.orderCode, sopyoOrderType: created.orderType }

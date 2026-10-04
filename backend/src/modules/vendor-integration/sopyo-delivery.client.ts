@@ -56,12 +56,6 @@ const CREATE_FIELDS = [
   'order_items.total_price',
 ];
 const CREATE_FIELD_SET = new Set(CREATE_FIELDS);
-const SAFE_PROVIDER_MESSAGES = new Map([
-  ['validation error', 'Validation error'],
-  ['validation failed', 'Validation failed'],
-  ['invalid request', 'Invalid request'],
-  ['bad request', 'Bad request'],
-]);
 
 function safeProviderStatus(value: unknown): SopyoUnexpectedResponseDiagnostic['providerStatus'] {
   if (typeof value === 'boolean') return value;
@@ -71,10 +65,29 @@ function safeProviderStatus(value: unknown): SopyoUnexpectedResponseDiagnostic['
   return undefined;
 }
 
-function safeProviderMessage(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  // Never echo arbitrary provider text: it may contain a rejected customer value.
-  return SAFE_PROVIDER_MESSAGES.get(value.trim().toLowerCase());
+function safeProviderMessage(value: unknown, input: SopyoCreateOrderInput, secrets: string[]): string | undefined {
+  if (typeof value !== 'string' || !value.trim() || value.length > 4_000 || /[\x00-\x1f\x7f]/.test(value)) {
+    return undefined;
+  }
+  const sensitive = new Set<string>(secrets.filter(Boolean));
+  function collectStrings(part: unknown): void {
+    if (typeof part === 'string' && part.length >= 3) sensitive.add(part);
+    else if (Array.isArray(part)) part.forEach(collectStrings);
+    else if (isRecord(part)) Object.values(part).forEach(collectStrings);
+  }
+  collectStrings(input);
+  let message = value.trim();
+  for (const exact of [...sensitive].sort((a, b) => b.length - a.length)) {
+    const escaped = exact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    message = message.replace(new RegExp(escaped, 'gi'), '[REDACTED]');
+  }
+  message = message
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+    .replace(/\+?\d[\d ().-]{6,}\d/g, (match) =>
+      (match.match(/\d/g)?.length ?? 0) >= 8 ? '[REDACTED_PHONE]' : match)
+    .replace(/\b(?:bearer|api[_ -]?token|access[_ -]?token|authorization)\s*[:=]?\s*\S+/gi, '[REDACTED_TOKEN]')
+    .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '[REDACTED_TOKEN]');
+  return Array.from(message).slice(0, 300).join('');
 }
 
 function safeValidationFields(body: Record<string, unknown>): string[] {
@@ -115,13 +128,13 @@ function safeValidationFields(body: Record<string, unknown>): string[] {
   return [...fields].sort();
 }
 
-function safeUnexpectedResponseDiagnostic(body: unknown): SopyoUnexpectedResponseDiagnostic {
+function safeUnexpectedResponseDiagnostic(
+  body: unknown, input: SopyoCreateOrderInput, secrets: string[],
+): SopyoUnexpectedResponseDiagnostic {
   if (!isRecord(body)) return { responseBodyType: 'JSON_NO_SAFE_DIAGNOSTIC' };
   const providerStatus = safeProviderStatus(body.status);
   const providerSuccess = typeof body.success === 'boolean' ? body.success : undefined;
-  const providerMessage = safeProviderMessage(body.message) ??
-    safeProviderMessage(body.error) ??
-    (isRecord(body.error) ? safeProviderMessage(body.error.message) : undefined);
+  const providerMessage = body.status === false ? safeProviderMessage(body.message, input, secrets) : undefined;
   const providerValidationFields = safeValidationFields(body);
   const hasSafeDiagnostic = providerStatus !== undefined || providerSuccess !== undefined ||
     providerMessage !== undefined || providerValidationFields.length > 0;
@@ -237,7 +250,7 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
       throw new SopyoDeliveryClientError('PAGINATION');
     },
 
-    async createOrderOnce(accessToken: string, input: SopyoCreateOrderInput): Promise<SopyoCreateOrderResult> {
+    async createOrderOnce(accessToken: string, input: SopyoCreateOrderInput, apiToken?: string): Promise<SopyoCreateOrderResult> {
       let response: Response;
       const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
       try {
@@ -269,7 +282,7 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
       }
       if (response.status !== 201) {
         return { kind: 'AMBIGUOUS', ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: response.status,
-          ...(response.status === 200 ? safeUnexpectedResponseDiagnostic(body) : {}) };
+          ...(response.status === 200 ? safeUnexpectedResponseDiagnostic(body, input, [accessToken, apiToken ?? '']) : {}) };
       }
       if (!isRecord(body) || !isRecord(body.data) || !Number.isSafeInteger(body.data.id) ||
           (body.data.id as number) <= 0 || typeof body.data.order_code !== 'string' ||

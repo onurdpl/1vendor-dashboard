@@ -337,6 +337,51 @@ describe('controlled Sopyo one-shot order create', () => {
     expectOneCreateAndTwoLookups(api.calls);
   });
 
+  it('returns a bounded top-level provider message only for status=false on HTTP 200', async () => {
+    const api = ambiguousCreateApi(async () => json({ status: false, message: 'Missing required field. '.repeat(40) }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toMatchObject({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200,
+      providerStatus: false, responseBodyType: 'JSON_SAFE_DIAGNOSTIC' });
+    expect(result).toHaveProperty('providerMessage');
+    expect((result as { providerMessage: string }).providerMessage.length).toBe(300);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('redacts email and phone-like values from the top-level HTTP 200 message', async () => {
+    const api = ambiguousCreateApi(async () => json({ status: false,
+      message: 'Invalid email other@example.invalid and phone +90 555 999 88 77' }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    expect(result).toMatchObject({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+      ambiguousReason: 'UNEXPECTED_HTTP_STATUS', providerStatus: false });
+    const message = (result as { providerMessage: string }).providerMessage;
+    expect(message).toContain('[REDACTED_EMAIL]');
+    expect(message).toContain('[REDACTED_PHONE]');
+    expect(message).not.toMatch(/other@example.invalid|555 999 88 77/);
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('redacts echoed request names, addresses, and credentials from the HTTP 200 message', async () => {
+    const api = ambiguousCreateApi(async () => json({ status: false,
+      message: 'Shipping Recipient at Street 1, Apt 2: Bearer bearer-secret; api-secret' }, 200));
+    const result = await run({ fetcher: api.fetcher });
+    const message = (result as { providerMessage: string }).providerMessage;
+    expect(message).not.toMatch(/Shipping Recipient|Street 1|Apt 2|bearer-secret|api-secret/);
+    expect(message).toContain('[REDACTED]');
+    expectOneCreateAndTwoLookups(api.calls);
+  });
+
+  it('does not emit a non-string or un-sanitizable top-level HTTP 200 message', async () => {
+    for (const message of [{ nested: 'customer@example.invalid' }, `unsafe\ncustomer@example.invalid`, 'x'.repeat(4_001)]) {
+      const api = ambiguousCreateApi(async () => json({ status: false, message }, 200));
+      const result = await run({ fetcher: api.fetcher });
+      expect(result).toMatchObject({ status: 'NOT_FOUND_AFTER_AMBIGUOUS_POST',
+        ambiguousReason: 'UNEXPECTED_HTTP_STATUS', httpStatus: 200, providerStatus: false });
+      expect(result).not.toHaveProperty('providerMessage');
+      expectOneCreateAndTwoLookups(api.calls);
+    }
+  });
+
   it('extracts only allowlisted field paths from an unexpected HTTP 200 validation object', async () => {
     const api = ambiguousCreateApi(async () => json({ errors: {
       shipping_info: { identification_no: 'customer@example.invalid' },
