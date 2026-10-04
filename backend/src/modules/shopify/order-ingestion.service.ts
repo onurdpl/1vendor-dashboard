@@ -1,3 +1,4 @@
+import { VendorIntegrationProviderCode, VendorOutboundMethod } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import { resolveAllocationOutboundSnapshot } from '../orders/allocation-outbound-snapshot.service.js';
@@ -19,6 +20,14 @@ import {
 } from './orders-create-ownership.service.js';
 
 const DEFAULT_VENDOR_INTEGRATION_VAT_RATE = '10';
+
+export function isSopyoOrderPushSnapshot(input: {
+  outboundMethodSnapshot: VendorOutboundMethod | null;
+  outboundIntegrationProviderSnapshot: VendorIntegrationProviderCode | null;
+}): boolean {
+  return input.outboundMethodSnapshot === VendorOutboundMethod.VENDOR_INTEGRATION &&
+    input.outboundIntegrationProviderSnapshot === VendorIntegrationProviderCode.SOPYO;
+}
 
 const TRANSIENT_DATABASE_OR_NETWORK_CODES = new Set([
   'P1001',
@@ -855,6 +864,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       }
 
       const allocationIds = new Set<string>();
+      const newSopyoAllocations = new Map<string, string>();
 
       for (const lineItem of resolvedLineItems) {
         const shopifyOrderLineItem = await tx.shopifyOrderLineItem.upsert({
@@ -897,6 +907,9 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
         });
 
         const allocationId = `alloc-${lineItem.vendorId}-${parsedOrder.sourceShopifyOrderId}`;
+        const existingAllocation = allocationIds.has(allocationId)
+          ? true
+          : await tx.vendorAllocation.findUnique({ where: { id: allocationId }, select: { id: true } });
         allocationIds.add(allocationId);
         const outboundSnapshot = await resolveAllocationOutboundSnapshot(tx, lineItem.vendorId);
 
@@ -944,6 +957,10 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
           },
         });
 
+        if (!existingAllocation && isSopyoOrderPushSnapshot(allocation)) {
+          newSopyoAllocations.set(allocation.id, allocation.assignedVendorId);
+        }
+
         await tx.allocationAssignmentHistory.upsert({
           where: {
             id: `assignment-history-${lineItem.vendorId}-${parsedOrder.sourceShopifyOrderId}-initial`,
@@ -967,6 +984,17 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
 
       for (const allocationId of allocationIds) {
         await upsertSaleLedgerForAllocation(tx, allocationId);
+      }
+
+      if (newSopyoAllocations.size > 0) {
+        await tx.sopyoOrderPush.createMany({
+          data: Array.from(newSopyoAllocations, ([vendorAllocationId, assignedVendorId]) => ({
+            vendorAllocationId,
+            assignedVendorId,
+            orderCode: vendorAllocationId,
+          })),
+          skipDuplicates: true,
+        });
       }
 
       if (input.executionContext) {

@@ -21,7 +21,11 @@ const prismaMock = vi.hoisted(() => ({
     upsert: vi.fn(),
   },
   vendorAllocation: {
+    findUnique: vi.fn(),
     upsert: vi.fn(),
+  },
+  sopyoOrderPush: {
+    createMany: vi.fn(),
   },
   vendorShippingConfig: {
     findUnique: vi.fn(),
@@ -47,6 +51,7 @@ vi.mock('../backend/src/modules/finance/sale-ledger.service.js', () => ({
 const {
   classifyOrderIngestionException,
   ingestShopifyOrderWebhook,
+  isSopyoOrderPushSnapshot,
   syncShopifyOrderPaidSnapshotFromWebhook,
   updateShopifyOrderContactAddressSnapshotFromWebhook,
 } = await import('../backend/src/modules/shopify/order-ingestion.service.js');
@@ -81,6 +86,8 @@ function mockSuccessfulDbWrites() {
   prismaMock.shopifyOrder.update.mockResolvedValue({});
   prismaMock.shopifyOrderLineItem.upsert.mockResolvedValue({ id: 'shopify-line-db-1' });
   prismaMock.vendorAllocation.upsert.mockResolvedValue({ id: 'alloc-sporjinal-2001' });
+  prismaMock.vendorAllocation.findUnique.mockResolvedValue(null);
+  prismaMock.sopyoOrderPush.createMany.mockResolvedValue({ count: 1 });
   prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(null);
   prismaMock.vendorAllocationLineItem.upsert.mockResolvedValue({});
   prismaMock.allocationAssignmentHistory.upsert.mockResolvedValue({});
@@ -364,6 +371,7 @@ describe('vendor order snapshot ingestion', () => {
       outboundMethodSnapshot: 'VENDOR_INTEGRATION',
       outboundIntegrationProviderSnapshot: 'SOPYO',
     };
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce({ id: existingAllocation.id });
     prismaMock.vendorAllocation.upsert.mockImplementationOnce(
       async ({ update }: { update: Record<string, unknown> }) => {
         Object.assign(existingAllocation, update);
@@ -417,6 +425,7 @@ describe('vendor order snapshot ingestion', () => {
     const replayUpdate = prismaMock.vendorAllocation.upsert.mock.calls[0]?.[0]?.update;
     expect(replayUpdate).not.toHaveProperty('outboundMethodSnapshot');
     expect(replayUpdate).not.toHaveProperty('outboundIntegrationProviderSnapshot');
+    expect(prismaMock.sopyoOrderPush.createMany).not.toHaveBeenCalled();
   });
 
   it('preserves existing pending reassignment state during Shopify order ingestion replay', async () => {
@@ -668,6 +677,127 @@ describe('vendor order snapshot ingestion', () => {
     expect(prismaMock.vendorShippingConfig.findUnique).toHaveBeenCalledWith({
       where: { vendorId: 'sporjinal' },
       select: { outboundMethod: true, selectedIntegrationProvider: true },
+    });
+  });
+
+  it('creates one Sopyo intent after all new allocation lines, with only allocation-scoped identity', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+    });
+    prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No external request allowed'));
+    try {
+      const result = await ingestShopifyOrderWebhook({
+        event: { id: 'webhook-sopyo-intent' } as never,
+        sellerInfo: { 'SKU-1': 'sporjinal', 'SKU-2': 'sporjinal' },
+        payload: { ...buildSimpleOrderPayload(2201), line_items: [
+          { id: 3201, sku: 'SKU-1', title: 'First', quantity: 1, price: '40.00' },
+          { id: 3202, sku: 'SKU-2', title: 'Second', quantity: 1, price: '60.00' },
+        ] },
+      });
+      expect(result).toMatchObject({ ok: true, allocationCount: 1 });
+      expect(prismaMock.vendorAllocationLineItem.upsert).toHaveBeenCalledTimes(2);
+      expect(prismaMock.sopyoOrderPush.createMany).toHaveBeenCalledExactlyOnceWith({
+        data: [{ vendorAllocationId: 'alloc-sporjinal-2201', assignedVendorId: 'sporjinal',
+          orderCode: 'alloc-sporjinal-2201' }],
+        skipDuplicates: true,
+      });
+      expect(prismaMock.vendorAllocationLineItem.upsert.mock.invocationCallOrder.at(-1))
+        .toBeLessThan(prismaMock.sopyoOrderPush.createMany.mock.invocationCallOrder[0]!);
+      expect(JSON.stringify(prismaMock.sopyoOrderPush.createMany.mock.calls))
+        .not.toMatch(/customer|email|phone|address|credential|token/i);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('does not duplicate a Sopyo intent when the same allocation is replayed', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+    });
+    prismaMock.vendorAllocation.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'alloc-sporjinal-2202' });
+    prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
+    for (const eventId of ['first', 'replay']) {
+      expect(await ingestShopifyOrderWebhook({
+        event: { id: `webhook-sopyo-${eventId}` } as never,
+        sellerInfo: { 'SKU-1': 'sporjinal' },
+        payload: buildSimpleOrderPayload(2202),
+      })).toMatchObject({ ok: true });
+    }
+    expect(prismaMock.sopyoOrderPush.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates separate Sopyo intents for two eligible vendors in one Shopify order', async () => {
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }, { id: 'yalispor' }]);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+    });
+    prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
+    const result = await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-sopyo-two-vendors' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal', 'SKU-2': 'yalispor' },
+      payload: { ...buildSimpleOrderPayload(2203), line_items: [
+        { id: 3203, sku: 'SKU-1', title: 'A', quantity: 1, price: '40.00' },
+        { id: 3204, sku: 'SKU-2', title: 'B', quantity: 1, price: '60.00' },
+      ] },
+    });
+    expect(result).toMatchObject({ ok: true, allocationCount: 2 });
+    expect(prismaMock.sopyoOrderPush.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [
+        { vendorAllocationId: 'alloc-sporjinal-2203', assignedVendorId: 'sporjinal', orderCode: 'alloc-sporjinal-2203' },
+        { vendorAllocationId: 'alloc-yalispor-2203', assignedVendorId: 'yalispor', orderCode: 'alloc-yalispor-2203' },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it('excludes unconfigured, Kargonomi, and other-provider snapshots from Sopyo intent eligibility', () => {
+    expect(isSopyoOrderPushSnapshot({ outboundMethodSnapshot: null,
+      outboundIntegrationProviderSnapshot: null })).toBe(false);
+    expect(isSopyoOrderPushSnapshot({ outboundMethodSnapshot: 'KARGONOMI',
+      outboundIntegrationProviderSnapshot: null })).toBe(false);
+    expect(isSopyoOrderPushSnapshot({ outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+      outboundIntegrationProviderSnapshot: 'OTHER' as 'SOPYO' })).toBe(false);
+    expect(isSopyoOrderPushSnapshot({ outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+      outboundIntegrationProviderSnapshot: 'SOPYO' })).toBe(true);
+  });
+
+  it.each([
+    ['unconfigured', null],
+    ['Kargonomi', { outboundMethod: 'KARGONOMI', selectedIntegrationProvider: null }],
+  ])('creates no Sopyo intent for a new %s allocation', async (_label, config) => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(config);
+    prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
+    expect(await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-non-sopyo' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2204),
+    })).toMatchObject({ ok: true });
+    expect(prismaMock.sopyoOrderPush.createMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps another vendor in the same order out of the Sopyo intent', async () => {
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }, { id: 'yalispor' }]);
+    prismaMock.vendorShippingConfig.findUnique.mockImplementation(async ({ where }) =>
+      where.vendorId === 'sporjinal'
+        ? { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' }
+        : { outboundMethod: 'KARGONOMI', selectedIntegrationProvider: null });
+    prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
+    expect(await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-mixed-providers' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal', 'SKU-2': 'yalispor' },
+      payload: { ...buildSimpleOrderPayload(2205), line_items: [
+        { id: 3205, sku: 'SKU-1', title: 'A', quantity: 1, price: '40.00' },
+        { id: 3206, sku: 'SKU-2', title: 'B', quantity: 1, price: '60.00' },
+      ] },
+    })).toMatchObject({ ok: true, allocationCount: 2 });
+    expect(prismaMock.sopyoOrderPush.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [{ vendorAllocationId: 'alloc-sporjinal-2205', assignedVendorId: 'sporjinal',
+        orderCode: 'alloc-sporjinal-2205' }],
+      skipDuplicates: true,
     });
   });
 

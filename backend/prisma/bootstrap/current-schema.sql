@@ -549,6 +549,15 @@ CREATE TYPE public."ShippingProvider" AS ENUM (
 
 
 --
+-- Name: SopyoOrderPushStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SopyoOrderPushStatus" AS ENUM (
+    'PENDING'
+);
+
+
+--
 -- Name: UserRole; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -2121,6 +2130,21 @@ CREATE TABLE public."ShopifyRefundLineItem" (
 
 
 --
+-- Name: SopyoOrderPush; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SopyoOrderPush" (
+    id text NOT NULL,
+    "vendorAllocationId" text NOT NULL,
+    "assignedVendorId" text NOT NULL,
+    "orderCode" text NOT NULL,
+    status public."SopyoOrderPushStatus" DEFAULT 'PENDING'::public."SopyoOrderPushStatus" NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL
+);
+
+
+--
 -- Name: SopyoVendorCredential; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2990,6 +3014,14 @@ ALTER TABLE ONLY public."ShopifyRefundLineItem"
 
 ALTER TABLE ONLY public."ShopifyRefund"
     ADD CONSTRAINT "ShopifyRefund_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SopyoOrderPush SopyoOrderPush_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoOrderPush"
+    ADD CONSTRAINT "SopyoOrderPush_pkey" PRIMARY KEY (id);
 
 
 --
@@ -4537,6 +4569,27 @@ CREATE UNIQUE INDEX "ShopifyRefundLineItem_shopifyRefundId_sourceRefundLineItemI
 --
 
 CREATE UNIQUE INDEX "ShopifyRefund_sourceShopifyRefundId_key" ON public."ShopifyRefund" USING btree ("sourceShopifyRefundId");
+
+
+--
+-- Name: SopyoOrderPush_orderCode_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SopyoOrderPush_orderCode_key" ON public."SopyoOrderPush" USING btree ("orderCode");
+
+
+--
+-- Name: SopyoOrderPush_status_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SopyoOrderPush_status_createdAt_idx" ON public."SopyoOrderPush" USING btree (status, "createdAt");
+
+
+--
+-- Name: SopyoOrderPush_vendorAllocationId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SopyoOrderPush_vendorAllocationId_key" ON public."SopyoOrderPush" USING btree ("vendorAllocationId");
 
 
 --
@@ -6231,6 +6284,14 @@ ALTER TABLE ONLY public."ShopifyRefundLineItem"
 
 ALTER TABLE ONLY public."ShopifyRefund"
     ADD CONSTRAINT "ShopifyRefund_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES public."ShopifyOrder"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SopyoOrderPush SopyoOrderPush_vendorAllocationId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoOrderPush"
+    ADD CONSTRAINT "SopyoOrderPush_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

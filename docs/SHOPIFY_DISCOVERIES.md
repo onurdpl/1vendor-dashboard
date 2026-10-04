@@ -96,6 +96,11 @@ query {
 - **Current retained Shopify evidence and the address helper do not provide distinct, semantically explicit shipping or billing neighborhoods.** After a safe split, this Sopyo payload sets each neighborhood to its corresponding derived district. District and neighborhood are not thereby semantically identical. If authoritative explicit Shopify neighborhood evidence becomes available, the approved rule is to prefer it, but those sources and branches are not implemented or testable today.
 - These are **temporary Sopyo-only compatibility rules**, not generic Turkey-address or Shopify rules and not rules for future integration providers. Do not move them into shared Shopify address helpers or reuse them automatically for another provider. Verify each future provider's own address-field contract from its documentation or live evidence, including its address composition and neighborhood semantics. Revisit the district/neighborhood fallbacks if Shopify provides reliable explicit neighborhood fields or Sopyo changes its contract.
 
+### Automatic Sopyo order delivery — Phase A intent only
+- Normal `orders/create` ingestion persists one durable, vendor-allocation-scoped Sopyo push intent only for a **new** allocation whose frozen outbound snapshot is `VENDOR_INTEGRATION` + `SOPYO`, after its allocation line items are written in the same database transaction. The intent stores the allocation ID as Sopyo `orderCode` and the allocation's assigned vendor, without customer data or credentials.
+- Phase A makes **no Sopyo HTTP request** and enables no automatic external push. A later dispatcher must validate the reconstructed, allocation-scoped payload before any send; the successful one-line `#1138` test does not establish general monetary mapping.
+- Historical allocations, Current-State Repair, split children, legacy `NULL/NULL` snapshots, Kargonomi, and other integration providers are outside this V1 intent path. Future providers must not inherit Sopyo-specific delivery or address rules automatically.
+
 ## Order Vendor Mapping
 - `orders/create` webhook payload does not include metafields.
 - Order metafield `custom.seller_info` must be fetched separately through Shopify Admin API.

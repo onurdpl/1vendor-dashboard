@@ -278,6 +278,10 @@ enum VendorIntegrationProviderCode {
   SOPYO
 }
 
+enum SopyoOrderPushStatus {
+  PENDING
+}
+
 enum ShipmentExecutionStatus {
   PENDING
   CREATED
@@ -773,6 +777,7 @@ model VendorAllocation {
   refundTerminalConflictEvidence         RefundTerminalConflictEvidence[]
   legacyRefundFinanceReviews             LegacyRefundFinanceReview[]
   deliveredObservation                   AllocationDeliveredObservation?
+  sopyoOrderPush                         SopyoOrderPush?
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -990,6 +995,19 @@ model VendorAllocationLineItem {
   productPanelVariantDisableEvents ProductPanelVariantDisableOutboxEvent[]
 
   @@unique([vendorAllocationId, shopifyLineItemId])
+}
+
+model SopyoOrderPush {
+  id                 String               @id @default(cuid())
+  vendorAllocationId String               @unique
+  assignedVendorId   String
+  orderCode          String               @unique
+  status             SopyoOrderPushStatus @default(PENDING)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  vendorAllocation   VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
 }
 
 model ProductPanelVariantDisableOutboxEvent {
