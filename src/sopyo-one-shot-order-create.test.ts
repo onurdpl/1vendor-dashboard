@@ -5,6 +5,7 @@ import type { SopyoCreateOrderInput } from '../backend/src/modules/vendor-integr
 
 const ALLOCATION_ID = 'alloc-yalispor-8256823525713';
 const SOURCE_ORDER_ID = '8256823525713';
+const SHIPPING_ADDRESS2 = 'Apt 2 \u2060Kartal';
 
 function fixture(vendorId = 'yalispor') {
   return {
@@ -17,8 +18,8 @@ function fixture(vendorId = 'yalispor') {
       totalPrice: new Prisma.Decimal('4299.00'), discountAmount: new Prisma.Decimal('0.00'),
       shippingAmount: new Prisma.Decimal('0.00'), orderTaxAmount: new Prisma.Decimal('390.82'),
       taxesIncluded: true, customerName: 'Customer Person', customerEmail: 'customer@example.invalid',
-      customerPhone: '05551112233', shippingAddress: 'Street 1, Apt 2',
-      shippingCity: 'Istanbul', shippingDistrict: 'Apt 2',
+      customerPhone: '05551112233', shippingAddress: `Street 1, ${SHIPPING_ADDRESS2}`,
+      shippingCity: 'Istanbul', shippingDistrict: SHIPPING_ADDRESS2,
       billingFullName: 'Billing Person', billingPhone: '05554445566',
       billingCity: 'Istanbul', billingDistrict: 'Suite 3',
     },
@@ -39,7 +40,8 @@ function rawOrder() {
     customer: { first_name: 'Customer', last_name: 'Person', email: 'customer@example.invalid' },
     shipping_address: {
       name: 'Shipping Recipient', phone: '0555 111 22 33',
-      address1: 'Street 1', address2: 'Apt 2', city: 'Istanbul', province: 'Istanbul', zip: '34000',
+      address1: 'Street 1', address2: SHIPPING_ADDRESS2, country_code: 'TR',
+      city: 'Istanbul', province: 'Istanbul', zip: '34000',
     },
     billing_address: {
       name: 'Billing Person', phone: '0555 444 55 66',
@@ -180,12 +182,12 @@ describe('controlled Sopyo one-shot order create', () => {
     expect(api.outbound[0]).toMatchObject({
       order_code: ALLOCATION_ID, order_status: 1, total_price: 4299,
       customer_info: { name: 'Customer Person', email: 'customer@example.invalid' },
-      shipping_info: { full_name: 'Shipping Recipient', gsm: '05551112233', city: 'Istanbul', address: 'Street 1, Apt 2' },
+      shipping_info: { full_name: 'Shipping Recipient', gsm: '05551112233', city: 'Istanbul',
+        address: `Street 1, ${SHIPPING_ADDRESS2}`, district: 'Kartal' },
       billing_info: { full_name: 'Billing Person', gsm: '05554445566', city: 'Istanbul' },
       order_items: [{ stock_code: 'SELECTED-SKU', product_name: 'Selected Product', quantity: 1, total_price: 4299 }],
     });
     expect(api.outbound[0]!.shipping_info.full_name).not.toBe(api.outbound[0]!.customer_info.name);
-    expect(api.outbound[0]!.shipping_info).not.toHaveProperty('district');
     expect(api.outbound[0]!.shipping_info).not.toHaveProperty('neighborhood');
     expect(api.outbound[0]!.billing_info).not.toHaveProperty('address');
     expect(api.outbound[0]!.order_items).toHaveLength(1);
@@ -203,6 +205,27 @@ describe('controlled Sopyo one-shot order create', () => {
     const api = mockSopyo();
     await expect(run({ database: db(fixture(), raw), fetcher: api.fetcher }))
       .rejects.toMatchObject({ code: 'SHIPPING_NAME_MISSING' });
+    expect(api.calls).not.toHaveBeenCalled();
+  });
+
+  it('blocks before authentication when the official Shopify split cannot derive a district; province is not a fallback', async () => {
+    const raw = rawOrder();
+    raw.shipping_address.address2 = 'Apt 2';
+    const stored = fixture();
+    stored.order.shippingAddress = 'Street 1, Apt 2';
+    stored.order.shippingDistrict = 'Apt 2';
+    const api = mockSopyo();
+    await expect(run({ database: db(stored, raw), fetcher: api.fetcher }))
+      .rejects.toMatchObject({ code: 'SHIPPING_DISTRICT_UNRESOLVED' });
+    expect(api.calls).not.toHaveBeenCalled();
+  });
+
+  it('blocks if retained Shopify address2 conflicts with the persisted district snapshot', async () => {
+    const stored = fixture();
+    stored.order.shippingDistrict = 'Unrelated district';
+    const api = mockSopyo();
+    await expect(run({ database: db(stored), fetcher: api.fetcher }))
+      .rejects.toMatchObject({ code: 'SHIPPING_DISTRICT_SNAPSHOT_MISMATCH' });
     expect(api.calls).not.toHaveBeenCalled();
   });
 
@@ -363,7 +386,7 @@ describe('controlled Sopyo one-shot order create', () => {
 
   it('redacts echoed request names, addresses, and credentials from the HTTP 200 message', async () => {
     const api = ambiguousCreateApi(async () => json({ status: false,
-      message: 'Shipping Recipient at Street 1, Apt 2: Bearer bearer-secret; api-secret' }, 200));
+      message: `Shipping Recipient at Street 1, ${SHIPPING_ADDRESS2}: Bearer bearer-secret; api-secret` }, 200));
     const result = await run({ fetcher: api.fetcher });
     const message = (result as { providerMessage: string }).providerMessage;
     expect(message).not.toMatch(/Shipping Recipient|Street 1|Apt 2|bearer-secret|api-secret/);

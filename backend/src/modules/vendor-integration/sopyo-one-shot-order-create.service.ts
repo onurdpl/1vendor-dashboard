@@ -2,6 +2,7 @@ import { Prisma, VendorIntegrationProviderCode, VendorOutboundMethod } from '@pr
 import { prisma } from '../../db/prisma.js';
 import { mapShopifyShippingAddress, normalizeShopifyShipmentPhone } from '../shopify/order-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
+import { splitShopifyWorldwideAddress2 } from '../shopify/shopify-worldwide-address.service.js';
 import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.service.js';
 import { createSopyoDeliveryClient, type SopyoCreateAmbiguousReason, type SopyoCreateOrderInput, type SopyoUnexpectedResponseDiagnostic } from './sopyo-delivery.client.js';
 
@@ -160,7 +161,20 @@ function buildPayload(allocation: SelectedAllocation, rawPayload: string): Sopyo
   if (billingName !== allocation.order.billingFullName || billingPhone !== allocation.order.billingPhone ||
       billingCity !== allocation.order.billingCity) fail('BILLING_SNAPSHOT_MISMATCH');
 
-  const shippingDistrict = explicitDistrict(shipping, allocation.order.shippingDistrict);
+  if (composedShipping.shippingDistrict !== allocation.order.shippingDistrict) {
+    fail('SHIPPING_DISTRICT_SNAPSHOT_MISMATCH');
+  }
+  const splitShipping = splitShopifyWorldwideAddress2({
+    address2: nonblank(shipping.address2), countryCode: composedShipping.shippingCountry,
+  });
+  if (splitShipping.splitSource !== 'shopify_worldwide' || !splitShipping.district) {
+    fail('SHIPPING_DISTRICT_UNRESOLVED');
+  }
+  const explicitShippingDistrict = explicitDistrict(shipping, allocation.order.shippingDistrict);
+  if (explicitShippingDistrict && explicitShippingDistrict !== splitShipping.district) {
+    fail('SHIPPING_DISTRICT_EVIDENCE_CONFLICT');
+  }
+  const shippingDistrict = splitShipping.district;
   const billingDistrict = explicitDistrict(billing, allocation.order.billingDistrict);
   const line = allocation.lineItems[0]!;
   return {
