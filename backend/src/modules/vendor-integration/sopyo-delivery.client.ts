@@ -4,7 +4,11 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_ORDER_PAGES = 20;
 
 export class SopyoDeliveryClientError extends Error {
-  constructor(readonly category: 'AUTH' | 'ORDERS' | 'MALFORMED' | 'PAGINATION') {
+  constructor(
+    readonly category: 'AUTH' | 'ORDERS' | 'MALFORMED' | 'PAGINATION',
+    readonly failureKind?: 'NETWORK' | 'HTTP' | 'INVALID_JSON' | 'INVALID_BODY' | 'INVALID_ID',
+    readonly httpStatus?: number,
+  ) {
     super(`Sopyo ${category.toLowerCase()} failed.`);
     this.name = 'SopyoDeliveryClientError';
   }
@@ -161,21 +165,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-async function requestJson(fetcher: typeof fetch, url: string, init: RequestInit, category: 'AUTH' | 'ORDERS'): Promise<unknown> {
+async function requestJsonWithStatus(
+  fetcher: typeof fetch, url: string, init: RequestInit, category: 'AUTH' | 'ORDERS',
+): Promise<{ body: unknown; httpStatus: number }> {
+  let response: Response;
   try {
-    const response = await fetcher(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    if (!response.ok) throw new SopyoDeliveryClientError(category);
-    return await response.json() as unknown;
+    response = await fetcher(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch {
-    // Fetch/JSON errors may contain URLs, request headers or provider payloads.
-    throw new SopyoDeliveryClientError(category);
+    // Fetch errors may contain URLs, request headers or provider payloads.
+    throw new SopyoDeliveryClientError(category, 'NETWORK');
   }
+  if (!response.ok) throw new SopyoDeliveryClientError(category, 'HTTP', response.status);
+  try {
+    return { body: await response.json() as unknown, httpStatus: response.status };
+  } catch {
+    throw new SopyoDeliveryClientError(category, 'INVALID_JSON', response.status);
+  }
+}
+
+async function requestJson(fetcher: typeof fetch, url: string, init: RequestInit, category: 'AUTH' | 'ORDERS'): Promise<unknown> {
+  return (await requestJsonWithStatus(fetcher, url, init, category)).body;
 }
 
 export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
   return {
     async authenticate(apiToken: string): Promise<string> {
-      const body = await requestJson(fetcher, `${BASE_URL}/api/v2/auth/login`, {
+      const { body, httpStatus } = await requestJsonWithStatus(fetcher, `${BASE_URL}/api/v2/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ api_token: [apiToken] }),
@@ -183,32 +198,37 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
       if (!isRecord(body) || !isRecord(body.access_token) ||
           typeof body.access_token.token !== 'string' || !body.access_token.token.trim() ||
           body.access_token.type !== 'bearer') {
-        throw new SopyoDeliveryClientError('MALFORMED');
+        throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_BODY', httpStatus);
       }
       return body.access_token.token;
     },
 
     async orderById(accessToken: string, orderId: string): Promise<SopyoOrderDetail> {
       if (!/^[1-9]\d{0,15}$/.test(orderId) || !Number.isSafeInteger(Number(orderId)) ||
-          String(Number(orderId)) !== orderId) throw new SopyoDeliveryClientError('MALFORMED');
-      let body: unknown;
+          String(Number(orderId)) !== orderId) throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_ID');
+      let response: Response;
       try {
-        const response = await fetcher(`${BASE_URL}/api/v2/orders/${orderId}`, {
+        response = await fetcher(`${BASE_URL}/api/v2/orders/${orderId}`, {
           method: 'GET',
           headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
-        if (response.status !== 200) throw new SopyoDeliveryClientError('ORDERS');
-        body = await response.json() as unknown;
       } catch {
         // Provider errors and bodies may contain credentials or personal data.
-        throw new SopyoDeliveryClientError('ORDERS');
+        throw new SopyoDeliveryClientError('ORDERS', 'NETWORK');
+      }
+      if (response.status !== 200) throw new SopyoDeliveryClientError('ORDERS', 'HTTP', response.status);
+      let body: unknown;
+      try {
+        body = await response.json() as unknown;
+      } catch {
+        throw new SopyoDeliveryClientError('ORDERS', 'INVALID_JSON', response.status);
       }
       if (!isRecord(body) || !Number.isSafeInteger(body.id) || (body.id as number) <= 0 ||
           typeof body.order_code !== 'string' || !body.order_code.trim() || body.order_code.length > 256 ||
           typeof body.order_type !== 'string' || !body.order_type.trim() || body.order_type.length > 100 ||
           !Number.isSafeInteger(body.order_status)) {
-        throw new SopyoDeliveryClientError('MALFORMED');
+        throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_BODY', response.status);
       }
       return { id: body.id as number, orderCode: body.order_code,
         orderType: body.order_type, orderStatus: body.order_status as number };
