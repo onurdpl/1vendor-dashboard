@@ -19,6 +19,7 @@ export type SopyoOrder = { id: number; orderStatus: number; trackingNumber: stri
 
 export type SopyoOrderByCode = { id: number; orderCode: string; orderType: string | null };
 export type SopyoOrderDetail = { id: number; orderCode: string; orderType: string; orderStatus: number };
+export type SopyoOrderCargoDetail = { cargoTrackingNumber: string | null; cargoCompany: string | null };
 
 type DetailField = 'id' | 'order_code' | 'order_type' | 'order_status';
 type DetailFieldType = 'NUMBER' | 'STRING' | 'NULL' | 'ABSENT' | 'OTHER';
@@ -209,6 +210,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function safeCargoText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text && text.length <= 200 && !/[\x00-\x1f\x7f@]/.test(text) &&
+    !/\b(?:bearer|api[_ -]?token|access[_ -]?token|authorization)\b/i.test(text) ? text : null;
+}
+
 async function requestJsonWithStatus(
   fetcher: typeof fetch, url: string, init: RequestInit, category: 'AUTH' | 'ORDERS',
 ): Promise<{ body: unknown; httpStatus: number }> {
@@ -247,7 +255,8 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
       return body.access_token.token;
     },
 
-    async orderById(accessToken: string, orderId: string): Promise<SopyoOrderDetail> {
+    async orderById(accessToken: string, orderId: string, options?: { includeCargo?: boolean }):
+      Promise<SopyoOrderDetail & Partial<SopyoOrderCargoDetail>> {
       if (!/^[1-9]\d{0,15}$/.test(orderId) || !Number.isSafeInteger(Number(orderId)) ||
           String(Number(orderId)) !== orderId) throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_ID');
       let response: Response;
@@ -276,8 +285,14 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
         throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_BODY', response.status,
           detailResponseStructure(body));
       }
-      return { id: data.id as number, orderCode: data.order_code,
+      const detail = { id: data.id as number, orderCode: data.order_code,
         orderType: data.order_type, orderStatus: data.order_status as number };
+      if (!options?.includeCargo) return detail;
+      const cargo = isRecord(data.cargo_info) ? data.cargo_info : null;
+      return { ...detail,
+        cargoTrackingNumber: safeCargoText(cargo?.tracking_no),
+        cargoCompany: safeCargoText(cargo?.company),
+      };
     },
 
     async ordersByTracking(accessToken: string, trackingNumber: string): Promise<SopyoOrder[]> {

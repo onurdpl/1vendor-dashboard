@@ -24,6 +24,36 @@ describe('Sopyo documented delivery-read client', () => {
     expect((fetcher.mock.calls[0]![1] as RequestInit).method).toBe('GET');
   });
 
+  it('includes only confirmed cargo fields when explicitly requested for diagnostics', async () => {
+    const fetcher = vi.fn(async () => json({ data: {
+      id: 38154205, order_code: 'alloc-1', order_type: 'SOPYOAPI', order_status: 1,
+      cargo_info: { tracking_no: ' TESTKARGO123 ', company: 'Sürat Kargo',
+        other: 'private@example.com' }, customer_info: { name: 'Private Customer' },
+    } }));
+    const client = createSopyoDeliveryClient(fetcher as typeof fetch);
+    expect(await client.orderById('secret', '38154205', { includeCargo: true })).toEqual({
+      id: 38154205, orderCode: 'alloc-1', orderType: 'SOPYOAPI', orderStatus: 1,
+      cargoTrackingNumber: 'TESTKARGO123', cargoCompany: 'Sürat Kargo',
+    });
+    expect(await client.orderById('secret', '38154205')).toEqual({
+      id: 38154205, orderCode: 'alloc-1', orderType: 'SOPYOAPI', orderStatus: 1,
+    });
+  });
+
+  it('keeps order-status parsing independent of absent or null cargo', async () => {
+    const core = { id: 38154205, order_code: 'alloc-1', order_type: 'SOPYOAPI', order_status: 1 };
+    for (const cargo_info of [undefined, null, {}, { tracking_no: null, company: null },
+      { tracking_no: 'private@example.com', company: 'Bearer secret' }]) {
+      const client = createSopyoDeliveryClient(vi.fn(async () => json({ data: {
+        ...core, ...(cargo_info === undefined ? {} : { cargo_info }),
+      } })) as typeof fetch);
+      expect(await client.orderById('secret', '38154205', { includeCargo: true })).toEqual({
+        id: 38154205, orderCode: 'alloc-1', orderType: 'SOPYOAPI', orderStatus: 1,
+        cargoTrackingNumber: null, cargoCompany: null,
+      });
+    }
+  });
+
   it('rejects non-200, malformed JSON and invalid detail fields without leaking provider content', async () => {
     const valid = { id: 1, order_code: 'a', order_type: 'SOPYOAPI', order_status: 6 };
     const invalid = [

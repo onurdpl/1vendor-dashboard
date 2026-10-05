@@ -21,7 +21,8 @@ function setup(options: {
   detail?: () => Promise<Response>;
 } = {}) {
   const findUnique = vi.fn(async () => options.row === undefined ? push : options.row);
-  const db = { sopyoOrderPush: { findUnique } };
+  const write = vi.fn(() => { throw new Error('diagnostic must not write'); });
+  const db = { sopyoOrderPush: { findUnique, create: write, update: write, upsert: write, delete: write } };
   const loadCredential = vi.fn(async (vendorId: string) => {
     expect(vendorId).toBe('vendor-a');
     if (options.credentialError) throw options.credentialError;
@@ -44,7 +45,7 @@ function setup(options: {
     pushId: id.length === 0 ? pushId : id[0], databaseUrl: 'postgresql://local-only/test', db: db as never,
     loadCredential, client: createSopyoDeliveryClient(fetcher as typeof fetch),
   });
-  return { run, findUnique, loadCredential, fetcher };
+  return { run, findUnique, write, loadCredential, fetcher };
 }
 
 describe('read-only Sopyo numeric-detail operator diagnostic', () => {
@@ -199,12 +200,40 @@ describe('read-only Sopyo numeric-detail operator diagnostic', () => {
     }) });
     expect(await lookalikes.run()).toEqual({
       id: 38154205, orderCode: allocationId, orderType: 'SOPYOAPI', orderStatus: 6,
+      cargoTrackingNumber: null, cargoCompany: null,
     });
     const successful = setup();
     expect(await successful.run()).toEqual({
       id: 38154205, orderCode: allocationId, orderType: 'SOPYOAPI', orderStatus: 6,
+      cargoTrackingNumber: null, cargoCompany: null,
     });
     expect(successful.fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'GET']);
+    expect(successful.write).not.toHaveBeenCalled();
+  });
+
+  it('returns only confirmed cargo fields without provider body, PII, secrets, or writes', async () => {
+    const s = setup({ detail: async () => Response.json({ data: {
+      id: 38154205, order_code: allocationId, order_type: 'SOPYOAPI', order_status: 1,
+      cargo_info: { tracking_no: ' TESTKARGO123 ', company: 'Sürat Kargo',
+        token: 'api-secret', customer: 'Private Customer' },
+      customer_info: { email: 'private@example.com', address: 'private street' },
+    } }) });
+    const result = await s.run();
+    expect(result).toEqual({ id: 38154205, orderCode: allocationId, orderType: 'SOPYOAPI', orderStatus: 1,
+      cargoTrackingNumber: 'TESTKARGO123', cargoCompany: 'Sürat Kargo' });
+    expect(JSON.stringify(result)).not.toMatch(/Private Customer|private@example.com|private street|api-secret|bearer-secret/);
+    expect(s.fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'GET']);
+    expect(s.write).not.toHaveBeenCalled();
+  });
+
+  it('suppresses cargo text that echoes the credential or bearer', async () => {
+    const s = setup({ detail: async () => Response.json({ data: {
+      id: 38154205, order_code: allocationId, order_type: 'SOPYOAPI', order_status: 1,
+      cargo_info: { tracking_no: 'api-secret', company: 'bearer-secret' },
+    } }) });
+    expect(await s.run()).toEqual({ id: 38154205, orderCode: allocationId,
+      orderType: 'SOPYOAPI', orderStatus: 1, cargoTrackingNumber: null, cargoCompany: null });
+    expect(s.write).not.toHaveBeenCalled();
   });
 
   it('never returns arbitrary exception text, provider bodies, credentials, tokens, or PII', async () => {

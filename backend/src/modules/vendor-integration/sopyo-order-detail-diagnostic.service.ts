@@ -12,7 +12,13 @@ type Failure = {
   SOPYO_ORDER_DETAIL_READ: 'FAILED'; reason: Reason; stage: Stage; httpStatus?: number;
   detailStructure?: SopyoDetailResponseStructure;
 };
-type Success = { id: number; orderCode: string; orderType: string; orderStatus: number };
+type Success = { id: number; orderCode: string; orderType: string; orderStatus: number;
+  cargoTrackingNumber: string | null; cargoCompany: string | null };
+
+function withoutCredentialText(value: string | null | undefined, apiToken: string, bearer: string): string | null {
+  if (!value || [apiToken, bearer].some((secret) => secret && value.toLowerCase().includes(secret.toLowerCase()))) return null;
+  return value;
+}
 
 function failed(reason: Reason, stage: Stage, httpStatus?: number, detailStructure?: SopyoDetailResponseStructure): Failure {
   return { SOPYO_ORDER_DETAIL_READ: 'FAILED', reason, stage,
@@ -80,9 +86,9 @@ export async function readSopyoOrderDetailDiagnostic(options: {
     }
     return failed('UNKNOWN', 'AUTH');
   }
-  let detail: Success;
+  let detail: Awaited<ReturnType<DetailClient['orderById']>>;
   try {
-    detail = await client.orderById(bearer, push.sopyoOrderId);
+    detail = await client.orderById(bearer, push.sopyoOrderId, { includeCargo: true });
   } catch (error) {
     if (error instanceof SopyoDeliveryClientError) {
       if (error.failureKind === 'NETWORK') return failed('NETWORK_ERROR', 'DETAIL_GET');
@@ -100,5 +106,7 @@ export async function readSopyoOrderDetailDiagnostic(options: {
   if (String(detail.id) !== push.sopyoOrderId || detail.orderCode !== push.orderCode ||
       detail.orderType !== 'SOPYOAPI') return failed('PROVIDER_IDENTITY_MISMATCH', 'IDENTITY_CHECK', 200);
   return { id: detail.id, orderCode: detail.orderCode,
-    orderType: detail.orderType, orderStatus: detail.orderStatus };
+    orderType: detail.orderType, orderStatus: detail.orderStatus,
+    cargoTrackingNumber: withoutCredentialText(detail.cargoTrackingNumber, apiToken, bearer),
+    cargoCompany: withoutCredentialText(detail.cargoCompany, apiToken, bearer) };
 }
