@@ -769,9 +769,10 @@ $$;
 
 CREATE FUNCTION public.validate_allocation_delivered_observation_source() RETURNS trigger
     LANGUAGE plpgsql
-    AS $$
+    AS $_$
 DECLARE
   allocation_row "VendorAllocation"%ROWTYPE;
+  push_row "SopyoOrderPush"%ROWTYPE;
 BEGIN
   SELECT * INTO allocation_row FROM "VendorAllocation" WHERE "id" = NEW."vendorAllocationId" FOR UPDATE;
   IF NOT FOUND OR allocation_row."outboundMethodSnapshot" IS DISTINCT FROM NEW."outboundMethod"
@@ -791,21 +792,54 @@ BEGIN
     RAISE EXCEPTION 'Delivered observation lacks matching Kargonomi execution';
   END IF;
 
-  IF NEW."outboundMethod" = 'VENDOR_INTEGRATION' AND NOT EXISTS (
-    SELECT 1 FROM "VendorIntegrationClient" client
-    WHERE client."id" = NEW."vendorIntegrationClientId"
-      AND client."vendorIdentifier" = allocation_row."assignedVendorId"
-      AND client."providerCode" = NEW."outboundIntegrationProvider"
-      AND client."enabled" = true
-      AND client."revokedAt" IS NULL
-      AND 'shipment:write' = ANY(client."scopes")
-  ) THEN
-    RAISE EXCEPTION 'Delivered observation lacks matching active integration client';
+  IF NEW."outboundMethod" = 'VENDOR_INTEGRATION' AND NEW."vendorIntegrationClientId" IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM "VendorIntegrationClient" client
+      WHERE client."id" = NEW."vendorIntegrationClientId"
+        AND client."vendorIdentifier" = allocation_row."assignedVendorId"
+        AND client."providerCode" = NEW."outboundIntegrationProvider"
+        AND client."enabled" = true
+        AND client."revokedAt" IS NULL
+        AND 'shipment:write' = ANY(client."scopes")
+    ) THEN
+      RAISE EXCEPTION 'Delivered observation lacks matching active integration client';
+    END IF;
+
+    IF NEW."outboundIntegrationProvider" = 'SOPYO' THEN
+      SELECT * INTO push_row FROM "SopyoOrderPush"
+      WHERE "vendorAllocationId" = NEW."vendorAllocationId" FOR UPDATE;
+      IF FOUND AND (
+        push_row."status" <> 'SUCCEEDED'
+        OR push_row."assignedVendorId" <> allocation_row."assignedVendorId"
+        OR push_row."orderCode" <> allocation_row."id"
+        OR push_row."sopyoOrderId" IS NULL
+        OR push_row."sopyoOrderId" <> NEW."sourceReference"
+      ) THEN
+        RAISE EXCEPTION 'Tracking observation conflicts with Sopyo push identity';
+      END IF;
+    END IF;
+  END IF;
+
+  IF NEW."sopyoOrderPushId" IS NOT NULL THEN
+    SELECT * INTO push_row FROM "SopyoOrderPush" WHERE "id" = NEW."sopyoOrderPushId" FOR UPDATE;
+    IF NOT FOUND OR NEW."outboundMethod" <> 'VENDOR_INTEGRATION'
+      OR NEW."outboundIntegrationProvider" <> 'SOPYO'
+      OR push_row."vendorAllocationId" <> NEW."vendorAllocationId"
+      OR push_row."assignedVendorId" <> allocation_row."assignedVendorId"
+      OR push_row."orderCode" <> allocation_row."id"
+      OR push_row."status" <> 'SUCCEEDED'
+      OR push_row."sopyoOrderId" IS NULL
+      OR push_row."sopyoOrderId" !~ '^[1-9][0-9]*$'
+      OR length(push_row."sopyoOrderId") > 16
+      OR push_row."sopyoOrderId"::numeric > 9007199254740991
+      OR NEW."sourceReference" <> push_row."sopyoOrderId" THEN
+      RAISE EXCEPTION 'Delivered observation lacks matching successful Sopyo push';
+    END IF;
   END IF;
 
   RETURN NEW;
 END;
-$$;
+$_$;
 
 
 SET default_table_access_method = heap;
@@ -839,8 +873,9 @@ CREATE TABLE public."AllocationDeliveredObservation" (
     "sourceReference" text NOT NULL,
     "shipmentExecutionId" text,
     "vendorIntegrationClientId" text,
+    "sopyoOrderPushId" text,
     CONSTRAINT "AllocationDeliveredObservation_reference_check" CHECK ((length(btrim("sourceReference")) > 0)),
-    CONSTRAINT "AllocationDeliveredObservation_source_check" CHECK (((("outboundMethod" = 'KARGONOMI'::public."VendorOutboundMethod") AND ("outboundIntegrationProvider" IS NULL) AND ("shipmentExecutionId" IS NOT NULL) AND ("vendorIntegrationClientId" IS NULL)) OR (("outboundMethod" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("outboundIntegrationProvider" IS NOT NULL) AND ("shipmentExecutionId" IS NULL) AND ("vendorIntegrationClientId" IS NOT NULL))))
+    CONSTRAINT "AllocationDeliveredObservation_source_check" CHECK (((("outboundMethod" = 'KARGONOMI'::public."VendorOutboundMethod") AND ("outboundIntegrationProvider" IS NULL) AND ("shipmentExecutionId" IS NOT NULL) AND ("vendorIntegrationClientId" IS NULL) AND ("sopyoOrderPushId" IS NULL)) OR (("outboundMethod" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("outboundIntegrationProvider" IS NOT NULL) AND ("shipmentExecutionId" IS NULL) AND ("vendorIntegrationClientId" IS NOT NULL) AND ("sopyoOrderPushId" IS NULL)) OR (("outboundMethod" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("outboundIntegrationProvider" = 'SOPYO'::public."VendorIntegrationProviderCode") AND ("shipmentExecutionId" IS NULL) AND ("vendorIntegrationClientId" IS NULL) AND ("sopyoOrderPushId" IS NOT NULL))))
 );
 
 
@@ -3210,6 +3245,13 @@ CREATE INDEX "AllocationDeliveredObservation_shipmentExecutionId_idx" ON public.
 
 
 --
+-- Name: AllocationDeliveredObservation_sopyoOrderPushId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "AllocationDeliveredObservation_sopyoOrderPushId_idx" ON public."AllocationDeliveredObservation" USING btree ("sopyoOrderPushId");
+
+
+--
 -- Name: AllocationDeliveredObservation_vendorAllocationId_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5158,6 +5200,14 @@ ALTER TABLE ONLY public."AllocationAssignmentHistory"
 
 ALTER TABLE ONLY public."AllocationDeliveredObservation"
     ADD CONSTRAINT "AllocationDeliveredObservation_shipmentExecutionId_fkey" FOREIGN KEY ("shipmentExecutionId") REFERENCES public."ShipmentExecution"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: AllocationDeliveredObservation AllocationDeliveredObservation_sopyoOrderPushId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."AllocationDeliveredObservation"
+    ADD CONSTRAINT "AllocationDeliveredObservation_sopyoOrderPushId_fkey" FOREIGN KEY ("sopyoOrderPushId") REFERENCES public."SopyoOrderPush"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

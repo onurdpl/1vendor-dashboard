@@ -811,12 +811,15 @@ model AllocationDeliveredObservation {
   sourceReference              String
   shipmentExecutionId          String?
   vendorIntegrationClientId    String?
+  sopyoOrderPushId             String?
   vendorAllocation             VendorAllocation               @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
   shipmentExecution            ShipmentExecution?             @relation(fields: [shipmentExecutionId], references: [id], onDelete: Restrict)
   vendorIntegrationClient      VendorIntegrationClient?       @relation(fields: [vendorIntegrationClientId], references: [id], onDelete: Restrict)
+  sopyoOrderPush               SopyoOrderPush?                @relation(fields: [sopyoOrderPushId], references: [id], onDelete: Restrict)
 
   @@index([shipmentExecutionId])
   @@index([vendorIntegrationClientId])
+  @@index([sopyoOrderPushId])
 }
 
 model CustomerCancellationRequest {
@@ -1016,6 +1019,7 @@ model SopyoOrderPush {
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   vendorAllocation   VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
+  deliveredObservations AllocationDeliveredObservation[]
 
   @@index([status, createdAt])
 }

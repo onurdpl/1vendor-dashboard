@@ -141,6 +141,12 @@ Kargonomi keeps its separate intake. The observation model and runtime compariso
 
 ## Phase 4 — SALE settlement-delay finance cutover
 
+### Additive Sopyo push-identity intake
+
+The Sopyo-specific delivery poller also accepts a `SUCCEEDED` `SopyoOrderPush` for a frozen `VENDOR_INTEGRATION`/`SOPYO` allocation. It uses the assigned vendor's outbound credential for an authenticated numeric-ID order detail read, requiring exact Sopyo ID, allocation order code, `SOPYOAPI` type, and numeric status `6`. Tracking, a shipment event, and an inbound integration client are not required for this branch. The immutable observation links to the durable push and retains its Sopyo ID as `sourceReference`; existing Kargonomi and tracking/client provenance remain distinct.
+
+An unresolved push blocks tracking-derived delivery authority for that allocation. A successful push permits tracking-derived authority only when the returned Sopyo ID matches the push. Concurrent same-ID paths converge on the allocation-unique first observation without replacing its provenance or database-generated UTC timestamp; conflicting IDs fail closed. No historical observation is backfilled. Finance's shared evaluator is unchanged, and FIN-BUG-003 remains OPEN pending natural production verification.
+
 For v1, `VendorAllocation` is the indivisible delivery-finance unit. One canonical, source-validated `AllocationDeliveredObservation` matures that allocation's SALE after its frozen `settlementDelayDaysSnapshot`; no line/quantity coverage, partial-delivery state, or multi-tracking completion formula was added. The shared SALE delay evaluator reads `firstObservedDeliveredAt`, requires observation/allocation ID and frozen outbound method/provider alignment, and retains the existing exact `eligibleAt <= asOfDate` cutoff. It has no provider-specific branch and does not consult current `VendorShippingConfig`.
 
 No observation, NULL/NULL historical outbound snapshot, malformed observation, or mismatched source fails closed. There is no fallback to `Fulfillment.shipmentUpdatedAt`, `shippingStatus`, `fulfilledAt`, Shopify timestamps, or provider order dates. Later operational RETURNED/CANCELLED/non-delivered status does not revoke or suspend an already valid observation or move its clock. Existing separately evidenced refund, return, and hold mechanisms remain independent.

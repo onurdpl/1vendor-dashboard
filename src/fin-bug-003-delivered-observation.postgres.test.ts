@@ -164,19 +164,25 @@ describeWithPostgres('FIN-BUG-003 Phase 3 delivered observation on isolated Post
     expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: historical.id } })).toBe(0);
   });
 
-  it('persisting the new observation does not change the current finance delay evaluator', async () => {
+  it('the existing finance evaluator uses the canonical observation at a zero-day cutoff', async () => {
     const { id, execution } = await fixture('KARGONOMI');
+    const { evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js');
+    const before = await db.vendorAllocation.findUniqueOrThrow({
+      where: { id }, include: { fulfillment: true, deliveredObservation: true },
+    });
+    expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 0,
+      vendorAllocation: before,
+    }).eligible).toBe(false);
     await record({ allocationId: id, source: {
       method: 'KARGONOMI', shipmentExecutionId: execution.id, sourceReference: execution.providerShipmentId!,
     } }, db);
-    const { evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js');
     const allocation = await db.vendorAllocation.findUniqueOrThrow({
       where: { id }, include: { fulfillment: true, deliveredObservation: true },
     });
     expect(allocation.deliveredObservation).not.toBeNull();
     expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 0,
       vendorAllocation: allocation,
-    }).eligible).toBe(false);
+    }, allocation.deliveredObservation!.firstObservedDeliveredAt).eligible).toBe(true);
   });
 
   it('projection-only delivered/tracking updates cannot create the authority', async () => {

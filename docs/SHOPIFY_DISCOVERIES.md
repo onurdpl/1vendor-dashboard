@@ -116,6 +116,11 @@ query {
 - `PROCESSING` and `RECONCILE_REQUIRED` remain operator-controlled lookup-only recovery through Phase B. `BLOCKED` and `SUCCEEDED` are not automatically selected. There is no automatic reconciliation or blind retry.
 - The production backlog before Phase C rollout was reported as one `SUCCEEDED` push and zero rows in every other state. This is rollout evidence, not a continuing invariant. Future provider integrations must not inherit these Sopyo-specific rules automatically.
 
+### Sopyo push-identity delivered observation
+- A successful per-allocation `SopyoOrderPush` can supply durable delivery provenance without local tracking or an inbound Vendor Integration client. The Sopyo delivery poller uses the assigned vendor's credential to read that push's numeric Sopyo order ID and requires exact returned ID, allocation order code, `SOPYOAPI` type, and status `6` before recording the canonical observation.
+- The existing tracking-based Sopyo path remains for allocations without a push intent. An unresolved push cannot be bypassed by tracking; after success, tracking may establish delivery only for the same Sopyo order ID. The first database-timed observation wins and is never overwritten. No historical observation is backfilled.
+- Finance still consumes only the provider-neutral, frozen-source-aligned `AllocationDeliveredObservation` plus the frozen SALE delay. This path does not change settlement or payout rules. FIN-BUG-003 remains OPEN until a natural production observation and finance evaluation are verified.
+
 ## Order Vendor Mapping
 - `orders/create` webhook payload does not include metafields.
 - Order metafield `custom.seller_info` must be fetched separately through Shopify Admin API.

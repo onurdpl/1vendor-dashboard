@@ -13,6 +13,35 @@ function page(number: number, last: number, data: unknown[]) {
 }
 
 describe('Sopyo documented delivery-read client', () => {
+  it('reads only numeric-ID detail authority and keeps sensitive fields out of the result', async () => {
+    const fetcher = vi.fn(async () => json({ id: 38154205, order_code: 'alloc-1',
+      order_type: 'SOPYOAPI', order_status: 6, customer_info: { email: 'private@example.com' } }));
+    const result = await createSopyoDeliveryClient(fetcher as typeof fetch).orderById('secret', '38154205');
+    expect(result).toEqual({ id: 38154205, orderCode: 'alloc-1', orderType: 'SOPYOAPI', orderStatus: 6 });
+    expect(fetcher.mock.calls[0]![0]).toBe('https://api.sopyo.dev/api/v2/orders/38154205');
+    expect((fetcher.mock.calls[0]![1] as RequestInit).method).toBe('GET');
+  });
+
+  it('rejects non-200, malformed JSON and invalid detail fields without leaking provider content', async () => {
+    const invalid = [
+      { id: 0, order_code: 'a', order_type: 'SOPYOAPI', order_status: 6 },
+      { id: 1, order_type: 'SOPYOAPI', order_status: 6 },
+      { id: 1, order_code: 'a', order_status: 6 },
+      { id: 1, order_code: 'a', order_type: 'SOPYOAPI', order_status: '6' },
+    ];
+    for (const body of invalid) {
+      const client = createSopyoDeliveryClient(vi.fn(async () => json(body)) as typeof fetch);
+      await expect(client.orderById('secret', '1')).rejects.toThrow('Sopyo malformed failed.');
+    }
+    await expect(createSopyoDeliveryClient(vi.fn(async () => json({ message: 'private@example.com' }, 404)) as typeof fetch)
+      .orderById('secret', '1')).rejects.toThrow('Sopyo orders failed.');
+    await expect(createSopyoDeliveryClient(vi.fn(async () => new Response('private@example.com', { status: 200 })) as typeof fetch)
+      .orderById('secret', '1')).rejects.toThrow('Sopyo orders failed.');
+    const fetcher = vi.fn(async () => json({}));
+    await expect(createSopyoDeliveryClient(fetcher as typeof fetch).orderById('secret', '01'))
+      .rejects.toThrow('Sopyo malformed failed.');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it('logs in with the documented token array and keeps the returned bearer in memory', async () => {
     const fetcher = vi.fn(async () => json({ access_token: { token: 'access-secret', type: 'bearer', expire_in: 1440 } }));
     const client = createSopyoDeliveryClient(fetcher as typeof fetch);

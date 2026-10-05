@@ -13,6 +13,7 @@ export class SopyoDeliveryClientError extends Error {
 export type SopyoOrder = { id: number; orderStatus: number; trackingNumber: string };
 
 export type SopyoOrderByCode = { id: number; orderCode: string; orderType: string | null };
+export type SopyoOrderDetail = { id: number; orderCode: string; orderType: string; orderStatus: number };
 
 export type SopyoCreateAmbiguousReason =
   | 'TRANSPORT_ERROR'
@@ -185,6 +186,32 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
         throw new SopyoDeliveryClientError('MALFORMED');
       }
       return body.access_token.token;
+    },
+
+    async orderById(accessToken: string, orderId: string): Promise<SopyoOrderDetail> {
+      if (!/^[1-9]\d{0,15}$/.test(orderId) || !Number.isSafeInteger(Number(orderId)) ||
+          String(Number(orderId)) !== orderId) throw new SopyoDeliveryClientError('MALFORMED');
+      let body: unknown;
+      try {
+        const response = await fetcher(`${BASE_URL}/api/v2/orders/${orderId}`, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (response.status !== 200) throw new SopyoDeliveryClientError('ORDERS');
+        body = await response.json() as unknown;
+      } catch {
+        // Provider errors and bodies may contain credentials or personal data.
+        throw new SopyoDeliveryClientError('ORDERS');
+      }
+      if (!isRecord(body) || !Number.isSafeInteger(body.id) || (body.id as number) <= 0 ||
+          typeof body.order_code !== 'string' || !body.order_code.trim() || body.order_code.length > 256 ||
+          typeof body.order_type !== 'string' || !body.order_type.trim() || body.order_type.length > 100 ||
+          !Number.isSafeInteger(body.order_status)) {
+        throw new SopyoDeliveryClientError('MALFORMED');
+      }
+      return { id: body.id as number, orderCode: body.order_code,
+        orderType: body.order_type, orderStatus: body.order_status as number };
     },
 
     async ordersByTracking(accessToken: string, trackingNumber: string): Promise<SopyoOrder[]> {

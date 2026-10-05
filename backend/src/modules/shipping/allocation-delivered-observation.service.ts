@@ -2,6 +2,7 @@ import {
   Prisma,
   ShipmentExecutionStatus,
   ShippingProvider,
+  SopyoOrderPushStatus,
   VendorIntegrationProviderCode,
   VendorOutboundMethod,
 } from '@prisma/client';
@@ -11,7 +12,8 @@ import { prisma } from '../../db/prisma.js';
 // No public status/tracking value is normalized here.
 export type VerifiedDeliveredSource =
   | { method: 'KARGONOMI'; shipmentExecutionId: string; sourceReference: string }
-  | { method: 'VENDOR_INTEGRATION'; providerCode: 'SOPYO'; clientId: string; sourceReference: string };
+  | { method: 'VENDOR_INTEGRATION'; providerCode: 'SOPYO'; clientId: string; pushId?: never; sourceReference: string }
+  | { method: 'VENDOR_INTEGRATION'; providerCode: 'SOPYO'; pushId: string; clientId?: never; sourceReference: string };
 
 export class DeliveredObservationSourceError extends Error {
   constructor(message: string) {
@@ -22,8 +24,14 @@ export class DeliveredObservationSourceError extends Error {
 
 type ObservationDb = Pick<
   Prisma.TransactionClient,
-  'vendorAllocation' | 'shipmentExecution' | 'vendorIntegrationClient' | 'allocationDeliveredObservation'
+  'vendorAllocation' | 'shipmentExecution' | 'vendorIntegrationClient' | 'sopyoOrderPush' | 'allocationDeliveredObservation'
 >;
+
+export function canonicalSopyoOrderId(value: string | null | undefined): string | null {
+  if (!value || !/^[1-9]\d{0,15}$/.test(value)) return null;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && String(numeric) === value ? value : null;
+}
 
 export async function recordVerifiedDeliveredObservation(
   input: { allocationId: string; source: VerifiedDeliveredSource },
@@ -50,6 +58,7 @@ export async function recordVerifiedDeliveredObservation(
 
   let shipmentExecutionId: string | null = null;
   let vendorIntegrationClientId: string | null = null;
+  let sopyoOrderPushId: string | null = null;
   let providerCode: VendorIntegrationProviderCode | null = null;
   if (input.source.method === 'KARGONOMI') {
     const execution = await db.shipmentExecution.findUnique({
@@ -64,6 +73,19 @@ export async function recordVerifiedDeliveredObservation(
       throw new DeliveredObservationSourceError('Matching delivered Kargonomi execution is required.');
     }
     shipmentExecutionId = input.source.shipmentExecutionId;
+  } else if (input.source.pushId) {
+    const push = await db.sopyoOrderPush.findUnique({
+      where: { id: input.source.pushId },
+      select: { vendorAllocationId: true, assignedVendorId: true, orderCode: true, status: true, sopyoOrderId: true },
+    });
+    if (!push || push.vendorAllocationId !== input.allocationId ||
+        push.assignedVendorId !== allocation.assignedVendorId || push.orderCode !== input.allocationId ||
+        push.status !== SopyoOrderPushStatus.SUCCEEDED ||
+        canonicalSopyoOrderId(push.sopyoOrderId) !== sourceReference) {
+      throw new DeliveredObservationSourceError('Matching successful Sopyo push is required.');
+    }
+    providerCode = input.source.providerCode;
+    sopyoOrderPushId = input.source.pushId;
   } else {
     const client = await db.vendorIntegrationClient.findUnique({
       where: { id: input.source.clientId },
@@ -74,8 +96,17 @@ export async function recordVerifiedDeliveredObservation(
         client.revokedAt !== null || !client.scopes.includes('shipment:write')) {
       throw new DeliveredObservationSourceError('Matching active coded integration client is required.');
     }
+    const push = await db.sopyoOrderPush.findUnique({
+      where: { vendorAllocationId: input.allocationId },
+      select: { assignedVendorId: true, orderCode: true, status: true, sopyoOrderId: true },
+    });
+    if (push && (push.status !== SopyoOrderPushStatus.SUCCEEDED ||
+        push.assignedVendorId !== allocation.assignedVendorId || push.orderCode !== input.allocationId ||
+        canonicalSopyoOrderId(push.sopyoOrderId) !== sourceReference)) {
+      throw new DeliveredObservationSourceError('Tracking observation conflicts with Sopyo push identity.');
+    }
     providerCode = input.source.providerCode;
-    vendorIntegrationClientId = input.source.clientId;
+    vendorIntegrationClientId = input.source.clientId!;
   }
 
   // PostgreSQL's allocation-unique index is the claim. ON CONFLICT DO NOTHING
@@ -88,6 +119,7 @@ export async function recordVerifiedDeliveredObservation(
       sourceReference,
       shipmentExecutionId,
       vendorIntegrationClientId,
+      sopyoOrderPushId,
     }],
     skipDuplicates: true,
   });

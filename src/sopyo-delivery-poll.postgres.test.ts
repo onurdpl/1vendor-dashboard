@@ -93,6 +93,233 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     return { fetcher, logins, queries };
   }
 
+  async function pushFixture(input: { status?: 'SUCCEEDED' | 'PENDING' | 'PROCESSING' | 'BLOCKED' | 'RECONCILE_REQUIRED';
+    withCredential?: boolean; keepTracking?: boolean } = {}) {
+    const source = await fixture({ withCredential: input.withCredential });
+    if (!input.keepTracking) {
+      await db.vendorIntegrationShipmentEvent.deleteMany({ where: { vendorAllocationId: source.id } });
+      await db.vendorIntegrationClient.delete({ where: { id: source.client.id } });
+      await db.vendorAllocation.update({ where: { id: source.id }, data: { trackingNumber: null } });
+    }
+    const sopyoOrderId = String(40_000_000 + sequence);
+    const push = await db.sopyoOrderPush.create({ data: {
+      vendorAllocationId: source.id, assignedVendorId: source.vendorId,
+      orderCode: source.id, status: input.status ?? 'SUCCEEDED',
+      sopyoOrderId: (input.status ?? 'SUCCEEDED') === 'SUCCEEDED' ? sopyoOrderId : null,
+    } });
+    return { ...source, push, sopyoOrderId };
+  }
+
+  function fakePushSopyo(target: { sopyoOrderId: string; id: string },
+    override: Partial<{ id: number; order_code: string; order_type: string; order_status: number }> = {}) {
+    const detailReads: string[] = [];
+    const logins: string[] = [];
+    const fetcher = (async (request: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.pathname === '/api/v2/auth/login') {
+        const token = (JSON.parse(String(init?.body)) as { api_token: string[] }).api_token[0]!;
+        logins.push(token);
+        return Response.json({ access_token: { token: `bearer-${token}`, type: 'bearer' } });
+      }
+      if (url.pathname.startsWith('/api/v2/orders/')) {
+        detailReads.push(url.pathname);
+        return Response.json({ id: Number(target.sopyoOrderId), order_code: target.id,
+          order_type: 'SOPYOAPI', order_status: 6, ...override });
+      }
+      const tracking = url.searchParams.get('cargo_tracking_no[eq]');
+      return Response.json({ data: tracking ? [{ id: Number(target.sopyoOrderId), order_status: 2,
+        cargo_info: { tracking_no: tracking } }] : [],
+      meta: { current_page: 1, last_page: 1 } });
+    }) as typeof fetch;
+    return { fetcher, detailReads, logins };
+  }
+
+  it('records a successful push by numeric detail without tracking, inbound client, or shipment event', async () => {
+    const source = await pushFixture();
+    const { evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js');
+    const before = await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id }, include: { deliveredObservation: true } });
+    expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 0, vendorAllocation: before }).eligible).toBe(false);
+    expect(before.trackingNumber).toBeNull();
+    expect(await db.vendorIntegrationShipmentEvent.count({ where: { vendorAllocationId: source.id } })).toBe(0);
+    const api = fakePushSopyo(source);
+    const start = new Date();
+    await Promise.all([poll({ db, fetcher: api.fetcher }), poll({ db, fetcher: api.fetcher })]);
+    const end = new Date();
+    const observation = await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } });
+    expect(observation).toMatchObject({ sopyoOrderPushId: source.push.id,
+      vendorIntegrationClientId: null, shipmentExecutionId: null, sourceReference: source.sopyoOrderId });
+    expect(observation.firstObservedDeliveredAt.getTime()).toBeGreaterThanOrEqual(start.getTime());
+    expect(observation.firstObservedDeliveredAt.getTime()).toBeLessThanOrEqual(end.getTime());
+    expect(api.detailReads).toContain(`/api/v2/orders/${source.sopyoOrderId}`);
+    expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(1);
+    await poll({ db, fetcher: api.fetcher });
+    expect((await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } })).firstObservedDeliveredAt)
+      .toEqual(observation.firstObservedDeliveredAt);
+    const after = await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id }, include: { deliveredObservation: true } });
+    expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 0, vendorAllocation: after,
+    }, observation.firstObservedDeliveredAt).eligible).toBe(true);
+    expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 1, vendorAllocation: after,
+    }, observation.firstObservedDeliveredAt).eligible).toBe(false);
+  });
+
+  it('rejects push detail identity mismatches and non-delivered status', async () => {
+    for (const override of [{ id: 999 }, { order_code: 'other-allocation' },
+      { order_type: 'OTHER' }, { order_status: 2 }]) {
+      const source = await pushFixture();
+      await poll({ db, fetcher: fakePushSopyo(source, override).fetcher });
+      expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(0);
+    }
+  });
+
+  it('keeps unresolved pushes and missing credentials from creating observations', async () => {
+    for (const status of ['PENDING', 'PROCESSING', 'BLOCKED', 'RECONCILE_REQUIRED'] as const) {
+      const source = await pushFixture({ status });
+      const api = fakePushSopyo(source);
+      await poll({ db, fetcher: api.fetcher });
+      expect(api.detailReads).not.toContain(`/api/v2/orders/${source.sopyoOrderId}`);
+      expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(0);
+    }
+    const missing = await pushFixture({ withCredential: false });
+    const api = fakePushSopyo(missing);
+    await poll({ db, fetcher: api.fetcher });
+    expect(api.logins).not.toContain(`api-${missing.vendorId}`);
+    expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: missing.id } })).toBe(0);
+  });
+
+  it('enforces push provenance, one FK branch, and immutable first time in PostgreSQL', async () => {
+    const source = await pushFixture();
+    const legacy = await fixture({ vendorId: source.vendorId, withCredential: false });
+    const data = { vendorAllocationId: source.id, outboundMethod: 'VENDOR_INTEGRATION' as const,
+      outboundIntegrationProvider: 'SOPYO' as const, sourceReference: source.sopyoOrderId };
+    await expect(db.allocationDeliveredObservation.create({ data: { ...data, sopyoOrderPushId: 'nonexistent' } })).rejects.toThrow();
+    await expect(db.allocationDeliveredObservation.create({ data: { ...data, sopyoOrderPushId: source.push.id,
+      vendorIntegrationClientId: legacy.client.id } })).rejects.toThrow();
+    await expect(db.allocationDeliveredObservation.create({ data: { ...data, sopyoOrderPushId: source.push.id,
+      sourceReference: '999' } })).rejects.toThrow();
+    const other = await pushFixture();
+    await expect(db.allocationDeliveredObservation.create({ data: { ...data, sopyoOrderPushId: other.push.id } })).rejects.toThrow();
+    const observation = await db.allocationDeliveredObservation.create({ data: { ...data, sopyoOrderPushId: source.push.id } });
+    await expect(db.allocationDeliveredObservation.update({ where: { id: observation.id },
+      data: { firstObservedDeliveredAt: new Date(0) } })).rejects.toThrow();
+    await expect(db.allocationDeliveredObservation.delete({ where: { id: observation.id } })).rejects.toThrow();
+  });
+
+  it('blocks unresolved tracking and conflicting successful-push tracking at the write boundary', async () => {
+    const { recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js');
+    const unresolved = await pushFixture({ status: 'PENDING', keepTracking: true });
+    await expect(recordVerifiedDeliveredObservation({ allocationId: unresolved.id, source: {
+      method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO', clientId: unresolved.client.id,
+      sourceReference: unresolved.sopyoOrderId,
+    } }, db)).rejects.toThrow('push identity');
+    await expect(db.allocationDeliveredObservation.create({ data: {
+      vendorAllocationId: unresolved.id, outboundMethod: 'VENDOR_INTEGRATION',
+      outboundIntegrationProvider: 'SOPYO', vendorIntegrationClientId: unresolved.client.id,
+      sourceReference: unresolved.sopyoOrderId,
+    } })).rejects.toThrow();
+    const successful = await pushFixture({ keepTracking: true });
+    await expect(recordVerifiedDeliveredObservation({ allocationId: successful.id, source: {
+      method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO', clientId: successful.client.id,
+      sourceReference: '999',
+    } }, db)).rejects.toThrow('push identity');
+    const first = await recordVerifiedDeliveredObservation({ allocationId: successful.id, source: {
+      method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO', clientId: successful.client.id,
+      sourceReference: successful.sopyoOrderId,
+    } }, db);
+    const replay = await recordVerifiedDeliveredObservation({ allocationId: successful.id, source: {
+      method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO', pushId: successful.push.id,
+      sourceReference: successful.sopyoOrderId,
+    } }, db);
+    expect(replay.id).toBe(first.id);
+    expect(replay.firstObservedDeliveredAt).toEqual(first.firstObservedDeliveredAt);
+    expect(replay.vendorIntegrationClientId).toBe(successful.client.id);
+    expect(replay.sopyoOrderPushId).toBeNull();
+  });
+
+  it('requires push vendor and frozen source identity before numeric detail lookup', async () => {
+    const foreignVendor = await pushFixture();
+    await db.sopyoOrderPush.update({ where: { id: foreignVendor.push.id }, data: { assignedVendorId: 'other-vendor' } });
+    const otherMethod = await pushFixture();
+    await db.vendorAllocation.update({ where: { id: otherMethod.id }, data: {
+      outboundMethodSnapshot: 'KARGONOMI', outboundIntegrationProviderSnapshot: null,
+    } });
+    const api = fakePushSopyo(foreignVendor);
+    await poll({ db, fetcher: api.fetcher });
+    expect(api.detailReads).not.toContain(`/api/v2/orders/${foreignVendor.sopyoOrderId}`);
+    expect(api.detailReads).not.toContain(`/api/v2/orders/${otherMethod.sopyoOrderId}`);
+    expect(await db.allocationDeliveredObservation.count({ where: {
+      vendorAllocationId: { in: [foreignVendor.id, otherMethod.id] },
+    } })).toBe(0);
+  });
+
+  it('uses only each push allocation’s assigned-vendor credential', async () => {
+    const first = await pushFixture();
+    const second = await pushFixture();
+    const requests: Array<{ orderId: string; bearer: string }> = [];
+    const fetcher = (async (request: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.pathname === '/api/v2/auth/login') {
+        const token = (JSON.parse(String(init?.body)) as { api_token: string[] }).api_token[0]!;
+        return Response.json({ access_token: { token, type: 'bearer' } });
+      }
+      if (url.pathname.startsWith('/api/v2/orders/')) {
+        const orderId = url.pathname.split('/').at(-1)!;
+        requests.push({ orderId, bearer: String((init?.headers as Record<string, string>).Authorization) });
+        const source = orderId === first.sopyoOrderId ? first : second;
+        return Response.json({ id: Number(orderId), order_code: source.id,
+          order_type: 'SOPYOAPI', order_status: 6 });
+      }
+      return Response.json({ data: [], meta: { current_page: 1, last_page: 1 } });
+    }) as typeof fetch;
+    await poll({ db, fetcher });
+    expect(requests).toContainEqual({ orderId: first.sopyoOrderId,
+      bearer: `Bearer api-${first.vendorId}` });
+    expect(requests).toContainEqual({ orderId: second.sopyoOrderId,
+      bearer: `Bearer api-${second.vendorId}` });
+    expect(await db.allocationDeliveredObservation.count({ where: {
+      vendorAllocationId: { in: [first.id, second.id] },
+    } })).toBe(2);
+  });
+
+  it('lets legacy tracking record the same successful push order but rejects a different one', async () => {
+    const matching = await pushFixture({ keepTracking: true });
+    const different = await pushFixture({ keepTracking: true });
+    const fetcher = (async (request: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(request));
+      if (url.pathname === '/api/v2/auth/login') return Response.json({ access_token: { token: 'bearer', type: 'bearer' } });
+      if (url.pathname.startsWith('/api/v2/orders/')) return Response.json({ id: Number(url.pathname.split('/').at(-1)),
+        order_code: 'not-the-order-code', order_type: 'SOPYOAPI', order_status: 6 });
+      const number = url.searchParams.get('cargo_tracking_no[eq]');
+      return Response.json({ data: [{ id: number === matching.tracking ? Number(matching.sopyoOrderId) : 999,
+        order_status: 6, cargo_info: { tracking_no: number } }],
+      meta: { current_page: 1, last_page: 1 } });
+    }) as typeof fetch;
+    await poll({ db, fetcher });
+    const observation = await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: matching.id } });
+    expect(observation).toMatchObject({ sourceReference: matching.sopyoOrderId,
+      vendorIntegrationClientId: matching.client.id, sopyoOrderPushId: null });
+    expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: different.id } })).toBe(0);
+  });
+
+  it('the canonical recorder resolves concurrent push and legacy claims for the same ID without overwrite', async () => {
+    const source = await pushFixture({ keepTracking: true });
+    const { recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js');
+    const [one, two] = await Promise.all([
+      recordVerifiedDeliveredObservation({ allocationId: source.id, source: {
+        method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO', pushId: source.push.id,
+        sourceReference: source.sopyoOrderId,
+      } }, db),
+      recordVerifiedDeliveredObservation({ allocationId: source.id, source: {
+        method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO', clientId: source.client.id,
+        sourceReference: source.sopyoOrderId,
+      } }, db),
+    ]);
+    expect(one.id).toBe(two.id);
+    expect(one.firstObservedDeliveredAt).toEqual(two.firstObservedDeliveredAt);
+    expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(1);
+    const persisted = await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } });
+    expect([persisted.sopyoOrderPushId, persisted.vendorIntegrationClientId].filter(Boolean)).toHaveLength(1);
+  });
+
   it('records exact status 6 once, preserves database observation time, and leaves finance delay unchanged', async () => {
     const source = await fixture();
     const { evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js');
