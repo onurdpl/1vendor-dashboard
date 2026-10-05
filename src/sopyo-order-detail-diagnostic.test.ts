@@ -35,10 +35,10 @@ function setup(options: {
     }
     expect(url).toBe('https://api.sopyo.dev/api/v2/orders/38154205');
     expect(init.method).toBe('GET');
-    return options.detail?.() ?? Promise.resolve(Response.json({
+    return options.detail?.() ?? Promise.resolve(Response.json({ data: {
       id: 38154205, order_code: allocationId, order_type: 'SOPYOAPI', order_status: 6,
       customer_info: { email: 'private@example.com', address: 'private street' },
-    }));
+    } }));
   });
   const run = (...id: [string?]) => readSopyoOrderDetailDiagnostic({
     pushId: id.length === 0 ? pushId : id[0], databaseUrl: 'postgresql://local-only/test', db: db as never,
@@ -124,38 +124,54 @@ describe('read-only Sopyo numeric-detail operator diagnostic', () => {
       reason: 'DETAIL_JSON_INVALID', stage: 'DETAIL_PARSE', httpStatus: 200 });
   });
 
-  it('reports only allowlisted structure for a valid JSON object with missing top-level fields', async () => {
+  it('reports only allowlisted structure when data is missing', async () => {
     const s = setup({ detail: async () => Response.json({
-      data: { id: 38154205, order_code: allocationId, order_type: 'SOPYOAPI', order_status: 6,
-        customer_info: { email: 'private@example.com' } },
+      id: 38154205, order_code: allocationId, order_type: 'SOPYOAPI', order_status: 6,
       customer_name: 'Private Customer', token: 'bearer-secret',
     }) });
     const result = await s.run();
     expect(result).toEqual({ SOPYO_ORDER_DETAIL_READ: 'FAILED',
       reason: 'DETAIL_SCHEMA_MISMATCH', stage: 'DETAIL_PARSE', httpStatus: 200,
       detailStructure: {
-        bodyType: 'OBJECT', topLevelKeys: ['data'], dataPresent: true, dataType: 'OBJECT',
-        requiredFieldTypes: { id: 'ABSENT', order_code: 'ABSENT', order_type: 'ABSENT', order_status: 'ABSENT' },
-        dataRequiredFieldTypes: { id: 'NUMBER', order_code: 'STRING', order_type: 'STRING', order_status: 'NUMBER' },
+        bodyType: 'OBJECT', topLevelKeys: ['id', 'order_code', 'order_status', 'order_type'],
+        dataPresent: false, dataType: 'ABSENT',
+        requiredFieldTypes: { id: 'NUMBER', order_code: 'STRING', order_type: 'STRING', order_status: 'NUMBER' },
       },
     });
     expect(JSON.stringify(result)).not.toMatch(/Private Customer|private@example.com|bearer-secret|alloc-yalispor|38154205/);
   });
 
   it('reports fixed field types for wrong types, never provider values or unknown keys', async () => {
-    const s = setup({ detail: async () => Response.json({ id: 38154205, order_code: allocationId,
+    const s = setup({ detail: async () => Response.json({ data: { id: 38154205, order_code: allocationId,
       order_type: 'SOPYOAPI', order_status: '6', customer_info: { name: 'Private Customer' },
-      tracking_number: 'SECRET-TRACKING', api_token: 'api-secret' }) });
+      tracking_number: 'SECRET-TRACKING', api_token: 'api-secret' } }) });
     const result = await s.run();
     expect(result).toEqual({ SOPYO_ORDER_DETAIL_READ: 'FAILED',
       reason: 'DETAIL_SCHEMA_MISMATCH', stage: 'DETAIL_PARSE', httpStatus: 200,
       detailStructure: {
-        bodyType: 'OBJECT', topLevelKeys: ['id', 'order_code', 'order_status', 'order_type'],
-        dataPresent: false, dataType: 'ABSENT',
-        requiredFieldTypes: { id: 'NUMBER', order_code: 'STRING', order_type: 'STRING', order_status: 'STRING' },
+        bodyType: 'OBJECT', topLevelKeys: ['data'],
+        dataPresent: true, dataType: 'OBJECT',
+        requiredFieldTypes: { id: 'ABSENT', order_code: 'ABSENT', order_type: 'ABSENT', order_status: 'ABSENT' },
+        dataRequiredFieldTypes: { id: 'NUMBER', order_code: 'STRING', order_type: 'STRING', order_status: 'STRING' },
       },
     });
     expect(JSON.stringify(result)).not.toMatch(/Private Customer|SECRET-TRACKING|api-secret|customer_info|tracking_number|api_token|alloc-yalispor|38154205/);
+  });
+
+  it('classifies null, array, and invalid data fields as schema mismatches', async () => {
+    const valid = { id: 38154205, order_code: allocationId, order_type: 'SOPYOAPI', order_status: 6 };
+    for (const body of [
+      { data: null }, { data: [valid] },
+      { data: { ...valid, id: 0 } },
+      { data: { ...valid, order_code: '' } },
+      { data: { ...valid, order_type: '' } },
+      { data: { ...valid, order_status: '6' } },
+    ]) {
+      const result = await setup({ detail: async () => Response.json(body) }).run();
+      expect(result).toMatchObject({ SOPYO_ORDER_DETAIL_READ: 'FAILED',
+        reason: 'DETAIL_SCHEMA_MISMATCH', stage: 'DETAIL_PARSE', httpStatus: 200 });
+      expect(JSON.stringify(result)).not.toMatch(/alloc-yalispor|38154205/);
+    }
   });
 
   it('bounds non-object and null structural diagnostics', async () => {
@@ -172,11 +188,18 @@ describe('read-only Sopyo numeric-detail operator diagnostic', () => {
   });
 
   it('detects provider identity mismatch and preserves the existing success output', async () => {
-    const mismatched = setup({ detail: async () => Response.json({
+    const mismatched = setup({ detail: async () => Response.json({ data: {
       id: 38154205, order_code: 'another-allocation', order_type: 'SOPYOAPI', order_status: 6,
-    }) });
+    } }) });
     expect(await mismatched.run()).toEqual({ SOPYO_ORDER_DETAIL_READ: 'FAILED',
       reason: 'PROVIDER_IDENTITY_MISMATCH', stage: 'IDENTITY_CHECK', httpStatus: 200 });
+    const lookalikes = setup({ detail: async () => Response.json({
+      id: 1, order_code: 'wrong-allocation', order_type: 'OTHER', order_status: 1,
+      data: { id: 38154205, order_code: allocationId, order_type: 'SOPYOAPI', order_status: 6 },
+    }) });
+    expect(await lookalikes.run()).toEqual({
+      id: 38154205, orderCode: allocationId, orderType: 'SOPYOAPI', orderStatus: 6,
+    });
     const successful = setup();
     expect(await successful.run()).toEqual({
       id: 38154205, orderCode: allocationId, orderType: 'SOPYOAPI', orderStatus: 6,

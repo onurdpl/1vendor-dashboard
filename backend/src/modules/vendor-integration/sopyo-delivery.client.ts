@@ -268,15 +268,16 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
       } catch {
         throw new SopyoDeliveryClientError('ORDERS', 'INVALID_JSON', response.status);
       }
-      if (!isRecord(body) || !Number.isSafeInteger(body.id) || (body.id as number) <= 0 ||
-          typeof body.order_code !== 'string' || !body.order_code.trim() || body.order_code.length > 256 ||
-          typeof body.order_type !== 'string' || !body.order_type.trim() || body.order_type.length > 100 ||
-          !Number.isSafeInteger(body.order_status)) {
+      const data = isRecord(body) && isRecord(body.data) ? body.data : null;
+      if (!data || !Number.isSafeInteger(data.id) || (data.id as number) <= 0 ||
+          typeof data.order_code !== 'string' || !data.order_code.trim() || data.order_code.length > 256 ||
+          typeof data.order_type !== 'string' || !data.order_type.trim() || data.order_type.length > 100 ||
+          !Number.isSafeInteger(data.order_status)) {
         throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_BODY', response.status,
           detailResponseStructure(body));
       }
-      return { id: body.id as number, orderCode: body.order_code,
-        orderType: body.order_type, orderStatus: body.order_status as number };
+      return { id: data.id as number, orderCode: data.order_code,
+        orderType: data.order_type, orderStatus: data.order_status as number };
     },
 
     async ordersByTracking(accessToken: string, trackingNumber: string): Promise<SopyoOrder[]> {

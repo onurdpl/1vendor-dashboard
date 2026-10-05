@@ -123,8 +123,8 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
       }
       if (url.pathname.startsWith('/api/v2/orders/')) {
         detailReads.push(url.pathname);
-        return Response.json({ id: Number(target.sopyoOrderId), order_code: target.id,
-          order_type: 'SOPYOAPI', order_status: 6, ...override });
+        return Response.json({ data: { id: Number(target.sopyoOrderId), order_code: target.id,
+          order_type: 'SOPYOAPI', order_status: 6, ...override } });
       }
       const tracking = url.searchParams.get('cargo_tracking_no[eq]');
       return Response.json({ data: tracking ? [{ id: Number(target.sopyoOrderId), order_status: 2,
@@ -265,8 +265,8 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
         const orderId = url.pathname.split('/').at(-1)!;
         requests.push({ orderId, bearer: String((init?.headers as Record<string, string>).Authorization) });
         const source = orderId === first.sopyoOrderId ? first : second;
-        return Response.json({ id: Number(orderId), order_code: source.id,
-          order_type: 'SOPYOAPI', order_status: 6 });
+        return Response.json({ data: { id: Number(orderId), order_code: source.id,
+          order_type: 'SOPYOAPI', order_status: 6 } });
       }
       return Response.json({ data: [], meta: { current_page: 1, last_page: 1 } });
     }) as typeof fetch;
@@ -286,8 +286,9 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     const fetcher = (async (request: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(request));
       if (url.pathname === '/api/v2/auth/login') return Response.json({ access_token: { token: 'bearer', type: 'bearer' } });
-      if (url.pathname.startsWith('/api/v2/orders/')) return Response.json({ id: Number(url.pathname.split('/').at(-1)),
-        order_code: 'not-the-order-code', order_type: 'SOPYOAPI', order_status: 6 });
+      if (url.pathname.startsWith('/api/v2/orders/')) return Response.json({ data: {
+        id: Number(url.pathname.split('/').at(-1)),
+        order_code: 'not-the-order-code', order_type: 'SOPYOAPI', order_status: 6 } });
       const number = url.searchParams.get('cargo_tracking_no[eq]');
       return Response.json({ data: [{ id: number === matching.tracking ? Number(matching.sopyoOrderId) : 999,
         order_status: 6, cargo_info: { tracking_no: number } }],
