@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
+import {
+  MISSING_DELIVERY_DATE_REASON,
+  SETTLEMENT_DELAY_PENDING_REASON,
+} from '../backend/src/modules/finance/settlement-delay-eligibility.service.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -160,6 +164,101 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     }, observation.firstObservedDeliveredAt).eligible).toBe(true);
     expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 1, vendorAllocation: after,
     }, observation.firstObservedDeliveredAt).eligible).toBe(false);
+  });
+
+  it('keeps a positive frozen SALE cutoff stable from Sopyo delivery intake through settlement preview', async () => {
+    const source = await pushFixture();
+    const saleId = `${source.id}-sale`;
+    const orderNumber = `#${source.id}`;
+    const frozenDelayDays = 1;
+    await db.vendorFinancialProfile.create({ data: { vendorId: source.vendorId, settlementDelayDays: 0 } });
+    await db.financeLedgerEntry.create({ data: {
+      id: saleId, vendorAllocationId: source.id, vendorId: source.vendorId,
+      entryType: 'sale', amount: '100.00', payoutStatus: 'PENDING', settlementStatus: 'ACCRUING',
+      commissionPercentSnapshot: '10.00', commissionVatPercentSnapshot: '20.00',
+      settlementDelayDaysSnapshot: frozenDelayDays,
+    } });
+    await db.fulfillment.create({ data: {
+      vendorAllocationId: source.id, fulfillmentStatus: 'fulfilled',
+      shipmentUpdatedAt: new Date('2020-01-01T00:00:00.000Z'),
+    } });
+    const { previewApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const previewAt = (asOfDate: Date) => previewApproval(source.vendorId, null, null, {
+      candidateScope: 'selected_orders', selectedOrderIds: [orderNumber], asOfDate,
+    });
+
+    expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(0);
+    const beforeDelivery = await previewAt(new Date());
+    expect(beforeDelivery.lines).toHaveLength(0);
+    expect(beforeDelivery.selectedOrderDiagnostics).toEqual([expect.objectContaining({
+      financeLedgerEntryId: saleId, candidateIncluded: false,
+      derivedSettlementStatus: 'accruing', excludedReason: MISSING_DELIVERY_DATE_REASON,
+    })]);
+
+    const api = fakePushSopyo(source);
+    const pollStartedAt = new Date();
+    await poll({ db, fetcher: api.fetcher });
+    const pollFinishedAt = new Date();
+    const observation = await db.allocationDeliveredObservation.findUniqueOrThrow({
+      where: { vendorAllocationId: source.id },
+    });
+    expect(api.detailReads).toContain(`/api/v2/orders/${source.sopyoOrderId}`);
+    expect(observation).toMatchObject({
+      vendorAllocationId: source.id, sopyoOrderPushId: source.push.id,
+      sourceReference: source.sopyoOrderId, outboundMethod: 'VENDOR_INTEGRATION',
+      outboundIntegrationProvider: 'SOPYO',
+    });
+    expect(observation.firstObservedDeliveredAt.getTime()).toBeGreaterThanOrEqual(pollStartedAt.getTime());
+    expect(observation.firstObservedDeliveredAt.getTime()).toBeLessThanOrEqual(pollFinishedAt.getTime());
+    expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(1);
+
+    const persistedSale = await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: saleId } });
+    expect(persistedSale.settlementDelayDaysSnapshot).toBe(frozenDelayDays);
+    const cutoff = new Date(observation.firstObservedDeliveredAt.getTime() + frozenDelayDays * 24 * 60 * 60 * 1000);
+    const beforeCutoff = await previewAt(new Date(cutoff.getTime() - 1));
+    expect(beforeCutoff.lines).toHaveLength(0);
+    expect(beforeCutoff.selectedOrderDiagnostics).toEqual([expect.objectContaining({
+      financeLedgerEntryId: saleId, candidateIncluded: false,
+      derivedSettlementStatus: 'accruing', excludedReason: SETTLEMENT_DELAY_PENDING_REASON,
+    })]);
+
+    const atCutoff = await previewAt(cutoff);
+    expect(atCutoff.lines).toEqual([expect.objectContaining({
+      financeLedgerEntryId: saleId, lineType: 'SALE', derivedSettlementStatus: 'payable',
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Derived payable because delivery evidence satisfies settlement delay.',
+      sourceSnapshotJson: expect.objectContaining({ settlementDelayDaysSnapshot: frozenDelayDays }),
+    })]);
+    expect(atCutoff.selectedOrderDiagnostics).toEqual([expect.objectContaining({
+      financeLedgerEntryId: saleId, candidateIncluded: true, derivedSettlementStatus: 'payable',
+      excludedReason: null,
+    })]);
+
+    await poll({ db, fetcher: api.fetcher });
+    const replayed = await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } });
+    expect(replayed.id).toBe(observation.id);
+    expect(replayed.firstObservedDeliveredAt).toEqual(observation.firstObservedDeliveredAt);
+    expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(1);
+
+    const laterShipmentUpdate = new Date(cutoff.getTime() + 7 * 24 * 60 * 60 * 1000);
+    await db.fulfillment.update({ where: { vendorAllocationId: source.id }, data: {
+      shipmentUpdatedAt: laterShipmentUpdate,
+    } });
+    expect((await db.fulfillment.findUniqueOrThrow({ where: { vendorAllocationId: source.id } })).shipmentUpdatedAt)
+      .toEqual(laterShipmentUpdate);
+    const stillBeforeCutoff = await previewAt(new Date(cutoff.getTime() - 1));
+    expect(stillBeforeCutoff.lines).toHaveLength(0);
+    expect(stillBeforeCutoff.selectedOrderDiagnostics).toEqual([expect.objectContaining({
+      financeLedgerEntryId: saleId, candidateIncluded: false,
+      derivedSettlementStatus: 'accruing', excludedReason: SETTLEMENT_DELAY_PENDING_REASON,
+    })]);
+    const afterRefresh = await previewAt(cutoff);
+    expect(afterRefresh.lines).toEqual([expect.objectContaining({
+      financeLedgerEntryId: saleId, derivedSettlementStatus: 'payable', eligibilityDecision: 'included',
+      eligibilityReason: 'Derived payable because delivery evidence satisfies settlement delay.',
+    })]);
+    expect((await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } }))
+      .firstObservedDeliveredAt).toEqual(observation.firstObservedDeliveredAt);
   });
 
   it('rejects push detail identity mismatches and non-delivered status', async () => {
