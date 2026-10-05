@@ -90,6 +90,9 @@ export type AppEnv = {
   LOGO_ISBASI_EXPECTED_TENANT_ID?: string;
   SOPYO_CREDENTIAL_ENCRYPTION_KEY?: string;
   SOPYO_DELIVERY_POLLING_ENABLED?: boolean;
+  SOPYO_ORDER_PUSH_WORKER_ENABLED?: boolean;
+  SOPYO_ORDER_PUSH_WORKER_INTERVAL_MS?: number;
+  SOPYO_ORDER_PUSH_WORKER_BATCH_SIZE?: number;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -123,6 +126,17 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
     throw new Error('Expected a positive integer configuration value.');
   }
 
+  return parsed;
+}
+
+function parseRequiredPositiveInteger(value: string | undefined, name: string, max = Number.MAX_SAFE_INTEGER) {
+  if (!value || !/^[1-9]\d*$/.test(value.trim())) {
+    throw new Error(`${name} must be an explicit positive integer when the Sopyo order-push worker is enabled.`);
+  }
+  const parsed = Number(value.trim());
+  if (!Number.isSafeInteger(parsed) || parsed > max) {
+    throw new Error(`${name} must be an explicit positive integer when the Sopyo order-push worker is enabled.`);
+  }
   return parsed;
 }
 
@@ -299,6 +313,15 @@ export function loadEnv(): AppEnv {
   const logoIsbasiCreateEnabled = parseBoolean(process.env.LOGO_ISBASI_CREATE_ENABLED, false);
   const logoIsbasiCreateEnvironment = process.env.LOGO_ISBASI_CREATE_ENVIRONMENT?.trim().toLowerCase() || undefined;
   const logoIsbasiExpectedTenantId = process.env.LOGO_ISBASI_EXPECTED_TENANT_ID?.trim() || undefined;
+  const sopyoOrderPushWorkerEnabled = parseBoolean(process.env.SOPYO_ORDER_PUSH_WORKER_ENABLED, false);
+  const sopyoOrderPushWorkerIntervalMs = sopyoOrderPushWorkerEnabled
+    ? parseRequiredPositiveInteger(process.env.SOPYO_ORDER_PUSH_WORKER_INTERVAL_MS,
+      'SOPYO_ORDER_PUSH_WORKER_INTERVAL_MS', 2_147_483_647)
+    : undefined;
+  const sopyoOrderPushWorkerBatchSize = sopyoOrderPushWorkerEnabled
+    ? parseRequiredPositiveInteger(process.env.SOPYO_ORDER_PUSH_WORKER_BATCH_SIZE,
+      'SOPYO_ORDER_PUSH_WORKER_BATCH_SIZE')
+    : undefined;
 
   if (shippingProvider === 'kargonomi') {
     if (!kargonomiBaseUrl) {
@@ -477,5 +500,8 @@ export function loadEnv(): AppEnv {
     LOGO_ISBASI_EXPECTED_TENANT_ID: logoIsbasiExpectedTenantId,
     SOPYO_CREDENTIAL_ENCRYPTION_KEY: process.env.SOPYO_CREDENTIAL_ENCRYPTION_KEY || undefined,
     SOPYO_DELIVERY_POLLING_ENABLED: parseBoolean(process.env.SOPYO_DELIVERY_POLLING_ENABLED, false),
+    SOPYO_ORDER_PUSH_WORKER_ENABLED: sopyoOrderPushWorkerEnabled,
+    SOPYO_ORDER_PUSH_WORKER_INTERVAL_MS: sopyoOrderPushWorkerIntervalMs,
+    SOPYO_ORDER_PUSH_WORKER_BATCH_SIZE: sopyoOrderPushWorkerBatchSize,
   } as AppEnv;
 }
