@@ -1,20 +1,23 @@
 import { prisma } from '../../db/prisma.js';
 import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.service.js';
 import { createSopyoDeliveryClient, SopyoDeliveryClientError } from './sopyo-delivery.client.js';
+import type { SopyoDetailResponseStructure } from './sopyo-delivery.client.js';
 
 type Reason = 'LOCAL_VALIDATION_FAILED' | 'CREDENTIAL_FAILED' | 'AUTH_FAILED' |
-  'DETAIL_NOT_FOUND' | 'DETAIL_HTTP_ERROR' | 'DETAIL_RESPONSE_INVALID' |
+  'DETAIL_NOT_FOUND' | 'DETAIL_HTTP_ERROR' | 'DETAIL_JSON_INVALID' | 'DETAIL_SCHEMA_MISMATCH' |
   'NETWORK_ERROR' | 'PROVIDER_IDENTITY_MISMATCH' | 'UNKNOWN';
 type Stage = 'LOCAL_VALIDATION' | 'PUSH_LOAD' | 'CREDENTIAL' | 'AUTH' |
   'DETAIL_GET' | 'DETAIL_PARSE' | 'IDENTITY_CHECK';
 type Failure = {
   SOPYO_ORDER_DETAIL_READ: 'FAILED'; reason: Reason; stage: Stage; httpStatus?: number;
+  detailStructure?: SopyoDetailResponseStructure;
 };
 type Success = { id: number; orderCode: string; orderType: string; orderStatus: number };
 
-function failed(reason: Reason, stage: Stage, httpStatus?: number): Failure {
+function failed(reason: Reason, stage: Stage, httpStatus?: number, detailStructure?: SopyoDetailResponseStructure): Failure {
   return { SOPYO_ORDER_DETAIL_READ: 'FAILED', reason, stage,
-    ...(httpStatus === undefined ? {} : { httpStatus }) };
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(detailStructure === undefined ? {} : { detailStructure }) };
 }
 
 type DetailClient = Pick<ReturnType<typeof createSopyoDeliveryClient>, 'authenticate' | 'orderById'>;
@@ -88,9 +91,9 @@ export async function readSopyoOrderDetailDiagnostic(options: {
           ? failed('DETAIL_NOT_FOUND', 'DETAIL_GET', 404)
           : failed('DETAIL_HTTP_ERROR', 'DETAIL_GET', error.httpStatus);
       }
-      if (error.failureKind === 'INVALID_JSON' || error.failureKind === 'INVALID_BODY') {
-        return failed('DETAIL_RESPONSE_INVALID', 'DETAIL_PARSE', error.httpStatus);
-      }
+      if (error.failureKind === 'INVALID_JSON') return failed('DETAIL_JSON_INVALID', 'DETAIL_PARSE', error.httpStatus);
+      if (error.failureKind === 'INVALID_BODY') return failed('DETAIL_SCHEMA_MISMATCH', 'DETAIL_PARSE',
+        error.httpStatus, error.detailStructure);
     }
     return failed('UNKNOWN', 'DETAIL_GET');
   }

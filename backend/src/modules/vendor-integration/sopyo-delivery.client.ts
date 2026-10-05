@@ -8,6 +8,7 @@ export class SopyoDeliveryClientError extends Error {
     readonly category: 'AUTH' | 'ORDERS' | 'MALFORMED' | 'PAGINATION',
     readonly failureKind?: 'NETWORK' | 'HTTP' | 'INVALID_JSON' | 'INVALID_BODY' | 'INVALID_ID',
     readonly httpStatus?: number,
+    readonly detailStructure?: SopyoDetailResponseStructure,
   ) {
     super(`Sopyo ${category.toLowerCase()} failed.`);
     this.name = 'SopyoDeliveryClientError';
@@ -18,6 +19,49 @@ export type SopyoOrder = { id: number; orderStatus: number; trackingNumber: stri
 
 export type SopyoOrderByCode = { id: number; orderCode: string; orderType: string | null };
 export type SopyoOrderDetail = { id: number; orderCode: string; orderType: string; orderStatus: number };
+
+type DetailField = 'id' | 'order_code' | 'order_type' | 'order_status';
+type DetailFieldType = 'NUMBER' | 'STRING' | 'NULL' | 'ABSENT' | 'OTHER';
+export type SopyoDetailResponseStructure = {
+  bodyType: 'OBJECT' | 'ARRAY' | 'STRING' | 'NUMBER' | 'NULL' | 'OTHER';
+  topLevelKeys: Array<DetailField | 'data'>;
+  dataPresent: boolean;
+  dataType: 'OBJECT' | 'ARRAY' | 'NULL' | 'ABSENT' | 'OTHER';
+  requiredFieldTypes: Record<DetailField, DetailFieldType>;
+  dataRequiredFieldTypes?: Record<DetailField, DetailFieldType>;
+};
+
+const DETAIL_FIELDS: DetailField[] = ['id', 'order_code', 'order_type', 'order_status'];
+const DETAIL_TOP_LEVEL_KEYS = new Set<string>([...DETAIL_FIELDS, 'data']);
+
+function detailFieldTypes(value: Record<string, unknown> | null): Record<DetailField, DetailFieldType> {
+  const result = {} as Record<DetailField, DetailFieldType>;
+  for (const field of DETAIL_FIELDS) {
+    const item = value && Object.hasOwn(value, field) ? value[field] : undefined;
+    result[field] = item === undefined ? 'ABSENT' : item === null ? 'NULL' :
+      typeof item === 'number' ? 'NUMBER' : typeof item === 'string' ? 'STRING' : 'OTHER';
+  }
+  return result;
+}
+
+function detailResponseStructure(body: unknown): SopyoDetailResponseStructure {
+  const top = isRecord(body) ? body : null;
+  const dataPresent = top !== null && Object.hasOwn(top, 'data');
+  const data = dataPresent ? top!.data : undefined;
+  const dataObject = isRecord(data) ? data : null;
+  return {
+    bodyType: body === null ? 'NULL' : Array.isArray(body) ? 'ARRAY' :
+      typeof body === 'string' ? 'STRING' : typeof body === 'number' ? 'NUMBER' :
+      top ? 'OBJECT' : 'OTHER',
+    topLevelKeys: top ? Object.keys(top).filter((key): key is DetailField | 'data' =>
+      DETAIL_TOP_LEVEL_KEYS.has(key)).sort() : [],
+    dataPresent,
+    dataType: !dataPresent ? 'ABSENT' : data === null ? 'NULL' :
+      Array.isArray(data) ? 'ARRAY' : dataObject ? 'OBJECT' : 'OTHER',
+    requiredFieldTypes: detailFieldTypes(top),
+    ...(dataObject ? { dataRequiredFieldTypes: detailFieldTypes(dataObject) } : {}),
+  };
+}
 
 export type SopyoCreateAmbiguousReason =
   | 'TRANSPORT_ERROR'
@@ -228,7 +272,8 @@ export function createSopyoDeliveryClient(fetcher: typeof fetch = fetch) {
           typeof body.order_code !== 'string' || !body.order_code.trim() || body.order_code.length > 256 ||
           typeof body.order_type !== 'string' || !body.order_type.trim() || body.order_type.length > 100 ||
           !Number.isSafeInteger(body.order_status)) {
-        throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_BODY', response.status);
+        throw new SopyoDeliveryClientError('MALFORMED', 'INVALID_BODY', response.status,
+          detailResponseStructure(body));
       }
       return { id: body.id as number, orderCode: body.order_code,
         orderType: body.order_type, orderStatus: body.order_status as number };
