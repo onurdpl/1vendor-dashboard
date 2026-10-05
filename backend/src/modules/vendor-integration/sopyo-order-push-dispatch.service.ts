@@ -56,10 +56,11 @@ async function loadCanonicalPayload(db: Db, push: {
       !line.shopifyOrderLineItem.sku?.trim() || !line.shopifyOrderLineItem.title?.trim() ||
       allocation.order.currency !== 'TRY' || allocation.order.taxesIncluded !== true ||
       !moneyIs(allocation.order.discountAmount, '0') ||
-      !moneyIs(allocation.order.shippingAmount, '0') ||
+      !allocation.order.shippingAmount || allocation.order.shippingAmount.lt(0) ||
       !amount.gt(0) || !amount.equals(line.shopifyOrderLineItem.lineTotalVatIncluded) ||
       !amount.equals(unitPrice.mul(line.quantity)) ||
-      !allocation.order.totalPrice || !amount.equals(allocation.order.totalPrice)) {
+      !allocation.order.totalPrice ||
+      !allocation.order.totalPrice.equals(amount.plus(allocation.order.shippingAmount))) {
     return { reasonCode: 'MONETARY_MAPPING_UNSUPPORTED' } as const;
   }
   const events = await db.webhookEvent.findMany({

@@ -90,7 +90,7 @@ function setup() {
 }
 
 describe('manual Sopyo order-push dispatcher', () => {
-  it('claims atomically, sends one POST for the simple V1 shape, and stores only safe durable outcome', async () => {
+  it('claims atomically, sends one POST for the zero-shipping V1 shape, and stores only safe durable outcome', async () => {
     const s = setup();
     const result = await s.run();
     expect(result).toMatchObject({ status: 'SUCCEEDED', result: 'CREATED', sopyoOrderId: 42 });
@@ -107,6 +107,27 @@ describe('manual Sopyo order-push dispatcher', () => {
     expect(JSON.stringify(s.push)).not.toContain('Billing Street');
     expect(await s.run()).toMatchObject({ status: 'NOT_CLAIMED' });
     expect(s.posts()).toHaveLength(1);
+  });
+
+  it('maps #1139-shaped positive checkout shipping outside Sopyo merchandise totals', async () => {
+    const s = setup();
+    const line = s.allocation.lineItems[0]!;
+    s.allocation.order.totalPrice = d('2099.95');
+    s.allocation.order.shippingAmount = d('100.00');
+    line.lineAmount = d('1999.95');
+    line.shopifyOrderLineItem.unitPrice = d('1999.95');
+    line.shopifyOrderLineItem.lineTotalVatIncluded = d('1999.95');
+
+    expect(await s.run()).toMatchObject({ status: 'SUCCEEDED', result: 'CREATED' });
+    expect(s.posts()).toHaveLength(1);
+    expect(s.posts()[0]?.body).toMatchObject({
+      total_price: 1999.95,
+      order_items: [{ quantity: 1, total_price: 1999.95 }],
+    });
+    expect(s.posts()[0]?.body).not.toHaveProperty('shipping_price');
+    expect(s.posts()[0]?.body).not.toHaveProperty('cargo_price');
+    expect(s.posts()[0]?.body).not.toHaveProperty('shipping_info.price');
+    expect(s.allocation.order.totalPrice.toString()).toBe('2099.95');
   });
 
   it('blocks mismatched vendor, outbound provider and order code before credential or Sopyo access', async () => {
@@ -139,7 +160,18 @@ describe('manual Sopyo order-push dispatcher', () => {
 
   it.each([
     ['discount', (s: ReturnType<typeof setup>) => { s.allocation.order.discountAmount = d('1'); }],
-    ['shipping', (s: ReturnType<typeof setup>) => { s.allocation.order.shippingAmount = d('1'); }],
+    ['unexplained grand-total residual', (s: ReturnType<typeof setup>) => {
+      s.allocation.lineItems[0]!.lineAmount = d('1999.95');
+      s.allocation.lineItems[0]!.shopifyOrderLineItem.unitPrice = d('1999.95');
+      s.allocation.lineItems[0]!.shopifyOrderLineItem.lineTotalVatIncluded = d('1999.95');
+      s.allocation.order.shippingAmount = d('100'); s.allocation.order.totalPrice = d('2199.95');
+    }],
+    ['negative shipping', (s: ReturnType<typeof setup>) => {
+      s.allocation.order.shippingAmount = d('-1'); s.allocation.order.totalPrice = d('99');
+    }],
+    ['missing shipping evidence', (s: ReturnType<typeof setup>) => {
+      s.allocation.order.shippingAmount = null as never;
+    }],
     ['multi-allocation', (s: ReturnType<typeof setup>) => { s.setAllocationCount(2); }],
     ['another order line', (s: ReturnType<typeof setup>) => { s.setOrderLineCount(2); }],
     ['missing line total', (s: ReturnType<typeof setup>) => { s.allocation.lineItems[0]!.shopifyOrderLineItem.lineTotalVatIncluded = null as never; }],
