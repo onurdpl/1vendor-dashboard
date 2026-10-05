@@ -280,6 +280,10 @@ enum VendorIntegrationProviderCode {
 
 enum SopyoOrderPushStatus {
   PENDING
+  PROCESSING
+  SUCCEEDED
+  BLOCKED
+  RECONCILE_REQUIRED
 }
 
 enum ShipmentExecutionStatus {
@@ -1003,6 +1007,12 @@ model SopyoOrderPush {
   assignedVendorId   String
   orderCode          String               @unique
   status             SopyoOrderPushStatus @default(PENDING)
+  claimToken         String?
+  processingStartedAt DateTime?
+  completedAt        DateTime?
+  sopyoOrderId       String?
+  reasonCode         String?
+  httpStatus         Int?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   vendorAllocation   VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)

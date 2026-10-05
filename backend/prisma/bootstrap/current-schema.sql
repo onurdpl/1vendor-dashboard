@@ -553,7 +553,11 @@ CREATE TYPE public."ShippingProvider" AS ENUM (
 --
 
 CREATE TYPE public."SopyoOrderPushStatus" AS ENUM (
-    'PENDING'
+    'PENDING',
+    'PROCESSING',
+    'SUCCEEDED',
+    'BLOCKED',
+    'RECONCILE_REQUIRED'
 );
 
 
@@ -2140,7 +2144,13 @@ CREATE TABLE public."SopyoOrderPush" (
     "orderCode" text NOT NULL,
     status public."SopyoOrderPushStatus" DEFAULT 'PENDING'::public."SopyoOrderPushStatus" NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    "updatedAt" timestamp(3) without time zone NOT NULL
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "claimToken" text,
+    "processingStartedAt" timestamp(3) without time zone,
+    "completedAt" timestamp(3) without time zone,
+    "sopyoOrderId" text,
+    "reasonCode" text,
+    "httpStatus" integer
 );
 
 

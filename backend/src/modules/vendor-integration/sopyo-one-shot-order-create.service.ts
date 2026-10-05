@@ -7,7 +7,7 @@ import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.se
 import { createSopyoDeliveryClient, type SopyoCreateAmbiguousReason, type SopyoCreateOrderInput, type SopyoUnexpectedResponseDiagnostic } from './sopyo-delivery.client.js';
 
 const TEST_AMOUNT = '4299.00';
-const allocationSelect = {
+export const sopyoPayloadAllocationSelect = {
   id: true, assignedVendorId: true, outboundMethodSnapshot: true,
   outboundIntegrationProviderSnapshot: true, allocationStatus: true,
   reassignmentRequired: true,
@@ -22,13 +22,14 @@ const allocationSelect = {
   lineItems: { select: {
     quantity: true, lineAmount: true,
     shopifyOrderLineItem: { select: {
-      shopifyOrderId: true, sku: true, title: true,
-      unitPriceVatIncluded: true, lineTotalVatIncluded: true,
+      shopifyOrderId: true, sku: true, title: true, quantity: true,
+      unitPrice: true, unitPriceVatIncluded: true, lineTotalVatIncluded: true,
     } },
   } },
 } satisfies Prisma.VendorAllocationSelect;
 
-type SelectedAllocation = Prisma.VendorAllocationGetPayload<{ select: typeof allocationSelect }>;
+export type SopyoPayloadAllocation = Prisma.VendorAllocationGetPayload<{ select: typeof sopyoPayloadAllocationSelect }>;
+type SelectedAllocation = SopyoPayloadAllocation;
 type RecordValue = Record<string, unknown>;
 
 export type SopyoOneShotPreSend = {
@@ -132,7 +133,9 @@ function validateAllocation(allocation: SelectedAllocation | null): SelectedAllo
   return allocation;
 }
 
-function buildPayload(allocation: SelectedAllocation, rawPayload: string): SopyoCreateOrderInput {
+export function buildSopyoOrderPayload(
+  allocation: SopyoPayloadAllocation, rawPayload: string, totalPrice: number, quantity: number,
+): SopyoCreateOrderInput {
   let source: RecordValue | null;
   try {
     source = record(JSON.parse(rawPayload) as unknown);
@@ -198,7 +201,7 @@ function buildPayload(allocation: SelectedAllocation, rawPayload: string): Sopyo
   return {
     order_code: allocation.id,
     order_status: 1,
-    total_price: 4299,
+    total_price: totalPrice,
     customer_info: { email: customerEmail, name: customerName },
     shipping_info: {
       full_name: shippingName, gsm: shippingPhone, city: shippingCity,
@@ -217,8 +220,8 @@ function buildPayload(allocation: SelectedAllocation, rawPayload: string): Sopyo
     order_items: [{
       stock_code: nonblank(line.shopifyOrderLineItem.sku)!,
       product_name: nonblank(line.shopifyOrderLineItem.title)!,
-      quantity: 1,
-      total_price: 4299,
+      quantity,
+      total_price: totalPrice,
     }],
   };
 }
@@ -233,7 +236,7 @@ export async function runSopyoOneShotOrderCreateTest(options: {
 }): Promise<SopyoOneShotResult> {
   const db = options.db ?? prisma;
   const allocation = validateAllocation(await db.vendorAllocation.findUnique({
-    where: { id: options.allocationId }, select: allocationSelect,
+    where: { id: options.allocationId }, select: sopyoPayloadAllocationSelect,
   }));
   if (allocation.id !== options.allocationId) fail('ALLOCATION_ID_MISMATCH');
   if (options.expectedVendorId && allocation.assignedVendorId !== options.expectedVendorId) {
@@ -250,7 +253,7 @@ export async function runSopyoOneShotOrderCreateTest(options: {
     select: { rawPayload: true },
   });
   if (events.length !== 1 || !events[0]!.rawPayload) fail('RAW_WEBHOOK_NOT_UNIQUE');
-  const payload = buildPayload(allocation, events[0]!.rawPayload);
+  const payload = buildSopyoOrderPayload(allocation, events[0]!.rawPayload, 4299, 1);
   const credential = await (options.loadCredential ?? getDecryptedSopyoCredentialForInternalUse)(allocation.assignedVendorId);
   const client = createSopyoDeliveryClient(options.fetcher);
   const bearer = await client.authenticate(credential);

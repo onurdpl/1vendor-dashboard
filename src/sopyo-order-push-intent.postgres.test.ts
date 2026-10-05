@@ -20,8 +20,8 @@ describeWithPostgres('Sopyo order push intent on isolated PostgreSQL', () => {
     const target = new URL(databaseUrl!);
     if (process.env.SOPYO_ORDER_PUSH_TEST_DATABASE_ISOLATED !== '1' ||
         !['127.0.0.1', 'localhost'].includes(target.hostname) ||
-        target.pathname.slice(1) !== 'sopyo_order_push_validation') {
-      throw new Error('Sopyo order push test requires isolated local sopyo_order_push_validation.');
+        !['sopyo_order_push_validation', 'sopyo_order_push_dispatch_validation'].includes(target.pathname.slice(1))) {
+      throw new Error('Sopyo order push test requires an explicitly isolated local Sopyo push validation database.');
     }
     process.env.DATABASE_URL = databaseUrl;
     ({ ingestShopifyOrderWebhook: ingest } = await import('../backend/src/modules/shopify/order-ingestion.service.js'));
@@ -86,8 +86,11 @@ describeWithPostgres('Sopyo order push intent on isolated PostgreSQL', () => {
         status: 'PENDING',
       });
       expect(Object.keys(row).sort()).toEqual([
-        'assignedVendorId', 'createdAt', 'id', 'orderCode', 'status', 'updatedAt', 'vendorAllocationId',
+        'assignedVendorId', 'claimToken', 'completedAt', 'createdAt', 'httpStatus', 'id', 'orderCode',
+        'processingStartedAt', 'reasonCode', 'sopyoOrderId', 'status', 'updatedAt', 'vendorAllocationId',
       ]);
+      expect(row.claimToken).toBeNull();
+      expect(row.sopyoOrderId).toBeNull();
       expect(JSON.stringify(row)).not.toContain('Private');
       expect(JSON.stringify(row)).not.toContain('private@example.test');
     }
