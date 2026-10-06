@@ -720,6 +720,7 @@ model VendorAllocation {
   assignedVendorId                       String
   outboundMethodSnapshot                 VendorOutboundMethod?
   outboundIntegrationProviderSnapshot    VendorIntegrationProviderCode?
+  shopifyLocationGidSnapshot             String?
   allocationStatus                       AllocationStatus                        @default(ACTIVE)
   cancellationReason                     CancellationReason?
   reassignmentRequired                   Boolean                                 @default(false)
@@ -2073,6 +2074,7 @@ model VendorShippingConfig {
   preferredProvider  ShippingProvider          @default(HEPSIJET)
   outboundMethod     VendorOutboundMethod?
   selectedIntegrationProvider VendorIntegrationProviderCode?
+  shopifyLocationGid String?
   shippingEnabled    Boolean                   @default(true)
   defaultDesi        Decimal                   @default(3.00) @db.Decimal(10, 2)
   cargoIntegrationId String?

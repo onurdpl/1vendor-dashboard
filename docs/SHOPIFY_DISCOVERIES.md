@@ -124,6 +124,11 @@ query {
 - The separate operator numeric-detail command is read-only for business data: it performs local SELECTs, Sopyo login, and at most one order-detail GET. Failures report only allowlisted stage/reason metadata and an HTTP status when a response exists; raw provider bodies, exception text, and secrets remain suppressed. This diagnostic change does not alter delivery authority or FIN-BUG-003 logic.
 - Finance still consumes only the provider-neutral, frozen-source-aligned `AllocationDeliveredObservation` plus the frozen SALE delay. This path does not change settlement or payout rules. FIN-BUG-003 is CLOSED after a natural Sopyo status-6 observation and read-only Admin settlement preview verified the derived payable SALE result for order `#1141`; see the canonical evidence in `docs/FINANCIAL_BUGS.md`.
 
+### Vendor Shopify Location authority foundation
+- Admin vendor shipping configuration stores an explicit nullable `shopifyLocationGid`. A newly created allocation freezes that vendor's current value as nullable `shopifyLocationGidSnapshot`; normal orders/create, current-state repair CREATE, and split-child CREATE use the same creation-time resolver. Existing-allocation replay/update does not replace the snapshot, and the migration does not backfill historical allocations.
+- A missing frozen location remains unknown; future Sopyo shipment-to-Shopify work must fail closed instead of inferring one from current configuration or warehouse/provider data. It must require the frozen GID to match the selected Shopify FulfillmentOrder `assignedLocation.location.id`.
+- Economic transfer still changes the assigned vendor on the existing allocation without rebinding its location or outbound snapshots. The operational location policy for transfers remains unresolved. This foundation does not create Shopify fulfillment, change Sopyo polling, or change finance/delivery authority.
+
 ## Order Vendor Mapping
 - `orders/create` webhook payload does not include metafields.
 - Order metafield `custom.seller_info` must be fetched separately through Shopify Admin API.

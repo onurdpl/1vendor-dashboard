@@ -8,7 +8,7 @@ export async function resolveAllocationOutboundSnapshot(
 ) {
   const config = await db.vendorShippingConfig.findUnique({
     where: { vendorId },
-    select: { outboundMethod: true, selectedIntegrationProvider: true },
+    select: { outboundMethod: true, selectedIntegrationProvider: true, shopifyLocationGid: true },
   });
   const selection = resolveVendorOutboundSelection({}, {
     outboundMethod: config?.outboundMethod ?? null,
@@ -17,5 +17,6 @@ export async function resolveAllocationOutboundSnapshot(
   return {
     outboundMethodSnapshot: selection.outboundMethod,
     outboundIntegrationProviderSnapshot: selection.selectedIntegrationProvider,
+    shopifyLocationGidSnapshot: config?.shopifyLocationGid ?? null,
   };
 }

@@ -198,6 +198,7 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
   if (!config) {
     return {
       vendorId,
+      shopifyLocationGid: null,
       outboundMethod: null,
       selectedIntegrationProvider: null,
       preferredProvider: 'hepsijet',
@@ -215,6 +216,7 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
 
   return {
     vendorId: config.vendorId,
+    shopifyLocationGid: config.shopifyLocationGid ?? null,
     outboundMethod: config.outboundMethod ?? null,
     selectedIntegrationProvider: config.selectedIntegrationProvider ?? null,
     preferredProvider: mapProvider(config.preferredProvider),
@@ -2290,6 +2292,18 @@ export async function upsertVendorShippingConfig(
   } = {},
 ): Promise<VendorShippingConfigDto> {
   const defaultConfig = mapShippingConfig(null, vendorId);
+  const shopifyLocationGid = input.shopifyLocationGid === undefined
+    ? undefined
+    : input.shopifyLocationGid === null
+      ? null
+      : typeof input.shopifyLocationGid === 'string'
+        ? input.shopifyLocationGid.trim() || null
+        : false;
+  if (shopifyLocationGid === false ||
+      (shopifyLocationGid !== undefined && shopifyLocationGid !== null &&
+        !/^gid:\/\/shopify\/Location\/[^\s/?#]+$/.test(shopifyLocationGid))) {
+    throw new Error('shopifyLocationGid must be a Shopify Location GID.');
+  }
   const existingConfig = await getStoredShippingConfig(vendorId);
   const beforeConfig = mapShippingConfig(existingConfig, vendorId);
   const preferredProvider = normalizeProvider(input.preferredProvider ?? defaultConfig.preferredProvider);
@@ -2334,6 +2348,7 @@ export async function upsertVendorShippingConfig(
         vendorId,
       },
       update: {
+        shopifyLocationGid,
         outboundMethod: lockedOutboundSelection?.outboundMethod,
         selectedIntegrationProvider: lockedOutboundSelection?.selectedIntegrationProvider,
         preferredProvider: input.preferredProvider === undefined ? undefined : preferredProvider,
@@ -2349,6 +2364,7 @@ export async function upsertVendorShippingConfig(
       },
       create: {
         vendorId,
+        shopifyLocationGid: shopifyLocationGid ?? null,
         outboundMethod: lockedOutboundSelection?.outboundMethod ?? null,
         selectedIntegrationProvider: lockedOutboundSelection?.selectedIntegrationProvider ?? null,
         preferredProvider,

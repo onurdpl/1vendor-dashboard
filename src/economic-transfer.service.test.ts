@@ -142,6 +142,7 @@ function buildAllocation(overrides: Partial<AllocationRow> = {}): AllocationRow 
     sourceShopifyOrderNumber: '#1001',
     originalVendorId: 'vendor-a',
     assignedVendorId: 'vendor-a',
+    shopifyLocationGidSnapshot: 'gid://shopify/Location/401',
     allocationStatus: 'VENDOR_BLOCKED',
     cancellationReason: 'OUT_OF_STOCK',
     reassignmentRequired: true,
@@ -402,6 +403,7 @@ describe('economic transfer service', () => {
     });
     expect(db.allocation).toMatchObject({
       assignedVendorId: 'vendor-b',
+      shopifyLocationGidSnapshot: 'gid://shopify/Location/401',
       originalVendorId: 'vendor-a',
       allocationStatus: 'ACTIVE',
       reassignmentRequired: false,

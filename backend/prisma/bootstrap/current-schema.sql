@@ -2355,6 +2355,7 @@ CREATE TABLE public."VendorAllocation" (
     "updatedAt" timestamp(3) without time zone NOT NULL,
     "outboundMethodSnapshot" public."VendorOutboundMethod",
     "outboundIntegrationProviderSnapshot" public."VendorIntegrationProviderCode",
+    "shopifyLocationGidSnapshot" text,
     CONSTRAINT "VendorAllocation_outbound_snapshot_check" CHECK (((("outboundMethodSnapshot" IS NULL) AND ("outboundIntegrationProviderSnapshot" IS NULL)) OR (("outboundMethodSnapshot" IS NOT NULL) AND ("outboundMethodSnapshot" = 'KARGONOMI'::public."VendorOutboundMethod") AND ("outboundIntegrationProviderSnapshot" IS NULL)) OR (("outboundMethodSnapshot" IS NOT NULL) AND ("outboundMethodSnapshot" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("outboundIntegrationProviderSnapshot" IS NOT NULL))))
 );
 
@@ -2580,6 +2581,7 @@ CREATE TABLE public."VendorShippingConfig" (
     "updatedAt" timestamp(3) without time zone NOT NULL,
     "outboundMethod" public."VendorOutboundMethod",
     "selectedIntegrationProvider" public."VendorIntegrationProviderCode",
+    "shopifyLocationGid" text,
     CONSTRAINT "VendorShippingConfig_outbound_selection_check" CHECK (((("outboundMethod" IS NULL) AND ("selectedIntegrationProvider" IS NULL)) OR (("outboundMethod" IS NOT NULL) AND ("outboundMethod" = 'KARGONOMI'::public."VendorOutboundMethod") AND ("selectedIntegrationProvider" IS NULL)) OR (("outboundMethod" IS NOT NULL) AND ("outboundMethod" = 'VENDOR_INTEGRATION'::public."VendorOutboundMethod") AND ("selectedIntegrationProvider" IS NOT NULL))))
 );
 

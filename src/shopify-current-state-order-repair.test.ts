@@ -503,6 +503,7 @@ describe('Shopify current-state order repair', () => {
       shopifyOrderLineItem: { upsert: vi.fn(async () => ({ id: 'line-db-new' })) },
       vendorShippingConfig: { findUnique: vi.fn(async () => ({
         outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+        shopifyLocationGid: 'gid://shopify/Location/202',
       })) },
       vendorAllocation: { upsert: vi.fn(async () => ({ id: 'alloc-yalispor-7856043819345' })) },
       vendorAllocationLineItem: { upsert: vi.fn(async () => ({})) },
@@ -516,21 +517,24 @@ describe('Shopify current-state order repair', () => {
 
     expect(tx.vendorShippingConfig.findUnique).toHaveBeenCalledWith({
       where: { vendorId: 'yalispor' },
-      select: { outboundMethod: true, selectedIntegrationProvider: true },
+      select: { outboundMethod: true, selectedIntegrationProvider: true, shopifyLocationGid: true },
     });
     expect(tx.vendorAllocation.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         outboundMethodSnapshot: 'VENDOR_INTEGRATION',
         outboundIntegrationProviderSnapshot: 'SOPYO',
+        shopifyLocationGidSnapshot: 'gid://shopify/Location/202',
       }),
       update: expect.not.objectContaining({
         outboundMethodSnapshot: expect.anything(),
         outboundIntegrationProviderSnapshot: expect.anything(),
+        shopifyLocationGidSnapshot: expect.anything(),
       }),
     }));
     const update = tx.vendorAllocation.upsert.mock.calls[0]?.[0]?.update;
     expect(update).not.toHaveProperty('outboundMethodSnapshot');
     expect(update).not.toHaveProperty('outboundIntegrationProviderSnapshot');
+    expect(update).not.toHaveProperty('shopifyLocationGidSnapshot');
   });
 
   it('defaults to dry-run and performs no mutation or audit write', async () => {

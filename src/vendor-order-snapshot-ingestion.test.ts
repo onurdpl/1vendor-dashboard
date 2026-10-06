@@ -651,6 +651,7 @@ describe('vendor order snapshot ingestion', () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce({
       outboundMethod: 'VENDOR_INTEGRATION',
       selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/101',
     });
 
     await ingestShopifyOrderWebhook({
@@ -664,20 +665,35 @@ describe('vendor order snapshot ingestion', () => {
         create: expect.objectContaining({
           outboundMethodSnapshot: 'VENDOR_INTEGRATION',
           outboundIntegrationProviderSnapshot: 'SOPYO',
+          shopifyLocationGidSnapshot: 'gid://shopify/Location/101',
         }),
         update: expect.not.objectContaining({
           outboundMethodSnapshot: expect.anything(),
           outboundIntegrationProviderSnapshot: expect.anything(),
+          shopifyLocationGidSnapshot: expect.anything(),
         }),
       }),
     );
     const update = prismaMock.vendorAllocation.upsert.mock.calls[0]?.[0]?.update;
     expect(update).not.toHaveProperty('outboundMethodSnapshot');
     expect(update).not.toHaveProperty('outboundIntegrationProviderSnapshot');
+    expect(update).not.toHaveProperty('shopifyLocationGidSnapshot');
     expect(prismaMock.vendorShippingConfig.findUnique).toHaveBeenCalledWith({
       where: { vendorId: 'sporjinal' },
-      select: { outboundMethod: true, selectedIntegrationProvider: true },
+      select: { outboundMethod: true, selectedIntegrationProvider: true, shopifyLocationGid: true },
     });
+  });
+
+  it('creates an allocation with a null location when vendor configuration is missing', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-no-location' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2010),
+    });
+    expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ shopifyLocationGidSnapshot: null }),
+      update: expect.not.objectContaining({ shopifyLocationGidSnapshot: expect.anything() }),
+    }));
   });
 
   it('creates one Sopyo intent after all new allocation lines, with only allocation-scoped identity', async () => {

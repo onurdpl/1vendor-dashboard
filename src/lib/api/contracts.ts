@@ -633,6 +633,7 @@ export type VendorShippingWarehouse = {
 
 export type VendorShippingConfig = {
   vendorId: string;
+  shopifyLocationGid: string | null;
   outboundMethod: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
   selectedIntegrationProvider: 'SOPYO' | null;
   preferredProvider: ShippingProvider;
@@ -648,6 +649,7 @@ export type VendorShippingConfig = {
 };
 
 export type VendorShippingConfigUpdate = {
+  shopifyLocationGid?: string | null;
   outboundMethod?: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
   selectedIntegrationProvider?: 'SOPYO' | null;
   preferredProvider?: ShippingProvider;

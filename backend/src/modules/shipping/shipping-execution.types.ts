@@ -88,6 +88,7 @@ export type VendorShippingWarehouseDto = {
 
 export type VendorShippingConfigDto = {
   vendorId: string;
+  shopifyLocationGid: string | null;
   outboundMethod: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
   selectedIntegrationProvider: 'SOPYO' | null;
   preferredProvider: ShippingProviderDto;
@@ -577,6 +578,7 @@ export type ShipmentExecutionPreviewDto = {
 };
 
 export type VendorShippingConfigUpdateDto = {
+  shopifyLocationGid?: string | null;
   outboundMethod?: 'KARGONOMI' | 'VENDOR_INTEGRATION' | null;
   selectedIntegrationProvider?: 'SOPYO' | null;
   preferredProvider?: ShippingProviderDto;

@@ -18,6 +18,7 @@ type ShippingConfigDraftProvider = ShippingProvider | 'navlungo';
 
 type ShippingConfigDraft = {
   preferredProvider: ShippingConfigDraftProvider;
+  shopifyLocationGid: string;
   outboundMethod: '' | 'KARGONOMI' | 'VENDOR_INTEGRATION';
   selectedIntegrationProvider: '' | 'SOPYO';
   cargoIntegrationId: string;
@@ -213,6 +214,7 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
 
   return {
     preferredProvider,
+    shopifyLocationGid: config?.shopifyLocationGid ?? '',
     outboundMethod: config?.outboundMethod ?? '',
     selectedIntegrationProvider: config?.selectedIntegrationProvider ?? '',
     cargoIntegrationId: config?.cargoIntegrationId ?? '',
@@ -274,6 +276,10 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
 
 function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   const errors: string[] = [];
+  const locationGid = draft.shopifyLocationGid.trim();
+  if (locationGid && !/^gid:\/\/shopify\/Location\/[^\s/?#]+$/.test(locationGid)) {
+    errors.push('Shopify Location GID must use gid://shopify/Location/...');
+  }
   if (draft.outboundMethod === 'VENDOR_INTEGRATION' && draft.selectedIntegrationProvider !== 'SOPYO') {
     errors.push('Select an integration provider for outbound shipping.');
   }
@@ -354,6 +360,7 @@ function buildShippingConfigUpdate(
     ?? currentConfig?.warehouses[0];
   const baseUpdate = {
     preferredProvider: draft.preferredProvider,
+    shopifyLocationGid: draft.shopifyLocationGid.trim() || null,
     outboundMethod: draft.outboundMethod || null,
     selectedIntegrationProvider: draft.outboundMethod === 'VENDOR_INTEGRATION' ? draft.selectedIntegrationProvider || null : null,
     shippingEnabled: currentConfig?.shippingEnabled ?? true,
@@ -702,6 +709,13 @@ export function VendorShippingConfigEditor({
             </label>
           ) : null}
           <small>Outbound selection is separate from Kargonomi return and shipping-execution settings.</small>
+          <label className="field">
+            <span>Shopify Location GID</span>
+            <input value={shippingConfigDraft.shopifyLocationGid} onChange={(event) => setShippingConfigDraft((current) => ({
+              ...current, shopifyLocationGid: event.target.value,
+            }))} placeholder="gid://shopify/Location/..." />
+            <small>Shopify Location assigned to this vendor for fulfillment routing.</small>
+          </label>
           <button type="button" className="button button-secondary" disabled={isSavingShippingConfig}
             onClick={() => {
               if (shippingConfigDraft.outboundMethod === 'VENDOR_INTEGRATION' && shippingConfigDraft.selectedIntegrationProvider !== 'SOPYO') {

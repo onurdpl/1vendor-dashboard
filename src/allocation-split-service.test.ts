@@ -83,6 +83,7 @@ function buildSourceAllocation(overrides: Record<string, unknown> = {}) {
     assignedVendorId: 'vendor-a',
     outboundMethodSnapshot: 'KARGONOMI',
     outboundIntegrationProviderSnapshot: null,
+    shopifyLocationGidSnapshot: 'gid://shopify/Location/301',
     allocationStatus: 'ACTIVE',
     cancellationReason: null,
     reassignmentRequired: false,
@@ -170,7 +171,8 @@ function createSplitDb(sourceOverrides: Record<string, unknown> = {}) {
   const tx = {
     $queryRaw: async () => [],
     vendorShippingConfig: {
-      findUnique: async () => ({ outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' }),
+      findUnique: async () => ({ outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+        shopifyLocationGid: 'gid://shopify/Location/302' }),
     },
     vendorAllocation: {
       findUnique: async ({ where }: any) => hydrateAllocation(state.allocations.get(where.id)),
@@ -308,9 +310,11 @@ describe('allocation split service', () => {
     const expectedChildId = buildDeterministicChildAllocationId('alloc-source', ['line-2']);
     expect(state.allocations.get('alloc-source')).toMatchObject({
       outboundMethodSnapshot: 'KARGONOMI', outboundIntegrationProviderSnapshot: null,
+      shopifyLocationGidSnapshot: 'gid://shopify/Location/301',
     });
     expect(state.allocations.get(expectedChildId)).toMatchObject({
       outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
+      shopifyLocationGidSnapshot: 'gid://shopify/Location/302',
     });
     const expectedRemainingLedgerId = __allocationSplitServiceTesting.buildRemainingReplacementLedgerId({
       vendorId: 'vendor-a',

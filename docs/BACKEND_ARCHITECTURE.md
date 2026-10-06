@@ -1249,6 +1249,7 @@ Historical foundation notes below are retained for context. Kargonomi is the onl
   - `KARGO_ENTEGRATOR`
   - future-ready schema values: `MNG`, `YURTICI`, `ARAS`
 - `VendorShippingConfig` stores vendor-level shipping settings:
+  - explicit nullable Shopify Location GID for that vendor; new allocations freeze it, and missing historical snapshots are not inferred
   - preferred provider
   - shipping enabled flag
   - default desi

@@ -176,6 +176,7 @@ vi.mock('../services/runtime-services', () => ({
 
 const shippingConfig: VendorShippingConfig = {
   vendorId: 'demo-vendor-a',
+  shopifyLocationGid: null,
   outboundMethod: null,
   selectedIntegrationProvider: null,
   preferredProvider: 'navlungo',
@@ -1957,6 +1958,29 @@ describe('VendorProfilePage', () => {
       ),
     );
     expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
+  });
+
+  it('shows, saves and clears the vendor Shopify Location GID', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'], vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, preferredProvider: 'kargonomi',
+      shopifyLocationGid: 'gid://shopify/Location/123' });
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+    const input = await screen.findByLabelText(/Shopify Location GID/);
+    expect(input).toHaveValue('gid://shopify/Location/123');
+    await user.clear(input);
+    await user.type(input, 'gid://shopify/Location/456');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+    await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a',
+      expect.objectContaining({ shopifyLocationGid: 'gid://shopify/Location/456' })));
+    await user.clear(input);
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+    await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a',
+      expect.objectContaining({ shopifyLocationGid: null })));
   });
 
   it('saves explicit outbound Sopyo selection independently of Kargonomi warehouse setup', async () => {

@@ -2065,6 +2065,7 @@ export const runtimeServices = {
       return {
         vendorId,
         preferredProvider: 'kargonomi' as const,
+        shopifyLocationGid: null,
         outboundMethod: null,
         selectedIntegrationProvider: null,
         shippingEnabled: true,
@@ -2098,6 +2099,7 @@ export const runtimeServices = {
       return {
         vendorId,
         preferredProvider: input.preferredProvider ?? 'kargonomi',
+        shopifyLocationGid: input.shopifyLocationGid?.trim() || null,
         outboundMethod: input.outboundMethod ?? null,
         selectedIntegrationProvider: input.selectedIntegrationProvider ?? null,
         shippingEnabled: input.shippingEnabled ?? true,
@@ -2131,6 +2133,7 @@ export const runtimeServices = {
         preferredProvider: 'kargonomi' as const,
         outboundMethod: null,
         selectedIntegrationProvider: null,
+        shopifyLocationGid: null,
         shippingEnabled: true,
         defaultDesi: '3.00',
         cargoIntegrationId: null,
