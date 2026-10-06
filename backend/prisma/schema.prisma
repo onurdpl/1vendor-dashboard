@@ -286,6 +286,16 @@ enum SopyoOrderPushStatus {
   RECONCILE_REQUIRED
 }
 
+enum SopyoShipmentIntentStatus {
+  CARGO_VERIFIED
+  SELECTION_PENDING
+  SUBMISSION_PENDING
+  OUTCOME_UNKNOWN
+  RECONCILIATION_PENDING
+  CONFIRMED
+  CONFLICT
+}
+
 enum ShipmentExecutionStatus {
   PENDING
   CREATED
@@ -426,6 +436,7 @@ model Vendor {
   shippingCosts                ShipmentShippingCost[]
   shippingConfig               VendorShippingConfig?
   sopyoCredential              SopyoVendorCredential?
+  sopyoShipmentIntents          SopyoShipmentIntent[]
   shippingWarehouses           VendorShippingWarehouse[]
   shipmentExecutions           ShipmentExecution[]
   financialProfile             VendorFinancialProfile?
@@ -783,6 +794,7 @@ model VendorAllocation {
   legacyRefundFinanceReviews             LegacyRefundFinanceReview[]
   deliveredObservation                   AllocationDeliveredObservation?
   sopyoOrderPush                         SopyoOrderPush?
+  sopyoShipmentIntent                    SopyoShipmentIntent?
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -1021,6 +1033,30 @@ model SopyoOrderPush {
   updatedAt          DateTime             @updatedAt
   vendorAllocation   VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
   deliveredObservations AllocationDeliveredObservation[]
+  shipmentIntent     SopyoShipmentIntent?
+
+  @@index([status, createdAt])
+}
+
+model SopyoShipmentIntent {
+  id                       String                    @id @default(cuid())
+  vendorAllocationId       String                    @unique
+  sopyoOrderPushId         String                    @unique
+  assignedVendorId         String
+  sopyoOrderId             String
+  orderCode                String
+  carrier                  String
+  trackingNumber           String
+  firstObservedCargoAt     DateTime                  @default(dbgenerated("timezone('UTC', clock_timestamp())"))
+  shopifyLocationGid       String
+  status                   SopyoShipmentIntentStatus @default(CARGO_VERIFIED)
+  conflictReasonCode       String?
+  conflictObservedAt       DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  vendorAllocation         VendorAllocation          @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
+  sopyoOrderPush           SopyoOrderPush            @relation(fields: [sopyoOrderPushId], references: [id], onDelete: Restrict)
+  assignedVendor           Vendor                    @relation(fields: [assignedVendorId], references: [id], onDelete: Restrict)
 
   @@index([status, createdAt])
 }
