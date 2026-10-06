@@ -114,6 +114,8 @@ export async function loadSopyoShopifyPlanningContext(tx: Prisma.TransactionClie
         SopyoShipmentIntentStatus.PLAN_READY])).has(intent.status)) {
     throw new SopyoShopifyPlanningError('NOT_ACTIONABLE');
   }
+  const frozenLocationGid = intent.shopifyLocationGid;
+  if (!frozenLocationGid?.trim()) throw new SopyoShopifyPlanningError('IDENTITY_MISMATCH');
   await assertAllocationActionable(tx, intent.vendorAllocationId);
   const allocation = intent.vendorAllocation;
   assertFullOrderOperationallyEligible(allocation.order);
@@ -124,8 +126,8 @@ export async function loadSopyoShopifyPlanningContext(tx: Prisma.TransactionClie
       allocation.reassignmentRequired ||
       allocation.outboundMethodSnapshot !== VendorOutboundMethod.VENDOR_INTEGRATION ||
       allocation.outboundIntegrationProviderSnapshot !== VendorIntegrationProviderCode.SOPYO ||
-      !allocation.shopifyLocationGidSnapshot ||
-      allocation.shopifyLocationGidSnapshot !== intent.shopifyLocationGid ||
+      !allocation.shopifyLocationGidSnapshot?.trim() ||
+      allocation.shopifyLocationGidSnapshot !== frozenLocationGid ||
       !intent.carrier.trim() || !intent.trackingNumber.trim() ||
       push.status !== SopyoOrderPushStatus.SUCCEEDED || push.id !== intent.sopyoOrderPushId ||
       push.vendorAllocationId !== allocation.id || push.assignedVendorId !== allocation.assignedVendorId ||
@@ -143,7 +145,8 @@ export async function loadSopyoShopifyPlanningContext(tx: Prisma.TransactionClie
   })).map((line) => line.id);
   allocationLineItems.sort((a, b) => a.id.localeCompare(b.id));
   otherAllocationLineItemIds.sort();
-  return { intent, allocation, allocationLineItems, otherAllocationLineItemIds };
+  return { intent: { ...intent, shopifyLocationGid: frozenLocationGid },
+    allocation, allocationLineItems, otherAllocationLineItemIds };
 }
 
 async function markConflict(db: typeof prisma, intentId: string,

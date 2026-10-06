@@ -28,6 +28,7 @@ describeWithPostgres('Sopyo shipment intent on isolated PostgreSQL', () => {
       await db.sopyoOrderPush.deleteMany({ where: { id: row.pushId } });
       await db.vendorAllocation.deleteMany({ where: { id: row.allocationId } });
       await db.shopifyOrder.deleteMany({ where: { id: row.orderId } });
+      await db.vendorShippingConfig.deleteMany({ where: { vendorId: row.vendorId } });
       await db.vendor.deleteMany({ where: { id: row.vendorId } });
     }
     await db.$disconnect();
@@ -101,8 +102,9 @@ describeWithPostgres('Sopyo shipment intent on isolated PostgreSQL', () => {
   });
 
   it('keeps first cargo immutable and records a bounded conflict for different cargo', async () => {
-    const { request } = await fixture();
+    const { request } = await fixture({ location: null });
     const first = await recordVerifiedSopyoShipmentIntent(request, db as never);
+    expect(first.shopifyLocationGid).toBeNull();
     const changed = await recordVerifiedSopyoShipmentIntent({
       ...request, detail: { ...request.detail, cargoTrackingNumber: 'OTHER' },
     }, db as never);
@@ -110,10 +112,40 @@ describeWithPostgres('Sopyo shipment intent on isolated PostgreSQL', () => {
       trackingNumber: first.trackingNumber, status: 'CONFLICT', conflictReasonCode: 'CARGO_MISMATCH' });
     expect(changed.conflictObservedAt).toBeInstanceOf(Date);
     expect(changed.firstObservedCargoAt).toEqual(first.firstObservedCargoAt);
+    expect(changed.shopifyLocationGid).toBeNull();
     const replay = await recordVerifiedSopyoShipmentIntent(request, db as never);
     expect(replay.status).toBe('CONFLICT');
     await expect(db.sopyoShipmentIntent.update({ where: { id: first.id },
       data: { trackingNumber: 'tampered' } })).rejects.toThrow();
+  });
+
+  it('persists NULL location for verified cargo and preserves it on exact replay', async () => {
+    const { vendor, allocation, request } = await fixture({ location: null });
+    const first = await recordVerifiedSopyoShipmentIntent(request, db as never);
+    await db.vendorShippingConfig.create({ data: {
+      vendorId: vendor.id, shopifyLocationGid: 'gid://shopify/Location/later',
+    } });
+    const replay = await recordVerifiedSopyoShipmentIntent(request, db as never);
+    expect(first.shopifyLocationGid).toBeNull();
+    expect(replay.id).toBe(first.id);
+    expect(replay.firstObservedCargoAt).toEqual(first.firstObservedCargoAt);
+    expect(replay.shopifyLocationGid).toBeNull();
+    expect(await db.sopyoShipmentIntent.count({ where: { vendorAllocationId: allocation.id } })).toBe(1);
+    await expect(db.sopyoShipmentIntent.update({ where: { id: first.id },
+      data: { shopifyLocationGid: 'gid://shopify/Location/later' } })).rejects.toThrow();
+    await expect(db.sopyoShipmentIntent.update({ where: { id: first.id },
+      data: { shopifyLocationGid: ' ' } })).rejects.toThrow();
+  });
+
+  it('rejects a non-NULL whitespace-only intent location at the database boundary', async () => {
+    const { allocation, push } = await fixture({ location: ' ' });
+    await expect(db.sopyoShipmentIntent.create({ data: {
+      vendorAllocationId: allocation.id, sopyoOrderPushId: push.id,
+      assignedVendorId: allocation.assignedVendorId,
+      sopyoOrderId: push.sopyoOrderId!, orderCode: allocation.id,
+      carrier: 'Carrier', trackingNumber: 'TRACK', shopifyLocationGid: ' ',
+    } })).rejects.toThrow();
+    expect(await db.sopyoShipmentIntent.count({ where: { vendorAllocationId: allocation.id } })).toBe(0);
   });
 
   it('serializes concurrent exact observations to the same durable intent', async () => {
@@ -144,17 +176,16 @@ describeWithPostgres('Sopyo shipment intent on isolated PostgreSQL', () => {
     expect(await db.sopyoShipmentIntent.count({ where: { vendorAllocationId: source.allocation.id } })).toBe(0);
   });
 
-  it('fails closed for missing location, cargo, successful push, or Sopyo snapshot', async () => {
-    const missingLocation = await fixture({ location: null });
+  it('fails closed for missing cargo, successful push, or Sopyo snapshot', async () => {
     const pending = await fixture({ pushStatus: 'PENDING' });
     const kargonomi = await fixture({ method: 'KARGONOMI' });
-    for (const request of [missingLocation.request, pending.request, kargonomi.request,
+    for (const request of [pending.request, kargonomi.request,
       { ...pending.request, detail: { ...pending.request.detail, cargoCompany: null } },
       { ...pending.request, detail: { ...pending.request.detail, cargoTrackingNumber: ' ' } }]) {
       await expect(recordVerifiedSopyoShipmentIntent(request, db as never)).rejects.toThrow();
     }
     expect(await db.sopyoShipmentIntent.count({ where: { vendorAllocationId: {
-      in: [missingLocation.allocation.id, pending.allocation.id, kargonomi.allocation.id],
+      in: [pending.allocation.id, kargonomi.allocation.id],
     } } })).toBe(0);
   });
 

@@ -77,8 +77,6 @@ export async function projectVerifiedSopyoCargo(
         allocation.reassignmentRequired ||
         allocation.outboundMethodSnapshot !== VendorOutboundMethod.VENDOR_INTEGRATION ||
         allocation.outboundIntegrationProviderSnapshot !== VendorIntegrationProviderCode.SOPYO ||
-        !allocation.shopifyLocationGidSnapshot?.trim() ||
-        intent.shopifyLocationGid !== allocation.shopifyLocationGidSnapshot.trim() ||
         push.id !== input.pushId || !validPush({ ...push, vendorAllocation: allocation }) ||
         intent.sopyoOrderPushId !== push.id || intent.assignedVendorId !== allocation.assignedVendorId ||
         intent.sopyoOrderId !== push.sopyoOrderId || intent.orderCode !== push.orderCode) {

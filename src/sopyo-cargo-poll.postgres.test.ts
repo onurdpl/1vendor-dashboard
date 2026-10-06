@@ -111,7 +111,7 @@ describeWithPostgres('Sopyo cargo polling and local projection on isolated Postg
   }
 
   it('leaves missing cargo untouched and later projects first verified cargo without Shopify/finance effects', async () => {
-    const source = await fixture();
+    const source = await fixture({ location: null });
     await db.financeLedgerEntry.create({ data: { id: `${source.allocation.id}-sale`,
       vendorAllocationId: source.allocation.id, vendorId: source.vendor.id,
       entryType: 'sale', amount: '100.00', payoutStatus: 'PENDING', settlementStatus: 'ACCRUING',
@@ -134,7 +134,7 @@ describeWithPostgres('Sopyo cargo polling and local projection on isolated Postg
     expect(second).toMatchObject({ candidateCount: 1, detailChecks: 1, projected: 1 });
     const intent = await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { vendorAllocationId: source.allocation.id } });
     expect(intent).toMatchObject({ sopyoOrderPushId: source.push.id, carrier: 'Sürat Kargo',
-      trackingNumber: 'TRACK123', status: 'CARGO_VERIFIED' });
+      trackingNumber: 'TRACK123', status: 'CARGO_VERIFIED', shopifyLocationGid: null });
     expect(await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.allocation.id } })).toMatchObject({
       carrier: 'Sürat Kargo', trackingNumber: 'TRACK123', shippingStatus: 'In Transit',
     });
@@ -182,17 +182,16 @@ describeWithPostgres('Sopyo cargo polling and local projection on isolated Postg
       .toMatchObject({ status: 'CARGO_VERIFIED', firstObservedCargoAt: intent.firstObservedCargoAt });
   });
 
-  it('fails closed for identity, frozen provider, vendor and location mismatches', async () => {
+  it('fails closed for identity, frozen provider and vendor mismatches', async () => {
     const badId = await fixture();
     const badCode = await fixture();
     const badVendor = await fixture();
-    const noLocation = await fixture({ location: null });
     const wrongProvider = await fixture({ method: null });
     const wrongMethod = await fixture({ method: 'KARGONOMI' });
     await db.sopyoOrderPush.update({ where: { id: badVendor.push.id },
       data: { assignedVendorId: badCode.vendor.id } });
     const rows = new Map<string, { code: string; company: string; tracking: string; id?: number }>();
-    for (const source of [badId, badCode, badVendor, noLocation, wrongProvider, wrongMethod]) {
+    for (const source of [badId, badCode, badVendor, wrongProvider, wrongMethod]) {
       rows.set(source.push.sopyoOrderId!, { code: source.allocation.id, company: 'Carrier', tracking: 'TRACK' });
     }
     rows.get(badId.push.sopyoOrderId!)!.id = 99;
@@ -200,7 +199,7 @@ describeWithPostgres('Sopyo cargo polling and local projection on isolated Postg
     const api = provider(rows);
     const report = await poll({ db: db as never, fetcher: api.fetcher });
     expect(report.projected).toBe(0);
-    for (const source of [badId, badCode, badVendor, noLocation, wrongProvider, wrongMethod]) {
+    for (const source of [badId, badCode, badVendor, wrongProvider, wrongMethod]) {
       expect(await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.allocation.id } }))
         .toMatchObject({ carrier: null, trackingNumber: null, shippingStatus: 'Awaiting Shipment' });
     }
@@ -209,8 +208,8 @@ describeWithPostgres('Sopyo cargo polling and local projection on isolated Postg
   it('preserves exact existing cargo, refuses changed local cargo and never downgrades Delivered', async () => {
     const exact = await fixture({ carrier: 'Carrier', trackingNumber: 'TRACK' });
     const alreadyInTransit = await fixture({ carrier: 'Carrier', trackingNumber: 'TRACK', shippingStatus: 'In Transit' });
-    const conflict = await fixture({ carrier: 'Other', trackingNumber: 'DIFFERENT' });
-    const delivered = await fixture({ carrier: 'Carrier', trackingNumber: 'TRACK', shippingStatus: 'Delivered' });
+    const conflict = await fixture({ location: null, carrier: 'Other', trackingNumber: 'DIFFERENT' });
+    const delivered = await fixture({ location: null, carrier: 'Carrier', trackingNumber: 'TRACK', shippingStatus: 'Delivered' });
     const rows = new Map<string, { code: string; company: string; tracking: string }>();
     for (const source of [exact, alreadyInTransit, conflict, delivered]) {
       rows.set(source.push.sopyoOrderId!, { code: source.allocation.id, company: 'Carrier', tracking: 'TRACK' });

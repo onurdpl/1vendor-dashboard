@@ -83,6 +83,19 @@ describe('Sopyo Shopify sync state routing', () => {
     expect(h.execute).not.toHaveBeenCalled();
   });
 
+  it('skips a NULL-location cargo intent without interrupting another candidate', async () => {
+    const missing = candidate('CARGO_VERIFIED', 'missing', {
+      shopifyLocationGid: null,
+      vendorAllocation: { ...candidate('CARGO_VERIFIED', 'missing').vendorAllocation,
+        shopifyLocationGidSnapshot: null },
+    });
+    const h = harness([missing as never, candidate('CARGO_VERIFIED', 'ready')]);
+    const report = await processSopyoShopifySync({ env, dependencies: h.dependencies, logger: h.logger as never });
+    expect(report).toMatchObject({ candidateCount: 2, skipped: 1, planned: 1, executed: 1, failed: 0 });
+    expect(h.plan).toHaveBeenCalledExactlyOnceWith({ intentId: 'ready', env });
+    expect(h.execute).toHaveBeenCalledExactlyOnceWith({ intentId: 'ready', env });
+  });
+
   it('never starts Shopify work under a different API version', async () => {
     const h = harness([candidate('CARGO_VERIFIED', 'a')]);
     const report = await processSopyoShopifySync({ env: { ...env, SHOPIFY_API_VERSION: '2024-01' },

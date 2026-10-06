@@ -64,11 +64,11 @@ export async function recordVerifiedSopyoShipmentIntent(
       select: { id: true, vendorAllocationId: true, assignedVendorId: true,
         orderCode: true, sopyoOrderId: true, status: true },
     });
-    const location = allocation.shopifyLocationGidSnapshot?.trim();
+    const location = allocation.shopifyLocationGidSnapshot?.trim() || null;
     if (actionability.allocation.id !== allocation.id ||
         allocation.outboundMethodSnapshot !== VendorOutboundMethod.VENDOR_INTEGRATION ||
         allocation.outboundIntegrationProviderSnapshot !== VendorIntegrationProviderCode.SOPYO ||
-        !location || !push || push.status !== SopyoOrderPushStatus.SUCCEEDED ||
+        !push || push.status !== SopyoOrderPushStatus.SUCCEEDED ||
         push.vendorAllocationId !== allocation.id ||
         push.assignedVendorId !== allocation.assignedVendorId ||
         push.orderCode !== allocation.id || input.detail.orderCode !== push.orderCode ||

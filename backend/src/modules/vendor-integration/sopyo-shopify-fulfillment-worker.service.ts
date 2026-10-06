@@ -80,7 +80,7 @@ export async function processSopyoShopifySync(input: {
       allocation.trackingNumber === intent.trackingNumber &&
       projectedStatuses.has(allocation.shippingStatus.trim().toLowerCase());
     if (intent.shopifyFulfillmentId || !intent.carrier.trim() || !intent.trackingNumber.trim() ||
-        !localProjectionValid || !intent.shopifyLocationGid.trim() ||
+        !localProjectionValid || !intent.shopifyLocationGid?.trim() ||
         allocation.id !== intent.vendorAllocationId || allocation.assignedVendorId !== intent.assignedVendorId ||
         allocation.allocationStatus !== 'ACTIVE' || allocation.cancellationReason ||
         allocation.reassignmentRequired ||

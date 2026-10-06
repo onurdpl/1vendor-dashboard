@@ -1050,7 +1050,7 @@ model SopyoShipmentIntent {
   carrier                  String
   trackingNumber           String
   firstObservedCargoAt     DateTime                  @default(dbgenerated("timezone('UTC', clock_timestamp())"))
-  shopifyLocationGid       String
+  shopifyLocationGid       String?
   status                   SopyoShipmentIntentStatus @default(CARGO_VERIFIED)
   conflictReasonCode       String?
   conflictObservedAt       DateTime?

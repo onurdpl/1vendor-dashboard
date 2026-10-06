@@ -48,7 +48,7 @@ describeWithPostgres('Sopyo Shopify execution planning on isolated PostgreSQL', 
     await db.$disconnect();
   });
 
-  async function fixture(quantity = 1) {
+  async function fixture(quantity = 1, frozenLocation: string | null = location) {
     const token = `sopyo-plan-${process.pid}-${Date.now()}-${++sequence}`;
     const vendor = await db.vendor.create({ data: { id: token, name: 'Planning test vendor' } });
     const order = await db.shopifyOrder.create({ data: {
@@ -63,7 +63,7 @@ describeWithPostgres('Sopyo Shopify execution planning on isolated PostgreSQL', 
       sourceShopifyOrderNumber: order.sourceShopifyOrderNumber,
       originalVendorId: vendor.id, assignedVendorId: vendor.id,
       outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
-      shopifyLocationGidSnapshot: location,
+      shopifyLocationGidSnapshot: frozenLocation,
     } });
     await db.vendorAllocationLineItem.create({ data: {
       vendorAllocationId: allocation.id, shopifyLineItemId: line.id, quantity,
@@ -169,6 +169,24 @@ describeWithPostgres('Sopyo Shopify execution planning on isolated PostgreSQL', 
     await db.sopyoOrderPush.update({ where: { id: item.push.id }, data: { assignedVendorId: 'wrong' } });
     await expect(item.run(item.canonical([item.fo('one', 1)]))).rejects.toThrow();
     expect(await db.sopyoShopifyExecutionPlan.count({ where: { sopyoShipmentIntentId: item.intent.id } })).toBe(0);
+  });
+
+  it('does not read Shopify or create a plan for a cargo intent with NULL frozen location', async () => {
+    const item = await fixture(1, null);
+    expect(item.intent.shopifyLocationGid).toBeNull();
+    const read = vi.fn();
+    await expect(planSopyoShopifyFulfillment({ intentId: item.intent.id, env,
+      shopifyAdminService: { fetchFulfillmentOrdersForSopyoPlanning: read },
+    }, db as never)).rejects.toThrow();
+    expect(read).not.toHaveBeenCalled();
+    expect(await db.sopyoShopifyExecutionPlan.count({ where: { sopyoShipmentIntentId: item.intent.id } })).toBe(0);
+    expect((await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { id: item.intent.id } })).status)
+      .toBe('CARGO_VERIFIED');
+    const columns = await db.$queryRaw<Array<{ is_nullable: string }>>`
+      SELECT is_nullable FROM information_schema.columns
+      WHERE table_name = 'SopyoShopifyExecutionPlan' AND column_name = 'shopifyLocationGid'
+    `;
+    expect(columns).toEqual([{ is_nullable: 'NO' }]);
   });
 
   it('rejects another allocation sharing the same Shopify order line', async () => {
