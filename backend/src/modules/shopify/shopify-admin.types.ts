@@ -532,6 +532,32 @@ export type ShopifySopyoFulfillmentPlanRead = {
   source: 'shopify_admin';
 };
 
+/** Canonical Shopify identity used only for Sopyo fulfillment confirmation. */
+export type ShopifySopyoFulfillmentEvidence = {
+  id: string;
+  orderGid: string;
+  locationGid: string;
+  fulfillmentOrderGids: string[];
+  lines: Array<{ shopifyOrderLineItemGid: string; quantity: number }>;
+  tracking: Array<{ company: string | null; number: string | null }>;
+  status: string;
+};
+
+export type ShopifySopyoFulfillmentCreateInput = {
+  orderGid: string;
+  lineItemsByFulfillmentOrder: Array<{
+    fulfillmentOrderId: string;
+    fulfillmentOrderLineItems: Array<{ id: string; quantity: number }>;
+  }>;
+  company: string;
+  trackingNumber: string;
+};
+
+export type ShopifySopyoFulfillmentCreateResult =
+  | { outcome: 'success'; fulfillment: ShopifySopyoFulfillmentEvidence }
+  | { outcome: 'rejected' }
+  | { outcome: 'unknown' };
+
 export type CancelFulfillmentOrderResult = {
   fulfillmentOrderId: string | null;
   fulfillmentOrderStatus: string | null;

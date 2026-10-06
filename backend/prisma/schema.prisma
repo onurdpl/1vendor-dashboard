@@ -1054,6 +1054,9 @@ model SopyoShipmentIntent {
   status                   SopyoShipmentIntentStatus @default(CARGO_VERIFIED)
   conflictReasonCode       String?
   conflictObservedAt       DateTime?
+  submissionStartedAt      DateTime?
+  confirmedAt              DateTime?
+  shopifyFulfillmentId     String?                   @unique
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
   vendorAllocation         VendorAllocation          @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)

@@ -31,6 +31,9 @@ import type {
   SellerInfoMap,
   ShopifyFulfillmentOrderCancellationClassificationResponse,
   ShopifySopyoFulfillmentPlanRead,
+  ShopifySopyoFulfillmentEvidence,
+  ShopifySopyoFulfillmentCreateInput,
+  ShopifySopyoFulfillmentCreateResult,
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
@@ -75,6 +78,44 @@ type OrderSellerInfoQueryResponse = {
     } | null;
   } | null;
 };
+
+type SopyoFulfillmentNode = {
+  id?: string | null;
+  status?: string | null;
+  order?: { id?: string | null } | null;
+  location?: { id?: string | null } | null;
+  trackingInfo?: Array<{ company?: string | null; number?: string | null }> | null;
+  fulfillmentOrders?: { pageInfo?: { hasNextPage?: boolean }; nodes?: Array<{ id?: string | null }> } | null;
+  fulfillmentLineItems?: { pageInfo?: { hasNextPage?: boolean }; nodes?: Array<{
+    quantity?: number | null; lineItem?: { id?: string | null } | null;
+  }> } | null;
+};
+
+function parseSopyoFulfillmentEvidence(node: SopyoFulfillmentNode | null | undefined): ShopifySopyoFulfillmentEvidence | null {
+  if (!node?.id?.startsWith('gid://shopify/Fulfillment/') ||
+      !node.order?.id?.startsWith('gid://shopify/Order/') ||
+      !node.location?.id?.startsWith('gid://shopify/Location/') ||
+      !node.status || !Array.isArray(node.trackingInfo) ||
+      node.fulfillmentOrders?.pageInfo?.hasNextPage !== false ||
+      !Array.isArray(node.fulfillmentOrders.nodes) ||
+      node.fulfillmentOrders.nodes.length === 0 ||
+      node.fulfillmentOrders.nodes.some((order) => !order.id?.startsWith('gid://shopify/FulfillmentOrder/')) ||
+      node.fulfillmentLineItems?.pageInfo?.hasNextPage !== false ||
+      !Array.isArray(node.fulfillmentLineItems.nodes) ||
+      node.fulfillmentLineItems.nodes.length === 0 ||
+      node.fulfillmentLineItems.nodes.some((line) =>
+        !line.lineItem?.id?.startsWith('gid://shopify/LineItem/') ||
+        !Number.isSafeInteger(line.quantity) || (line.quantity ?? 0) <= 0)) return null;
+  return {
+    id: node.id, orderGid: node.order.id, locationGid: node.location.id,
+    status: node.status,
+    fulfillmentOrderGids: node.fulfillmentOrders.nodes.map((order) => order.id!),
+    lines: node.fulfillmentLineItems.nodes.map((line) => ({
+      shopifyOrderLineItemGid: line.lineItem!.id!, quantity: line.quantity!,
+    })),
+    tracking: node.trackingInfo.map((info) => ({ company: info.company ?? null, number: info.number ?? null })),
+  };
+}
 
 type RecentOrdersQueryResponse = {
   orders: {
@@ -4473,6 +4514,116 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  /** A single 2026-10 mutation can contain all same-order, same-location planned fulfillment orders. */
+  async function createSopyoFulfillment(
+    input: ShopifySopyoFulfillmentCreateInput,
+  ): Promise<ShopifySopyoFulfillmentCreateResult> {
+    if (env.SHOPIFY_API_VERSION !== '2026-10' || !env.SHOPIFY_SHOP_DOMAIN ||
+        !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify 2026-10 fulfillment create is not configured.');
+    }
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json',
+            'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN },
+          body: JSON.stringify({
+            query: `mutation SopyoFulfillmentCreate($fulfillment: FulfillmentInput!) {
+              fulfillmentCreate(fulfillment: $fulfillment) {
+                userErrors { field message }
+                fulfillment {
+                  id status order { id } location { id }
+                  trackingInfo(first: 10) { company number }
+                  fulfillmentOrders(first: 100) { pageInfo { hasNextPage } nodes { id } }
+                  fulfillmentLineItems(first: 250) {
+                    pageInfo { hasNextPage }
+                    nodes { quantity lineItem { id } }
+                  }
+                }
+              }
+            }`,
+            variables: { fulfillment: {
+              lineItemsByFulfillmentOrder: input.lineItemsByFulfillmentOrder,
+              trackingInfo: { company: input.company, number: input.trackingNumber },
+              notifyCustomer: false,
+            } },
+          }),
+        },
+      );
+    } catch {
+      return { outcome: 'unknown' };
+    }
+    if (!response.ok) return { outcome: 'unknown' };
+    let json: ShopifyGraphqlResponse<{ fulfillmentCreate?: {
+      fulfillment?: SopyoFulfillmentNode | null;
+      userErrors?: Array<{ field?: string[] | null; message?: string | null }> | null;
+    } | null }>;
+    try { json = await parseCanonicalShopifyResponse(response); }
+    catch { return { outcome: 'unknown' }; }
+    if (json.errors?.length || !json.data?.fulfillmentCreate) return { outcome: 'unknown' };
+    const result = json.data.fulfillmentCreate;
+    if (!Array.isArray(result.userErrors)) return { outcome: 'unknown' };
+    if (result.userErrors.length > 0) {
+      return result.fulfillment ? { outcome: 'unknown' } : { outcome: 'rejected' };
+    }
+    const fulfillment = parseSopyoFulfillmentEvidence(result.fulfillment);
+    return fulfillment ? { outcome: 'success', fulfillment } : { outcome: 'unknown' };
+  }
+
+  /** Strict, complete order fulfillment read. An incomplete list never proves absence. */
+  async function fetchSopyoFulfillmentsForReconciliation(
+    shopifyOrderId: string,
+  ): Promise<ShopifySopyoFulfillmentEvidence[]> {
+    if (env.SHOPIFY_API_VERSION !== '2026-10' || !env.SHOPIFY_SHOP_DOMAIN ||
+        !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify 2026-10 fulfillment reconciliation is not configured.');
+    }
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN },
+        body: JSON.stringify({
+          query: `query SopyoFulfillmentReconciliation($id: ID!) {
+            order(id: $id) {
+              id fulfillmentsCount { count }
+              fulfillments(first: 250) {
+                id status order { id } location { id }
+                trackingInfo(first: 10) { company number }
+                fulfillmentOrders(first: 100) { pageInfo { hasNextPage } nodes { id } }
+                fulfillmentLineItems(first: 250) {
+                  pageInfo { hasNextPage }
+                  nodes { quantity lineItem { id } }
+                }
+              }
+            }
+          }`,
+          variables: { id: toShopifyOrderGid(shopifyOrderId) },
+        }),
+      },
+    );
+    if (!response.ok) throw new Error('Shopify fulfillment reconciliation read failed.');
+    const json = await parseCanonicalShopifyResponse<{ order?: {
+      id?: string | null; fulfillmentsCount?: { count?: number | null } | null;
+      fulfillments?: SopyoFulfillmentNode[] | null;
+    } | null }>(response);
+    const order = json.data?.order;
+    if (json.errors?.length || order?.id !== toShopifyOrderGid(shopifyOrderId) ||
+        !Array.isArray(order.fulfillments) || !Number.isSafeInteger(order.fulfillmentsCount?.count) ||
+        order.fulfillmentsCount?.count !== order.fulfillments.length) {
+      throw new Error('Shopify fulfillment reconciliation evidence is incomplete.');
+    }
+    const evidence = order.fulfillments.map(parseSopyoFulfillmentEvidence);
+    if (evidence.some((item) => !item)) {
+      throw new Error('Shopify fulfillment reconciliation evidence is incomplete.');
+    }
+    return evidence as ShopifySopyoFulfillmentEvidence[];
+  }
+
   /** Strict 2026-10 read for Sopyo planning. Truncated or malformed canonical data is not usable. */
   async function fetchFulfillmentOrdersForSopyoPlanning(
     shopifyOrderId: string,
@@ -4790,6 +4941,8 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchFulfillmentOrders,
     fetchFulfillmentOrdersForCancellationClassification,
     fetchFulfillmentOrdersForSopyoPlanning,
+    createSopyoFulfillment,
+    fetchSopyoFulfillmentsForReconciliation,
     cancelFulfillment,
     cancelFulfillmentOrder,
     createShopifyRefund,

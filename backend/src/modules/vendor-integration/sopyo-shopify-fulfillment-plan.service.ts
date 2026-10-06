@@ -94,7 +94,7 @@ export function buildSopyoShopifyExecutionLines(input: {
   return sortedLines(selected);
 }
 
-async function loadContext(tx: Prisma.TransactionClient, intentId: string) {
+export async function loadSopyoShopifyPlanningContext(tx: Prisma.TransactionClient, intentId: string) {
   const intent = await tx.sopyoShipmentIntent.findUnique({
     where: { id: intentId },
     include: {
@@ -161,7 +161,7 @@ export async function planSopyoShopifyFulfillment(input: {
   env: AppEnv;
   shopifyAdminService?: Pick<ReturnType<typeof createShopifyAdminService>, 'fetchFulfillmentOrdersForSopyoPlanning'>;
 }, db: typeof prisma = prisma) {
-  const before = await db.$transaction((tx) => loadContext(tx, input.intentId));
+  const before = await db.$transaction((tx) => loadSopyoShopifyPlanningContext(tx, input.intentId));
   const read = input.shopifyAdminService ?? createShopifyAdminService(input.env);
   let canonical: ShopifySopyoFulfillmentPlanRead;
   try {
@@ -191,7 +191,7 @@ export async function planSopyoShopifyFulfillment(input: {
 
   try {
     return await db.$transaction(async (tx) => {
-      const current = await loadContext(tx, input.intentId);
+      const current = await loadSopyoShopifyPlanningContext(tx, input.intentId);
       if (JSON.stringify(current.allocationLineItems) !== JSON.stringify(before.allocationLineItems) ||
           JSON.stringify(current.otherAllocationLineItemIds) !== JSON.stringify(before.otherAllocationLineItemIds) ||
           current.allocation.order.sourceShopifyOrderId !== before.allocation.order.sourceShopifyOrderId ||

@@ -159,6 +159,7 @@ Alternative for quick schema sync without migration history:
 - Orders/create, payment, cancellation, and refund routes require durable webhook and commerce/reconciliation evidence; return and order-update discovery routes require durable webhook/diagnostic or lifecycle evidence; fulfillment routes require durable webhook and allocation-sync evidence. None may acknowledge success without that persistence boundary.
 
 ## Vendor Allocation Model
+- The Sopyo Phase 3 internal Shopify fulfillment executor is not a startup worker or HTTP route. It fences one `PLAN_READY` shipment intent before a single Shopify GraphQL `2026-10` create attempt, retains unknown outcomes for canonical read-only reconciliation, and confirms only an exact plan-matching Shopify fulfillment. It does not project local shipping state, alter Kargonomi/manual fulfillment, or establish delivery/finance authority.
 - Backend persists source Shopify order and line items.
 - Backend creates vendor allocations from line-item vendor mapping.
 - Vendor mapping is resolved from the Shopify variant vendor metafield into internal vendor IDs.
