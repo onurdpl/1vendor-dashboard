@@ -12,13 +12,13 @@
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "522c55c09cbed0e573fa052803e2e5fd62abfb483a251f4d6724f4322d2c6c5a"
+    "sha256": "c518112d9c5d58c1806099a7db8ee25102558c0d6751df29f3fb7c66f43b8a26"
   },
   "catalog": {
-    "sha256": "a00e48b011d7e395dd6e902a396097ad1f2521f05cafc324f7b822661afd1a01"
+    "sha256": "8d6630bcfb2db95529dfac86ba994216417df9dba15d54d8c19a2d591915aea9"
   },
-  "migrationCutoff": "20261008190000_add_sopyo_shopify_submission_outcome",
-  "baselineMigrationFilesSha256": "afed377395297888e7b90e5a29ad10f42a0ea7dc393b1cb83528c858b558718f",
+  "migrationCutoff": "20261008200000_add_sopyo_local_cargo_conflict_reasons",
+  "baselineMigrationFilesSha256": "e1e5e695fa06fa4df4c802ec9765f8739af26013d06c28fc2e9115d96d1ae014",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -135,6 +135,7 @@
     "20261008160000_add_sopyo_shipment_intent",
     "20261008170000_add_sopyo_shopify_execution_plan",
     "20261008180000_link_sopyo_plan_allocation_line",
-    "20261008190000_add_sopyo_shopify_submission_outcome"
+    "20261008190000_add_sopyo_shopify_submission_outcome",
+    "20261008200000_add_sopyo_local_cargo_conflict_reasons"
   ]
 }

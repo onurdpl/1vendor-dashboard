@@ -160,6 +160,7 @@ Alternative for quick schema sync without migration history:
 
 ## Vendor Allocation Model
 - The Sopyo Phase 3 internal Shopify fulfillment executor is not a startup worker or HTTP route. It fences one `PLAN_READY` shipment intent before a single Shopify GraphQL `2026-10` create attempt, retains unknown outcomes for canonical read-only reconciliation, and confirms only an exact plan-matching Shopify fulfillment. It does not project local shipping state, alter Kargonomi/manual fulfillment, or establish delivery/finance authority.
+- An independent opt-in Sopyo cargo poller reads successful pushed orders by numeric ID at the existing 30-minute Sopyo polling cadence. After the shipment-intent recorder verifies first carrier/tracking, a local transaction projects those values and `In Transit` onto the owning allocation; it never invokes Shopify fulfillment work. Exact replay is idempotent, stronger `Delivered` state is preserved, and local identity conflicts require attention. The separate Sopyo status-6 delivery poller alone records delivered observation for the settlement clock.
 - Backend persists source Shopify order and line items.
 - Backend creates vendor allocations from line-item vendor mapping.
 - Vendor mapping is resolved from the Shopify variant vendor metafield into internal vendor IDs.
