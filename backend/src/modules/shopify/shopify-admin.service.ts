@@ -30,6 +30,7 @@ import type {
   PreviewSuggestedRefundResult,
   SellerInfoMap,
   ShopifyFulfillmentOrderCancellationClassificationResponse,
+  ShopifySopyoFulfillmentPlanRead,
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
@@ -4472,6 +4473,100 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  /** Strict 2026-10 read for Sopyo planning. Truncated or malformed canonical data is not usable. */
+  async function fetchFulfillmentOrdersForSopyoPlanning(
+    shopifyOrderId: string,
+  ): Promise<ShopifySopyoFulfillmentPlanRead> {
+    if (env.SHOPIFY_API_VERSION !== '2026-10' || !env.SHOPIFY_SHOP_DOMAIN ||
+        !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify 2026-10 fulfillment planning read is not configured.');
+    }
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN },
+        body: JSON.stringify({
+          query: `
+            query SopyoFulfillmentPlanning($id: ID!) {
+              order(id: $id) {
+                id
+                fulfillmentOrders(first: 100) {
+                  pageInfo { hasNextPage }
+                  nodes {
+                    id
+                    status
+                    requestStatus
+                    supportedActions { action }
+                    assignedLocation { location { id } }
+                    lineItems(first: 250) {
+                      pageInfo { hasNextPage }
+                      nodes { id remainingQuantity totalQuantity lineItem { id } }
+                    }
+                    fulfillments(first: 1) {
+                      pageInfo { hasNextPage }
+                      nodes { id }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: { id: toShopifyOrderGid(shopifyOrderId) },
+        }),
+      },
+    );
+    if (!response.ok) throw new Error('Shopify fulfillment planning read failed.');
+    const json = await parseCanonicalShopifyResponse<{
+      order?: { id?: string; fulfillmentOrders?: {
+        pageInfo?: { hasNextPage?: boolean }; nodes?: Array<{
+          id?: string; status?: string | null; requestStatus?: string | null;
+          supportedActions?: Array<{ action?: string | null }> | null;
+          assignedLocation?: { location?: { id?: string | null } | null } | null;
+          lineItems?: { pageInfo?: { hasNextPage?: boolean }; nodes?: Array<{
+            id?: string; remainingQuantity?: number | null; totalQuantity?: number | null;
+            lineItem?: { id?: string | null } | null;
+          }> };
+          fulfillments?: { pageInfo?: { hasNextPage?: boolean }; nodes?: Array<{ id?: string }> };
+        }>;
+      } } | null;
+    }>(response);
+    const order = json.data?.order;
+    if (json.errors?.length || !order?.id ||
+        order.id !== toShopifyOrderGid(shopifyOrderId) ||
+        order.fulfillmentOrders?.pageInfo?.hasNextPage !== false ||
+        !Array.isArray(order.fulfillmentOrders.nodes)) {
+      throw new Error('Shopify fulfillment planning evidence is incomplete.');
+    }
+    const fulfillmentOrders = order.fulfillmentOrders.nodes.map((fulfillmentOrder) => {
+      if (!fulfillmentOrder.id ||
+          fulfillmentOrder.lineItems?.pageInfo?.hasNextPage !== false ||
+          !Array.isArray(fulfillmentOrder.lineItems.nodes) ||
+          fulfillmentOrder.fulfillments?.pageInfo?.hasNextPage !== false ||
+          !Array.isArray(fulfillmentOrder.fulfillments.nodes) ||
+          fulfillmentOrder.fulfillments.nodes.some((fulfillment) => !fulfillment.id)) {
+        throw new Error('Shopify fulfillment planning evidence is incomplete.');
+      }
+      return {
+        id: fulfillmentOrder.id,
+        status: fulfillmentOrder.status ?? null,
+        requestStatus: fulfillmentOrder.requestStatus ?? null,
+        supportedActions: Array.isArray(fulfillmentOrder.supportedActions)
+          ? fulfillmentOrder.supportedActions.map((action) => action.action?.trim()).filter((action): action is string => Boolean(action))
+          : null,
+        assignedLocationId: fulfillmentOrder.assignedLocation?.location?.id ?? null,
+        lineItems: fulfillmentOrder.lineItems.nodes.map((line) => ({
+          id: line.id ?? '', lineItemId: line.lineItem?.id ?? '',
+          remainingQuantity: typeof line.remainingQuantity === 'number' ? line.remainingQuantity : null,
+          totalQuantity: typeof line.totalQuantity === 'number' ? line.totalQuantity : null,
+        })),
+        existingFulfillmentIds: fulfillmentOrder.fulfillments.nodes.map((fulfillment) => fulfillment.id!),
+      };
+    });
+    return { orderGid: order.id, fulfillmentOrders, source: 'shopify_admin' };
+  }
+
   async function fetchOrderFulfillmentState(shopifyOrderId: string): Promise<ShopifyOrderFulfillmentState> {
     if (mockOrderFulfillmentStateByOrderId[shopifyOrderId]) {
       return {
@@ -4694,6 +4789,7 @@ export function createShopifyAdminService(env: AppEnv) {
     syncReturnShipping,
     fetchFulfillmentOrders,
     fetchFulfillmentOrdersForCancellationClassification,
+    fetchFulfillmentOrdersForSopyoPlanning,
     cancelFulfillment,
     cancelFulfillmentOrder,
     createShopifyRefund,

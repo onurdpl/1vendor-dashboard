@@ -8,17 +8,17 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "9a2641c3f91bbbdf9b731ed90096a5b732757691956a336d0d17413ef7ce703f"
+    "sha256": "db47e590e538ddf0755d9bb35a550c58f388259a7b692059a7591c8fa6e950b4"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "1e492445741680eb93497b35baa05433cf27ae9ab83aa09280aeb16d1b9a5261"
+    "sha256": "a1c2287299a4a85dc2451f87dee6435dabc3d4be278826f52fd1ce6dcb72b4b9"
   },
   "catalog": {
-    "sha256": "bb6725ac59292dd1769ae5872f2cbe3c01d1d39c6f9afdf7462d18952a42a6b7"
+    "sha256": "afbce02c1b887762de52b364907a6ed01eee19d4e66b9f1eaeff0091c294752c"
   },
-  "migrationCutoff": "20261008160000_add_sopyo_shipment_intent",
-  "baselineMigrationFilesSha256": "e26b7e7cb08f7fe27e670131be9460cfa1b22c28e9907303b4b824a7fdf28e34",
+  "migrationCutoff": "20261008180000_link_sopyo_plan_allocation_line",
+  "baselineMigrationFilesSha256": "fc46457e459179c1bbca18d2fbdb64f70d8deb28cf883d732e03e9819cfcd019",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -132,6 +132,8 @@
     "20261008130000_add_sopyo_order_push_dispatcher",
     "20261008140000_add_sopyo_push_delivery_provenance",
     "20261008150000_add_vendor_shopify_location_authority",
-    "20261008160000_add_sopyo_shipment_intent"
+    "20261008160000_add_sopyo_shipment_intent",
+    "20261008170000_add_sopyo_shopify_execution_plan",
+    "20261008180000_link_sopyo_plan_allocation_line"
   ]
 }

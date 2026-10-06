@@ -524,6 +524,14 @@ export type ShopifyFulfillmentOrderCancellationClassificationResponse = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type ShopifySopyoFulfillmentPlanRead = {
+  orderGid: string;
+  fulfillmentOrders: Array<ShopifyFulfillmentOrderForCancellationClassification & {
+    existingFulfillmentIds: string[];
+  }>;
+  source: 'shopify_admin';
+};
+
 export type CancelFulfillmentOrderResult = {
   fulfillmentOrderId: string | null;
   fulfillmentOrderStatus: string | null;

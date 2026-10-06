@@ -294,6 +294,7 @@ enum SopyoShipmentIntentStatus {
   RECONCILIATION_PENDING
   CONFIRMED
   CONFLICT
+  PLAN_READY
 }
 
 enum ShipmentExecutionStatus {
@@ -1013,6 +1014,7 @@ model VendorAllocationLineItem {
   vendorAllocation                 VendorAllocation                        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
   shopifyOrderLineItem             ShopifyOrderLineItem                    @relation(fields: [shopifyLineItemId], references: [id], onDelete: Cascade)
   productPanelVariantDisableEvents ProductPanelVariantDisableOutboxEvent[]
+  sopyoShopifyExecutionPlanLines SopyoShopifyExecutionPlanLine[]
 
   @@unique([vendorAllocationId, shopifyLineItemId])
 }
@@ -1057,8 +1059,35 @@ model SopyoShipmentIntent {
   vendorAllocation         VendorAllocation          @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
   sopyoOrderPush           SopyoOrderPush            @relation(fields: [sopyoOrderPushId], references: [id], onDelete: Restrict)
   assignedVendor           Vendor                    @relation(fields: [assignedVendorId], references: [id], onDelete: Restrict)
+  executionPlan            SopyoShopifyExecutionPlan?
 
   @@index([status, createdAt])
+}
+
+model SopyoShopifyExecutionPlan {
+  id                       String                           @id @default(cuid())
+  sopyoShipmentIntentId    String                           @unique
+  shopifyOrderGid          String
+  shopifyLocationGid       String
+  baselineFulfillmentIds   String[]                         @default([])
+  plannedAt                DateTime                         @default(dbgenerated("timezone('UTC', clock_timestamp())"))
+  intent                   SopyoShipmentIntent              @relation(fields: [sopyoShipmentIntentId], references: [id], onDelete: Restrict)
+  lines                    SopyoShopifyExecutionPlanLine[]
+}
+
+model SopyoShopifyExecutionPlanLine {
+  id                             String                     @id @default(cuid())
+  planId                         String
+  vendorAllocationLineItemId     String
+  fulfillmentOrderGid            String
+  fulfillmentOrderLineItemGid    String
+  shopifyOrderLineItemGid        String
+  quantity                       Int
+  plan                           SopyoShopifyExecutionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  vendorAllocationLineItem       VendorAllocationLineItem @relation(fields: [vendorAllocationLineItemId], references: [id], onDelete: Restrict)
+
+  @@unique([planId, fulfillmentOrderLineItemGid], map: "SopyoShopifyPlanLine_plan_foLine_key")
+  @@index([vendorAllocationLineItemId])
 }
 
 model ProductPanelVariantDisableOutboxEvent {

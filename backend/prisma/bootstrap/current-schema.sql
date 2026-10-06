@@ -572,7 +572,8 @@ CREATE TYPE public."SopyoShipmentIntentStatus" AS ENUM (
     'OUTCOME_UNKNOWN',
     'RECONCILIATION_PENDING',
     'CONFIRMED',
-    'CONFLICT'
+    'CONFLICT',
+    'PLAN_READY'
 );
 
 
@@ -774,6 +775,19 @@ CREATE FUNCTION public.prevent_allocation_delivered_observation_change() RETURNS
     AS $$
 BEGIN
   RAISE EXCEPTION 'Allocation delivered observation is immutable';
+END;
+$$;
+
+
+--
+-- Name: reject_sopyo_shopify_plan_rewrite(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reject_sopyo_shopify_plan_rewrite() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'Sopyo Shopify execution plan is immutable';
 END;
 $$;
 
@@ -2271,7 +2285,37 @@ CREATE TABLE public."SopyoShipmentIntent" (
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "updatedAt" timestamp(3) without time zone NOT NULL,
     CONSTRAINT "SopyoShipmentIntent_cargo_check" CHECK (((length(btrim(carrier)) >= 1) AND (length(btrim(carrier)) <= 200) AND (length(btrim("trackingNumber")) >= 1) AND (length(btrim("trackingNumber")) <= 200) AND (carrier = btrim(carrier)) AND ("trackingNumber" = btrim("trackingNumber")) AND (length(btrim("shopifyLocationGid")) > 0))),
-    CONSTRAINT "SopyoShipmentIntent_conflict_check" CHECK ((((status = 'CONFLICT'::public."SopyoShipmentIntentStatus") AND ("conflictReasonCode" = 'CARGO_MISMATCH'::text) AND ("conflictObservedAt" IS NOT NULL)) OR ((status <> 'CONFLICT'::public."SopyoShipmentIntentStatus") AND ("conflictReasonCode" IS NULL) AND ("conflictObservedAt" IS NULL))))
+    CONSTRAINT "SopyoShipmentIntent_conflict_check" CHECK ((((status = 'CONFLICT'::public."SopyoShipmentIntentStatus") AND ("conflictReasonCode" = ANY (ARRAY['CARGO_MISMATCH'::text, 'SHOPIFY_PLAN_UNSAFE'::text, 'SHOPIFY_PLAN_CHANGED'::text, 'SHOPIFY_READ_INCOMPLETE'::text])) AND ("conflictObservedAt" IS NOT NULL)) OR ((status <> 'CONFLICT'::public."SopyoShipmentIntentStatus") AND ("conflictReasonCode" IS NULL) AND ("conflictObservedAt" IS NULL))))
+);
+
+
+--
+-- Name: SopyoShopifyExecutionPlan; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SopyoShopifyExecutionPlan" (
+    id text NOT NULL,
+    "sopyoShipmentIntentId" text NOT NULL,
+    "shopifyOrderGid" text NOT NULL,
+    "shopifyLocationGid" text NOT NULL,
+    "baselineFulfillmentIds" text[] DEFAULT ARRAY[]::text[] NOT NULL,
+    "plannedAt" timestamp(3) without time zone DEFAULT timezone('UTC'::text, clock_timestamp()) NOT NULL
+);
+
+
+--
+-- Name: SopyoShopifyExecutionPlanLine; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SopyoShopifyExecutionPlanLine" (
+    id text NOT NULL,
+    "planId" text NOT NULL,
+    "vendorAllocationLineItemId" text NOT NULL,
+    "fulfillmentOrderGid" text NOT NULL,
+    "fulfillmentOrderLineItemGid" text NOT NULL,
+    "shopifyOrderLineItemGid" text NOT NULL,
+    quantity integer NOT NULL,
+    CONSTRAINT "SopyoShopifyExecutionPlanLine_quantity_check" CHECK ((quantity > 0))
 );
 
 
@@ -3163,6 +3207,22 @@ ALTER TABLE ONLY public."SopyoOrderPush"
 
 ALTER TABLE ONLY public."SopyoShipmentIntent"
     ADD CONSTRAINT "SopyoShipmentIntent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SopyoShopifyExecutionPlanLine SopyoShopifyExecutionPlanLine_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoShopifyExecutionPlanLine"
+    ADD CONSTRAINT "SopyoShopifyExecutionPlanLine_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SopyoShopifyExecutionPlan SopyoShopifyExecutionPlan_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoShopifyExecutionPlan"
+    ADD CONSTRAINT "SopyoShopifyExecutionPlan_pkey" PRIMARY KEY (id);
 
 
 --
@@ -4762,6 +4822,27 @@ CREATE UNIQUE INDEX "SopyoShipmentIntent_vendorAllocationId_key" ON public."Sopy
 
 
 --
+-- Name: SopyoShopifyExecutionPlanLine_vendorAllocationLineItemId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SopyoShopifyExecutionPlanLine_vendorAllocationLineItemId_idx" ON public."SopyoShopifyExecutionPlanLine" USING btree ("vendorAllocationLineItemId");
+
+
+--
+-- Name: SopyoShopifyExecutionPlan_sopyoShipmentIntentId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SopyoShopifyExecutionPlan_sopyoShipmentIntentId_key" ON public."SopyoShopifyExecutionPlan" USING btree ("sopyoShipmentIntentId");
+
+
+--
+-- Name: SopyoShopifyPlanLine_plan_foLine_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SopyoShopifyPlanLine_plan_foLine_key" ON public."SopyoShopifyExecutionPlanLine" USING btree ("planId", "fulfillmentOrderLineItemGid");
+
+
+--
 -- Name: SopyoVendorCredential_vendorId_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5277,6 +5358,20 @@ CREATE TRIGGER "FinancialCorrectionDeduction_direction_guard" BEFORE INSERT OR U
 --
 
 CREATE TRIGGER "SopyoShipmentIntent_validate" BEFORE INSERT OR UPDATE ON public."SopyoShipmentIntent" FOR EACH ROW EXECUTE FUNCTION public.validate_sopyo_shipment_intent();
+
+
+--
+-- Name: SopyoShopifyExecutionPlanLine SopyoShopifyExecutionPlanLine_no_rewrite; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "SopyoShopifyExecutionPlanLine_no_rewrite" BEFORE UPDATE ON public."SopyoShopifyExecutionPlanLine" FOR EACH ROW EXECUTE FUNCTION public.reject_sopyo_shopify_plan_rewrite();
+
+
+--
+-- Name: SopyoShopifyExecutionPlan SopyoShopifyExecutionPlan_no_rewrite; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "SopyoShopifyExecutionPlan_no_rewrite" BEFORE UPDATE ON public."SopyoShopifyExecutionPlan" FOR EACH ROW EXECUTE FUNCTION public.reject_sopyo_shopify_plan_rewrite();
 
 
 --
@@ -6500,6 +6595,30 @@ ALTER TABLE ONLY public."SopyoShipmentIntent"
 
 ALTER TABLE ONLY public."SopyoShipmentIntent"
     ADD CONSTRAINT "SopyoShipmentIntent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: SopyoShopifyExecutionPlanLine SopyoShopifyExecutionPlanLine_planId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoShopifyExecutionPlanLine"
+    ADD CONSTRAINT "SopyoShopifyExecutionPlanLine_planId_fkey" FOREIGN KEY ("planId") REFERENCES public."SopyoShopifyExecutionPlan"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: SopyoShopifyExecutionPlanLine SopyoShopifyExecutionPlanLine_vendorAllocationLineItemId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoShopifyExecutionPlanLine"
+    ADD CONSTRAINT "SopyoShopifyExecutionPlanLine_vendorAllocationLineItemId_fkey" FOREIGN KEY ("vendorAllocationLineItemId") REFERENCES public."VendorAllocationLineItem"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: SopyoShopifyExecutionPlan SopyoShopifyExecutionPlan_sopyoShipmentIntentId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SopyoShopifyExecutionPlan"
+    ADD CONSTRAINT "SopyoShopifyExecutionPlan_sopyoShipmentIntentId_fkey" FOREIGN KEY ("sopyoShipmentIntentId") REFERENCES public."SopyoShipmentIntent"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --
