@@ -1971,6 +1971,23 @@ export function AdminShopifyOrderPage() {
                 {allocation.trackingNumber ?? 'Not assigned'}
               </strong>
             </div>
+            {allocation.sopyoShopifySync && (
+              <div className="meta-item">
+                <span>Sopyo → Shopify sync</span>
+                <strong>{allocation.sopyoShopifySync.status === 'CONFIRMED'
+                  ? 'Confirmed'
+                  : allocation.sopyoShopifySync.status === 'CONFLICT'
+                    ? `Needs attention${allocation.sopyoShopifySync.conflictReasonCode
+                      ? ` · ${allocation.sopyoShopifySync.conflictReasonCode}` : ''}`
+                    : allocation.sopyoShopifySync.status === 'OUTCOME_UNKNOWN' ||
+                        allocation.sopyoShopifySync.status === 'RECONCILIATION_PENDING' ||
+                        allocation.sopyoShopifySync.status === 'SUBMISSION_PENDING'
+                      ? 'Reconciliation pending · create will not be retried'
+                      : allocation.sopyoShopifySync.status === 'PLAN_READY'
+                        ? 'Ready to submit'
+                        : 'Planning pending'}</strong>
+              </div>
+            )}
             <div className="meta-item">
               <span>Tracking URL</span>
               {allocation.trackingUrl ? (

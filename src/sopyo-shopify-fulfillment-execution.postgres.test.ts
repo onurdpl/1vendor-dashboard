@@ -9,6 +9,8 @@ import { planSopyoShopifyFulfillment }
   from '../backend/src/modules/vendor-integration/sopyo-shopify-fulfillment-plan.service.js';
 import { executeSopyoShopifyFulfillment }
   from '../backend/src/modules/vendor-integration/sopyo-shopify-fulfillment-execution.service.js';
+import { processSopyoShopifySync }
+  from '../backend/src/modules/vendor-integration/sopyo-shopify-fulfillment-worker.service.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -207,6 +209,75 @@ describeWithPostgres('Sopyo Shopify fulfillment execution on isolated PostgreSQL
     release();
     await first;
     expect(item.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('automatically routes persisted PLAN_READY then OUTCOME_UNKNOWN through one create and canonical reconciliation', async () => {
+    const item = await fixture();
+    await db.vendorAllocation.update({ where: { id: item.allocation.id }, data: {
+      carrier: 'Carrier', trackingNumber: 'TRACK-1', shippingStatus: 'In Transit',
+    } });
+    const before = await Promise.all([db.allocationDeliveredObservation.count(),
+      db.financeLedgerEntry.count(), db.vendorIntegrationShipmentEvent.count(),
+      db.shipmentExecution.count(), db.shipmentShippingCost.count()]);
+    item.create.mockResolvedValueOnce({ outcome: 'unknown' });
+    item.lookup.mockResolvedValueOnce([]).mockResolvedValueOnce([item.evidence]);
+    const runWorker = () => processSopyoShopifySync({ env, dependencies: {
+      db: { sopyoShipmentIntent: { findMany: (args: never) => db.sopyoShipmentIntent.findMany({
+        ...args, where: { AND: [(args as { where: object }).where, { id: item.intent.id }] },
+      }) } } as never,
+      plan: vi.fn(),
+      execute: ({ intentId, env: runtimeEnv }) => executeSopyoShopifyFulfillment({
+        intentId, env: runtimeEnv, shopifyAdminService: item.port,
+      }, db as never),
+    } as never });
+    const first = await runWorker();
+    expect(first).toMatchObject({ executed: 1, confirmed: 0, failed: 0 });
+    expect((await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { id: item.intent.id } })).status)
+      .toBe('OUTCOME_UNKNOWN');
+    const second = await runWorker();
+    expect(second).toMatchObject({ reconciled: 1, confirmed: 0, failed: 0 });
+    const third = await runWorker();
+    expect(third).toMatchObject({ reconciled: 1, confirmed: 1, failed: 0 });
+    expect((await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { id: item.intent.id } })).shopifyFulfillmentId)
+      .toBe(item.evidence.id);
+    expect(item.create).toHaveBeenCalledTimes(1);
+    expect(await Promise.all([db.allocationDeliveredObservation.count(),
+      db.financeLedgerEntry.count(), db.vendorIntegrationShipmentEvent.count(),
+      db.shipmentExecution.count(), db.shipmentShippingCost.count()])).toEqual(before);
+    const allocation = await db.vendorAllocation.findUniqueOrThrow({ where: { id: item.allocation.id } });
+    expect([allocation.carrier, allocation.trackingNumber, allocation.shippingStatus])
+      .toEqual(['Carrier', 'TRACK-1', 'In Transit']);
+  });
+
+  it('overlapping orchestration cycles share the durable executor fence', async () => {
+    const item = await fixture();
+    await db.vendorAllocation.update({ where: { id: item.allocation.id }, data: {
+      carrier: 'Carrier', trackingNumber: 'TRACK-1', shippingStatus: 'In Transit',
+    } });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    item.create.mockImplementation(async () => {
+      await held;
+      return { outcome: 'success', fulfillment: item.evidence };
+    });
+    item.lookup.mockResolvedValue([]);
+    const runWorker = () => processSopyoShopifySync({ env, dependencies: {
+      db: { sopyoShipmentIntent: { findMany: (args: never) => db.sopyoShipmentIntent.findMany({
+        ...args, where: { AND: [(args as { where: object }).where, { id: item.intent.id }] },
+      }) } } as never,
+      plan: vi.fn(),
+      execute: ({ intentId, env: runtimeEnv }) => executeSopyoShopifyFulfillment({
+        intentId, env: runtimeEnv, shopifyAdminService: item.port,
+      }, db as never),
+    } as never });
+    const first = runWorker();
+    await vi.waitFor(() => expect(item.create).toHaveBeenCalledTimes(1));
+    await runWorker();
+    release();
+    await first;
+    expect(item.create).toHaveBeenCalledTimes(1);
+    expect((await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { id: item.intent.id } })).status)
+      .toBe('CONFIRMED');
   });
 
   it('prevents mutation after vendor or frozen-location change', async () => {

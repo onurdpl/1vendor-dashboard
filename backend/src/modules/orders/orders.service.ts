@@ -4360,6 +4360,7 @@ export async function getAdminShopifyOrderBreakdown(
             assignedVendor: true,
             originalVendor: true,
             fulfillment: true,
+            sopyoShipmentIntent: { select: { status: true, conflictReasonCode: true } },
             lineItems: {
             include: {
               shopifyOrderLineItem: true,
@@ -4706,6 +4707,10 @@ export async function getAdminShopifyOrderBreakdown(
         shippingStatus: allocation.shippingStatus,
         trackingNumber: allocation.trackingNumber,
         carrier: allocation.carrier,
+        sopyoShopifySync: allocation.sopyoShipmentIntent
+          ? { status: allocation.sopyoShipmentIntent.status,
+              conflictReasonCode: allocation.sopyoShipmentIntent.conflictReasonCode }
+          : null,
         trackingUrl: allocation.fulfillment?.trackingUrl ?? null,
         fulfilledAt: toIsoString(allocation.fulfillment?.fulfilledAt),
         shipmentCreatedAt: toIsoString(allocation.fulfillment?.shipmentCreatedAt),

@@ -308,6 +308,19 @@ async function findLatestStatusAxes() {
 }
 
 describe('AdminShopifyOrderPage split visibility', () => {
+  it('keeps local tracking visible while showing independent Sopyo Shopify reconciliation', async () => {
+    getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+      sourceShopifyOrderId: '7817723773265', sourceShopifyOrderNumber: '#1091',
+      customer: 'Customer', createdAt: '2026-06-21T08:00:00.000Z',
+      allocations: [buildAllocation({ splitSummary: null, carrier: 'Carrier',
+        trackingNumber: 'TRACK-123', shippingStatus: 'In Transit',
+        sopyoShopifySync: { status: 'OUTCOME_UNKNOWN', conflictReasonCode: null } })],
+    });
+    renderPage();
+    expect(await screen.findByText('Sopyo → Shopify sync')).toBeInTheDocument();
+    expect(screen.getByText('Reconciliation pending · create will not be retried')).toBeInTheDocument();
+    expect(screen.getByText('TRACK-123')).toBeInTheDocument();
+  });
   afterEach(() => {
     cleanup();
     vi.useRealTimers();

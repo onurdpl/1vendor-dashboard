@@ -734,6 +734,7 @@ export type AdminOrderBreakdownAllocationDto = {
   shippingStatus: string;
   trackingNumber: string | null;
   carrier: string | null;
+  sopyoShopifySync: { status: string; conflictReasonCode: string | null } | null;
   trackingUrl: string | null;
   fulfilledAt: string | null;
   shipmentCreatedAt: string | null;

@@ -161,6 +161,7 @@ Webhook processing lifecycle states:
   - reassignment workflow fields (`reassignmentRequired`, candidate vendors, notes, and audit fields when present)
   - assignment history entries with actor, role, reason, and timestamps
   - per-allocation tracking metadata
+  - optional per-allocation `sopyoShopifySync` durable technical state (`status`, bounded `conflictReasonCode`) when a Sopyo shipment intent exists; local carrier/tracking remains independent of Shopify confirmation
   - per-allocation refunded items and totals when present
   - structured order-level `customerRefundCompletion` with canonical statuses for no verified monetary refund, verified partial customer refund, verified full customer refund, or unresolved evidence
   - order-level `refundWebhookStatus` from the newest exactly related `refunds/create` `WebhookEvent`, or `null` when no such stored event is observed

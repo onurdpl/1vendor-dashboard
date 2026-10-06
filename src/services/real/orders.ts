@@ -275,6 +275,7 @@ type AdminOrderBreakdownDto = {
     shippingStatus: string;
     trackingNumber: string | null;
     carrier: string | null;
+    sopyoShopifySync?: { status: string; conflictReasonCode: string | null } | null;
     trackingUrl: string | null;
     fulfilledAt: string | null;
     shipmentCreatedAt: string | null;
@@ -748,6 +749,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         shippingStatus,
         trackingNumber: allocation.trackingNumber ?? undefined,
         carrier: allocation.carrier ?? undefined,
+        sopyoShopifySync: allocation.sopyoShopifySync ?? null,
         trackingUrl: allocation.trackingUrl ?? undefined,
         fulfilledAt: allocation.fulfilledAt ?? undefined,
         fulfilledByVendorId: allocation.fulfilledAt ? allocation.assignedVendorId : undefined,

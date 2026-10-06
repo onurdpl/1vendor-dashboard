@@ -38,6 +38,7 @@ import { registerVendorIntegrationDocsRoutes } from './modules/vendor-integratio
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
 import { registerSopyoDeliveryPollScheduler } from './modules/vendor-integration/sopyo-delivery-poll.service.js';
 import { registerSopyoCargoPollScheduler } from './modules/vendor-integration/sopyo-cargo-poll.service.js';
+import { registerSopyoShopifySyncScheduler } from './modules/vendor-integration/sopyo-shopify-fulfillment-worker.service.js';
 import { registerSopyoOrderPushWorker } from './modules/vendor-integration/sopyo-order-push-worker.service.js';
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
 import { registerVendorDirectoryRoutes } from './modules/vendors/vendor-directory.routes.js';
@@ -513,6 +514,7 @@ export function createApp() {
   registerAbandonedApprovedReturnAutoCancelScheduler(app, env);
   registerSopyoDeliveryPollScheduler(app, env);
   registerSopyoCargoPollScheduler(app, env);
+  registerSopyoShopifySyncScheduler(app, env);
   registerSopyoOrderPushWorker(app, env);
 
   if (env.NODE_ENV !== 'production') {

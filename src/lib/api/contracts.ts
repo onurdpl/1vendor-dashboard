@@ -1270,6 +1270,7 @@ export type VendorAllocationSummary = {
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
   carrier?: string;
+  sopyoShopifySync?: { status: string; conflictReasonCode: string | null } | null;
   trackingUrl?: string;
   estimatedDelivery?: string;
   allocationTotal: string;
