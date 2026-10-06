@@ -10,6 +10,7 @@ import {
 } from '@prisma/client';
 import { createEventsIdempotently } from './finance-event.service.js';
 import { assertLedgerActiveForMoneyMovement } from './active-ledger-policy.service.js';
+import { vendorOwnedSopyoSaleShippingOverride } from './sale-shipping-snapshot.service.js';
 import {
   evaluateSaleSettlementDelay,
   normalizeSettlementDelayDays,
@@ -343,6 +344,7 @@ export async function upsertSaleLedgerForAllocation(
     shippingCostIdSnapshot: confirmedShippingCost?.id ?? null,
     financialProfileIdSnapshot: activeProfile?.id ?? null,
     settlementDelayDaysSnapshot: normalizeSettlementDelayDays(activeProfile?.settlementDelayDays),
+    ...vendorOwnedSopyoSaleShippingOverride(allocation),
   };
   const settlementTiming = evaluateSaleSettlementDelay({
     entryType: 'sale',

@@ -12,6 +12,7 @@ import { prisma } from '../../db/prisma.js';
 import { resolveAllocationOutboundSnapshot } from './allocation-outbound-snapshot.service.js';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import { buildSaleLedgerEntryId } from '../finance/sale-ledger.service.js';
+import { vendorOwnedSopyoSaleShippingOverride } from '../finance/sale-shipping-snapshot.service.js';
 import {
   buildAllocationSplitSelectedLineHash,
   buildDeterministicChildAllocationId,
@@ -349,7 +350,7 @@ function assertNoInconsistentExistingSplit(input: {
 async function createSplitSaleLedger(input: {
   tx: AllocationSplitDb;
   ledgerId: string;
-  allocation: Pick<VendorAllocation, 'id' | 'assignedVendorId' | 'createdAt' | 'shippingStatus'> & {
+  allocation: Pick<VendorAllocation, 'id' | 'assignedVendorId' | 'createdAt' | 'shippingStatus' | 'outboundMethodSnapshot' | 'outboundIntegrationProviderSnapshot'> & {
     order: { id: string; sourceShopifyOrderId: string; sourceShopifyOrderNumber: string; currency: string | null };
   };
   sourceLedger: LoadedLedger;
@@ -379,6 +380,7 @@ async function createSplitSaleLedger(input: {
       shippingCostSourceSnapshot: input.sourceLedger.shippingCostSourceSnapshot,
       shippingCostProviderSnapshot: input.sourceLedger.shippingCostProviderSnapshot,
       shippingCostIdSnapshot: input.sourceLedger.shippingCostIdSnapshot,
+      ...vendorOwnedSopyoSaleShippingOverride(input.allocation),
       financialProfileIdSnapshot: input.sourceLedger.financialProfileIdSnapshot,
       settlementDelayDaysSnapshot: input.sourceLedger.settlementDelayDaysSnapshot,
       settlementStatus: SettlementStatus.ACCRUING,
@@ -662,6 +664,8 @@ export async function splitAllocationForLineItemReject(
         assignedVendorId: freshSource.assignedVendorId,
         createdAt: freshSource.createdAt,
         shippingStatus: freshSource.shippingStatus,
+        outboundMethodSnapshot: freshSource.outboundMethodSnapshot,
+        outboundIntegrationProviderSnapshot: freshSource.outboundIntegrationProviderSnapshot,
         order: freshSource.order,
       },
       sourceLedger,
@@ -679,6 +683,8 @@ export async function splitAllocationForLineItemReject(
         assignedVendorId: childAllocation.assignedVendorId,
         createdAt: childAllocation.createdAt,
         shippingStatus: childAllocation.shippingStatus,
+        outboundMethodSnapshot: childAllocation.outboundMethodSnapshot,
+        outboundIntegrationProviderSnapshot: childAllocation.outboundIntegrationProviderSnapshot,
         order: childAllocation.order,
       },
       sourceLedger,

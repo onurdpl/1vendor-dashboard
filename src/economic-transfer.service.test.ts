@@ -433,6 +433,32 @@ describe('economic transfer service', () => {
     ]));
   });
 
+  it('freezes disabled shipping on a new Sopyo target SALE despite a positive target profile and cost', async () => {
+    const db = setupDb({
+      allocation: buildAllocation({
+        outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+        outboundIntegrationProviderSnapshot: 'SOPYO',
+      }),
+    });
+    prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({
+      id: 'profile-vendor-b', commissionPercent: '12.00', commissionVatPercent: '20.00',
+      deductShippingEnabled: true, shippingMode: 'EXTERNAL_PROVIDER',
+      fixedShippingFee: '88.00', settlementDelayDays: 21,
+    });
+    prismaMock.shipmentShippingCost.findFirst.mockResolvedValue({
+      id: 'confirmed-cost', shippingCost: '72.00', shippingVatAmount: '12.00',
+      sourceType: 'MANUAL', providerName: 'Provider',
+    });
+
+    await runTransfer();
+    const target = db.allocation.financeEntries.find((ledger) => ledger.id === 'fin-vendor-b-sale-1001-alloc-1');
+    expect(target).toMatchObject({
+      deductShippingEnabledSnapshot: false, shippingModeSnapshot: 'DISABLED',
+      fixedShippingFeeSnapshot: '0.00', shippingCostSnapshot: null,
+      shippingVatAmountSnapshot: null, shippingCostIdSnapshot: null,
+    });
+  });
+
   it('blocks a full-refund terminal transfer before a pending claim or forward reassignment write', async () => {
     const db = setupDb({
       allocation: buildAllocation({ fullRefundTerminalFact: { id: 'terminal-fact-1' } }),

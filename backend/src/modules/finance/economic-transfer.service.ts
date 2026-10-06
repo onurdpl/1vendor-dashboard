@@ -28,6 +28,7 @@ import {
   hasActiveCustomerCancellationFinanceHold,
 } from './customer-cancellation-finance-hold.service.js';
 import { assertAllocationActionable } from '../orders/allocation-actionability-guard.service.js';
+import { vendorOwnedSopyoSaleShippingOverride } from './sale-shipping-snapshot.service.js';
 
 export type TransferAllocationEconomicsInput = {
   vendorAllocationId: string;
@@ -483,6 +484,7 @@ async function createTargetSaleLedger(input: {
     shippingCostIdSnapshot: confirmedShippingCost?.id ?? null,
     financialProfileIdSnapshot: activeProfile?.id ?? null,
     settlementDelayDaysSnapshot: normalizeSettlementDelayDays(activeProfile?.settlementDelayDays),
+    ...vendorOwnedSopyoSaleShippingOverride(allocation),
   };
   const settlementTiming = evaluateSaleSettlementDelay({
     entryType: 'sale',

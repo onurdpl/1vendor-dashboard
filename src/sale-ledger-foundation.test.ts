@@ -218,6 +218,57 @@ describe('sale ledger foundation', () => {
     }));
   });
 
+  it.each([
+    { shippingMode: 'FIXED', fixedShippingFee: 88, shippingCost: null },
+    { shippingMode: 'EXTERNAL_PROVIDER', fixedShippingFee: null, shippingCost: {
+      id: 'confirmed-cost', shippingCost: 72, shippingVatAmount: 12,
+      sourceType: 'MANUAL', providerName: 'Provider',
+    } },
+  ])('freezes vendor-owned Sopyo shipping as disabled despite $shippingMode profile', async (input) => {
+    const { tx } = buildTx({
+      allocation: buildAllocation({
+        outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+        outboundIntegrationProviderSnapshot: 'SOPYO',
+        deliveredObservation: {
+          vendorAllocationId: 'alloc-1', outboundMethod: 'VENDOR_INTEGRATION',
+          outboundIntegrationProvider: 'SOPYO', firstObservedDeliveredAt: new Date('2026-05-13T10:20:00.000Z'),
+        },
+      }),
+      activeProfile: {
+        id: 'profile-sporjinal', commissionPercent: 10, commissionVatPercent: 20,
+        deductShippingEnabled: true, shippingMode: input.shippingMode,
+        fixedShippingFee: input.fixedShippingFee, settlementDelayDays: 21,
+      },
+      shippingCost: input.shippingCost,
+    });
+    const sale = await upsertSaleLedgerForAllocation(tx as never, 'alloc-1') as Record<string, unknown>;
+    expect(sale).toMatchObject({
+      deductShippingEnabledSnapshot: false,
+      shippingModeSnapshot: 'DISABLED',
+      fixedShippingFeeSnapshot: '0.00',
+      shippingCostSnapshot: null,
+      shippingVatAmountSnapshot: null,
+      shippingCostSourceSnapshot: null,
+      shippingCostProviderSnapshot: null,
+      shippingCostIdSnapshot: null,
+      settlementEligibleAt: new Date('2026-06-03T10:20:00.000Z'),
+    });
+  });
+
+  it.each([
+    { method: null, provider: null },
+    { method: 'KARGONOMI', provider: null },
+  ])('keeps existing $method outbound snapshot shipping behavior', async ({ method, provider }) => {
+    const { tx } = buildTx({
+      allocation: buildAllocation({ outboundMethodSnapshot: method, outboundIntegrationProviderSnapshot: provider }),
+      activeProfile: { deductShippingEnabled: true, shippingMode: 'FIXED', fixedShippingFee: 88 },
+    });
+    const sale = await upsertSaleLedgerForAllocation(tx as never, 'alloc-1') as Record<string, unknown>;
+    expect(sale).toMatchObject({
+      deductShippingEnabledSnapshot: true, shippingModeSnapshot: 'FIXED', fixedShippingFeeSnapshot: 88,
+    });
+  });
+
   it('returns an existing identical sale ledger without creating events or updating the row', async () => {
     const { tx, createMany, update } = buildTx({
       existingLedger: buildLedger(),

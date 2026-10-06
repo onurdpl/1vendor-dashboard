@@ -355,6 +355,30 @@ describe('allocation split service', () => {
     });
   });
 
+  it('does not copy a positive source shipping deduction into a Sopyo-frozen split child', async () => {
+    const source = buildSourceAllocation();
+    source.financeEntries = [buildSourceLedger({
+      deductShippingEnabledSnapshot: true,
+      shippingModeSnapshot: 'FIXED',
+      fixedShippingFeeSnapshot: '25.00',
+    })];
+    const { db, state } = createSplitDb({ financeEntries: source.financeEntries });
+    const result = await splitAllocationForLineItemReject({
+      vendorAllocationId: 'alloc-source',
+      selectedVendorAllocationLineItemIds: ['line-2'],
+      actorVendorId: 'vendor-a',
+      reason: 'OUT_OF_STOCK',
+      confirmSplit: true,
+    }, db as never);
+    expect(state.ledgers.get(result.remainingSaleLedgerId)).toMatchObject({
+      deductShippingEnabledSnapshot: true, shippingModeSnapshot: 'FIXED', fixedShippingFeeSnapshot: '25.00',
+    });
+    expect(state.ledgers.get(result.childSaleLedgerId)).toMatchObject({
+      deductShippingEnabledSnapshot: false, shippingModeSnapshot: 'DISABLED', fixedShippingFeeSnapshot: '0.00',
+      shippingCostSnapshot: null, shippingVatAmountSnapshot: null,
+    });
+  });
+
   it('voids source ledger, creates replacement ledgers, split event, history, and sale events', async () => {
     const { db, state } = createSplitDb();
 
