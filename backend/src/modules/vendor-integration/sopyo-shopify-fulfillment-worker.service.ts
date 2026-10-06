@@ -45,10 +45,10 @@ export async function processSopyoShopifySync(input: {
   };
   // The planner is read-only externally but uses the configured Shopify client.
   // Fail before either service can read/mutate Shopify with an unsupported API version.
-  if (input.env.SHOPIFY_API_VERSION !== '2026-10' || !input.env.SHOPIFY_SHOP_DOMAIN ||
+  if (input.env.SHOPIFY_API_VERSION !== '2026-01' || !input.env.SHOPIFY_SHOP_DOMAIN ||
       !input.env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
     input.logger?.error({ event: 'SOPYO_SHOPIFY_SYNC_CONFIG_UNAVAILABLE' },
-      'Sopyo Shopify sync requires Shopify Admin API 2026-10.');
+      'Sopyo Shopify sync requires Shopify Admin API 2026-01.');
     return report;
   }
   const db = input.dependencies?.db ?? prisma;

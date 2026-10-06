@@ -8,7 +8,7 @@ import { planSopyoShopifyFulfillment } from '../backend/src/modules/vendor-integ
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 const location = 'gid://shopify/Location/123';
-const env = { SHOPIFY_API_VERSION: '2026-10' } as AppEnv;
+const env = { SHOPIFY_API_VERSION: '2026-01' } as AppEnv;
 
 describeWithPostgres('Sopyo Shopify execution planning on isolated PostgreSQL', () => {
   let db: PrismaClient;

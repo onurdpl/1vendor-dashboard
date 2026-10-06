@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 import { createShopifyAdminService } from '../backend/src/modules/shopify/shopify-admin.service.js';
 
-const env = { SHOPIFY_API_VERSION: '2026-10', SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+const env = { SHOPIFY_API_VERSION: '2026-01', SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
   SHOPIFY_ADMIN_ACCESS_TOKEN: 'test-token' } as AppEnv;
 const fulfillment = {
   id: 'gid://shopify/Fulfillment/1', status: 'SUCCESS',
@@ -23,7 +23,7 @@ const input = {
   ],
 };
 
-describe('Sopyo Shopify 2026-10 fulfillment GraphQL transport', () => {
+describe('Sopyo Shopify 2026-01 fulfillment GraphQL transport', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('sends one mutation with both exact fulfillment-order line GIDs and tracking', async () => {
@@ -34,9 +34,10 @@ describe('Sopyo Shopify 2026-10 fulfillment GraphQL transport', () => {
     expect(result).toMatchObject({ outcome: 'success', fulfillment: { id: fulfillment.id } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, options] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://example.myshopify.com/admin/api/2026-10/graphql.json');
+    expect(url).toBe('https://example.myshopify.com/admin/api/2026-01/graphql.json');
     const body = JSON.parse(String(options?.body));
     expect(body.query).toContain('fulfillmentCreate');
+    expect(body.query).not.toContain('fulfillmentCreateV2');
     expect(body.variables.fulfillment.lineItemsByFulfillmentOrder).toEqual(input.lineItemsByFulfillmentOrder);
     expect(body.variables.fulfillment.trackingInfo).toEqual({ company: 'Carrier', number: 'TRACK' });
     expect(body.variables.fulfillment.notifyCustomer).toBe(false);
@@ -64,26 +65,77 @@ describe('Sopyo Shopify 2026-10 fulfillment GraphQL transport', () => {
     },
   );
 
-  it('requires a complete canonical fulfillment list and nested identity', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ data: { order: {
-      id: input.orderGid, fulfillmentsCount: { count: 1 }, fulfillments: [fulfillment],
-    } } }));
+  it('exhausts order and fulfillment-order pages, deduplicating shared fulfillment IDs', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const { id, after } = body.variables;
+      if (body.query.includes('SopyoFulfillmentOrderMembership')) {
+        expect(body.query).toContain('displayable: false');
+        const second = after === 'order-cursor';
+        return Response.json({ data: { order: { id: input.orderGid, fulfillmentOrders: {
+          pageInfo: { hasNextPage: !second, endCursor: second ? null : 'order-cursor' },
+          nodes: [{ id: `gid://shopify/FulfillmentOrder/${second ? '4' : '3'}` }],
+        } } } });
+      }
+      if (body.query.includes('SopyoFulfillmentEvidence')) {
+        return Response.json({ data: { fulfillment } });
+      }
+      expect(body.query).toContain('fulfillments(first: 100, after: $after)');
+      const firstOrder = id === 'gid://shopify/FulfillmentOrder/3';
+      const secondPage = after === 'fulfillment-cursor';
+      return Response.json({ data: { fulfillmentOrder: { id, order: { id: input.orderGid },
+        fulfillments: { pageInfo: {
+          hasNextPage: firstOrder && !secondPage,
+          endCursor: firstOrder && !secondPage ? 'fulfillment-cursor' : null,
+        }, nodes: firstOrder && secondPage ? [] : [{ id: fulfillment.id }] },
+      } } });
+    });
     const result = await createShopifyAdminService(env).fetchSopyoFulfillmentsForReconciliation(input.orderGid);
     expect(result).toHaveLength(1);
     expect(result[0]?.fulfillmentOrderGids).toEqual([
       'gid://shopify/FulfillmentOrder/3', 'gid://shopify/FulfillmentOrder/4',
     ]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
     const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
-    expect(body.query).toContain('fulfillmentsCount');
+    expect(body.query).not.toContain('fulfillmentsCount');
+    expect(body.query).not.toContain('fulfillments(first: 250)');
     expect(body.query).not.toContain('fulfillmentCreate');
   });
 
-  it('rejects truncated canonical fulfillment evidence', async () => {
+  it('rejects malformed pagination instead of accepting truncated membership', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ data: { order: {
-      id: input.orderGid, fulfillmentsCount: { count: 2 }, fulfillments: [fulfillment],
+      id: input.orderGid, fulfillmentOrders: {
+        pageInfo: { hasNextPage: true, endCursor: null }, nodes: [{ id: 'gid://shopify/FulfillmentOrder/3' }],
+      },
     } } }));
     await expect(createShopifyAdminService(env).fetchSopyoFulfillmentsForReconciliation(input.orderGid))
       .rejects.toThrow('incomplete');
+  });
+
+  it('rejects truncated fulfillment-order relationship pages', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.query.includes('SopyoFulfillmentOrderMembership')) {
+        return Response.json({ data: { order: { id: input.orderGid, fulfillmentOrders: {
+          pageInfo: { hasNextPage: false }, nodes: [{ id: 'gid://shopify/FulfillmentOrder/3' }],
+        } } } });
+      }
+      return Response.json({ data: { fulfillmentOrder: {
+        id: 'gid://shopify/FulfillmentOrder/3', order: { id: input.orderGid },
+        fulfillments: { pageInfo: { hasNextPage: true, endCursor: null },
+          nodes: [{ id: fulfillment.id }] },
+      } } });
+    });
+    await expect(createShopifyAdminService(env).fetchSopyoFulfillmentsForReconciliation(input.orderGid))
+      .rejects.toThrow('incomplete');
+  });
+
+  it('fails closed on an unsupported Shopify version before any request', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const unsupported = createShopifyAdminService({ ...env, SHOPIFY_API_VERSION: '2024-01' });
+    await expect(unsupported.fetchSopyoFulfillmentsForReconciliation(input.orderGid)).rejects.toThrow('not configured');
+    await expect(unsupported.fetchFulfillmentOrdersForSopyoPlanning(input.orderGid)).rejects.toThrow('not configured');
+    await expect(unsupported.createSopyoFulfillment(input)).rejects.toThrow('not configured');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

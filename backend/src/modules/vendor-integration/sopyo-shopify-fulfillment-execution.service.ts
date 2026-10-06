@@ -169,7 +169,7 @@ export async function executeSopyoShopifyFulfillment(input: {
   env: AppEnv;
   shopifyAdminService?: ShopifyPort;
 }, db: typeof prisma = prisma) {
-  if (input.env.SHOPIFY_API_VERSION !== '2026-10' || !input.env.SHOPIFY_SHOP_DOMAIN ||
+  if (input.env.SHOPIFY_API_VERSION !== '2026-01' || !input.env.SHOPIFY_SHOP_DOMAIN ||
       !input.env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
     throw new SopyoShopifyExecutionError('SHOPIFY_NOT_CONFIGURED');
   }

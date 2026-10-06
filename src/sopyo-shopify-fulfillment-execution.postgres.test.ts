@@ -15,7 +15,7 @@ import { processSopyoShopifySync }
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 const location = 'gid://shopify/Location/123';
-const env = { SHOPIFY_API_VERSION: '2026-10', SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+const env = { SHOPIFY_API_VERSION: '2026-01', SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
   SHOPIFY_ADMIN_ACCESS_TOKEN: 'test-token' } as AppEnv;
 
 describeWithPostgres('Sopyo Shopify fulfillment execution on isolated PostgreSQL', () => {

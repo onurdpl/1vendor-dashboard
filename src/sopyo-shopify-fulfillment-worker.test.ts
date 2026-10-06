@@ -3,7 +3,7 @@ import { processSopyoShopifySync, createSopyoShopifySyncWorker,
   registerSopyoShopifySyncScheduler } from '../backend/src/modules/vendor-integration/sopyo-shopify-fulfillment-worker.service.js';
 import { SOPYO_DELIVERY_POLL_INTERVAL_MS } from '../backend/src/modules/vendor-integration/sopyo-delivery-poll.service.js';
 
-const env = { SHOPIFY_API_VERSION: '2026-10', SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+const env = { SHOPIFY_API_VERSION: '2026-01', SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
   SHOPIFY_ADMIN_ACCESS_TOKEN: 'test-token', SOPYO_DELIVERY_POLLING_ENABLED: true } as never;
 
 function candidate(status: string, id: string, overrides: Record<string, unknown> = {}) {
@@ -92,7 +92,7 @@ describe('Sopyo Shopify sync state routing', () => {
     expect(h.plan).not.toHaveBeenCalled();
     expect(h.execute).not.toHaveBeenCalled();
     expect(h.logger.error).toHaveBeenCalledWith({ event: 'SOPYO_SHOPIFY_SYNC_CONFIG_UNAVAILABLE' },
-      'Sopyo Shopify sync requires Shopify Admin API 2026-10.');
+      'Sopyo Shopify sync requires Shopify Admin API 2026-01.');
   });
 
   it('isolates candidate errors and never logs exception text', async () => {

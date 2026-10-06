@@ -4514,13 +4514,13 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
-  /** A single 2026-10 mutation can contain all same-order, same-location planned fulfillment orders. */
+  /** A single 2026-01 mutation can contain all same-order, same-location planned fulfillment orders. */
   async function createSopyoFulfillment(
     input: ShopifySopyoFulfillmentCreateInput,
   ): Promise<ShopifySopyoFulfillmentCreateResult> {
-    if (env.SHOPIFY_API_VERSION !== '2026-10' || !env.SHOPIFY_SHOP_DOMAIN ||
+    if (env.SHOPIFY_API_VERSION !== '2026-01' || !env.SHOPIFY_SHOP_DOMAIN ||
         !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
-      throw new Error('Shopify 2026-10 fulfillment create is not configured.');
+      throw new Error('Shopify 2026-01 fulfillment create is not configured.');
     }
     let response: Response;
     try {
@@ -4573,64 +4573,125 @@ export function createShopifyAdminService(env: AppEnv) {
     return fulfillment ? { outcome: 'success', fulfillment } : { outcome: 'unknown' };
   }
 
-  /** Strict, complete order fulfillment read. An incomplete list never proves absence. */
+  /** Exhausts accessible fulfillment-order relationships; absence still never proves a create failed. */
   async function fetchSopyoFulfillmentsForReconciliation(
     shopifyOrderId: string,
   ): Promise<ShopifySopyoFulfillmentEvidence[]> {
-    if (env.SHOPIFY_API_VERSION !== '2026-10' || !env.SHOPIFY_SHOP_DOMAIN ||
+    if (env.SHOPIFY_API_VERSION !== '2026-01' || !env.SHOPIFY_SHOP_DOMAIN ||
         !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
-      throw new Error('Shopify 2026-10 fulfillment reconciliation is not configured.');
+      throw new Error('Shopify 2026-01 fulfillment reconciliation is not configured.');
     }
-    const response = await fetch(
-      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json',
-          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN },
-        body: JSON.stringify({
-          query: `query SopyoFulfillmentReconciliation($id: ID!) {
-            order(id: $id) {
-              id fulfillmentsCount { count }
-              fulfillments(first: 250) {
-                id status order { id } location { id }
-                trackingInfo(first: 10) { company number }
-                fulfillmentOrders(first: 100) { pageInfo { hasNextPage } nodes { id } }
-                fulfillmentLineItems(first: 250) {
-                  pageInfo { hasNextPage }
-                  nodes { quantity lineItem { id } }
-                }
-              }
+    const orderGid = toShopifyOrderGid(shopifyOrderId);
+    const incomplete = () => new Error('Shopify fulfillment reconciliation evidence is incomplete.');
+    async function read<T>(query: string, variables: Record<string, string | null>): Promise<T> {
+      const response = await fetch(
+        `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json',
+            'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN! },
+          body: JSON.stringify({ query, variables }),
+        },
+      );
+      if (!response.ok) throw new Error('Shopify fulfillment reconciliation read failed.');
+      const json = await parseCanonicalShopifyResponse<T>(response);
+      if (json.errors?.length || !json.data) throw incomplete();
+      return json.data;
+    }
+    type PageInfo = { hasNextPage?: boolean | null; endCursor?: string | null };
+    function nextCursor(pageInfo: PageInfo | null | undefined, current: string | null): string | null {
+      if (typeof pageInfo?.hasNextPage !== 'boolean') throw incomplete();
+      if (!pageInfo.hasNextPage) return null;
+      if (!pageInfo.endCursor || pageInfo.endCursor === current) throw incomplete();
+      return pageInfo.endCursor;
+    }
+    const orderIds: string[] = [];
+    const seenOrderIds = new Set<string>();
+    const seenOrderCursors = new Set<string>();
+    let orderCursor: string | null = null;
+    do {
+      const data: { order?: { id?: string | null; fulfillmentOrders?: {
+        pageInfo?: PageInfo | null; nodes?: Array<{ id?: string | null }> | null;
+      } | null } | null } = await read(`query SopyoFulfillmentOrderMembership($id: ID!, $after: String) {
+        order(id: $id) {
+          id
+          fulfillmentOrders(first: 100, after: $after, displayable: false) {
+            pageInfo { hasNextPage endCursor }
+            nodes { id }
+          }
+        }
+      }`, { id: orderGid, after: orderCursor });
+      const connection = data.order?.fulfillmentOrders;
+      if (data.order?.id !== orderGid || !Array.isArray(connection?.nodes)) throw incomplete();
+      for (const node of connection.nodes) {
+        if (!node.id?.startsWith('gid://shopify/FulfillmentOrder/') || seenOrderIds.has(node.id)) throw incomplete();
+        seenOrderIds.add(node.id);
+        orderIds.push(node.id);
+      }
+      orderCursor = nextCursor(connection.pageInfo, orderCursor);
+      if (orderCursor && (seenOrderCursors.has(orderCursor) || connection.nodes.length === 0)) throw incomplete();
+      if (orderCursor) seenOrderCursors.add(orderCursor);
+    } while (orderCursor);
+
+    const fulfillmentMembership = new Map<string, Set<string>>();
+    for (const fulfillmentOrderId of orderIds) {
+      const seenCursors = new Set<string>();
+      let cursor: string | null = null;
+      do {
+        const data: { fulfillmentOrder?: { id?: string | null; order?: { id?: string | null } | null;
+          fulfillments?: { pageInfo?: PageInfo | null; nodes?: SopyoFulfillmentNode[] | null } | null;
+        } | null } = await read(`query SopyoFulfillmentOrderFulfillments($id: ID!, $after: String) {
+          fulfillmentOrder(id: $id) {
+            id order { id }
+            fulfillments(first: 100, after: $after) {
+              pageInfo { hasNextPage endCursor }
+              nodes { id }
             }
-          }`,
-          variables: { id: toShopifyOrderGid(shopifyOrderId) },
-        }),
-      },
-    );
-    if (!response.ok) throw new Error('Shopify fulfillment reconciliation read failed.');
-    const json = await parseCanonicalShopifyResponse<{ order?: {
-      id?: string | null; fulfillmentsCount?: { count?: number | null } | null;
-      fulfillments?: SopyoFulfillmentNode[] | null;
-    } | null }>(response);
-    const order = json.data?.order;
-    if (json.errors?.length || order?.id !== toShopifyOrderGid(shopifyOrderId) ||
-        !Array.isArray(order.fulfillments) || !Number.isSafeInteger(order.fulfillmentsCount?.count) ||
-        order.fulfillmentsCount?.count !== order.fulfillments.length) {
-      throw new Error('Shopify fulfillment reconciliation evidence is incomplete.');
+          }
+        }`, { id: fulfillmentOrderId, after: cursor });
+        const connection = data.fulfillmentOrder?.fulfillments;
+        if (data.fulfillmentOrder?.id !== fulfillmentOrderId ||
+            data.fulfillmentOrder.order?.id !== orderGid || !Array.isArray(connection?.nodes)) throw incomplete();
+        for (const node of connection.nodes) {
+          if (!node.id?.startsWith('gid://shopify/Fulfillment/')) throw incomplete();
+          const memberships = fulfillmentMembership.get(node.id) ?? new Set<string>();
+          memberships.add(fulfillmentOrderId);
+          fulfillmentMembership.set(node.id, memberships);
+        }
+        cursor = nextCursor(connection.pageInfo, cursor);
+        if (cursor && (seenCursors.has(cursor) || connection.nodes.length === 0)) throw incomplete();
+        if (cursor) seenCursors.add(cursor);
+      } while (cursor);
     }
-    const evidence = order.fulfillments.map(parseSopyoFulfillmentEvidence);
-    if (evidence.some((item) => !item)) {
-      throw new Error('Shopify fulfillment reconciliation evidence is incomplete.');
+    const fulfillments: ShopifySopyoFulfillmentEvidence[] = [];
+    for (const [id, memberships] of fulfillmentMembership) {
+      const data: { fulfillment?: SopyoFulfillmentNode | null } = await read(`query SopyoFulfillmentEvidence($id: ID!) {
+        fulfillment(id: $id) {
+          id status order { id } location { id }
+          trackingInfo(first: 10) { company number }
+          fulfillmentOrders(first: 100) { pageInfo { hasNextPage } nodes { id } }
+          fulfillmentLineItems(first: 250) {
+            pageInfo { hasNextPage }
+            nodes { quantity lineItem { id } }
+          }
+        }
+      }`, { id });
+      const evidence = parseSopyoFulfillmentEvidence(data.fulfillment);
+      if (!evidence || evidence.id !== id || evidence.orderGid !== orderGid ||
+          [...memberships].some((fulfillmentOrderId) =>
+            !evidence.fulfillmentOrderGids.includes(fulfillmentOrderId))) throw incomplete();
+      fulfillments.push(evidence);
     }
-    return evidence as ShopifySopyoFulfillmentEvidence[];
+    return fulfillments;
   }
 
-  /** Strict 2026-10 read for Sopyo planning. Truncated or malformed canonical data is not usable. */
+  /** Strict 2026-01 read for Sopyo planning. Truncated or malformed canonical data is not usable. */
   async function fetchFulfillmentOrdersForSopyoPlanning(
     shopifyOrderId: string,
   ): Promise<ShopifySopyoFulfillmentPlanRead> {
-    if (env.SHOPIFY_API_VERSION !== '2026-10' || !env.SHOPIFY_SHOP_DOMAIN ||
+    if (env.SHOPIFY_API_VERSION !== '2026-01' || !env.SHOPIFY_SHOP_DOMAIN ||
         !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
-      throw new Error('Shopify 2026-10 fulfillment planning read is not configured.');
+      throw new Error('Shopify 2026-01 fulfillment planning read is not configured.');
     }
     const response = await fetch(
       `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
