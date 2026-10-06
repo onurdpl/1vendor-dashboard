@@ -35,6 +35,7 @@ export async function authenticateVendorIntegrationRequest(request: FastifyReque
       id: true,
       vendorIdentifier: true,
       providerName: true,
+      providerCode: true,
       enabled: true,
       scopes: true,
       revokedAt: true,
@@ -57,6 +58,7 @@ export async function authenticateVendorIntegrationRequest(request: FastifyReque
     clientId: client.id,
     vendorIdentifier: client.vendorIdentifier,
     providerName: client.providerName,
+    providerCode: client.providerCode,
     scopes: client.scopes,
   };
 

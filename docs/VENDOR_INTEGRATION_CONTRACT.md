@@ -39,6 +39,7 @@ Tokens can be revoked or rotated by Sporgym. After revocation, requests using th
 - A provider can access only allocations assigned to the vendor linked to its token.
 - Vendor identity is derived from the bearer token, never from request body or query parameters.
 - Cross-vendor allocation access is rejected.
+- For shipment writes to an allocation frozen as `VENDOR_INTEGRATION` / `SOPYO`, the authenticated client must have persisted `providerCode=SOPYO`. A legacy NULL-coded client is rejected; this does not change NULL/NULL or Kargonomi allocation behavior. Shipment updates remain operational evidence, not delivered-observation or finance authority.
 - Write endpoints require `Idempotency-Key`.
 - Sporgym records audit logs for integration API requests.
 - Audit logs do not store full request bodies, full response bodies, bearer tokens, passwords, or provider secrets.

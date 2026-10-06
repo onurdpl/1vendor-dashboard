@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { VendorIntegrationProviderCode, VendorOutboundMethod, type Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { isFullOrderCancelled } from '../orders/full-order-cancellation-policy.js';
 import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
@@ -98,6 +98,22 @@ function assertAllocationIsOperational(allocation: {
   }
 }
 
+function assertShipmentProviderAuthority(
+  allocation: {
+    outboundMethodSnapshot: VendorOutboundMethod | null;
+    outboundIntegrationProviderSnapshot: VendorIntegrationProviderCode | null;
+  },
+  context: VendorIntegrationContext,
+) {
+  if (allocation.outboundMethodSnapshot === VendorOutboundMethod.VENDOR_INTEGRATION &&
+      allocation.outboundIntegrationProviderSnapshot === VendorIntegrationProviderCode.SOPYO &&
+      context.providerCode !== VendorIntegrationProviderCode.SOPYO) {
+    throw new VendorIntegrationOrderStateError(
+      'Integration client provider does not match the allocation outbound provider.',
+    );
+  }
+}
+
 export function validateVendorIntegrationShipmentPayload(input: {
   carrier?: string | null;
   trackingNumber?: string | null;
@@ -150,6 +166,8 @@ export async function updateVendorIntegrationOrderShipment(
           select: {
             id: true,
             assignedVendorId: true,
+            outboundMethodSnapshot: true,
+            outboundIntegrationProviderSnapshot: true,
             carrier: true,
             trackingNumber: true,
             vendorIntegrationTrackingUrl: true,
@@ -161,6 +179,7 @@ export async function updateVendorIntegrationOrderShipment(
       },
     });
     if (existingEvent) {
+      assertShipmentProviderAuthority(existingEvent.vendorAllocation, input.context);
       return {
         idempotent: true,
         allocation: serializeShipment(existingEvent.vendorAllocation),
@@ -188,6 +207,8 @@ export async function updateVendorIntegrationOrderShipment(
       select: {
         id: true,
         assignedVendorId: true,
+        outboundMethodSnapshot: true,
+        outboundIntegrationProviderSnapshot: true,
         allocationStatus: true,
         cancellationReason: true,
         order: {
@@ -204,6 +225,7 @@ export async function updateVendorIntegrationOrderShipment(
     }
 
     assertAllocationIsOperational(allocation);
+    assertShipmentProviderAuthority(allocation, input.context);
     await assertNoPendingCustomerCancellationHold(allocation.id, tx);
 
     const shippedAt = parseShippedAt(input.shippedAt);

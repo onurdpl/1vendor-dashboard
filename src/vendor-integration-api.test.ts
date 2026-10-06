@@ -62,6 +62,7 @@ function buildClient(overrides: Record<string, unknown> = {}) {
     id: 'client-1',
     vendorIdentifier: 'sporjinal',
     providerName: 'Provider A',
+    providerCode: null,
     enabled: true,
     scopes: ['orders:read'],
     revokedAt: null,
@@ -1485,6 +1486,102 @@ describe('vendor integration API foundation', () => {
         }),
       }),
     );
+  });
+
+  it('rejects a legacy NULL-coded client on a Sopyo-frozen allocation before shipment mutation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
+    }));
+
+    const response = await injectVendorIntegrationShipment('alloc-sporjinal-1',
+      { authorization: 'Bearer legacy-token', 'idempotency-key': 'sopyo-legacy-key' },
+      { carrier: 'Carrier', trackingNumber: 'TRACK-1' });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({ message: 'Integration client provider does not match the allocation outbound provider.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a legacy NULL-coded replay for a Sopyo-frozen allocation without rewriting shipment data', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorIntegrationShipmentEvent.findUnique.mockResolvedValueOnce({
+      vendorAllocation: buildAllocation({
+        outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
+      }),
+    });
+
+    const response = await injectVendorIntegrationShipment('alloc-sporjinal-1',
+      { authorization: 'Bearer legacy-token', 'idempotency-key': 'sopyo-existing-key' },
+      { carrier: 'Carrier', trackingNumber: 'TRACK-1' });
+
+    expect(response.statusCode).toBe(409);
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('allows a same-vendor SOPYO-coded client to update a Sopyo-frozen allocation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({
+      providerCode: 'SOPYO', scopes: ['shipment:write'],
+    }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
+    }));
+    prismaMock.vendorAllocation.update.mockResolvedValueOnce(buildAllocation({
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
+      carrier: 'Carrier', trackingNumber: 'TRACK-1', shippingStatus: 'In Transit',
+    }));
+
+    const response = await injectVendorIntegrationShipment('alloc-sporjinal-1',
+      { authorization: 'Bearer sopyo-token', 'idempotency-key': 'sopyo-valid-key' },
+      { carrier: 'Carrier', trackingNumber: 'TRACK-1' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.request.vendorIntegration).toEqual(expect.objectContaining({ providerCode: 'SOPYO' }));
+    expect(response.payload).toEqual(expect.objectContaining({ idempotent: false,
+      allocation: expect.objectContaining({ shippingStatus: 'In Transit' }) }));
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Sopyo-coded shipment replay idempotent', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({
+      providerCode: 'SOPYO', scopes: ['shipment:write'],
+    }));
+    prismaMock.vendorIntegrationShipmentEvent.findUnique.mockResolvedValueOnce({
+      vendorAllocation: buildAllocation({
+        outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
+        carrier: 'Original carrier', trackingNumber: 'ORIGINAL', shippingStatus: 'In Transit',
+      }),
+    });
+
+    const response = await injectVendorIntegrationShipment('alloc-sporjinal-1',
+      { authorization: 'Bearer sopyo-token', 'idempotency-key': 'sopyo-existing-key' },
+      { carrier: 'Different carrier', trackingNumber: 'DIFFERENT' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(expect.objectContaining({ idempotent: true,
+      allocation: expect.objectContaining({ trackingNumber: 'ORIGINAL' }) }));
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { outboundMethodSnapshot: null, outboundIntegrationProviderSnapshot: null },
+    { outboundMethodSnapshot: 'KARGONOMI', outboundIntegrationProviderSnapshot: null },
+  ])('preserves legacy shipment writes for $outboundMethodSnapshot allocation', async (snapshot) => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation(snapshot));
+    prismaMock.vendorAllocation.update.mockResolvedValueOnce(buildAllocation({
+      ...snapshot, carrier: 'Carrier', trackingNumber: 'TRACK-1', shippingStatus: 'In Transit',
+    }));
+
+    const response = await injectVendorIntegrationShipment('alloc-sporjinal-1',
+      { authorization: 'Bearer legacy-token', 'idempotency-key': 'legacy-key' },
+      { carrier: 'Carrier', trackingNumber: 'TRACK-1' });
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).toHaveBeenCalledTimes(1);
   });
 
   it('returns the previous shipment result for repeated idempotency keys without duplicate events', async () => {
