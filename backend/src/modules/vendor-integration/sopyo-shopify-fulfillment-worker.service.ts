@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { canonicalSopyoOrderId } from '../shipping/allocation-delivered-observation.service.js';
-import { SOPYO_DELIVERY_POLL_INTERVAL_MS } from './sopyo-delivery-poll.service.js';
+import { SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS } from './sopyo-delivery-poll.service.js';
 import { executeSopyoShopifyFulfillment } from './sopyo-shopify-fulfillment-execution.service.js';
 import { planSopyoShopifyFulfillment } from './sopyo-shopify-fulfillment-plan.service.js';
 
@@ -158,7 +158,7 @@ export function createSopyoShopifySyncWorker(input: {
 
   function start() {
     if (timer || stopping) return;
-    timer = globalThis.setInterval(() => { void runCycle(); }, SOPYO_DELIVERY_POLL_INTERVAL_MS);
+    timer = globalThis.setInterval(() => { void runCycle(); }, SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS);
     timer.unref?.();
   }
 

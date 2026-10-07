@@ -11,7 +11,7 @@ import { assertFullOrderOperationallyEligible } from '../orders/full-order-cance
 import { canonicalSopyoOrderId } from '../shipping/allocation-delivered-observation.service.js';
 import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.service.js';
 import { createSopyoDeliveryClient } from './sopyo-delivery.client.js';
-import { SOPYO_DELIVERY_POLL_INTERVAL_MS } from './sopyo-delivery-poll.service.js';
+import { SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS } from './sopyo-delivery-poll.service.js';
 import { recordVerifiedSopyoShipmentIntent } from './sopyo-shipment-intent.service.js';
 
 const IN_TRANSIT = 'In Transit';
@@ -207,7 +207,7 @@ export function createSopyoCargoPollWorker(input: {
 
   function start() {
     if (timer || stopping) return;
-    timer = globalThis.setInterval(() => { void runCycle(); }, SOPYO_DELIVERY_POLL_INTERVAL_MS);
+    timer = globalThis.setInterval(() => { void runCycle(); }, SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS);
     timer.unref?.();
   }
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { processSopyoShopifySync, createSopyoShopifySyncWorker,
   registerSopyoShopifySyncScheduler } from '../backend/src/modules/vendor-integration/sopyo-shopify-fulfillment-worker.service.js';
-import { SOPYO_DELIVERY_POLL_INTERVAL_MS } from '../backend/src/modules/vendor-integration/sopyo-delivery-poll.service.js';
+import { SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS, SOPYO_DELIVERY_POLL_INTERVAL_MS } from '../backend/src/modules/vendor-integration/sopyo-delivery-poll.service.js';
 
 const env = { SHOPIFY_API_VERSION: '2026-01', SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
   SHOPIFY_ADMIN_ACCESS_TOKEN: 'test-token', SOPYO_DELIVERY_POLLING_ENABLED: true } as never;
@@ -145,7 +145,7 @@ describe('Sopyo Shopify sync state routing', () => {
 });
 
 describe('Sopyo Shopify sync scheduler', () => {
-  it('reuses the opted-in 30-minute cadence, prevents overlap and drains on shutdown', async () => {
+  it('uses a delayed-first-tick one-minute cadence, prevents overlap and drains on shutdown', async () => {
     vi.useFakeTimers();
     let finish!: (value: never) => void;
     const first = new Promise<never>((resolve) => { finish = resolve; });
@@ -154,13 +154,18 @@ describe('Sopyo Shopify sync scheduler', () => {
     const worker = createSopyoShopifySyncWorker({ env, logger: logger as never, process });
     worker.start();
     worker.start();
-    await vi.advanceTimersByTimeAsync(SOPYO_DELIVERY_POLL_INTERVAL_MS);
-    await vi.advanceTimersByTimeAsync(SOPYO_DELIVERY_POLL_INTERVAL_MS);
+    expect(SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS).toBe(60_000);
+    expect(SOPYO_DELIVERY_POLL_INTERVAL_MS).toBe(30 * 60 * 1000);
+    expect(process).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS - 1);
+    expect(process).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS);
     expect(process).toHaveBeenCalledTimes(1);
     const closing = worker.close();
     finish({ candidateCount: 0 } as never);
     await closing;
-    await vi.advanceTimersByTimeAsync(SOPYO_DELIVERY_POLL_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS);
     expect(process).toHaveBeenCalledTimes(1);
   });
 
