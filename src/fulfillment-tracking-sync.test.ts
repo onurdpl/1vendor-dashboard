@@ -8,6 +8,9 @@ const prismaMock = vi.hoisted(() => ({
   fulfillment: {
     upsert: vi.fn(),
   },
+  sopyoShipmentIntent: {
+    findUnique: vi.fn(),
+  },
   shipmentExecution: {
     findFirst: vi.fn(),
   },
@@ -113,6 +116,8 @@ describe('fulfillment tracking sync', () => {
     prismaMock.vendorAllocation.findUnique.mockReset();
     prismaMock.vendorAllocation.update.mockReset();
     prismaMock.fulfillment.upsert.mockReset();
+    prismaMock.sopyoShipmentIntent.findUnique.mockReset();
+    prismaMock.sopyoShipmentIntent.findUnique.mockResolvedValue(null);
     prismaMock.shipmentExecution.findFirst.mockReset();
     prismaMock.customerCancellationRequestItem.findFirst.mockReset();
     prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue(null);
@@ -391,6 +396,37 @@ describe('fulfillment tracking sync', () => {
       message: 'Shopify fulfillment already exists for this allocation; tracking sync was not duplicated.',
     });
     expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
+  it.each(['SUBMISSION_PENDING', 'OUTCOME_UNKNOWN', 'RECONCILIATION_PENDING', 'CONFIRMED',
+    'CONFLICT'] as const)('blocks manual submission after Sopyo %s with a durable submission timestamp',
+    async (status) => {
+      prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
+      prismaMock.sopyoShipmentIntent.findUnique.mockResolvedValue({
+        status, submissionStartedAt: new Date(), shopifyFulfillmentId: null,
+      });
+      const service = createFulfillmentService(env);
+
+      await expect(service.updateAllocationTracking(buildRequest())).resolves.toEqual({
+        ok: false,
+        code: 409,
+        message: 'Shopify fulfillment submission is already controlled by another application path.',
+      });
+      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
+      expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
+      expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    });
+
+  it('does not block manual fulfillment merely because a pre-submission Sopyo intent exists', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
+    prismaMock.sopyoShipmentIntent.findUnique.mockResolvedValue({
+      status: 'PLAN_READY', submissionStartedAt: null, shopifyFulfillmentId: null,
+    });
+
+    const result = await createFulfillmentService(env).updateAllocationTracking(buildRequest());
+    expect(result.ok).toBe(true);
+    expect(shopifyAdminMock.createFulfillmentTracking).toHaveBeenCalledTimes(1);
   });
 
   it('does not report success when Shopify creation response has no fulfillment id', async () => {

@@ -29,6 +29,9 @@ const prismaMock = vi.hoisted(() => ({
   fulfillment: {
     upsert: vi.fn(),
   },
+  sopyoShipmentIntent: {
+    findUnique: vi.fn(),
+  },
   customerCancellationRequestItem: {
     findFirst: vi.fn(),
   },
@@ -403,6 +406,8 @@ describe('shipping execution foundation', () => {
     prismaMock.shipmentShippingCost.findFirst.mockReset();
     prismaMock.shipmentShippingCost.upsert.mockReset();
     prismaMock.fulfillment.upsert.mockReset();
+    prismaMock.sopyoShipmentIntent.findUnique.mockReset();
+    prismaMock.sopyoShipmentIntent.findUnique.mockResolvedValue(null);
     prismaMock.customerCancellationRequestItem.findFirst.mockReset();
     prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue(null);
     prismaMock.returnRecord.findFirst.mockReset();

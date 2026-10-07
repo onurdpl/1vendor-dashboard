@@ -11,6 +11,7 @@ import { executeSopyoShopifyFulfillment }
   from '../backend/src/modules/vendor-integration/sopyo-shopify-fulfillment-execution.service.js';
 import { processSopyoShopifySync }
   from '../backend/src/modules/vendor-integration/sopyo-shopify-fulfillment-worker.service.js';
+import { createFulfillmentService } from '../backend/src/modules/fulfillments/fulfillment.service.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -47,6 +48,7 @@ describeWithPostgres('Sopyo Shopify fulfillment execution on isolated PostgreSQL
         await db.sopyoShipmentIntent.delete({ where: { id: intent.id } });
       }
       await db.sopyoOrderPush.deleteMany({ where: { vendorAllocationId: row.allocationId } });
+      await db.fulfillment.deleteMany({ where: { vendorAllocationId: row.allocationId } });
       await db.vendorAllocationLineItem.deleteMany({ where: { vendorAllocationId: row.allocationId } });
       await db.vendorAllocation.delete({ where: { id: row.allocationId } });
       await db.shopifyOrderLineItem.deleteMany({ where: { shopifyOrderId: row.orderId } });
@@ -113,8 +115,96 @@ describeWithPostgres('Sopyo Shopify fulfillment execution on isolated PostgreSQL
       createSopyoFulfillment: create, fetchSopyoFulfillmentsForReconciliation: lookup };
     const run = () => executeSopyoShopifyFulfillment({ intentId: intent.id, env,
       shopifyAdminService: port }, db as never);
-    return { vendor, order, line, allocation, push, intent, plan, canonical, evidence, create, lookup, port, run };
+    const manualCreate = vi.fn().mockResolvedValue({ fulfillmentId: `gid://shopify/Fulfillment/manual-${n}`,
+      status: 'submitted', source: 'shopify_admin', fulfillmentCreated: true, skippedReason: null,
+      fulfillmentOrderIdPresent: true, fulfillmentIdPresent: true });
+    const manualPort = { fetchFulfillmentOrders: vi.fn().mockResolvedValue({
+      fulfillmentOrders: canonical.fulfillmentOrders.map((fo) => ({ id: fo.id, status: fo.status,
+        lineItems: fo.lineItems.map((item) => ({ id: item.id, lineItemId: item.lineItemId,
+          quantity: item.remainingQuantity })) })),
+    }), createFulfillmentTracking: manualCreate };
+    const manual = () => createFulfillmentService(env, { db: db as never,
+      shopifyAdminService: manualPort as never }).updateAllocationTracking({
+      allocationId: allocation.id, body: { carrier: 'Carrier', trackingNumber: 'TRACK-1' },
+      authUser: { id: vendor.id, email: 'test@example.invalid', role: 'vendor' },
+      vendorContext: { vendorId: vendor.id, role: 'vendor', allowedVendorIds: [vendor.id] },
+    });
+    return { vendor, order, line, allocation, push, intent, plan, canonical, evidence, create, lookup, port, run,
+      manual, manualCreate, manualPort };
   }
+
+  it('Sopyo-first claim excludes the manual path even before Shopify responds', async () => {
+    const item = await fixture();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    item.create.mockImplementation(async () => { await held; return { outcome: 'success', fulfillment: item.evidence }; });
+    const sopyo = item.run();
+    try {
+      await vi.waitFor(() => expect(item.create).toHaveBeenCalledTimes(1));
+      const manual = await item.manual();
+      expect(manual).toMatchObject({ ok: false, code: 409 });
+      expect(item.manualCreate).not.toHaveBeenCalled();
+      expect(await db.fulfillment.findUnique({ where: { vendorAllocationId: item.allocation.id } })).toBeNull();
+    } finally { release(); await sopyo; }
+  });
+
+  it('manual-first claim excludes Sopyo before a second Shopify create', async () => {
+    const item = await fixture();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    item.manualCreate.mockImplementation(async () => { await held; return {
+      fulfillmentId: 'gid://shopify/Fulfillment/manual', status: 'submitted', source: 'shopify_admin',
+      fulfillmentCreated: true, skippedReason: null, fulfillmentOrderIdPresent: true,
+      fulfillmentIdPresent: true,
+    }; });
+    const manual = item.manual();
+    try {
+      await vi.waitFor(() => expect(item.manualCreate).toHaveBeenCalledTimes(1));
+      await expect(item.run()).rejects.toThrow();
+      expect(item.create).not.toHaveBeenCalled();
+      expect((await db.fulfillment.findUniqueOrThrow({ where: { vendorAllocationId: item.allocation.id } }))
+        .syncStatus).toBe('fulfillment_submission_pending');
+    } finally { release(); await manual; }
+  });
+
+  it('concurrent real PostgreSQL claim transactions allow at most one external create path', async () => {
+    const item = await fixture();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    item.create.mockImplementation(async () => { await held; return { outcome: 'success', fulfillment: item.evidence }; });
+    item.manualCreate.mockImplementation(async () => { await held; return {
+      fulfillmentId: 'gid://shopify/Fulfillment/manual', status: 'submitted', source: 'shopify_admin',
+      fulfillmentCreated: true, skippedReason: null, fulfillmentOrderIdPresent: true,
+      fulfillmentIdPresent: true,
+    }; });
+    const sopyo = item.run().catch((error: unknown) => error);
+    const manual = item.manual().catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() => expect(item.create.mock.calls.length + item.manualCreate.mock.calls.length).toBe(1));
+    } finally { release(); }
+    const [sopyoOutcome, manualOutcome] = await Promise.all([sopyo, manual]);
+    expect(item.create.mock.calls.length + item.manualCreate.mock.calls.length).toBe(1);
+    if (item.create.mock.calls.length === 1) {
+      expect(sopyoOutcome).toMatchObject({ status: 'CONFIRMED' });
+      expect(manualOutcome).toMatchObject({ ok: false, code: 409 });
+    } else {
+      expect(manualOutcome).toMatchObject({ ok: true });
+      expect(sopyoOutcome).toBeInstanceOf(Error);
+    }
+  });
+
+  it('a normal non-Sopyo allocation without intent still uses the manual path', async () => {
+    const item = await fixture();
+    await db.sopyoShopifyExecutionPlanLine.deleteMany({ where: { planId: item.plan.id } });
+    await db.sopyoShopifyExecutionPlan.delete({ where: { id: item.plan.id } });
+    await db.sopyoShipmentIntent.delete({ where: { id: item.intent.id } });
+    await db.sopyoOrderPush.delete({ where: { id: item.push.id } });
+    await db.vendorAllocation.update({ where: { id: item.allocation.id }, data: {
+      outboundMethodSnapshot: 'KARGONOMI', outboundIntegrationProviderSnapshot: null,
+    } });
+    expect((await item.manual()).ok).toBe(true);
+    expect(item.manualCreate).toHaveBeenCalledTimes(1);
+  });
 
   it('submits exact persisted FO-line IDs and quantities once, including multiple FOs, then replays', async () => {
     const item = await fixture(2, true);

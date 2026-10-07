@@ -1,3 +1,4 @@
+import { SopyoShipmentIntentStatus } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AuthUserContext } from '../auth/auth.types.js';
 import type { RequestVendorContext } from '../vendor-access/vendor-access.types.js';
@@ -52,8 +53,26 @@ function isOpenFulfillmentOrderStatus(status: string | null | undefined) {
   return (status ?? '').trim().toLowerCase() === 'open';
 }
 
-export function createFulfillmentService(env: AppEnv) {
-  const shopifyAdminService = createShopifyAdminService(env);
+class ShopifyFulfillmentSubmissionConflictError extends Error {
+  constructor() {
+    super('Shopify fulfillment submission is already controlled by another application path.');
+  }
+}
+
+const sopyoSubmittedStatuses = new Set<SopyoShipmentIntentStatus>([
+  SopyoShipmentIntentStatus.SUBMISSION_PENDING,
+  SopyoShipmentIntentStatus.OUTCOME_UNKNOWN,
+  SopyoShipmentIntentStatus.RECONCILIATION_PENDING,
+  SopyoShipmentIntentStatus.CONFIRMED,
+]);
+
+export function createFulfillmentService(env: AppEnv, dependencies: {
+  db?: typeof prisma;
+  shopifyAdminService?: Pick<ReturnType<typeof createShopifyAdminService>,
+    'fetchFulfillmentOrders' | 'createFulfillmentTracking'>;
+} = {}) {
+  const db = dependencies.db ?? prisma;
+  const shopifyAdminService = dependencies.shopifyAdminService ?? createShopifyAdminService(env);
 
   async function updateAllocationTracking(input: {
     allocationId: string;
@@ -83,7 +102,7 @@ export function createFulfillmentService(env: AppEnv) {
       };
     }
 
-    const allocation = await prisma.vendorAllocation.findUnique({
+    const allocation = await db.vendorAllocation.findUnique({
       where: {
         id: input.allocationId,
       },
@@ -182,7 +201,7 @@ export function createFulfillmentService(env: AppEnv) {
     }
 
     try {
-      await prisma.$transaction(async (tx) => {
+      await db.$transaction(async (tx) => {
         await assertAllocationActionable(tx, allocation.id);
 
         const currentAllocation = await tx.vendorAllocation.findUnique({
@@ -223,6 +242,18 @@ export function createFulfillmentService(env: AppEnv) {
         }
         if (currentAllocation.fulfillment?.syncStatus === 'fulfillment_submission_pending') {
           throw new Error('Shopify fulfillment submission is already in progress for this allocation.');
+        }
+
+        // This read and the local submission claim share Sopyo's order-scoped advisory lock.
+        // An intent alone is not a claim; submissionStartedAt records the crossed boundary
+        // even when later reconciliation or conflict changes its status.
+        const sopyoIntent = await tx.sopyoShipmentIntent.findUnique({
+          where: { vendorAllocationId: allocation.id },
+          select: { status: true, submissionStartedAt: true, shopifyFulfillmentId: true },
+        });
+        if (sopyoIntent && (sopyoIntent.submissionStartedAt || sopyoIntent.shopifyFulfillmentId ||
+            sopyoSubmittedStatuses.has(sopyoIntent.status))) {
+          throw new ShopifyFulfillmentSubmissionConflictError();
         }
 
         let existingProviderEvidenceVerified = false;
@@ -296,6 +327,9 @@ export function createFulfillmentService(env: AppEnv) {
           message: error.message,
         };
       }
+      if (error instanceof ShopifyFulfillmentSubmissionConflictError) {
+        return { ok: false, code: 409, message: error.message };
+      }
       throw error;
     }
 
@@ -328,7 +362,7 @@ export function createFulfillmentService(env: AppEnv) {
 
     if (matchedFulfillmentOrders.length === 0) {
       const missingFulfillmentOrderMessage = 'Shopify fulfillment order data is missing; cannot sync tracking automatically.';
-      await prisma.fulfillment.upsert({
+      await db.fulfillment.upsert({
         where: {
           vendorAllocationId: allocation.id,
         },
@@ -355,7 +389,7 @@ export function createFulfillmentService(env: AppEnv) {
         },
       });
 
-      await prisma.vendorAllocation.update({
+      await db.vendorAllocation.update({
         where: { id: allocation.id },
         data: {
           fulfillmentStatus: 'fulfillment_sync_failed',
@@ -389,7 +423,7 @@ export function createFulfillmentService(env: AppEnv) {
 
       const submittedAt = new Date();
 
-      await prisma.$transaction(async (tx) => {
+      await db.$transaction(async (tx) => {
         await tx.fulfillment.upsert({
           where: {
             vendorAllocationId: allocation.id,
@@ -462,7 +496,7 @@ export function createFulfillmentService(env: AppEnv) {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify fulfillment sync failed.';
 
-      await prisma.$transaction(async (tx) => {
+      await db.$transaction(async (tx) => {
         await tx.fulfillment.upsert({
           where: {
             vendorAllocationId: allocation.id,
