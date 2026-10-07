@@ -13,6 +13,8 @@ function candidate(status: string, id: string, overrides: Record<string, unknown
     sopyoOrderPushId: `push-${id}`, sopyoOrderId: '38154205', orderCode: allocationId,
     carrier: 'Carrier', trackingNumber: 'TRACK-123',
     shopifyLocationGid: 'gid://shopify/Location/1', shopifyFulfillmentId: null,
+    submissionStartedAt: ['SUBMISSION_PENDING', 'OUTCOME_UNKNOWN', 'RECONCILIATION_PENDING']
+      .includes(status) ? new Date('2026-10-07T00:00:00.000Z') : null,
     executionPlan: status === 'CARGO_VERIFIED' ? null : { id: `plan-${id}` },
     sopyoOrderPush: { id: `push-${id}`, vendorAllocationId: allocationId,
       assignedVendorId: 'vendor-a', orderCode: allocationId, status: 'SUCCEEDED', sopyoOrderId: '38154205' },
@@ -67,18 +69,41 @@ describe('Sopyo Shopify sync state routing', () => {
       expect(second).toMatchObject({ reconciled: 1, confirmed: 1 });
     });
 
+  it.each(['SUBMISSION_PENDING', 'OUTCOME_UNKNOWN', 'RECONCILIATION_PENDING'])(
+    '%s still reaches reconciliation after mutable allocation cargo/status drift', async (status) => {
+      const original = candidate(status, 'drift');
+      const h = harness([candidate(status, 'drift', { vendorAllocation: {
+        ...original.vendorAllocation, carrier: null, trackingNumber: null,
+        shippingStatus: 'awaiting_shipment', allocationStatus: 'VENDOR_BLOCKED',
+      } })]);
+      const report = await processSopyoShopifySync({ env, dependencies: h.dependencies });
+      expect(report).toMatchObject({ reconciled: 1, confirmed: 1, skipped: 0 });
+      expect(h.plan).not.toHaveBeenCalled();
+      expect(h.execute).toHaveBeenCalledExactlyOnceWith({ intentId: 'drift', env });
+    });
+
+  it('does not route a post-submission state lacking durable submission evidence', async () => {
+    const h = harness([candidate('OUTCOME_UNKNOWN', 'missing', { submissionStartedAt: null })]);
+    expect(await processSopyoShopifySync({ env, dependencies: h.dependencies }))
+      .toMatchObject({ skipped: 1, reconciled: 0 });
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
   it('fails closed for invalid projection, frozen authority, or plan/state disagreement', async () => {
     const h = harness([
       candidate('CARGO_VERIFIED', 'a', { vendorAllocation: {
         ...candidate('CARGO_VERIFIED', 'a').vendorAllocation, trackingNumber: 'OTHER',
       } }),
       candidate('PLAN_READY', 'b', { executionPlan: null }),
+      candidate('PLAN_READY', 'd', { vendorAllocation: {
+        ...candidate('PLAN_READY', 'd').vendorAllocation, carrier: 'OTHER',
+      } }),
       candidate('CARGO_VERIFIED', 'c', { vendorAllocation: {
         ...candidate('CARGO_VERIFIED', 'c').vendorAllocation, shopifyLocationGidSnapshot: null,
       } }),
     ]);
     const report = await processSopyoShopifySync({ env, dependencies: h.dependencies, logger: h.logger as never });
-    expect(report.skipped).toBe(3);
+    expect(report.skipped).toBe(4);
     expect(h.plan).not.toHaveBeenCalled();
     expect(h.execute).not.toHaveBeenCalled();
   });

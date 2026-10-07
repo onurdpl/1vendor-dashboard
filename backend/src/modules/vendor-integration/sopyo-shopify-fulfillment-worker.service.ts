@@ -13,6 +13,8 @@ const planningStatuses: SopyoShipmentIntentStatus[] = [SopyoShipmentIntentStatus
 const executionStatuses: SopyoShipmentIntentStatus[] = [SopyoShipmentIntentStatus.PLAN_READY,
   SopyoShipmentIntentStatus.SUBMISSION_PENDING, SopyoShipmentIntentStatus.OUTCOME_UNKNOWN,
   SopyoShipmentIntentStatus.RECONCILIATION_PENDING];
+const reconciliationStatuses: SopyoShipmentIntentStatus[] = [SopyoShipmentIntentStatus.SUBMISSION_PENDING,
+  SopyoShipmentIntentStatus.OUTCOME_UNKNOWN, SopyoShipmentIntentStatus.RECONCILIATION_PENDING];
 const candidateStatuses = [...planningStatuses, ...executionStatuses];
 const projectedStatuses = new Set(['in transit', 'in_transit', 'shipped', 'partially_shipped',
   'out_for_delivery', 'delivered']);
@@ -61,7 +63,7 @@ export async function processSopyoShopifySync(input: {
       id: true, status: true, vendorAllocationId: true, assignedVendorId: true,
       sopyoOrderPushId: true, sopyoOrderId: true, orderCode: true,
       carrier: true, trackingNumber: true, shopifyLocationGid: true,
-      shopifyFulfillmentId: true, executionPlan: { select: { id: true } },
+      submissionStartedAt: true, shopifyFulfillmentId: true, executionPlan: { select: { id: true } },
       sopyoOrderPush: { select: { id: true, vendorAllocationId: true, assignedVendorId: true,
         orderCode: true, status: true, sopyoOrderId: true } },
       vendorAllocation: { select: {
@@ -76,21 +78,30 @@ export async function processSopyoShopifySync(input: {
   for (const intent of candidates) {
     const allocation = intent.vendorAllocation;
     const push = intent.sopyoOrderPush;
-    const localProjectionValid = allocation.carrier === intent.carrier &&
+    const reconciliationOnly = reconciliationStatuses.includes(intent.status);
+    // A submitted attempt is identified by its durable intent and immutable execution plan.
+    // Current allocation cargo/status/ownership may drift after Shopify has been called.
+    const persistedIdentityValid = !intent.shopifyFulfillmentId && Boolean(intent.carrier.trim()) &&
+      Boolean(intent.trackingNumber.trim()) && Boolean(intent.shopifyLocationGid?.trim()) &&
+      allocation.id === intent.vendorAllocationId &&
+      push.id === intent.sopyoOrderPushId && push.vendorAllocationId === intent.vendorAllocationId &&
+      push.assignedVendorId === intent.assignedVendorId && push.orderCode === intent.orderCode &&
+      push.sopyoOrderId === intent.sopyoOrderId && intent.orderCode === intent.vendorAllocationId &&
+      Boolean(canonicalSopyoOrderId(intent.sopyoOrderId));
+    const preSubmissionAuthorityValid = allocation.carrier === intent.carrier &&
       allocation.trackingNumber === intent.trackingNumber &&
-      projectedStatuses.has(allocation.shippingStatus.trim().toLowerCase());
-    if (intent.shopifyFulfillmentId || !intent.carrier.trim() || !intent.trackingNumber.trim() ||
-        !localProjectionValid || !intent.shopifyLocationGid?.trim() ||
-        allocation.id !== intent.vendorAllocationId || allocation.assignedVendorId !== intent.assignedVendorId ||
-        allocation.allocationStatus !== 'ACTIVE' || allocation.cancellationReason ||
-        allocation.reassignmentRequired ||
-        allocation.outboundMethodSnapshot !== VendorOutboundMethod.VENDOR_INTEGRATION ||
-        allocation.outboundIntegrationProviderSnapshot !== VendorIntegrationProviderCode.SOPYO ||
-        allocation.shopifyLocationGidSnapshot !== intent.shopifyLocationGid ||
-        push.id !== intent.sopyoOrderPushId || push.status !== SopyoOrderPushStatus.SUCCEEDED ||
-        push.vendorAllocationId !== allocation.id || push.assignedVendorId !== allocation.assignedVendorId ||
-        push.orderCode !== allocation.id || intent.orderCode !== allocation.id ||
-        !canonicalSopyoOrderId(push.sopyoOrderId) || push.sopyoOrderId !== intent.sopyoOrderId) {
+      projectedStatuses.has(allocation.shippingStatus.trim().toLowerCase()) &&
+      allocation.assignedVendorId === intent.assignedVendorId &&
+      allocation.allocationStatus === 'ACTIVE' && !allocation.cancellationReason &&
+      !allocation.reassignmentRequired &&
+      allocation.outboundMethodSnapshot === VendorOutboundMethod.VENDOR_INTEGRATION &&
+      allocation.outboundIntegrationProviderSnapshot === VendorIntegrationProviderCode.SOPYO &&
+      allocation.shopifyLocationGidSnapshot === intent.shopifyLocationGid &&
+      push.status === SopyoOrderPushStatus.SUCCEEDED &&
+      push.assignedVendorId === allocation.assignedVendorId && !intent.submissionStartedAt;
+    if (!persistedIdentityValid || (reconciliationOnly
+      ? !intent.submissionStartedAt || !intent.executionPlan
+      : !preSubmissionAuthorityValid)) {
       report.skipped += 1;
       input.logger?.error({ event: 'SOPYO_SHOPIFY_SYNC_AUTHORITY_UNAVAILABLE', intentId: intent.id },
         'Sopyo Shopify sync candidate failed local authority checks.');

@@ -129,9 +129,84 @@ describeWithPostgres('Sopyo Shopify fulfillment execution on isolated PostgreSQL
       authUser: { id: vendor.id, email: 'test@example.invalid', role: 'vendor' },
       vendorContext: { vendorId: vendor.id, role: 'vendor', allowedVendorIds: [vendor.id] },
     });
+    const workerPlan = vi.fn();
+    const runWorker = () => processSopyoShopifySync({ env, dependencies: {
+      db: { sopyoShipmentIntent: { findMany: (args: never) => db.sopyoShipmentIntent.findMany({
+        ...args, where: { AND: [(args as { where: object }).where, { id: intent.id }] },
+      }) } } as never,
+      plan: workerPlan,
+      execute: ({ intentId, env: runtimeEnv }) => executeSopyoShopifyFulfillment({
+        intentId, env: runtimeEnv, shopifyAdminService: port,
+      }, db as never),
+    } as never });
     return { vendor, order, line, allocation, push, intent, plan, canonical, evidence, create, lookup, port, run,
-      manual, manualCreate, manualPort };
+      manual, manualCreate, manualPort, workerPlan, runWorker };
   }
+
+  it('routes SUBMISSION_PENDING through reconciliation after local cargo is cleared', async () => {
+    const item = await fixture();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    item.create.mockImplementation(async () => { await held; return { outcome: 'success', fulfillment: item.evidence }; });
+    const submission = item.run();
+    try {
+      await vi.waitFor(() => expect(item.create).toHaveBeenCalledTimes(1));
+      expect((await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { id: item.intent.id } })).status)
+        .toBe('SUBMISSION_PENDING');
+      await db.vendorAllocation.update({ where: { id: item.allocation.id }, data: {
+        carrier: null, trackingNumber: null, shippingStatus: 'awaiting_shipment',
+      } });
+      item.lookup.mockResolvedValue([]);
+      expect(await item.runWorker()).toMatchObject({ reconciled: 1, skipped: 0, failed: 0 });
+      expect(item.lookup).toHaveBeenCalledTimes(1);
+      expect(item.workerPlan).not.toHaveBeenCalled();
+      expect(item.create).toHaveBeenCalledTimes(1);
+    } finally { release(); await submission; }
+  });
+
+  it('confirms an OUTCOME_UNKNOWN attempt from exact Shopify evidence despite local drift', async () => {
+    const item = await fixture();
+    item.create.mockResolvedValueOnce({ outcome: 'unknown' });
+    expect((await item.run()).status).toBe('OUTCOME_UNKNOWN');
+    await db.vendorAllocation.update({ where: { id: item.allocation.id }, data: {
+      carrier: 'OTHER', trackingNumber: 'OTHER', shippingStatus: 'fulfillment_event_attention',
+    } });
+    expect(await item.runWorker()).toMatchObject({ reconciled: 1, confirmed: 1, skipped: 0 });
+    const saved = await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { id: item.intent.id } });
+    expect(saved.status).toBe('CONFIRMED');
+    expect(saved.shopifyFulfillmentId).toBe(item.evidence.id);
+    expect(item.lookup).toHaveBeenCalledTimes(1);
+    expect(item.workerPlan).not.toHaveBeenCalled();
+    expect(item.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['none', 'ambiguous'] as const)(
+    'retains fail-closed %s reconciliation after local cargo drift', async (evidence) => {
+      const item = await fixture();
+      item.create.mockResolvedValueOnce({ outcome: 'unknown' });
+      expect((await item.run()).status).toBe('OUTCOME_UNKNOWN');
+      await db.vendorAllocation.update({ where: { id: item.allocation.id }, data: {
+        carrier: null, trackingNumber: null, shippingStatus: 'awaiting_shipment',
+      } });
+      item.lookup.mockResolvedValue(evidence === 'none' ? [] : [item.evidence,
+        { ...item.evidence, id: 'gid://shopify/Fulfillment/another' }]);
+      expect(await item.runWorker()).toMatchObject({ reconciled: 1, skipped: 0, failed: 0 });
+      expect((await db.sopyoShipmentIntent.findUniqueOrThrow({ where: { id: item.intent.id } })).status)
+        .toBe(evidence === 'none' ? 'OUTCOME_UNKNOWN' : 'CONFLICT');
+      expect(item.lookup).toHaveBeenCalledTimes(1);
+      expect(item.workerPlan).not.toHaveBeenCalled();
+      expect(item.create).toHaveBeenCalledTimes(1);
+    });
+
+  it('keeps strict PLAN_READY cargo authority before a new Shopify create', async () => {
+    const item = await fixture();
+    await db.vendorAllocation.update({ where: { id: item.allocation.id }, data: {
+      carrier: 'OTHER', trackingNumber: 'OTHER', shippingStatus: 'awaiting_shipment',
+    } });
+    expect(await item.runWorker()).toMatchObject({ skipped: 1, executed: 0 });
+    expect(item.workerPlan).not.toHaveBeenCalled();
+    expect(item.create).not.toHaveBeenCalled();
+  });
 
   it('Sopyo-first claim excludes the manual path even before Shopify responds', async () => {
     const item = await fixture();
