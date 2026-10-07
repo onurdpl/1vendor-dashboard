@@ -54,10 +54,12 @@ describeWithPostgres('FIN-BUG-003 Phase 2 allocation outbound snapshot on isolat
   }
 
   it('freezes the explicit provider on A, preserves it through config change/replay, and snapshots new config on B', async () => {
-    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' });
+    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/121454952785' });
     const first = await createAllocation(`${vendorId}-a`);
     expect(first).toMatchObject({
       outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
+      shopifyLocationGidSnapshot: 'gid://shopify/Location/121454952785',
     });
 
     await save(vendorId, { outboundMethod: 'KARGONOMI' });
@@ -78,6 +80,21 @@ describeWithPostgres('FIN-BUG-003 Phase 2 allocation outbound snapshot on isolat
     const allocation = await createAllocation(`${vendorId}-unconfigured`);
     expect(allocation).toMatchObject({ outboundMethodSnapshot: null, outboundIntegrationProviderSnapshot: null,
       shopifyLocationGidSnapshot: null });
+  });
+
+  it('fails closed for a legacy Sopyo configuration missing location without rewriting an older allocation', async () => {
+    const historical = await createAllocation(`${vendorId}-historical-null`);
+    await db.vendorShippingConfig.create({ data: {
+      vendorId, outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: null,
+    } });
+    await expect(createAllocation(`${vendorId}-invalid-new`)).rejects.toThrow('Shopify Location GID is required');
+    expect(await db.vendorAllocation.findUnique({ where: { id: `${vendorId}-invalid-new` } })).toBeNull();
+    await save(vendorId, { shopifyLocationGid: 'gid://shopify/Location/121454952785' });
+    expect((await createAllocation(`${vendorId}-valid-new`)).shopifyLocationGidSnapshot)
+      .toBe('gid://shopify/Location/121454952785');
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: historical.id } })).shopifyLocationGidSnapshot)
+      .toBeNull();
   });
 
   it('saves, reads, clears and validates current location without changing older snapshots', async () => {
@@ -107,7 +124,8 @@ describeWithPostgres('FIN-BUG-003 Phase 2 allocation outbound snapshot on isolat
   });
 
   it('preserves the snapshot through operational projection updates and integration-token lifecycle', async () => {
-    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' });
+    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/101' });
     const allocation = await createAllocation(`${vendorId}-operations`);
     const client = await db.vendorIntegrationClient.create({ data: {
       vendorIdentifier: vendorId,

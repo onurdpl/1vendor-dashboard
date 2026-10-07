@@ -1996,9 +1996,33 @@ describe('VendorProfilePage', () => {
     await user.selectOptions(await screen.findByLabelText('Outbound method'), 'VENDOR_INTEGRATION');
     await user.selectOptions(screen.getByLabelText('Integration Provider'), 'SOPYO');
     await user.click(screen.getByRole('button', { name: 'Save outbound selection' }));
+    expect(await screen.findByText('A valid Shopify Location GID is required for Sopyo outbound shipping.')).toBeInTheDocument();
+    expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText(/Shopify Location GID/), 'gid://shopify/Location/121454952785');
+    await user.click(screen.getByRole('button', { name: 'Save outbound selection' }));
     await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a', {
       outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/121454952785',
     }));
+  });
+
+  it('saves Sopyo selection and visible location in one full-config request', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({ email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'], vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a' });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, preferredProvider: 'kargonomi', defaultWarehouseId: null });
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+    await user.selectOptions(await screen.findByLabelText('Outbound method'), 'VENDOR_INTEGRATION');
+    await user.selectOptions(screen.getByLabelText('Integration Provider'), 'SOPYO');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+    expect(await screen.findByText('Shopify Location GID is required for Sopyo outbound shipping.')).toBeInTheDocument();
+    expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText(/Shopify Location GID/), 'gid://shopify/Location/121454952785');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+    await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a',
+      expect.objectContaining({ outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+        shopifyLocationGid: 'gid://shopify/Location/121454952785' })));
   });
 
   it('shows a safe shipping setup error when admin save fails', async () => {

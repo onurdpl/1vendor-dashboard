@@ -280,6 +280,9 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   if (locationGid && !/^gid:\/\/shopify\/Location\/[^\s/?#]+$/.test(locationGid)) {
     errors.push('Shopify Location GID must use gid://shopify/Location/...');
   }
+  if (draft.outboundMethod === 'VENDOR_INTEGRATION' && draft.selectedIntegrationProvider === 'SOPYO' && !locationGid) {
+    errors.push('Shopify Location GID is required for Sopyo outbound shipping.');
+  }
   if (draft.outboundMethod === 'VENDOR_INTEGRATION' && draft.selectedIntegrationProvider !== 'SOPYO') {
     errors.push('Select an integration provider for outbound shipping.');
   }
@@ -722,9 +725,18 @@ export function VendorShippingConfigEditor({
                 setShippingConfigFeedback({ tone: 'error', message: 'Select an integration provider for outbound shipping.' });
                 return;
               }
+              if (shippingConfigDraft.outboundMethod === 'VENDOR_INTEGRATION') {
+                const locationGid = shippingConfigDraft.shopifyLocationGid.trim();
+                if (!locationGid || !/^gid:\/\/shopify\/Location\/[^\s/?#]+$/.test(locationGid)) {
+                  setShippingConfigFeedback({ tone: 'error', message: 'A valid Shopify Location GID is required for Sopyo outbound shipping.' });
+                  return;
+                }
+              }
               void updateShippingConfigMutation({
                 outboundMethod: shippingConfigDraft.outboundMethod || null,
                 selectedIntegrationProvider: shippingConfigDraft.outboundMethod === 'VENDOR_INTEGRATION' ? 'SOPYO' : null,
+                ...(shippingConfigDraft.outboundMethod === 'VENDOR_INTEGRATION'
+                  ? { shopifyLocationGid: shippingConfigDraft.shopifyLocationGid.trim() } : {}),
               }).catch(() => undefined);
             }}>
             Save outbound selection

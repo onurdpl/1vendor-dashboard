@@ -50,8 +50,68 @@ describeWithPostgres('FIN-BUG-003 Phase 1 outbound selection on isolated Postgre
     await expect(activate(vendorId, { status: 'active' })).resolves.toMatchObject({ status: 'active' });
   });
 
+  it('rejects Sopyo without location and preserves the saved pair on a partial clear', async () => {
+    const location = 'gid://shopify/Location/121454952785';
+    await expect(save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION',
+      selectedIntegrationProvider: 'SOPYO' })).rejects.toThrow('Shopify Location GID is required');
+    expect(await db.vendorShippingConfig.findUnique({ where: { vendorId } })).toBeNull();
+
+    const saved = await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION',
+      selectedIntegrationProvider: 'SOPYO', shopifyLocationGid: location });
+    expect(saved).toMatchObject({ outboundMethod: 'VENDOR_INTEGRATION',
+      selectedIntegrationProvider: 'SOPYO', shopifyLocationGid: location });
+    await expect(save(vendorId, { shopifyLocationGid: null })).rejects.toThrow('Shopify Location GID is required');
+    await expect(save(vendorId, { shopifyLocationGid: '  ' })).rejects.toThrow('Shopify Location GID is required');
+    expect(await db.vendorShippingConfig.findUniqueOrThrow({ where: { vendorId } })).toMatchObject({
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO', shopifyLocationGid: location,
+    });
+    await save(vendorId, { shippingEnabled: false });
+    expect(await db.vendorShippingConfig.findUniqueOrThrow({ where: { vendorId } })).toMatchObject({
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: location, shippingEnabled: false,
+    });
+    await save(vendorId, { outboundMethod: 'KARGONOMI', shopifyLocationGid: null });
+    expect(await db.vendorShippingConfig.findUniqueOrThrow({ where: { vendorId } })).toMatchObject({
+      outboundMethod: 'KARGONOMI', selectedIntegrationProvider: null, shopifyLocationGid: null,
+    });
+  });
+
+  it('rejects a direct Admin shipping-config API save that bypasses the UI', async () => {
+    const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
+    let saveHandler: ((request: unknown, reply: unknown) => Promise<unknown>) | undefined;
+    const app = {
+      get: () => undefined,
+      post: () => undefined,
+      put: (path: string, _options: unknown, handler: typeof saveHandler) => {
+        if (path === '/admin/vendors/:vendorId/shipping-config') saveHandler = handler;
+      },
+    };
+    registerShippingExecutionRoutes(app as never, { JWT_SECRET: 'isolated-test-secret' } as never);
+    expect(saveHandler).toBeDefined();
+    const response = await saveHandler!(
+      { authUser: { role: 'admin' }, params: { vendorId }, body: {
+        outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO', shopifyLocationGid: null,
+      } },
+      { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) },
+    );
+    expect(response).toMatchObject({ status: 400, body: { message: 'Shopify Location GID is required for Sopyo outbound shipping.' } });
+    expect(await db.vendorShippingConfig.findUnique({ where: { vendorId } })).toBeNull();
+  });
+
+  it('rejects a partial save when a legacy Sopyo configuration has an invalid stored location', async () => {
+    await db.vendorShippingConfig.create({ data: {
+      vendorId, outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'not-a-shopify-gid',
+    } });
+    await expect(save(vendorId, { shippingEnabled: false })).rejects.toThrow('must be a Shopify Location GID');
+    expect(await db.vendorShippingConfig.findUniqueOrThrow({ where: { vendorId } })).toMatchObject({
+      shopifyLocationGid: 'not-a-shopify-gid', shippingEnabled: true,
+    });
+  });
+
   it('saves Sopyo before connection, ignores legacy/free-text and cross-vendor clients, then accepts a coded client', async () => {
-    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' });
+    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/101' });
     await db.vendorIntegrationClient.create({ data: {
       vendorIdentifier: vendorId, providerName: 'Sopyo API', tokenHash: `${vendorId}-legacy`,
       scopes: ['orders:read', 'shipment:write'],
@@ -73,7 +133,8 @@ describeWithPostgres('FIN-BUG-003 Phase 1 outbound selection on isolated Postgre
   it('rejects invalid provider pairs and preserves selection on unrelated config updates', async () => {
     await expect(save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION' })).rejects.toThrow('providerCode must be SOPYO');
     await expect(save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'sopyo' as 'SOPYO' })).rejects.toThrow('providerCode must be SOPYO');
-    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' });
+    await save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/101' });
     await expect(db.$executeRaw`
       UPDATE "VendorShippingConfig"
       SET "outboundMethod" = NULL, "selectedIntegrationProvider" = 'SOPYO'
@@ -92,7 +153,8 @@ describeWithPostgres('FIN-BUG-003 Phase 1 outbound selection on isolated Postgre
 
   it('does not allow an incomplete connection or a concurrent incomplete selection to activate a vendor', async () => {
     const concurrent = await Promise.allSettled([
-      save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' }),
+      save(vendorId, { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+        shopifyLocationGid: 'gid://shopify/Location/101' }),
       activate(vendorId, { status: 'active' }),
     ]);
     expect(concurrent[0].status).toBe('fulfilled');

@@ -2,6 +2,8 @@ import {
   Prisma,
   ShipmentExecutionStatus,
   ShippingProvider,
+  VendorIntegrationProviderCode,
+  VendorOutboundMethod,
   type ShipmentExecution,
   type VendorShippingConfig,
   type VendorShippingWarehouse,
@@ -2331,17 +2333,27 @@ export async function upsertVendorShippingConfig(
   }
   const config = await prisma.$transaction(async (tx) => {
     const outboundSelectionChanged = input.outboundMethod !== undefined || input.selectedIntegrationProvider !== undefined;
-    let lockedOutboundSelection: ReturnType<typeof resolveVendorOutboundSelection> | null = null;
-    if (outboundSelectionChanged) {
-      await tx.$queryRaw`SELECT "id" FROM "Vendor" WHERE "id" = ${vendorId} FOR UPDATE`;
-      const currentSelection = await tx.vendorShippingConfig.findUnique({
-        where: { vendorId },
-        select: { outboundMethod: true, selectedIntegrationProvider: true },
-      });
-      lockedOutboundSelection = resolveVendorOutboundSelection(input, {
-        outboundMethod: currentSelection?.outboundMethod ?? null,
-        selectedIntegrationProvider: currentSelection?.selectedIntegrationProvider ?? null,
-      });
+    await tx.$queryRaw`SELECT "id" FROM "Vendor" WHERE "id" = ${vendorId} FOR UPDATE`;
+    const currentSelection = await tx.vendorShippingConfig.findUnique({
+      where: { vendorId },
+      select: { outboundMethod: true, selectedIntegrationProvider: true, shopifyLocationGid: true },
+    });
+    const effectiveOutboundSelection = resolveVendorOutboundSelection(input, {
+      outboundMethod: currentSelection?.outboundMethod ?? null,
+      selectedIntegrationProvider: currentSelection?.selectedIntegrationProvider ?? null,
+    });
+    const effectiveLocationGid = shopifyLocationGid === undefined
+      ? currentSelection?.shopifyLocationGid ?? null
+      : shopifyLocationGid;
+    if (effectiveOutboundSelection.outboundMethod === VendorOutboundMethod.VENDOR_INTEGRATION &&
+        effectiveOutboundSelection.selectedIntegrationProvider === VendorIntegrationProviderCode.SOPYO &&
+        !effectiveLocationGid?.trim()) {
+      throw new Error('Shopify Location GID is required for Sopyo outbound shipping.');
+    }
+    if (effectiveOutboundSelection.outboundMethod === VendorOutboundMethod.VENDOR_INTEGRATION &&
+        effectiveOutboundSelection.selectedIntegrationProvider === VendorIntegrationProviderCode.SOPYO &&
+        !/^gid:\/\/shopify\/Location\/[^\s/?#]+$/.test(effectiveLocationGid!)) {
+      throw new Error('shopifyLocationGid must be a Shopify Location GID.');
     }
     const savedConfig = await tx.vendorShippingConfig.upsert({
       where: {
@@ -2349,8 +2361,8 @@ export async function upsertVendorShippingConfig(
       },
       update: {
         shopifyLocationGid,
-        outboundMethod: lockedOutboundSelection?.outboundMethod,
-        selectedIntegrationProvider: lockedOutboundSelection?.selectedIntegrationProvider,
+        outboundMethod: outboundSelectionChanged ? effectiveOutboundSelection.outboundMethod : undefined,
+        selectedIntegrationProvider: outboundSelectionChanged ? effectiveOutboundSelection.selectedIntegrationProvider : undefined,
         preferredProvider: input.preferredProvider === undefined ? undefined : preferredProvider,
         shippingEnabled: input.shippingEnabled,
         defaultDesi: input.defaultDesi === undefined ? undefined : defaultDesi,
@@ -2365,8 +2377,8 @@ export async function upsertVendorShippingConfig(
       create: {
         vendorId,
         shopifyLocationGid: shopifyLocationGid ?? null,
-        outboundMethod: lockedOutboundSelection?.outboundMethod ?? null,
-        selectedIntegrationProvider: lockedOutboundSelection?.selectedIntegrationProvider ?? null,
+        outboundMethod: effectiveOutboundSelection.outboundMethod,
+        selectedIntegrationProvider: effectiveOutboundSelection.selectedIntegrationProvider,
         preferredProvider,
         shippingEnabled: input.shippingEnabled ?? defaultConfig.shippingEnabled,
         defaultDesi,

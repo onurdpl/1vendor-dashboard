@@ -696,9 +696,29 @@ describe('vendor order snapshot ingestion', () => {
     }));
   });
 
+  it('retains a failed order event for attention when a new Sopyo allocation lacks location', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO', shopifyLocationGid: null,
+    });
+    const result = await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-sopyo-missing-location', rawPayload: '{"id":2210}' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' }, payload: buildSimpleOrderPayload(2210),
+    });
+    expect(result).toMatchObject({ ok: false, action: 'received_needs_attention',
+      processingStatus: 'needs_attention' });
+    expect(prismaMock.webhookEvent.update).toHaveBeenCalledWith({
+      where: { id: 'webhook-sopyo-missing-location' },
+      data: expect.objectContaining({ status: 'FAILED',
+        errorMessage: expect.stringContaining('Shopify Location GID is required') }),
+    });
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.sopyoOrderPush.createMany).not.toHaveBeenCalled();
+  });
+
   it('creates one Sopyo intent after all new allocation lines, with only allocation-scoped identity', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/101',
     });
     prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No external request allowed'));
@@ -731,6 +751,7 @@ describe('vendor order snapshot ingestion', () => {
   it('does not duplicate a Sopyo intent when the same allocation is replayed', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/101',
     });
     prismaMock.vendorAllocation.findUnique
       .mockResolvedValueOnce(null)
@@ -750,6 +771,7 @@ describe('vendor order snapshot ingestion', () => {
     prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }, { id: 'yalispor' }]);
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: 'gid://shopify/Location/101',
     });
     prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
     const result = await ingestShopifyOrderWebhook({
@@ -799,7 +821,8 @@ describe('vendor order snapshot ingestion', () => {
     prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }, { id: 'yalispor' }]);
     prismaMock.vendorShippingConfig.findUnique.mockImplementation(async ({ where }) =>
       where.vendorId === 'sporjinal'
-        ? { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO' }
+        ? { outboundMethod: 'VENDOR_INTEGRATION', selectedIntegrationProvider: 'SOPYO',
+          shopifyLocationGid: 'gid://shopify/Location/101' }
         : { outboundMethod: 'KARGONOMI', selectedIntegrationProvider: null });
     prismaMock.vendorAllocation.upsert.mockImplementation(async ({ create }) => create);
     expect(await ingestShopifyOrderWebhook({
