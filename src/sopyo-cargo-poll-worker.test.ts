@@ -15,7 +15,7 @@ describe('Sopyo cargo polling scheduler', () => {
     worker.start();
     worker.start();
     expect(SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS).toBe(60_000);
-    expect(SOPYO_DELIVERY_POLL_INTERVAL_MS).toBe(30 * 60 * 1000);
+    expect(SOPYO_DELIVERY_POLL_INTERVAL_MS).toBe(60_000);
     expect(poll).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS - 1);
     expect(poll).not.toHaveBeenCalled();

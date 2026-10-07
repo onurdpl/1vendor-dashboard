@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSopyoDeliveryClient, SopyoDeliveryClientError } from '../backend/src/modules/vendor-integration/sopyo-delivery.client.js';
 import { registerSopyoDeliveryPollScheduler, SOPYO_DELIVERY_POLL_INTERVAL_MS } from '../backend/src/modules/vendor-integration/sopyo-delivery-poll.service.js';
+import { SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS } from '../backend/src/modules/vendor-integration/sopyo-delivery-poll.service.js';
+import { prisma } from '../backend/src/db/prisma.js';
 import type { AppEnv } from '../backend/src/config/env.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -130,7 +132,7 @@ describe('Sopyo documented delivery-read client', () => {
       .rejects.toMatchObject({ category: 'MALFORMED' });
   });
 
-  it('registers a dedicated default-gated 30-minute timer with close cleanup', () => {
+  it('registers a dedicated default-gated one-minute timer with close cleanup', () => {
     const timer = { unref: vi.fn() } as unknown as ReturnType<typeof setInterval>;
     const interval = vi.spyOn(globalThis, 'setInterval').mockReturnValue(timer);
     const clear = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => undefined);
@@ -140,7 +142,8 @@ describe('Sopyo documented delivery-read client', () => {
       registerSopyoDeliveryPollScheduler(app, { SOPYO_DELIVERY_POLLING_ENABLED: false } as AppEnv);
       expect(interval).not.toHaveBeenCalled();
       registerSopyoDeliveryPollScheduler(app, { SOPYO_DELIVERY_POLLING_ENABLED: true } as AppEnv);
-      expect(SOPYO_DELIVERY_POLL_INTERVAL_MS).toBe(30 * 60 * 1000);
+      expect(SOPYO_DELIVERY_POLL_INTERVAL_MS).toBe(60_000);
+      expect(SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS).toBe(60_000);
       expect(interval).toHaveBeenCalledOnce();
       expect(interval.mock.calls[0]![1]).toBe(SOPYO_DELIVERY_POLL_INTERVAL_MS);
       close?.(app, () => undefined);
@@ -148,6 +151,31 @@ describe('Sopyo documented delivery-read client', () => {
     } finally {
       interval.mockRestore();
       clear.mockRestore();
+    }
+  });
+
+  it('waits for the first minute and does not overlap an active delivery poll', async () => {
+    vi.useFakeTimers();
+    let finish!: (value: never[]) => void;
+    const first = new Promise<never[]>((resolve) => { finish = resolve; });
+    const candidates = vi.spyOn(prisma.sopyoVendorCredential, 'findMany')
+      .mockImplementationOnce(() => first as never).mockResolvedValue([] as never);
+    const app = { log: { info: vi.fn(), error: vi.fn() }, addHook: vi.fn() } as unknown as FastifyInstance;
+    try {
+      registerSopyoDeliveryPollScheduler(app, { SOPYO_DELIVERY_POLLING_ENABLED: true } as AppEnv);
+      expect(candidates).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(candidates).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(candidates).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(candidates).toHaveBeenCalledTimes(1);
+      finish([]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(candidates).toHaveBeenCalledTimes(2);
+    } finally {
+      candidates.mockRestore();
+      vi.useRealTimers();
     }
   });
 });

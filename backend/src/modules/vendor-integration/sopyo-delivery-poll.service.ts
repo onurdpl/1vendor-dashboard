@@ -6,7 +6,7 @@ import { canonicalSopyoOrderId, recordVerifiedDeliveredObservation } from '../sh
 import { getDecryptedSopyoCredentialForInternalUse } from './sopyo-credential.service.js';
 import { createSopyoDeliveryClient } from './sopyo-delivery.client.js';
 
-export const SOPYO_DELIVERY_POLL_INTERVAL_MS = 30 * 60 * 1000;
+export const SOPYO_DELIVERY_POLL_INTERVAL_MS = 60 * 1000;
 export const SOPYO_CARGO_SHOPIFY_SYNC_INTERVAL_MS = 60 * 1000;
 
 const candidateSelect = {
