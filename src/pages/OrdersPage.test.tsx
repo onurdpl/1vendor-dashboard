@@ -735,9 +735,11 @@ describe('OrdersPage control center', () => {
   });
 
   it.each([
-    ['confirmed', 'Shopify delivery synced'],
-    ['pending', 'Shopify delivery sync pending'],
-  ] as const)('shows actual %s Delivered-sync evidence only in the side panel', async (status, expectedLabel) => {
+    ['confirmed', 'Shopify delivery synced', 'orders-detail-status-fulfilled', null],
+    ['pending', 'Shopify delivery sync pending', 'orders-detail-status-fulfilled', null],
+    ['rejected', 'Shopify delivery sync failed', 'orders-detail-status-blocked', 'op-tone-danger'],
+    ['outcome_unknown', 'Shopify delivery sync needs verification', 'orders-detail-status-pending', 'op-tone-warning'],
+  ] as const)('shows actual %s Delivered-sync evidence only in the Admin side panel', async (status, expectedLabel, stripClass, badgeClass) => {
     const deliveredOrder: OrderDetail = {
       ...orderDetail,
       trackingUrl: undefined,
@@ -763,7 +765,19 @@ describe('OrdersPage control center', () => {
     expect(sidebar).not.toBeNull();
     const strip = (sidebar as HTMLElement).querySelector('.orders-detail-status-strip');
     expect(strip).not.toBeNull();
-    expect(within(strip as HTMLElement).getByText(expectedLabel)).toBeInTheDocument();
+    expect(strip).toHaveClass(stripClass);
+    const label = within(strip as HTMLElement).getByText(expectedLabel);
+    expect(label).toBeInTheDocument();
+    if (badgeClass) {
+      expect(label).toHaveClass('op-badge', badgeClass);
+      expect(label).not.toHaveClass('op-tone-success');
+    } else {
+      expect(label).not.toHaveClass('op-tone-danger', 'op-tone-warning');
+    }
+    if (status === 'rejected' || status === 'outcome_unknown') {
+      expect(within(strip as HTMLElement).queryByText('Shopify delivery sync pending')).not.toBeInTheDocument();
+      expect(within(strip as HTMLElement).queryByText('Shopify delivery synced')).not.toBeInTheDocument();
+    }
     expect(within(strip as HTMLElement).queryByText('Shopify synced')).not.toBeInTheDocument();
     expect(within(strip as HTMLElement).queryByText('Fulfillment sync synced')).not.toBeInTheDocument();
   });

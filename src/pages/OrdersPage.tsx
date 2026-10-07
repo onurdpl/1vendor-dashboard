@@ -1056,7 +1056,21 @@ export function OrdersPage() {
                 ? 'Shopify delivery synced'
                 : shopifyDeliverySyncStatus === 'pending'
                   ? 'Shopify delivery sync pending'
+                  : isAdmin && shopifyDeliverySyncStatus === 'rejected'
+                    ? 'Shopify delivery sync failed'
+                    : isAdmin && shopifyDeliverySyncStatus === 'outcome_unknown'
+                      ? 'Shopify delivery sync needs verification'
                   : null;
+              const shopifyDeliverySyncWarningTone = isAdmin && !hasCanonicalTerminalStory && shopifyDeliverySyncStatus === 'rejected'
+                ? 'danger'
+                : isAdmin && !hasCanonicalTerminalStory && shopifyDeliverySyncStatus === 'outcome_unknown'
+                  ? 'warning'
+                  : null;
+              const statusStripTone = shopifyDeliverySyncWarningTone === 'danger'
+                ? 'blocked'
+                : shopifyDeliverySyncWarningTone === 'warning'
+                  ? 'pending'
+                  : shippingOperational.tone;
               const shipmentExecution = (selectedOrder as OrderDetail).shipmentExecution;
               const trackingLabel = hasCanonicalTerminalStory
                 ? operationalStory.shippingLabel === 'Unavailable' ? '—' : operationalStory.shippingLabel
@@ -1173,10 +1187,14 @@ export function OrdersPage() {
               </div>
 
               {!hideVendorBlockedSidebarGuidance ? (
-                <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
+                <div className={`orders-detail-status-strip orders-detail-status-${statusStripTone}`}>
                   <strong>{vendorBlockedStory?.adminActionTitle ?? (hasCanonicalTerminalStory ? operationalStory.primaryLabel : selectedOrder.shippingStatus)}</strong>
                   {isAdmin && vendorBlockedStory ? null : selectedOrder.shippingStatus === 'Delivered' && !hasCanonicalTerminalStory ? null : <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>}
-                  {!hasCanonicalTerminalStory && shopifyDeliverySyncLabel ? <span>{shopifyDeliverySyncLabel}</span> : null}
+                  {!hasCanonicalTerminalStory && shopifyDeliverySyncLabel ? (
+                    shopifyDeliverySyncWarningTone
+                      ? <StatusBadge tone={shopifyDeliverySyncWarningTone}>{shopifyDeliverySyncLabel}</StatusBadge>
+                      : <span>{shopifyDeliverySyncLabel}</span>
+                  ) : null}
                   {isAdmin && !hasCanonicalTerminalStory && selectedOrder.shippingStatus !== 'Delivered' ? <span>Fulfillment sync {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
                 </div>
               ) : null}
