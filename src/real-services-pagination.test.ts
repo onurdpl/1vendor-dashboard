@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
 import { getFinanceDashboard, getFinanceProfile, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
-import { getVendorOrdersWorkflowSummary, listOrders } from './services/real/orders';
+import { getAdminShopifyOrderBreakdown, getOrder, getVendorOrdersWorkflowSummary, listOrders } from './services/real/orders';
 import { getAdminOperationsQueueDashboard, listAdminOperationsQueue } from './services/real/operations';
 import { queryKeys } from './lib/api/queryKeys';
 import { listDashboardReturns, listReturns } from './services/real/returns';
@@ -93,6 +93,38 @@ describe('real service pagination plumbing', () => {
       },
       fulfillmentActionAvailable: false,
     });
+  });
+
+  it('maps the existing delivered allocation status in vendor list/detail and Admin detail', async () => {
+    const allocation = {
+      id: 'allocation-sopyo-delivered',
+      sourceShopifyOrderId: 'gid://shopify/Order/1145',
+      sourceShopifyOrderNumber: '#1145',
+      assignedVendorId: 'vendor-a', originalVendorId: 'vendor-a', vendorId: 'vendor-a',
+      allocationStatus: 'ACTIVE', operationalActionability: { actionable: true, reason: null },
+      refundRecordCount: 0, fulfillmentStatus: 'fulfilled', shippingStatus: 'delivered',
+      carrier: 'Carrier', trackingNumber: 'TRACK', trackingUrl: null,
+      fulfilledAt: null, shipmentCreatedAt: null, shipmentUpdatedAt: null,
+      totalAmount: '100.00', lineItemCount: 1,
+      createdAt: '2026-10-07T10:00:00.000Z', updatedAt: '2026-10-07T11:00:00.000Z',
+    };
+    apiClientGet.mockResolvedValueOnce([allocation]);
+    apiClientGet.mockResolvedValueOnce({ ...allocation, assignmentHistory: [], lineItems: [],
+      shopifyFulfillmentSync: null, reassignmentRequired: false });
+    apiClientGet.mockResolvedValueOnce({
+      order: { sourceShopifyOrderId: allocation.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber, createdAt: allocation.createdAt },
+      allocations: [{ ...allocation, vendorName: 'Vendor A', lineItems: [], assignmentHistory: [],
+        refundRecords: [], returnRecords: [] }],
+    });
+
+    const [listed] = await listOrders();
+    const detail = await getOrder(allocation.id);
+    const admin = await getAdminShopifyOrderBreakdown(allocation.sourceShopifyOrderId);
+
+    expect(listed).toMatchObject({ shippingStatus: 'Delivered', status: 'Delivered' });
+    expect(detail).toMatchObject({ shippingStatus: 'Delivered', status: 'Delivered' });
+    expect(admin.allocations[0]).toMatchObject({ shippingStatus: 'Delivered', status: 'Delivered' });
   });
 
   it('passes the operations queue type filter only when requested', async () => {

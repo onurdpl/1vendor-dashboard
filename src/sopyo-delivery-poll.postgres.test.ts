@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 import {
   MISSING_DELIVERY_DATE_REASON,
@@ -160,6 +162,9 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     expect((await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } })).firstObservedDeliveredAt)
       .toEqual(observation.firstObservedDeliveredAt);
     const after = await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id }, include: { deliveredObservation: true } });
+    expect(after.shippingStatus).toBe('delivered');
+    expect(after.fulfillmentStatus).toBe(before.fulfillmentStatus);
+    expect(await db.fulfillment.count({ where: { vendorAllocationId: source.id } })).toBe(0);
     expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 0, vendorAllocation: after,
     }, observation.firstObservedDeliveredAt).eligible).toBe(true);
     expect(evaluateSaleSettlementDelay({ entryType: 'SALE', settlementDelayDaysSnapshot: 1, vendorAllocation: after,
@@ -211,6 +216,7 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     expect(observation.firstObservedDeliveredAt.getTime()).toBeGreaterThanOrEqual(pollStartedAt.getTime());
     expect(observation.firstObservedDeliveredAt.getTime()).toBeLessThanOrEqual(pollFinishedAt.getTime());
     expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(1);
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id } })).shippingStatus).toBe('delivered');
 
     const persistedSale = await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: saleId } });
     expect(persistedSale.settlementDelayDaysSnapshot).toBe(frozenDelayDays);
@@ -267,6 +273,8 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
       const source = await pushFixture();
       await poll({ db, fetcher: fakePushSopyo(source, override).fetcher });
       expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(0);
+      expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id } })).shippingStatus)
+        .toBe('Awaiting Shipment');
     }
   });
 
@@ -397,7 +405,10 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     const observation = await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: matching.id } });
     expect(observation).toMatchObject({ sourceReference: matching.sopyoOrderId,
       vendorIntegrationClientId: matching.client.id, sopyoOrderPushId: null });
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: matching.id } })).shippingStatus).toBe('delivered');
     expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: different.id } })).toBe(0);
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: different.id } })).shippingStatus)
+      .toBe('Awaiting Shipment');
   });
 
   it('the canonical recorder resolves concurrent push and legacy claims for the same ID without overwrite', async () => {
@@ -434,11 +445,13 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     const observation = await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } });
     expect(observation).toMatchObject({ outboundMethod: 'VENDOR_INTEGRATION', outboundIntegrationProvider: 'SOPYO',
       vendorIntegrationClientId: source.client.id, sourceReference: '37505089' });
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id } })).shippingStatus).toBe('delivered');
     expect(observation.firstObservedDeliveredAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
     expect(observation.firstObservedDeliveredAt.getTime()).toBeLessThanOrEqual(after.getTime());
     await poll({ db, fetcher: api.fetcher });
     expect((await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: source.id } })).firstObservedDeliveredAt)
       .toEqual(observation.firstObservedDeliveredAt);
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id } })).shippingStatus).toBe('delivered');
     expect(evaluateSaleSettlementDelay(financeInput)).toEqual(beforeEligibility);
     expect(beforeEligibility.eligible).toBe(false);
   });
@@ -609,5 +622,62 @@ describeWithPostgres('FIN-BUG-003 isolated Sopyo delivery adapter on PostgreSQL'
     expect(report.failedLookups).toBeGreaterThanOrEqual(1);
     expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: failing.id } })).toBe(0);
     expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: healthy.id } })).toBe(1);
+  });
+
+  it('rolls back the observation if the local Delivered projection cannot commit', async () => {
+    const source = await pushFixture();
+    await db.$executeRawUnsafe(`CREATE FUNCTION sopyo_reject_delivered_projection_test() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW."id" = TG_ARGV[0] AND NEW."shippingStatus" = 'delivered' THEN
+          RAISE EXCEPTION 'isolated projection failure';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await db.$executeRawUnsafe(`CREATE TRIGGER sopyo_reject_delivered_projection_test
+      BEFORE UPDATE ON "VendorAllocation" FOR EACH ROW
+      EXECUTE FUNCTION sopyo_reject_delivered_projection_test('${source.id}')`);
+    try {
+      const report = await poll({ db, fetcher: fakePushSopyo(source).fetcher });
+      expect(report.failedLookups).toBeGreaterThanOrEqual(1);
+      expect(await db.allocationDeliveredObservation.count({ where: { vendorAllocationId: source.id } })).toBe(0);
+      expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: source.id } })).shippingStatus)
+        .toBe('Awaiting Shipment');
+    } finally {
+      await db.$executeRawUnsafe('DROP TRIGGER sopyo_reject_delivered_projection_test ON "VendorAllocation"');
+      await db.$executeRawUnsafe('DROP FUNCTION sopyo_reject_delivered_projection_test()');
+    }
+  });
+
+  it('applies the bounded forward repair only to source-aligned observed Sopyo allocations', async () => {
+    const { recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js');
+    const sopyo = await pushFixture();
+    const observation = await recordVerifiedDeliveredObservation({ allocationId: sopyo.id, source: {
+      method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO', pushId: sopyo.push.id,
+      sourceReference: sopyo.sopyoOrderId,
+    } }, db);
+    await db.vendorAllocation.update({ where: { id: sopyo.id }, data: { shippingStatus: 'shipped' } });
+    const kargonomi = await fixture({ method: 'KARGONOMI' });
+    const execution = await db.shipmentExecution.create({ data: {
+      id: `${kargonomi.id}-execution`,
+      allocationId: kargonomi.id, vendorId: kargonomi.vendorId, provider: 'KARGONOMI',
+      providerShipmentId: `${kargonomi.id}-shipment`, shipmentStatus: 'DELIVERED', requestSnapshot: {},
+    } });
+    const kargonomiObservation = await recordVerifiedDeliveredObservation({ allocationId: kargonomi.id, source: {
+      method: 'KARGONOMI', shipmentExecutionId: execution.id, sourceReference: execution.providerShipmentId!,
+    } }, db);
+    await db.vendorAllocation.update({ where: { id: kargonomi.id }, data: { shippingStatus: 'shipped' } });
+    const unobserved = await fixture();
+    const migration = readFileSync(resolve(process.cwd(),
+      'backend/prisma/migrations/20261008220000_project_sopyo_delivered_status/migration.sql'), 'utf8');
+    await db.$executeRawUnsafe(migration);
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: sopyo.id } })).shippingStatus).toBe('delivered');
+    expect(await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: sopyo.id } }))
+      .toMatchObject({ id: observation.id, firstObservedDeliveredAt: observation.firstObservedDeliveredAt });
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: kargonomi.id } })).shippingStatus).toBe('shipped');
+    expect(await db.allocationDeliveredObservation.findUniqueOrThrow({ where: { vendorAllocationId: kargonomi.id } }))
+      .toMatchObject({ id: kargonomiObservation.id, firstObservedDeliveredAt: kargonomiObservation.firstObservedDeliveredAt });
+    expect((await db.vendorAllocation.findUniqueOrThrow({ where: { id: unobserved.id } })).shippingStatus)
+      .toBe('Awaiting Shipment');
+    expect(await db.$executeRawUnsafe(migration)).toBe(0);
   });
 });

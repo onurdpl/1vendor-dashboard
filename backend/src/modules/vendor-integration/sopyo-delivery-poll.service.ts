@@ -150,6 +150,9 @@ export async function pollSopyoDeliveredOrders(
             source: { method: 'VENDOR_INTEGRATION', providerCode: 'SOPYO',
               pushId: currentPush.id, sourceReference: String(order.id) },
           }, tx);
+          await tx.vendorAllocation.update({
+            where: { id: current.id }, data: { shippingStatus: 'delivered' },
+          });
           return true;
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
         if (inserted) report.observationsRecorded += 1;
@@ -191,6 +194,9 @@ export async function pollSopyoDeliveredOrders(
               sourceReference: String(orders[0]!.id),
             },
           }, tx);
+          await tx.vendorAllocation.update({
+            where: { id: exact[0]!.row.id }, data: { shippingStatus: 'delivered' },
+          });
           return true;
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
         if (inserted) report.observationsRecorded += 1;
