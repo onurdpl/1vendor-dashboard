@@ -28,10 +28,11 @@ describeWithPostgres('Sopyo order push intent on isolated PostgreSQL', () => {
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
     await db.vendor.createMany({ data: vendorIds.map((id) => ({ id, name: id })) });
-    await db.vendorShippingConfig.createMany({ data: vendorIds.map((vendorId) => ({
+    await db.vendorShippingConfig.createMany({ data: vendorIds.map((vendorId, index) => ({
       vendorId,
       outboundMethod: 'VENDOR_INTEGRATION',
       selectedIntegrationProvider: 'SOPYO',
+      shopifyLocationGid: `gid://shopify/Location/${101 + index}`,
     })) });
     expect((await processOrder(`sopyo-push-first-${suffix}`)).ok).toBe(true);
   });
