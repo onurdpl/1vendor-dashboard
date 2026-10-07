@@ -8,6 +8,7 @@ import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { buildSaleLedgerEntryId, upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
+import { preserveCurrentSopyoDelivered, preserveVerifiedSopyoDelivered } from '../shopify/sopyo-delivered-projection.service.js';
 import type {
   CanonicalShopifyOrderLineItemSnapshot,
   CanonicalShopifyOrderSnapshot,
@@ -995,6 +996,7 @@ export function createReconciliationService(env: AppEnv) {
         },
         allocations: {
           include: {
+            deliveredObservation: true,
             fulfillment: true,
             lineItems: {
               include: {
@@ -1208,6 +1210,9 @@ export function createReconciliationService(env: AppEnv) {
                   : allItemsFulfilled
                     ? 'shipped'
                     : 'partially_shipped';
+          if (preserveVerifiedSopyoDelivered(allocation, desiredShippingStatus)) {
+            desiredShippingStatus = 'delivered';
+          }
           desiredTrackingNumber = tracking?.number ?? null;
           desiredCarrier = tracking?.company ?? null;
           desiredTrackingUrl = tracking?.url ?? null;
@@ -1293,11 +1298,14 @@ export function createReconciliationService(env: AppEnv) {
           }
         } else if (fieldComparisons.length > 0) {
           await prisma.$transaction(async (tx) => {
+            const shippingStatusAtWrite = allocation.outboundIntegrationProviderSnapshot === 'SOPYO' &&
+              await preserveCurrentSopyoDelivered(tx, allocation.id, desiredShippingStatus)
+              ? 'delivered' : desiredShippingStatus;
             await tx.vendorAllocation.update({
               where: { id: allocation.id },
               data: {
                 fulfillmentStatus: desiredFulfillmentStatus,
-                shippingStatus: desiredShippingStatus,
+                shippingStatus: shippingStatusAtWrite,
                 trackingNumber: desiredTrackingNumber,
                 carrier: desiredCarrier,
               },

@@ -4573,6 +4573,100 @@ export function createShopifyAdminService(env: AppEnv) {
     return fulfillment ? { outcome: 'success', fulfillment } : { outcome: 'unknown' };
   }
 
+  /** Exact fulfillment/event read; an incomplete page never proves DELIVERED absent. */
+  async function readSopyoFulfillmentDelivered(input: {
+    fulfillmentId: string; orderGid: string;
+  }): Promise<{ delivered: boolean }> {
+    if (env.SHOPIFY_API_VERSION !== '2026-01' || !env.SHOPIFY_SHOP_DOMAIN ||
+        !env.SHOPIFY_ADMIN_ACCESS_TOKEN ||
+        !/^gid:\/\/shopify\/Fulfillment\/\d+$/.test(input.fulfillmentId) ||
+        !/^gid:\/\/shopify\/Order\/\d+$/.test(input.orderGid)) {
+      throw new Error('Shopify exact fulfillment event read is not configured.');
+    }
+    const incomplete = () => new Error('Shopify fulfillment event evidence is incomplete.');
+    let cursor: string | null = null;
+    const seen = new Set<string>();
+    let delivered = false;
+    do {
+      const response: Response = await fetch(
+        `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+        { method: 'POST', headers: { 'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN },
+          body: JSON.stringify({ query: `query SopyoFulfillmentDelivered($id: ID!, $after: String) {
+            fulfillment(id: $id) {
+              id order { id }
+              events(first: 100, after: $after) {
+                pageInfo { hasNextPage endCursor }
+                nodes { id status }
+              }
+            }
+          }`, variables: { id: input.fulfillmentId, after: cursor } }),
+        },
+      );
+      if (!response.ok) throw incomplete();
+      const json: ShopifyGraphqlResponse<{ fulfillment?: {
+        id?: string | null; order?: { id?: string | null } | null;
+        events?: { pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
+          nodes?: Array<{ id?: string | null; status?: string | null }> | null } | null;
+      } | null }> = await parseCanonicalShopifyResponse(response);
+      if (json.errors?.length) throw incomplete();
+      const fulfillment: NonNullable<NonNullable<typeof json.data>['fulfillment']> | null | undefined =
+        json.data?.fulfillment;
+      const events: NonNullable<typeof fulfillment>['events'] = fulfillment?.events;
+      if (fulfillment?.id !== input.fulfillmentId || fulfillment.order?.id !== input.orderGid ||
+          !Array.isArray(events?.nodes) || typeof events.pageInfo?.hasNextPage !== 'boolean' ||
+          events.nodes.some((node) => !node?.id || !node?.status)) throw incomplete();
+      if (events.nodes.some((node) => node.status === 'DELIVERED')) delivered = true;
+      if (!events.pageInfo.hasNextPage) break;
+      const next: string | null | undefined = events.pageInfo.endCursor;
+      if (!next || next === cursor || seen.has(next) || events.nodes.length === 0) throw incomplete();
+      seen.add(next);
+      cursor = next;
+    } while (true);
+    return { delivered };
+  }
+
+  /** The caller must durably claim the exact intent before this one external write. */
+  async function createSopyoDeliveredEvent(
+    fulfillmentId: string,
+  ): Promise<{ outcome: 'success' | 'rejected' | 'unknown' }> {
+    if (env.SHOPIFY_API_VERSION !== '2026-01' || !env.SHOPIFY_SHOP_DOMAIN ||
+        !env.SHOPIFY_ADMIN_ACCESS_TOKEN ||
+        !/^gid:\/\/shopify\/Fulfillment\/\d+$/.test(fulfillmentId)) {
+      throw new Error('Shopify 2026-01 delivered event create is not configured.');
+    }
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+        { method: 'POST', headers: { 'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN },
+          body: JSON.stringify({ query: `mutation SopyoDeliveredEventCreate($fulfillmentEvent: FulfillmentEventInput!) {
+            fulfillmentEventCreate(fulfillmentEvent: $fulfillmentEvent) {
+              fulfillmentEvent { id status }
+              userErrors { field message }
+            }
+          }`, variables: { fulfillmentEvent: { fulfillmentId, status: 'DELIVERED' } } }),
+        },
+      );
+    } catch { return { outcome: 'unknown' }; }
+    if (!response.ok) return { outcome: 'unknown' };
+    let json: ShopifyGraphqlResponse<{ fulfillmentEventCreate?: {
+      fulfillmentEvent?: { id?: string | null; status?: string | null } | null;
+      userErrors?: Array<{ field?: string[] | null; message?: string | null }> | null;
+    } | null }>;
+    try { json = await parseCanonicalShopifyResponse(response); }
+    catch { return { outcome: 'unknown' }; }
+    const result = json.data?.fulfillmentEventCreate;
+    if (json.errors?.length || !result || !Array.isArray(result.userErrors)) return { outcome: 'unknown' };
+    if (result.userErrors.length > 0) {
+      return result.fulfillmentEvent ? { outcome: 'unknown' } : { outcome: 'rejected' };
+    }
+    return result.fulfillmentEvent?.id?.startsWith('gid://shopify/FulfillmentEvent/') &&
+      result.fulfillmentEvent.status === 'DELIVERED'
+      ? { outcome: 'success' } : { outcome: 'unknown' };
+  }
+
   /** Exhausts accessible fulfillment-order relationships; absence still never proves a create failed. */
   async function fetchSopyoFulfillmentsForReconciliation(
     shopifyOrderId: string,
@@ -5003,6 +5097,8 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchFulfillmentOrdersForCancellationClassification,
     fetchFulfillmentOrdersForSopyoPlanning,
     createSopyoFulfillment,
+    readSopyoFulfillmentDelivered,
+    createSopyoDeliveredEvent,
     fetchSopyoFulfillmentsForReconciliation,
     cancelFulfillment,
     cancelFulfillmentOrder,

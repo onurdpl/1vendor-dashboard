@@ -1,5 +1,6 @@
 import { prisma } from '../../db/prisma.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
+import { preserveCurrentSopyoDelivered } from './sopyo-delivered-projection.service.js';
 import type { AppEnv } from '../../config/env.js';
 import type {
   FulfillmentIngestionInput,
@@ -185,6 +186,7 @@ export async function ingestFulfillmentWebhook(
         include: {
           allocations: {
             include: {
+              deliveredObservation: true,
               lineItems: {
                 include: {
                   shopifyOrderLineItem: true,
@@ -319,7 +321,7 @@ export async function ingestFulfillmentWebhook(
           eventFulfillmentId === representativeFulfillment.sourceFulfillmentId;
         const effectiveDeliveryStatus = eventAppliesToFulfillment ? deliveryEventStatus : canonicalEventStatus;
         const fulfillmentStatus = allAllocationItemsFulfilled ? 'fulfilled' : 'partially_fulfilled';
-        const shippingStatus =
+        const derivedShippingStatus =
           effectiveDeliveryStatus === 'delivered'
             ? 'delivered'
             : effectiveDeliveryStatus === 'in_transit'
@@ -329,6 +331,9 @@ export async function ingestFulfillmentWebhook(
                 : allAllocationItemsFulfilled
                   ? 'shipped'
                   : 'partially_shipped';
+        const shippingStatus = allocation.outboundIntegrationProviderSnapshot === 'SOPYO' &&
+          await preserveCurrentSopyoDelivered(tx, allocation.id, derivedShippingStatus)
+          ? 'delivered' : derivedShippingStatus;
         const fulfilledAt = toDate(representativeFulfillment.createdAt);
         const latestEvent = getLatestFulfillmentEvent(representativeFulfillment);
         const shipmentCreatedAt = fulfilledAt;

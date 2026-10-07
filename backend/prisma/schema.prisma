@@ -297,6 +297,13 @@ enum SopyoShipmentIntentStatus {
   PLAN_READY
 }
 
+enum SopyoDeliveredSyncStatus {
+  SUBMISSION_PENDING
+  CONFIRMED
+  REJECTED
+  OUTCOME_UNKNOWN
+}
+
 enum ShipmentExecutionStatus {
   PENDING
   CREATED
@@ -1057,6 +1064,11 @@ model SopyoShipmentIntent {
   submissionStartedAt      DateTime?
   confirmedAt              DateTime?
   shopifyFulfillmentId     String?                   @unique
+  deliveredSyncStatus      SopyoDeliveredSyncStatus?
+  deliveredSubmissionStartedAt DateTime?
+  deliveredConfirmedAt     DateTime?
+  deliveredRejectedAt      DateTime?
+  deliveredRejectReasonCode String?
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
   vendorAllocation         VendorAllocation          @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict)
@@ -1065,6 +1077,7 @@ model SopyoShipmentIntent {
   executionPlan            SopyoShopifyExecutionPlan?
 
   @@index([status, createdAt])
+  @@index([deliveredSyncStatus, createdAt])
 }
 
 model SopyoShopifyExecutionPlan {

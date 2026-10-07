@@ -139,3 +139,73 @@ describe('Sopyo Shopify 2026-01 fulfillment GraphQL transport', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('Sopyo exact Shopify Delivered event transport', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const fulfillmentId = 'gid://shopify/Fulfillment/44';
+  const orderGid = 'gid://shopify/Order/55';
+
+  it('exhausts exact fulfillment event pages and recognizes an existing DELIVERED', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.variables.id).toBe(fulfillmentId);
+      return Response.json({ data: { fulfillment: { id: fulfillmentId, order: { id: orderGid },
+        events: { nodes: [{ id: body.variables.after ? 'event-2' : 'event-1',
+          status: body.variables.after ? 'DELIVERED' : 'IN_TRANSIT' }],
+          pageInfo: { hasNextPage: !body.variables.after,
+            endCursor: body.variables.after ? null : 'cursor-1' } },
+      } } });
+    });
+    expect(await createShopifyAdminService(env).readSopyoFulfillmentDelivered({ fulfillmentId, orderGid }))
+      .toEqual({ delivered: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['wrong-fulfillment', 'wrong-order', 'missing-page-info', 'repeated-cursor'])(
+    'fails closed on %s rather than proving absence', async (kind) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        return Response.json({ data: { fulfillment: {
+          id: kind === 'wrong-fulfillment' ? 'gid://shopify/Fulfillment/99' : fulfillmentId,
+          order: { id: kind === 'wrong-order' ? 'gid://shopify/Order/99' : orderGid },
+          events: { nodes: [{ id: 'event-1', status: 'IN_TRANSIT' }],
+            pageInfo: kind === 'missing-page-info' ? null :
+              { hasNextPage: kind === 'repeated-cursor', endCursor: body.variables.after ?? 'cursor-1' } },
+        } } });
+      });
+      await expect(createShopifyAdminService(env).readSopyoFulfillmentDelivered({ fulfillmentId, orderGid }))
+        .rejects.toThrow();
+    },
+  );
+
+  it('sends only a DELIVERED event for the stored fulfillment', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ data: {
+      fulfillmentEventCreate: { userErrors: [],
+        fulfillmentEvent: { id: 'gid://shopify/FulfillmentEvent/1', status: 'DELIVERED' } },
+    } }));
+    expect(await createShopifyAdminService(env).createSopyoDeliveredEvent(fulfillmentId))
+      .toEqual({ outcome: 'success' });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.query).toContain('fulfillmentEventCreate');
+    expect(body.query).not.toContain('fulfillmentCreate(');
+    expect(body.variables.fulfillmentEvent).toEqual({ fulfillmentId, status: 'DELIVERED' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('classifies userErrors as rejected and transport/partial responses as unknown', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockResolvedValueOnce(Response.json({ data: { fulfillmentEventCreate: {
+      userErrors: [{ field: ['status'], message: 'Rejected' }], fulfillmentEvent: null,
+    } } }));
+    expect(await createShopifyAdminService(env).createSopyoDeliveredEvent(fulfillmentId))
+      .toEqual({ outcome: 'rejected' });
+    fetchMock.mockRejectedValueOnce(new Error('token-sensitive transport failure'));
+    expect(await createShopifyAdminService(env).createSopyoDeliveredEvent(fulfillmentId))
+      .toEqual({ outcome: 'unknown' });
+    fetchMock.mockResolvedValueOnce(Response.json({ data: { fulfillmentEventCreate: {
+      userErrors: [], fulfillmentEvent: null,
+    } } }));
+    expect(await createShopifyAdminService(env).createSopyoDeliveredEvent(fulfillmentId))
+      .toEqual({ outcome: 'unknown' });
+  });
+});

@@ -28,6 +28,7 @@ const prismaMock = vi.hoisted(() => ({
     upsert: vi.fn(),
     updateMany: vi.fn(),
   },
+  $queryRaw: vi.fn(),
   $transaction: vi.fn((callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock)),
 }));
 
@@ -75,6 +76,7 @@ function allocation(input: {
   trackingNumber?: string | null;
   carrier?: string | null;
   fulfillment?: Record<string, unknown> | null;
+  verifiedSopyo?: boolean;
 }) {
   const allocationId = input.id ?? 'alloc-a';
   return {
@@ -86,6 +88,12 @@ function allocation(input: {
     trackingNumber: input.trackingNumber ?? null,
     carrier: input.carrier ?? null,
     fulfillment: input.fulfillment ?? null,
+    outboundMethodSnapshot: input.verifiedSopyo ? 'VENDOR_INTEGRATION' : null,
+    outboundIntegrationProviderSnapshot: input.verifiedSopyo ? 'SOPYO' : null,
+    deliveredObservation: input.verifiedSopyo ? {
+      vendorAllocationId: allocationId, outboundMethod: 'VENDOR_INTEGRATION',
+      outboundIntegrationProvider: 'SOPYO',
+    } : null,
     lineItems: [
       {
         id: 'allocation-line-1',
@@ -186,6 +194,37 @@ describe('fulfillment reconciliation downgrade protection', () => {
         resolvedAt: expect.any(Date),
       },
     });
+  });
+
+  it('does not downgrade a source-aligned Sopyo Delivered allocation from older Shopify progression', async () => {
+    const sourceAligned = allocation({
+      fulfillmentStatus: 'fulfilled', shippingStatus: 'delivered', verifiedSopyo: true,
+    });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder([sourceAligned]));
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(sourceAligned);
+    const older = { ...fulfillment(), events: [{ status: 'in_transit',
+      happenedAt: '2026-06-25T12:00:00.000Z' }] };
+    const result = await createReconciliationService(buildEnv([older])).reconcileShopifyOrder('order-1');
+    expect(result?.reconciliationStatus).toBe('repaired');
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ shippingStatus: 'delivered' }),
+    }));
+  });
+
+  it('rechecks newly committed Sopyo Delivered state at the reconciliation write boundary', async () => {
+    const stale = allocation({ fulfillmentStatus: 'fulfilled', shippingStatus: 'shipped', verifiedSopyo: true });
+    stale.deliveredObservation = null;
+    const current = allocation({ fulfillmentStatus: 'fulfilled', shippingStatus: 'delivered', verifiedSopyo: true });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder([stale]));
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(current);
+    const older = { ...fulfillment(), events: [{ status: 'in_transit',
+      happenedAt: '2026-06-25T12:00:00.000Z' }] };
+    const result = await createReconciliationService(buildEnv([older])).reconcileShopifyOrder('order-1');
+    expect(result?.reconciliationStatus).toBe('repaired');
+    expect(prismaMock.$queryRaw).toHaveBeenCalledOnce();
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ shippingStatus: 'delivered' }),
+    }));
   });
 
   it('preserves delivered state and creates a reconciliation issue when no canonical line matches', async () => {
