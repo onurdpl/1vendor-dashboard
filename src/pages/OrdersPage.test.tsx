@@ -433,9 +433,9 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText('+900000000002')).not.toBeInTheDocument();
     expect(screen.queryByText('22 Harbor Ave')).not.toBeInTheDocument();
     expect(screen.queryByText('Rail billing street')).not.toBeInTheDocument();
-    expect(within(orderRow).getByText('Fulfilled')).toBeInTheDocument();
+    expect(within(orderRow).getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(within(orderRow).queryByText('Tracking visible')).not.toBeInTheDocument();
-    expect(within(orderRow).getByText('Tracking synced')).toBeInTheDocument();
+    expect(within(orderRow).queryByText('Shopify sync pending')).not.toBeInTheDocument();
     expect(within(orderRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
     expect(within(orderRow).getByText('$1,950.00')).toBeInTheDocument();
     expect(within(orderRow).getByText('1 line items')).toBeInTheDocument();
@@ -517,7 +517,7 @@ describe('OrdersPage control center', () => {
     expect(within(shipmentUpdatedRow).getByText('Acme Supply Co.')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('Shopify')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).queryByText('Demo Vendor A · Shopify')).not.toBeInTheDocument();
-    expect(within(shipmentUpdatedRow).getByText('Fulfilled')).toBeInTheDocument();
+    expect(within(shipmentUpdatedRow).getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(within(shipmentUpdatedRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('$1,950.00')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1101');
@@ -636,10 +636,10 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     const fulfilledRow = await screen.findByRole('button', { name: /#1002/ });
-    expect(within(fulfilledRow).getByText('Fulfilled')).toBeInTheDocument();
+    expect(within(fulfilledRow).getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(fulfilledRow.querySelector('.orders-table-status-cell small')).toBeNull();
     expect(within(fulfilledRow).queryByText('Tracking visible')).not.toBeInTheDocument();
-    expect(within(fulfilledRow).getByText('Tracking synced')).toBeInTheDocument();
+    expect(within(fulfilledRow).queryByText('Shopify sync pending')).not.toBeInTheDocument();
     expect(within(fulfilledRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
 
     const inFlowRow = screen.getByRole('button', { name: /#1004/ });
@@ -695,7 +695,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
   });
 
-  it('keeps unresolved vendor tracking primaries and concrete evidence unchanged', async () => {
+  it('keeps tracking visible without presenting its missing URL as Shopify sync evidence', async () => {
     setVendorUser();
     const shopifySyncPendingOrder = buildAwaitingRejectableOrder({
       id: 'ORD-A-1009',
@@ -723,7 +723,8 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     const syncPendingRow = await screen.findByRole('button', { name: /#1009/ });
-    expect(within(syncPendingRow).getByText('Shopify sync pending')).toBeInTheDocument();
+    expect(within(syncPendingRow).getByText('Label Created')).toBeInTheDocument();
+    expect(within(syncPendingRow).queryByText('Shopify sync pending')).not.toBeInTheDocument();
     expect(within(syncPendingRow).getByText('DHL / TRK-A-1009')).toBeInTheDocument();
 
     const providerPendingRow = screen.getByRole('button', { name: /#1010/ });
@@ -731,6 +732,61 @@ describe('OrdersPage control center', () => {
 
     const reassignmentRow = screen.getByRole('button', { name: /#1011/ });
     expect(within(reassignmentRow).getByText('Needs review')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['confirmed', 'Shopify delivery synced'],
+    ['pending', 'Shopify delivery sync pending'],
+  ] as const)('shows actual %s Delivered-sync evidence only in the side panel', async (status, expectedLabel) => {
+    const deliveredOrder: OrderDetail = {
+      ...orderDetail,
+      trackingUrl: undefined,
+      shopifyDeliverySync: { status },
+      shopifyFulfillmentSync: {
+        status: 'synced', fulfillmentOrderIdPresent: true, fulfillmentIdPresent: true,
+        syncStatus: 'synced', skippedReason: null, errorMessage: null, lastAttemptedAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(deliveredOrder)]);
+    getOrderMock.mockResolvedValue(deliveredOrder);
+
+    renderOrdersPage();
+
+    const row = await screen.findByRole('button', { name: /#1002/ });
+    const shippingCell = row.querySelector('.orders-table-shipping-cell');
+    expect(shippingCell).not.toBeNull();
+    expect(within(shippingCell as HTMLElement).getByText('Delivered')).toBeInTheDocument();
+    expect(within(shippingCell as HTMLElement).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
+    expect(within(row).queryByText(/Shopify delivery sync|Shopify sync pending/)).not.toBeInTheDocument();
+
+    const sidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+    expect(sidebar).not.toBeNull();
+    const strip = (sidebar as HTMLElement).querySelector('.orders-detail-status-strip');
+    expect(strip).not.toBeNull();
+    expect(within(strip as HTMLElement).getByText(expectedLabel)).toBeInTheDocument();
+    expect(within(strip as HTMLElement).queryByText('Shopify synced')).not.toBeInTheDocument();
+    expect(within(strip as HTMLElement).queryByText('Fulfillment sync synced')).not.toBeInTheDocument();
+  });
+
+  it('does not treat fulfillment creation alone as Shopify Delivered confirmation', async () => {
+    const deliveredOrder: OrderDetail = {
+      ...orderDetail,
+      shopifyDeliverySync: null,
+      shopifyFulfillmentSync: {
+        status: 'synced', fulfillmentOrderIdPresent: true, fulfillmentIdPresent: true,
+        syncStatus: 'synced', skippedReason: null, errorMessage: null, lastAttemptedAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(deliveredOrder)]);
+    getOrderMock.mockResolvedValue(deliveredOrder);
+    renderOrdersPage();
+
+    const sidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+    expect(sidebar).not.toBeNull();
+    const strip = (sidebar as HTMLElement).querySelector('.orders-detail-status-strip');
+    expect(strip).not.toBeNull();
+    expect(within(strip as HTMLElement).queryByText(/Shopify delivery sync/)).not.toBeInTheDocument();
+    expect(within(strip as HTMLElement).queryByText('Shopify synced')).not.toBeInTheDocument();
   });
 
   it('keeps pending reassignment in Status across shipment evidence without changing Tracking', async () => {
@@ -809,7 +865,7 @@ describe('OrdersPage control center', () => {
       const trackingCell = row.querySelector('.orders-table-shipping-cell');
       expect(statusCell).not.toBeNull();
       expect(trackingCell).not.toBeNull();
-      expect(within(statusCell as HTMLElement).getByText('Fulfilled')).toBeInTheDocument();
+      expect(within(statusCell as HTMLElement).getByText(orderNumber === '#1144' ? 'Delivered' : 'Fulfilled')).toBeInTheDocument();
       expect(within(statusCell as HTMLElement).queryByText('Pending Reassignment')).not.toBeInTheDocument();
       expect(statusCell?.querySelector('small')).toBeNull();
       expect(within(trackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
@@ -2879,7 +2935,7 @@ describe('OrdersPage control center', () => {
         expect(fulfillmentCard).not.toBeNull();
         expect(within(fulfillmentCard as HTMLElement).getByText('Provider')).toBeInTheDocument();
         expect(within(fulfillmentCard as HTMLElement).getAllByText('Blocked').length).toBeGreaterThan(0);
-        expect(within(fulfillmentCard as HTMLElement).getByText('Shopify sync')).toBeInTheDocument();
+        expect(within(fulfillmentCard as HTMLElement).getByText('Fulfillment sync')).toBeInTheDocument();
         expect(within(fulfillmentCard as HTMLElement).getByText('Not fulfilled')).toBeInTheDocument();
       } else {
         expect(screen.getByText('Awaiting admin resolution. Fulfillment is not ready.')).toBeInTheDocument();

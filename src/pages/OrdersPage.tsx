@@ -249,6 +249,9 @@ function getLifecyclePrimaryLabel(order: OrderSummary) {
   if (order.shippingStatus === 'Awaiting Shipment') {
     return 'Awaiting shipment';
   }
+  if (order.shippingStatus === 'Delivered') {
+    return 'Delivered';
+  }
   if (order.fulfillmentStatus === 'Fulfilled') {
     return 'Fulfilled';
   }
@@ -275,11 +278,14 @@ function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
   if (order.allocationStatus === 'pending_reassignment') {
     return { label: 'Needs review', tone: 'blocked' as const, helper: null };
   }
+  if (order.shippingStatus === 'Delivered') {
+    return { label: 'Delivered', tone: 'fulfilled' as const, helper: getTrackingLabel(order) };
+  }
   if (order.trackingNumber && order.trackingUrl) {
     return { label: 'Tracking synced', tone: 'tracking' as const, helper: getTrackingLabel(order) };
   }
   if (order.trackingNumber || order.carrier) {
-    return { label: 'Shopify sync pending', tone: 'tracking' as const, helper: getTrackingLabel(order) };
+    return { label: order.shippingStatus, tone: 'tracking' as const, helper: getTrackingLabel(order) };
   }
   if (order.shippingStatus === 'Label Created' || order.shippingStatus === 'In Transit') {
     return { label: 'Provider pending', tone: 'pending' as const, helper: null };
@@ -287,7 +293,7 @@ function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
   if (order.shippingStatus === 'Awaiting Shipment') {
     return { label: 'No tracking yet', tone: 'pending' as const, helper: null };
   }
-  if (order.fulfillmentStatus === 'Fulfilled' || order.shippingStatus === 'Delivered') {
+  if (order.fulfillmentStatus === 'Fulfilled') {
     return { label: 'Fulfilled', tone: 'fulfilled' as const, helper: null };
   }
   return { label: 'Provider pending', tone: 'pending' as const, helper: null };
@@ -1043,6 +1049,14 @@ export function OrdersPage() {
               const hasCanonicalTerminalStory = operationalStory.state !== 'active_or_unknown';
               const shippingOperational = getShippingOperationalLabel(selectedOrder);
               const shopifyFulfillmentState = getShopifyFulfillmentRailLabel(selectedOrder);
+              const shopifyDeliverySyncStatus = selectedOrder.shippingStatus === 'Delivered'
+                ? (selectedOrder as OrderDetail).shopifyDeliverySync?.status
+                : null;
+              const shopifyDeliverySyncLabel = shopifyDeliverySyncStatus === 'confirmed'
+                ? 'Shopify delivery synced'
+                : shopifyDeliverySyncStatus === 'pending'
+                  ? 'Shopify delivery sync pending'
+                  : null;
               const shipmentExecution = (selectedOrder as OrderDetail).shipmentExecution;
               const trackingLabel = hasCanonicalTerminalStory
                 ? operationalStory.shippingLabel === 'Unavailable' ? '—' : operationalStory.shippingLabel
@@ -1161,8 +1175,9 @@ export function OrdersPage() {
               {!hideVendorBlockedSidebarGuidance ? (
                 <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
                   <strong>{vendorBlockedStory?.adminActionTitle ?? (hasCanonicalTerminalStory ? operationalStory.primaryLabel : selectedOrder.shippingStatus)}</strong>
-                  {isAdmin && vendorBlockedStory ? null : <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>}
-                  {isAdmin && !hasCanonicalTerminalStory ? <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
+                  {isAdmin && vendorBlockedStory ? null : selectedOrder.shippingStatus === 'Delivered' && !hasCanonicalTerminalStory ? null : <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>}
+                  {!hasCanonicalTerminalStory && shopifyDeliverySyncLabel ? <span>{shopifyDeliverySyncLabel}</span> : null}
+                  {isAdmin && !hasCanonicalTerminalStory && selectedOrder.shippingStatus !== 'Delivered' ? <span>Fulfillment sync {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
                 </div>
               ) : null}
 
@@ -1229,7 +1244,7 @@ export function OrdersPage() {
                     <strong>{!hasCanonicalTerminalStory && trackingUrl ? <a className="inline-link" href={trackingUrl}>Open tracking</a> : trackingLabel}</strong>
                   </div>
                   <div>
-                    <span>{isAdmin ? 'Shopify sync' : 'Shipment status'}</span>
+                    <span>{isAdmin ? 'Fulfillment sync' : 'Shipment status'}</span>
                     <strong>{isAdmin ? shopifyFulfillmentState : fulfillmentRailValue}</strong>
                   </div>
                   <div>

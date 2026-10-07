@@ -185,6 +185,7 @@ type OrderDetailDto = OrderSummaryDto & {
     errorMessage: string | null;
     lastAttemptedAt: string | null;
   };
+  shopifyDeliverySync?: OrderDetail['shopifyDeliverySync'];
   shopifyReturnSignal?: OrderDetail['shopifyReturnSignal'];
   allocationFinanceSummary?: OrderDetail['allocationFinanceSummary'];
   lineItems: Array<{
@@ -602,6 +603,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     shipmentUpdatedAt: dto.shipmentUpdatedAt ?? undefined,
     shipmentExecution: dto.shipmentExecution ?? null,
     shopifyFulfillmentSync: dto.shopifyFulfillmentSync,
+    shopifyDeliverySync: dto.shopifyDeliverySync ?? null,
     shopifyReturnSignal: dto.shopifyReturnSignal ?? null,
     ...(dto.allocationFinanceSummary !== undefined
       ? { allocationFinanceSummary: dto.allocationFinanceSummary }

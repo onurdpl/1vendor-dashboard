@@ -4035,6 +4035,12 @@ export async function getVendorOrderById(
     include: {
       order: true,
       fulfillment: true,
+      deliveredObservation: {
+        select: { vendorAllocationId: true, outboundMethod: true, outboundIntegrationProvider: true },
+      },
+      sopyoShipmentIntent: {
+        select: { assignedVendorId: true, status: true, shopifyFulfillmentId: true, deliveredSyncStatus: true },
+      },
       fullRefundTerminalFact: {
         select: {
           id: true,
@@ -4173,6 +4179,24 @@ export async function getVendorOrderById(
       carrier: allocation.carrier,
       trackingUrl: allocation.fulfillment?.trackingUrl ?? allocation.vendorIntegrationTrackingUrl,
     }),
+    shopifyDeliverySync: (() => {
+      const observation = allocation.deliveredObservation;
+      const intent = allocation.sopyoShipmentIntent;
+      if (allocation.outboundMethodSnapshot !== 'VENDOR_INTEGRATION' ||
+          allocation.outboundIntegrationProviderSnapshot !== 'SOPYO' ||
+          observation?.vendorAllocationId !== allocation.id ||
+          observation.outboundMethod !== 'VENDOR_INTEGRATION' ||
+          observation.outboundIntegrationProvider !== 'SOPYO' ||
+          intent?.assignedVendorId !== allocation.assignedVendorId ||
+          intent.status !== 'CONFIRMED' || !intent.shopifyFulfillmentId) return null;
+      if (intent.deliveredSyncStatus === 'CONFIRMED') return { status: 'confirmed' };
+      if (intent.deliveredSyncStatus === 'REJECTED') return { status: 'rejected' };
+      if (intent.deliveredSyncStatus === 'OUTCOME_UNKNOWN') return { status: 'outcome_unknown' };
+      if (intent.deliveredSyncStatus === null || intent.deliveredSyncStatus === 'SUBMISSION_PENDING') {
+        return { status: 'pending' };
+      }
+      return null;
+    })(),
     shopifyReturnSignal,
     shipmentExecution: mapShipmentExecution(allocation.shipmentExecutions?.[0]),
     reassignmentRequired: allocation.reassignmentRequired,

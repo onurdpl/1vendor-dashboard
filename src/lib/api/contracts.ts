@@ -1001,6 +1001,9 @@ export type OrderDetail = OrderSummary & {
     errorMessage: string | null;
     lastAttemptedAt: string | null;
   };
+  shopifyDeliverySync?: {
+    status: 'pending' | 'confirmed' | 'rejected' | 'outcome_unknown';
+  } | null;
   shopifyReturnSignal?: {
     topic: string;
     receivedAt: string;

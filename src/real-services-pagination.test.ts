@@ -110,7 +110,7 @@ describe('real service pagination plumbing', () => {
     };
     apiClientGet.mockResolvedValueOnce([allocation]);
     apiClientGet.mockResolvedValueOnce({ ...allocation, assignmentHistory: [], lineItems: [],
-      shopifyFulfillmentSync: null, reassignmentRequired: false });
+      shopifyFulfillmentSync: null, shopifyDeliverySync: { status: 'confirmed' }, reassignmentRequired: false });
     apiClientGet.mockResolvedValueOnce({
       order: { sourceShopifyOrderId: allocation.sourceShopifyOrderId,
         sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber, createdAt: allocation.createdAt },
@@ -123,7 +123,9 @@ describe('real service pagination plumbing', () => {
     const admin = await getAdminShopifyOrderBreakdown(allocation.sourceShopifyOrderId);
 
     expect(listed).toMatchObject({ shippingStatus: 'Delivered', status: 'Delivered' });
-    expect(detail).toMatchObject({ shippingStatus: 'Delivered', status: 'Delivered' });
+    expect(detail).toMatchObject({ shippingStatus: 'Delivered', status: 'Delivered',
+      shopifyDeliverySync: { status: 'confirmed' } });
+    expect(listed).not.toHaveProperty('shopifyDeliverySync');
     expect(admin.allocations[0]).toMatchObject({ shippingStatus: 'Delivered', status: 'Delivered' });
   });
 

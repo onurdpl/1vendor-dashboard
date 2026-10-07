@@ -204,6 +204,45 @@ describe('order detail snapshot API mapping', () => {
     });
   });
 
+  it('exposes only the source-aligned Sopyo Shopify delivery-sync state', async () => {
+    const base = buildAllocation();
+    const aligned = {
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION',
+      outboundIntegrationProviderSnapshot: 'SOPYO',
+      deliveredObservation: {
+        vendorAllocationId: base.id,
+        outboundMethod: 'VENDOR_INTEGRATION',
+        outboundIntegrationProvider: 'SOPYO',
+      },
+      sopyoShipmentIntent: {
+        assignedVendorId: base.assignedVendorId,
+        status: 'CONFIRMED',
+        shopifyFulfillmentId: 'gid://shopify/Fulfillment/1',
+        deliveredSyncStatus: 'CONFIRMED',
+      },
+    };
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildAllocation(aligned));
+    expect((await getVendorOrderById('sporjinal', base.id))?.shopifyDeliverySync).toEqual({ status: 'confirmed' });
+
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildAllocation({
+      ...aligned,
+      sopyoShipmentIntent: { ...aligned.sopyoShipmentIntent, deliveredSyncStatus: null },
+    }));
+    expect((await getVendorOrderById('sporjinal', base.id))?.shopifyDeliverySync).toEqual({ status: 'pending' });
+
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildAllocation({
+      ...aligned,
+      sopyoShipmentIntent: { ...aligned.sopyoShipmentIntent, deliveredSyncStatus: 'OUTCOME_UNKNOWN' },
+    }));
+    expect((await getVendorOrderById('sporjinal', base.id))?.shopifyDeliverySync).toEqual({ status: 'outcome_unknown' });
+
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildAllocation({
+      ...aligned,
+      deliveredObservation: null,
+    }));
+    expect((await getVendorOrderById('sporjinal', base.id))?.shopifyDeliverySync).toBeNull();
+  });
+
   it('exposes a canonically converged refund status from the persisted order snapshot', async () => {
     prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
       order: {

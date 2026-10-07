@@ -55,6 +55,10 @@ export type ShopifyFulfillmentSyncDto = {
   lastAttemptedAt: string | null;
 };
 
+export type ShopifyDeliverySyncDto = {
+  status: 'pending' | 'confirmed' | 'rejected' | 'outcome_unknown';
+};
+
 export type ShopifyReturnSignalDiscoveryDto = {
   topic: string;
   receivedAt: string;
@@ -619,6 +623,7 @@ export type OrderDetailDto = OrderSummaryDto & {
   cancellationReason: string | null;
   orderSnapshot: OrderSnapshotDto;
   shopifyFulfillmentSync: ShopifyFulfillmentSyncDto;
+  shopifyDeliverySync: ShopifyDeliverySyncDto | null;
   shopifyReturnSignal: ShopifyReturnSignalDiscoveryDto | null;
   financeLedgerPreview?: FinanceLedgerPreviewDto | null;
   allocationFinanceSummary?: AllocationFinanceSummaryDto;
