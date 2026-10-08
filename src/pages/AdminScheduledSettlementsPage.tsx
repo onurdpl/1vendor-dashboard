@@ -390,6 +390,7 @@ export function AdminScheduledSettlementsPage() {
       setCreateResult(result);
       setCreateOpen(false);
       await loadDryRun(runDate, vendorFilter);
+      await loadJobStatus();
       setSuccessMessage('Scheduled settlement drafts created.');
     } catch (requestError) {
       setCreateError(requestError instanceof Error ? requestError.message : 'Scheduled draft creation failed.');
@@ -724,6 +725,58 @@ export function AdminScheduledSettlementsPage() {
           <EmptyStatePanel title="No schedule preview yet" description="Preview Schedule to review vendors due for scheduled draft preparation." />
         ) : null}
       </section>
+
+      {jobStatus?.lastRun ? (
+        <section className="scheduled-advanced-section" aria-label="Last scheduled job evidence">
+          <h3>Last scheduled job evidence</h3>
+          <p>Job execution: {safeStatusLabel(jobStatus.lastRun.status)} · {jobStatus.lastRun.runDate}. Settlement records below show their current, separate status.</p>
+          {jobStatus.evidence ? (
+            <>
+              {!jobStatus.evidence.createdClaimsAvailable ? <p>Job-created settlement metadata is unavailable; provenance is unknown.</p> : null}
+              {jobStatus.evidence.jobError ? <p>Recorded job error: {jobStatus.evidence.jobError}</p> : null}
+              {jobStatus.evidence.jobVendorOutcomes.length ? (
+                <ul className="scheduled-notes">
+                  {jobStatus.evidence.jobVendorOutcomes.map((outcome, index) => (
+                    <li key={`${outcome.vendorId}-${outcome.state}-${index}`}>Job record · {outcome.vendorId} · {outcome.state}: {outcome.reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {jobStatus.evidence.settlements.length ? (
+                <ul className="scheduled-result-list">
+                  {jobStatus.evidence.settlements.map((settlement) => (
+                    <li key={settlement.id}>
+                      <span>{settlement.vendorId}</span>
+                      <Link to={getOpenSettlementHref(settlement.id)}>Open Settlement</Link>
+                      <span>{safeStatusLabel(settlement.status)} · {settlement.lineCount} source line{settlement.lineCount === 1 ? '' : 's'}</span>
+                      {!settlement.cycleAligned ? <span>Different scheduled cycle/date; not verified for this run</span> : null}
+                      <span>{settlement.jobProvenance === 'MATCHED_METADATA' ? 'Job metadata matches this settlement' : 'Job origin UNKNOWN'}</span>
+                      {settlement.sourceLines.length ? (
+                        <details>
+                          <summary>Source-line evidence</summary>
+                          <ul>
+                            {settlement.sourceLines.map((line) => <li key={line.id}>{line.lineType} · ledger {line.financeLedgerEntryId}</li>)}
+                          </ul>
+                          {settlement.sourceLinesTruncated ? <p>Additional source lines not shown.</p> : null}
+                        </details>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : <p>No cycle settlement is listed; this does not prove no vendor was attempted.</p>}
+              {jobStatus.evidence.jobCreatedClaims.some((claim) => claim.evidence !== 'MATCHED') ? (
+                <ul className="scheduled-notes">
+                  {jobStatus.evidence.jobCreatedClaims.filter((claim) => claim.evidence !== 'MATCHED').map((claim) => (
+                    <li key={`${claim.vendorId}-${claim.settlementApprovalId}`}>
+                      Job metadata references {claim.vendorId} / {claim.settlementApprovalId}: {claim.evidence === 'CONTRADICTORY' ? 'contradictory settlement evidence' : 'settlement evidence UNKNOWN; manual investigation required'}.
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {jobStatus.evidence.notes.map((note) => <p key={note}>{note}</p>)}
+            </>
+          ) : <p>Reconciled settlement evidence is unavailable.</p>}
+        </section>
+      ) : null}
 
       {createOpen ? (
         <CreateDraftsModal

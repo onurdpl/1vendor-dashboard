@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import {
   createSettlementScheduleDrafts,
+  buildScheduledSettlementCycleKey,
   getSettlementScheduleDryRun,
   toSettlementRunDate,
   toSettlementRunDateKey,
@@ -70,6 +71,34 @@ export type SettlementScheduleAutoDraftJobStatusResponse = {
     startedAt: string;
     finishedAt: string | null;
   } | null;
+  evidence: SettlementScheduleJobEvidence | null;
+  notes: string[];
+};
+
+export type SettlementScheduleJobEvidence = {
+  runDate: string;
+  recordsTruncated: boolean;
+  createdClaimsAvailable: boolean;
+  jobOutcomeMetadataComplete: boolean;
+  jobOutcomesTruncated: boolean;
+  jobError: string | null;
+  jobVendorOutcomes: Array<{ vendorId: string; state: 'SKIPPED' | 'FAILED'; reason: string }>;
+  settlements: Array<{
+    id: string;
+    vendorId: string;
+    scheduledCycleKey: string | null;
+    status: string;
+    cycleAligned: boolean;
+    jobProvenance: 'MATCHED_METADATA' | 'UNKNOWN';
+    lineCount: number;
+    sourceLines: Array<{ id: string; financeLedgerEntryId: string; lineType: string }>;
+    sourceLinesTruncated: boolean;
+  }>;
+  jobCreatedClaims: Array<{
+    vendorId: string;
+    settlementApprovalId: string;
+    evidence: 'MATCHED' | 'MISSING_OR_UNLISTED' | 'CONTRADICTORY';
+  }>;
   notes: string[];
 };
 
@@ -265,10 +294,112 @@ async function latestJobRun() {
   });
 }
 
+async function readJobEvidence(run: SettlementScheduleJobRun): Promise<SettlementScheduleJobEvidence> {
+  const metadata = asRecord(run.metadataJson);
+  const metadataSummary = asRecord(metadata?.summary);
+  const rawClaims = metadata?.createdDrafts;
+  const validClaims = Array.isArray(rawClaims) && rawClaims.every((value) => {
+    const row = asRecord(value);
+    return row && typeof row.vendorId === 'string' && typeof row.settlementApprovalId === 'string';
+  });
+  const claims = validClaims ? (rawClaims as Array<{ vendorId: string; settlementApprovalId: string }>) : [];
+  const createdClaimsAvailable = validClaims &&
+    (run.status === SettlementScheduleJobRunStatus.PROCESSING || claims.length === run.createdDraftCount);
+  const readOutcomes = (value: unknown, state: 'SKIPPED' | 'FAILED') => {
+    if (!Array.isArray(value) || !value.every((item) => {
+      const row = asRecord(item);
+      return row && typeof row.vendorId === 'string' && typeof row.reason === 'string';
+    })) return null;
+    return value.map((item): { vendorId: string; state: 'SKIPPED' | 'FAILED'; reason: string } => {
+      const row = item as { vendorId: string; reason: string };
+      return { vendorId: row.vendorId, state, reason: row.reason };
+    });
+  };
+  const skippedOutcomes = readOutcomes(metadata?.skipped, 'SKIPPED');
+  const failedOutcomes = readOutcomes(metadata?.failed, 'FAILED');
+  const jobOutcomeMetadataComplete = skippedOutcomes !== null && failedOutcomes !== null &&
+    skippedOutcomes.length === run.skippedCount &&
+    nonNegativeCount(metadataSummary?.failed) === failedOutcomes.length;
+  const jobOutcomesTruncated = (skippedOutcomes?.length ?? 0) + (failedOutcomes?.length ?? 0) > 100;
+  const claimIds = claims.slice(0, 100).map((claim) => claim.settlementApprovalId);
+  const rows = await prisma.settlementApproval.findMany({
+    where: {
+      OR: [
+        { scheduledRunDate: run.runDate, scheduledCycleKey: { not: null } },
+        { id: { in: claimIds } },
+      ],
+    },
+    orderBy: { id: 'asc' },
+    take: 101,
+    select: {
+      id: true, vendorId: true, scheduledRunDate: true, scheduledCycleKey: true, status: true,
+      _count: { select: { lines: true } },
+      lines: {
+        orderBy: { id: 'asc' }, take: 21,
+        select: { id: true, financeLedgerEntryId: true, lineType: true },
+      },
+    },
+  });
+  const recordsTruncated = rows.length > 100 || claims.length > 100;
+  const visibleRows = rows.slice(0, 100);
+  const matchingClaims = new Set<string>();
+  const settlements = visibleRows.map((row) => {
+    const expectedKey = buildScheduledSettlementCycleKey(row.vendorId, run.runDate);
+    const matchingClaim = claims.find((claim) => claim.settlementApprovalId === row.id && claim.vendorId === row.vendorId);
+    const aligned = row.scheduledRunDate?.getTime() === run.runDate.getTime() && row.scheduledCycleKey === expectedKey;
+    if (matchingClaim && aligned) matchingClaims.add(JSON.stringify([row.vendorId, row.id]));
+    return {
+      id: row.id,
+      vendorId: row.vendorId,
+      scheduledCycleKey: row.scheduledCycleKey,
+      status: row.status,
+      cycleAligned: aligned,
+      jobProvenance: matchingClaim && aligned ? 'MATCHED_METADATA' as const : 'UNKNOWN' as const,
+      lineCount: row._count.lines,
+      sourceLines: row.lines.slice(0, 20).map((line) => ({
+        id: line.id, financeLedgerEntryId: line.financeLedgerEntryId, lineType: line.lineType,
+      })),
+      sourceLinesTruncated: row._count.lines > 20,
+    };
+  });
+  const visibleById = new Map(visibleRows.map((row) => [row.id, row]));
+  const jobCreatedClaims = claims.slice(0, 100).map((claim) => {
+    const row = visibleById.get(claim.settlementApprovalId);
+    return {
+      vendorId: claim.vendorId,
+      settlementApprovalId: claim.settlementApprovalId,
+      evidence: matchingClaims.has(JSON.stringify([claim.vendorId, claim.settlementApprovalId])) ? 'MATCHED' as const
+        : row ? 'CONTRADICTORY' as const : 'MISSING_OR_UNLISTED' as const,
+    };
+  });
+  const notes = [
+    'Cycle-matched settlement records alone do not establish which execution path created them.',
+    'No settlement record does not prove a vendor was never attempted.',
+  ];
+  if (!createdClaimsAvailable) notes.push('JobRun created-draft metadata is unavailable or incomplete; unrecorded job provenance is unknown.');
+  if (!jobOutcomeMetadataComplete) notes.push('JobRun skipped/failed vendor metadata is unavailable or incomplete; unrecorded vendor outcomes are unknown.');
+  if (jobOutcomesTruncated) notes.push('JobRun vendor outcomes are limited to the first 100 persisted records.');
+  if (recordsTruncated) notes.push('Evidence is limited to 100 settlement records and 20 source lines per settlement; omitted records remain unknown.');
+  if (run.status === SettlementScheduleJobRunStatus.PROCESSING) notes.push('PROCESSING does not prove that a worker is still active.');
+  return {
+    runDate: toSettlementRunDateKey(run.runDate),
+    recordsTruncated,
+    createdClaimsAvailable,
+    jobOutcomeMetadataComplete,
+    jobOutcomesTruncated,
+    jobError: typeof metadata?.error === 'string' ? metadata.error : null,
+    jobVendorOutcomes: [...(skippedOutcomes ?? []), ...(failedOutcomes ?? [])].slice(0, 100),
+    settlements,
+    jobCreatedClaims,
+    notes,
+  };
+}
+
 export async function getSettlementScheduleAutoDraftJobStatus(
   env: JobInput['env'],
 ): Promise<SettlementScheduleAutoDraftJobStatusResponse> {
   const lastRun = await latestJobRun();
+  const evidence = lastRun ? await readJobEvidence(lastRun) : null;
   return {
     ok: true,
     writesPerformed: false,
@@ -288,6 +419,7 @@ export async function getSettlementScheduleAutoDraftJobStatus(
           finishedAt: toIso(lastRun.finishedAt),
         }
       : null,
+    evidence,
     notes: [
       'Scheduled settlement auto-draft job creates draft settlement approvals only.',
       'Approval, Logo invoice creation, and payout execution are not automated by this job.',

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
+  settlementApproval: { findMany: vi.fn() },
   settlementScheduleJobRun: {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-schedule.service.js', () => ({
+  buildScheduledSettlementCycleKey: (vendorId: string, date: Date) => `scheduled-settlement:${vendorId}:${date.toISOString().slice(0, 10)}`,
   getSettlementScheduleDryRun: dryRunMock,
   createSettlementScheduleDrafts: createDraftsMock,
   toSettlementRunDate: (value?: string | Date | null) => {
@@ -177,6 +179,7 @@ describe('settlement schedule auto draft job service', () => {
     dryRunMock.mockResolvedValue(dryRunResponse());
     createDraftsMock.mockResolvedValue(createResult());
     prismaMock.settlementScheduleJobRun.findFirst.mockResolvedValue(null);
+    prismaMock.settlementApproval.findMany.mockResolvedValue([]);
     prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue(null);
     prismaMock.settlementScheduleJobRun.create.mockResolvedValue({
       id: 'job-run-1',
@@ -226,6 +229,139 @@ describe('settlement schedule auto draft job service', () => {
       runDate: '2026-06-24',
       status: 'COMPLETED',
     }));
+    expect(result.evidence).toEqual(expect.objectContaining({
+      settlements: [], createdClaimsAvailable: false,
+    }));
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 101,
+      where: { OR: [
+        { scheduledRunDate: new Date('2026-06-24T00:00:00.000Z'), scheduledCycleKey: { not: null } },
+        { id: { in: [] } },
+      ] },
+    }));
+  });
+
+  it.each(['COMPLETED', 'FAILED', 'PROCESSING'] as const)(
+    'reconciles %s job metadata with current settlement and source-line evidence without writes', async (status) => {
+      prismaMock.settlementScheduleJobRun.findFirst.mockResolvedValue({
+        id: 'run-1', runDate: new Date('2026-06-24T00:00:00.000Z'), status,
+        writesPerformed: true, createdDraftCount: 1, skippedCount: 0, blockedCount: status === 'FAILED' ? 1 : 0,
+        startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: status === 'PROCESSING' ? null : new Date('2026-06-24T01:01:00.000Z'),
+        metadataJson: {
+          createdDrafts: [{ vendorId: 'vendor-a', settlementApprovalId: 'approval-a' }],
+          ...(status === 'FAILED' ? {
+            summary: { failed: 1 }, skipped: [], failed: [{ vendorId: 'vendor-b', reason: 'Write failed.' }],
+          } : {}),
+        },
+      });
+      prismaMock.settlementApproval.findMany.mockResolvedValue([{
+        id: 'approval-a', vendorId: 'vendor-a', status: 'DRAFT',
+        scheduledRunDate: new Date('2026-06-24T00:00:00.000Z'),
+        scheduledCycleKey: 'scheduled-settlement:vendor-a:2026-06-24',
+        _count: { lines: 1 },
+        lines: [{ id: 'line-a', financeLedgerEntryId: 'ledger-a', lineType: 'SALE' }],
+      }]);
+      const result = await getSettlementScheduleAutoDraftJobStatus(envWrite);
+      expect(result.lastRun?.status).toBe(status);
+      expect(result.evidence?.settlements).toEqual([
+        expect.objectContaining({ id: 'approval-a', status: 'DRAFT', jobProvenance: 'MATCHED_METADATA', lineCount: 1,
+          sourceLines: [{ id: 'line-a', financeLedgerEntryId: 'ledger-a', lineType: 'SALE' }] }),
+      ]);
+      expect(result.evidence?.jobCreatedClaims).toEqual([expect.objectContaining({ evidence: 'MATCHED' })]);
+      if (status === 'FAILED') {
+        expect(result.evidence?.jobVendorOutcomes).toEqual([{ vendorId: 'vendor-b', state: 'FAILED', reason: 'Write failed.' }]);
+        expect(result.evidence?.jobOutcomeMetadataComplete).toBe(true);
+      }
+      if (status === 'PROCESSING') expect(result.evidence?.notes.join(' ')).toContain('does not prove');
+      expect(prismaMock.settlementScheduleJobRun.create).not.toHaveBeenCalled();
+      expect(prismaMock.settlementScheduleJobRun.update).not.toHaveBeenCalled();
+      expect(createDraftsMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['CANCELLED', 'APPROVED'] as const)('reports current %s settlement state without calling it a job result', async (status) => {
+    prismaMock.settlementScheduleJobRun.findFirst.mockResolvedValue({
+      id: 'run-1', runDate: new Date('2026-06-24T00:00:00.000Z'), status: 'COMPLETED',
+      writesPerformed: false, createdDraftCount: 0, skippedCount: 0, blockedCount: 0,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: { createdDrafts: [] },
+    });
+    prismaMock.settlementApproval.findMany.mockResolvedValue([{
+      id: 'manual-approval', vendorId: 'vendor-b', status,
+      scheduledRunDate: new Date('2026-06-24T00:00:00.000Z'),
+      scheduledCycleKey: 'scheduled-settlement:vendor-b:2026-06-24',
+      _count: { lines: 0 }, lines: [],
+    }]);
+    const result = await getSettlementScheduleAutoDraftJobStatus(envWrite);
+    expect(result.evidence?.settlements).toEqual([expect.objectContaining({
+      id: 'manual-approval', status, jobProvenance: 'UNKNOWN', lineCount: 0,
+    })]);
+  });
+
+  it('keeps missing and contradictory job claims visible without inventing a successful settlement', async () => {
+    prismaMock.settlementScheduleJobRun.findFirst.mockResolvedValue({
+      id: 'run-1', runDate: new Date('2026-06-24T00:00:00.000Z'), status: 'FAILED',
+      writesPerformed: false, createdDraftCount: 2, skippedCount: 0, blockedCount: 0,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: { createdDrafts: [
+        { vendorId: 'vendor-a', settlementApprovalId: 'missing-approval' },
+        { vendorId: 'vendor-b', settlementApprovalId: 'wrong-vendor-approval' },
+      ] },
+    });
+    prismaMock.settlementApproval.findMany.mockResolvedValue([{
+      id: 'wrong-vendor-approval', vendorId: 'other-vendor', status: 'DRAFT',
+      scheduledRunDate: new Date('2026-06-24T00:00:00.000Z'),
+      scheduledCycleKey: 'scheduled-settlement:other-vendor:2026-06-24',
+      _count: { lines: 0 }, lines: [],
+    }]);
+    const result = await getSettlementScheduleAutoDraftJobStatus(envWrite);
+    expect(result.evidence?.jobCreatedClaims).toEqual([
+      expect.objectContaining({ settlementApprovalId: 'missing-approval', evidence: 'MISSING_OR_UNLISTED' }),
+      expect.objectContaining({ settlementApprovalId: 'wrong-vendor-approval', evidence: 'CONTRADICTORY' }),
+    ]);
+    expect(result.evidence?.settlements[0].jobProvenance).toBe('UNKNOWN');
+  });
+
+  it('marks incomplete metadata without discarding its one verifiable claim', async () => {
+    prismaMock.settlementScheduleJobRun.findFirst.mockResolvedValue({
+      id: 'run-1', runDate: new Date('2026-06-24T00:00:00.000Z'), status: 'COMPLETED',
+      writesPerformed: true, createdDraftCount: 2, skippedCount: 0, blockedCount: 0,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: { createdDrafts: [{ vendorId: 'vendor-a', settlementApprovalId: 'approval-a' }] },
+    });
+    prismaMock.settlementApproval.findMany.mockResolvedValue([{
+      id: 'approval-a', vendorId: 'vendor-a', status: 'APPROVED',
+      scheduledRunDate: new Date('2026-06-24T00:00:00.000Z'),
+      scheduledCycleKey: 'scheduled-settlement:vendor-a:2026-06-24',
+      _count: { lines: 0 }, lines: [],
+    }]);
+    const result = await getSettlementScheduleAutoDraftJobStatus(envWrite);
+    expect(result.evidence?.createdClaimsAvailable).toBe(false);
+    expect(result.evidence?.jobCreatedClaims).toEqual([expect.objectContaining({ evidence: 'MATCHED' })]);
+    expect(result.evidence?.notes.join(' ')).toContain('incomplete');
+  });
+
+  it('does not let one vendor claim borrow another vendor’s matching approval ID', async () => {
+    prismaMock.settlementScheduleJobRun.findFirst.mockResolvedValue({
+      id: 'run-1', runDate: new Date('2026-06-24T00:00:00.000Z'), status: 'COMPLETED',
+      writesPerformed: true, createdDraftCount: 2, skippedCount: 0, blockedCount: 0,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: { createdDrafts: [
+        { vendorId: 'vendor-a', settlementApprovalId: 'approval-a' },
+        { vendorId: 'vendor-b', settlementApprovalId: 'approval-a' },
+      ] },
+    });
+    prismaMock.settlementApproval.findMany.mockResolvedValue([{
+      id: 'approval-a', vendorId: 'vendor-a', status: 'DRAFT',
+      scheduledRunDate: new Date('2026-06-24T00:00:00.000Z'),
+      scheduledCycleKey: 'scheduled-settlement:vendor-a:2026-06-24',
+      _count: { lines: 0 }, lines: [],
+    }]);
+    const result = await getSettlementScheduleAutoDraftJobStatus(envWrite);
+    expect(result.evidence?.jobCreatedClaims).toEqual([
+      expect.objectContaining({ vendorId: 'vendor-a', evidence: 'MATCHED' }),
+      expect.objectContaining({ vendorId: 'vendor-b', evidence: 'CONTRADICTORY' }),
+    ]);
   });
 
   it('blocks when env is disabled and does not create drafts', async () => {

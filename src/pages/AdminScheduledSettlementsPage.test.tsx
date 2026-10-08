@@ -295,6 +295,36 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(within(panel).getByText('Timeline')).toBeInTheDocument();
   });
 
+  it('separates JobRun status, current settlement status, and unknown provenance', async () => {
+    getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue({
+      ...autoDraftJobStatus,
+      lastRun: { ...autoDraftJobStatus.lastRun!, status: 'FAILED' },
+      evidence: {
+        runDate: '2026-06-17', recordsTruncated: false, createdClaimsAvailable: false,
+        jobOutcomeMetadataComplete: true, jobOutcomesTruncated: false, jobError: 'Previous job failed.',
+        jobVendorOutcomes: [{ vendorId: 'vendor-c', state: 'FAILED', reason: 'Write failed.' }],
+        settlements: [{
+          id: 'manual-draft', vendorId: 'vendor-a', scheduledCycleKey: 'scheduled-settlement:vendor-a:2026-06-17',
+          status: 'CANCELLED', cycleAligned: true, jobProvenance: 'UNKNOWN', lineCount: 1,
+          sourceLines: [{ id: 'line-a', financeLedgerEntryId: 'ledger-a', lineType: 'SALE' }],
+          sourceLinesTruncated: false,
+        }],
+        jobCreatedClaims: [{ vendorId: 'vendor-b', settlementApprovalId: 'missing-draft', evidence: 'MISSING_OR_UNLISTED' }],
+        notes: ['Cycle-matched settlement records alone do not establish which execution path created them.'],
+      },
+    });
+    renderPage();
+    const evidence = await screen.findByLabelText('Last scheduled job evidence');
+    expect(within(evidence).getByText(/Job execution: Failed/)).toBeInTheDocument();
+    expect(within(evidence).getByText(/Cancelled · 1 source line/)).toBeInTheDocument();
+    expect(within(evidence).getByText('Job origin UNKNOWN')).toBeInTheDocument();
+    expect(within(evidence).getByText(/Recorded job error: Previous job failed/)).toBeInTheDocument();
+    expect(within(evidence).getByText(/Job record · vendor-c · FAILED: Write failed/)).toBeInTheDocument();
+    expect(within(evidence).getByText(/settlement evidence UNKNOWN; manual investigation required/)).toBeInTheDocument();
+    expect(within(evidence).getByText(/ledger ledger-a/)).toBeInTheDocument();
+    expect(within(evidence).queryByText(/Automatically recovered/)).not.toBeInTheDocument();
+  });
+
   it('filters the queue with workflow tabs using existing loaded schedule data', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -535,6 +565,7 @@ describe('AdminScheduledSettlementsPage', () => {
     renderPage();
 
     await screen.findAllByText('Ready');
+    getSettlementScheduleAutoDraftJobStatusMock.mockClear();
     const filterActions = within(screen.getByLabelText('Scheduled settlement filters')).getByLabelText('Scheduled settlement actions');
     await user.click(within(filterActions).getByRole('button', { name: 'Create Scheduled Drafts' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Create scheduled drafts for eligible vendors?');
@@ -547,6 +578,7 @@ describe('AdminScheduledSettlementsPage', () => {
       expect.objectContaining({ confirmAutoSettlementDrafts: true }),
     ));
     expect(await screen.findByText('Scheduled settlement drafts created.')).toBeInTheDocument();
+    expect(getSettlementScheduleAutoDraftJobStatusMock).toHaveBeenCalledTimes(1);
     await user.click(screen.getByText('Advanced run details'));
     expect(await screen.findByLabelText('Scheduled draft creation result')).toHaveTextContent('Created');
   });

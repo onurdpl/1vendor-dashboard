@@ -2116,6 +2116,32 @@ export type SettlementScheduleAutoDraftJobStatusResponse = {
     startedAt: string;
     finishedAt: string | null;
   } | null;
+  evidence?: {
+    runDate: string;
+    recordsTruncated: boolean;
+    createdClaimsAvailable: boolean;
+    jobOutcomeMetadataComplete: boolean;
+    jobOutcomesTruncated: boolean;
+    jobError: string | null;
+    jobVendorOutcomes: Array<{ vendorId: string; state: 'SKIPPED' | 'FAILED'; reason: string }>;
+    settlements: Array<{
+      id: string;
+      vendorId: string;
+      scheduledCycleKey: string | null;
+      status: string;
+      cycleAligned: boolean;
+      jobProvenance: 'MATCHED_METADATA' | 'UNKNOWN';
+      lineCount: number;
+      sourceLines: Array<{ id: string; financeLedgerEntryId: string; lineType: string }>;
+      sourceLinesTruncated: boolean;
+    }>;
+    jobCreatedClaims: Array<{
+      vendorId: string;
+      settlementApprovalId: string;
+      evidence: 'MATCHED' | 'MISSING_OR_UNLISTED' | 'CONTRADICTORY';
+    }>;
+    notes: string[];
+  } | null;
   notes: string[];
 };
 
