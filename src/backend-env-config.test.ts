@@ -33,6 +33,18 @@ function resetEnv(overrides: Record<string, string | undefined>) {
 }
 
 describe('backend env shipping provider gates', () => {
+  it('keeps the passive finance scheduler disabled independently of existing job flags', () => {
+    resetEnv({
+      SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED: undefined,
+      SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: 'true',
+      SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: 'false',
+    });
+    expect(loadEnv().SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED).toBe(false);
+
+    resetEnv({ SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED: 'true' });
+    expect(loadEnv().SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED).toBe(true);
+  });
+
   it.each([
     ['Lidio', ['LIDIO_ENABLED', 'LIDIO_BASE_URL', 'LIDIO_MERCHANT_CODE', 'LIDIO_AUTHORIZATION_SCHEME',
       'LIDIO_AUTHORIZATION_TOKEN', 'LIDIO_MERCHANT_KEY', 'LIDIO_API_PASSWORD', 'LIDIO_SUBSELLER_PROFILE_ID']],
