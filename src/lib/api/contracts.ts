@@ -2062,11 +2062,11 @@ export type SettlementScheduleAutoDraftJobMode = 'DRY_RUN' | 'WRITE';
 export type SettlementScheduleAutoDraftJobVendorResult = {
   vendorId: string;
   state: string;
-  due: boolean;
-  autoDraftEnabled: boolean;
-  eligibleLineCount: number;
-  pendingRefundAdjustmentCount: number;
-  estimatedNetPayableMinor: number;
+  due: boolean | null;
+  autoDraftEnabled: boolean | null;
+  eligibleLineCount: number | null;
+  pendingRefundAdjustmentCount: number | null;
+  estimatedNetPayableMinor: number | null;
   createdSettlementApprovalId: string | null;
   skippedReason: string | null;
   blockers: string[];
@@ -2080,13 +2080,13 @@ export type SettlementScheduleAutoDraftJobResponse = {
   enabled: boolean;
   dryRun: boolean;
   summary: {
-    vendorsChecked: number;
-    dueVendors: number;
-    readyVendors: number;
-    createdDrafts: number;
-    skipped: number;
-    blocked: number;
-    existingDrafts: number;
+    vendorsChecked: number | null;
+    dueVendors: number | null;
+    readyVendors: number | null;
+    createdDrafts: number | null;
+    skipped: number | null;
+    blocked: number | null;
+    existingDrafts: number | null;
   };
   vendors: SettlementScheduleAutoDraftJobVendorResult[];
   notes: string[];
@@ -2095,6 +2095,7 @@ export type SettlementScheduleAutoDraftJobResponse = {
     status: string | null;
     startedAt: string | null;
     finishedAt: string | null;
+    recordedWritesPerformed?: boolean;
   } | null;
 };
 

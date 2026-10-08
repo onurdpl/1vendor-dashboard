@@ -357,7 +357,117 @@ describe('settlement schedule auto draft job service', () => {
     }));
   });
 
-  it('does not create duplicate drafts for repeated runDate calls', async () => {
+  it('reports persisted COMPLETED evidence rather than a fresh preview on a repeated runDate', async () => {
+    prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue({
+      id: 'job-run-existing', status: 'COMPLETED', writesPerformed: true,
+      createdDraftCount: 1, skippedCount: 1, blockedCount: 1,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'),
+      finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: {
+        summary: { vendorsChecked: 2, dueVendors: 2, created: 1, skipped: 1, failed: 0 },
+        createdDrafts: [{ vendorId: 'historical-vendor', settlementApprovalId: 'historical-approval', lineCount: 1, netPayableMinor: 12345 }],
+        skipped: [{ vendorId: 'historical-blocked', reason: 'Historical correction block.' }],
+        failed: [],
+      },
+    });
+
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.writesPerformed).toBe(false);
+    expect(result.jobRun).toEqual(expect.objectContaining({ status: 'COMPLETED', recordedWritesPerformed: true }));
+    expect(result.summary).toEqual(expect.objectContaining({ vendorsChecked: 2, readyVendors: null, createdDrafts: 1 }));
+    expect(result.vendors).toEqual([
+      expect.objectContaining({ vendorId: 'historical-vendor', state: 'CREATED', estimatedNetPayableMinor: 12345 }),
+      expect.objectContaining({ vendorId: 'historical-blocked', state: 'SKIPPED', skippedReason: 'Historical correction block.' }),
+    ]);
+    expect(dryRunMock).not.toHaveBeenCalled();
+    expect(prismaMock.settlementScheduleJobRun.create).not.toHaveBeenCalled();
+    expect(createDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['FAILED', 'PROCESSING'] as const)('reports persisted %s without pretending the run completed', async (status) => {
+    prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue({
+      id: 'job-run-existing', status, writesPerformed: false,
+      createdDraftCount: 0, skippedCount: 0, blockedCount: 0,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'),
+      finishedAt: status === 'FAILED' ? new Date('2026-06-24T01:01:00.000Z') : null,
+      metadataJson: status === 'FAILED' ? { error: 'Existing database failure.' } : null,
+    });
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.jobRun?.status).toBe(status);
+    expect(result.summary.createdDrafts).toBeNull();
+    expect(result.vendors).toEqual([]);
+    expect(result.notes.join(' ')).toContain(status === 'FAILED' ? 'Existing database failure.' : 'does not prove');
+    expect(dryRunMock).not.toHaveBeenCalled();
+    expect(prismaMock.settlementScheduleJobRun.create).not.toHaveBeenCalled();
+    expect(createDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves available FAILED run vendor results without retrying', async () => {
+    prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue({
+      id: 'job-run-existing', status: 'FAILED', writesPerformed: true,
+      createdDraftCount: 1, skippedCount: 0, blockedCount: 1,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: {
+        summary: { vendorsChecked: 2, dueVendors: 2, created: 1, skipped: 0, failed: 1 },
+        createdDrafts: [{ vendorId: 'historical-created', settlementApprovalId: 'approval-created', netPayableMinor: 5000 }],
+        skipped: [], failed: [{ vendorId: 'historical-failed', reason: 'Database write failed.' }],
+      },
+    });
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.jobRun).toEqual(expect.objectContaining({ status: 'FAILED', recordedWritesPerformed: true }));
+    expect(result.summary).toEqual(expect.objectContaining({ createdDrafts: 1, skipped: 0, blocked: 1 }));
+    expect(result.vendors).toEqual([
+      expect.objectContaining({ vendorId: 'historical-created', state: 'CREATED' }),
+      expect.objectContaining({ vendorId: 'historical-failed', state: 'FAILED', skippedReason: 'Database write failed.' }),
+    ]);
+    expect(createDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it('does not invent vendors when historical metadata is incomplete', async () => {
+    prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue({
+      id: 'job-run-existing', status: 'COMPLETED', writesPerformed: true,
+      createdDraftCount: 1, skippedCount: 0, blockedCount: 0,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: { summary: { vendorsChecked: 2 }, createdDrafts: [{ vendorId: 'known-vendor', settlementApprovalId: 'known-approval' }] },
+    });
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+    expect(result.summary).toEqual(expect.objectContaining({ vendorsChecked: 2, dueVendors: null, readyVendors: null, createdDrafts: 1 }));
+    expect(result.vendors).toEqual([expect.objectContaining({ vendorId: 'known-vendor', state: 'CREATED', estimatedNetPayableMinor: null })]);
+    expect(result.notes.join(' ')).toContain('incomplete');
+  });
+
+  it('keeps persisted aggregate counts but marks absent COMPLETED vendor evidence unknown', async () => {
+    prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue({
+      id: 'job-run-existing', status: 'COMPLETED', writesPerformed: true,
+      createdDraftCount: 2, skippedCount: 1, blockedCount: 1,
+      startedAt: new Date('2026-06-24T01:00:00.000Z'), finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: null,
+    });
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.summary).toEqual(expect.objectContaining({
+      vendorsChecked: null, dueVendors: null, readyVendors: null,
+      createdDrafts: 2, skipped: 1, blocked: 1, existingDrafts: null,
+    }));
+    expect(result.vendors).toEqual([]);
+    expect(result.notes.join(' ')).toContain('missing or incomplete');
+  });
+
+  it('uses persisted status after a concurrent unique-runDate collision', async () => {
     const uniqueError = Object.assign(new Error('Unique constraint failed'), {
       code: 'P2002',
       clientVersion: '6.19.3',
@@ -366,10 +476,16 @@ describe('settlement schedule auto draft job service', () => {
     prismaMock.settlementScheduleJobRun.create.mockRejectedValue(uniqueError);
     prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue({
       id: 'job-run-existing',
-      status: 'COMPLETED',
+      status: 'FAILED',
+      writesPerformed: false,
+      createdDraftCount: 0,
+      skippedCount: 0,
+      blockedCount: 0,
       startedAt: new Date('2026-06-24T01:00:00.000Z'),
       finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      metadataJson: { error: 'Historical failure.' },
     });
+    prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValueOnce(null);
 
     const result = await runSettlementScheduleAutoDraftJob({
       env: envWrite,
@@ -378,8 +494,10 @@ describe('settlement schedule auto draft job service', () => {
     });
 
     expect(result.writesPerformed).toBe(false);
-    expect(result.summary.createdDrafts).toBe(0);
-    expect(result.vendors[0].state).toBe('ALREADY_PROCESSED');
+    expect(result.ok).toBe(false);
+    expect(result.jobRun?.status).toBe('FAILED');
+    expect(result.summary.createdDrafts).toBeNull();
+    expect(result.vendors).toEqual([]);
     expect(createDraftsMock).not.toHaveBeenCalled();
   });
 });

@@ -1828,6 +1828,36 @@ describe('finance route validation', () => {
     }));
   });
 
+  it('passes a persisted FAILED job result through the admin route without claiming success', async () => {
+    runSettlementScheduleAutoDraftJobMock.mockResolvedValueOnce({
+      ok: false,
+      writesPerformed: false,
+      runDate: '2026-01-21',
+      mode: 'WRITE',
+      enabled: true,
+      dryRun: false,
+      summary: {
+        vendorsChecked: null, dueVendors: null, readyVendors: null,
+        createdDrafts: null, skipped: null, blocked: null, existingDrafts: null,
+      },
+      vendors: [],
+      notes: ['Historical failure.'],
+      jobRun: {
+        id: 'existing-run', status: 'FAILED', startedAt: '2026-01-21T01:00:00.000Z',
+        finishedAt: '2026-01-21T01:01:00.000Z', recordedWritesPerformed: false,
+      },
+    });
+    const result = await createRegisteredPostRoutes().get('/admin/finance/settlement-schedules/run-auto-draft-job')?.(
+      { authUser: { id: 'admin-1', role: 'admin' }, body: { runDate: '2026-01-21', confirmScheduledSettlementAutoDraftJob: true } },
+      createReply(),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      summary: expect.objectContaining({ createdDrafts: null }),
+      jobRun: expect.objectContaining({ status: 'FAILED' }),
+    }));
+  });
+
   it('requires admin access for scheduled auto draft job trigger', async () => {
     const posts = createRegisteredPostRoutes();
     const reply = createReply();

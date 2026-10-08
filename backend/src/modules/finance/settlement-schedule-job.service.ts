@@ -1,4 +1,4 @@
-import { Prisma, SettlementScheduleJobRunStatus } from '@prisma/client';
+import { Prisma, SettlementScheduleJobRunStatus, type SettlementScheduleJobRun } from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import {
@@ -16,11 +16,11 @@ export type SettlementScheduleAutoDraftJobMode = 'DRY_RUN' | 'WRITE';
 export type SettlementScheduleAutoDraftJobVendorResult = {
   vendorId: string;
   state: string;
-  due: boolean;
-  autoDraftEnabled: boolean;
-  eligibleLineCount: number;
-  pendingRefundAdjustmentCount: number;
-  estimatedNetPayableMinor: number;
+  due: boolean | null;
+  autoDraftEnabled: boolean | null;
+  eligibleLineCount: number | null;
+  pendingRefundAdjustmentCount: number | null;
+  estimatedNetPayableMinor: number | null;
   createdSettlementApprovalId: string | null;
   skippedReason: string | null;
   blockers: string[];
@@ -34,13 +34,13 @@ export type SettlementScheduleAutoDraftJobResponse = {
   enabled: boolean;
   dryRun: boolean;
   summary: {
-    vendorsChecked: number;
-    dueVendors: number;
-    readyVendors: number;
-    createdDrafts: number;
-    skipped: number;
-    blocked: number;
-    existingDrafts: number;
+    vendorsChecked: number | null;
+    dueVendors: number | null;
+    readyVendors: number | null;
+    createdDrafts: number | null;
+    skipped: number | null;
+    blocked: number | null;
+    existingDrafts: number | null;
   };
   vendors: SettlementScheduleAutoDraftJobVendorResult[];
   notes: string[];
@@ -49,6 +49,7 @@ export type SettlementScheduleAutoDraftJobResponse = {
     status: string | null;
     startedAt: string | null;
     finishedAt: string | null;
+    recordedWritesPerformed?: boolean;
   } | null;
 };
 
@@ -113,7 +114,6 @@ function getVendorDryRunState(vendor: SettlementScheduleDryRunVendorDto) {
 function buildVendorResults(
   dryRun: SettlementScheduleDryRunResponseDto,
   createResult: SettlementScheduleCreateDraftsResponseDto | null,
-  alreadyProcessed = false,
 ) {
   return dryRun.vendors.map((vendor) => {
     const created = createResult?.createdDrafts.find((draft) => draft.vendorId === vendor.vendorId) ?? null;
@@ -125,9 +125,7 @@ function buildVendorResults(
       failed?.reason,
       ...vendor.warnings,
     ].filter((value): value is string => Boolean(value));
-    const state = alreadyProcessed
-      ? 'ALREADY_PROCESSED'
-      : created
+    const state = created
         ? 'CREATED'
         : failed
           ? 'BLOCKED'
@@ -146,7 +144,7 @@ function buildVendorResults(
       pendingRefundAdjustmentCount: vendor.pendingRefundAdjustmentCount,
       estimatedNetPayableMinor: vendor.netPayableMinor,
       createdSettlementApprovalId: created?.settlementApprovalId ?? null,
-      skippedReason: skipped?.reason ?? failed?.reason ?? (alreadyProcessed ? 'Job already processed for this run date.' : null),
+      skippedReason: skipped?.reason ?? failed?.reason ?? null,
       blockers,
     };
   });
@@ -155,17 +153,109 @@ function buildVendorResults(
 function buildSummary(
   dryRun: SettlementScheduleDryRunResponseDto,
   createResult: SettlementScheduleCreateDraftsResponseDto | null,
-  alreadyProcessed = false,
 ) {
   const existingDrafts = countExistingDrafts(createResult);
   return {
     vendorsChecked: dryRun.summary.vendorsChecked,
     dueVendors: dryRun.summary.dueVendors,
     readyVendors: dryRun.summary.autoDraftEligibleVendors,
-    createdDrafts: alreadyProcessed ? 0 : createResult?.summary.created ?? 0,
-    skipped: alreadyProcessed ? dryRun.summary.autoDraftEligibleVendors : createResult?.summary.skipped ?? 0,
-    blocked: alreadyProcessed ? 0 : (createResult?.summary.failed ?? 0) + Math.max((createResult?.summary.skipped ?? 0) - existingDrafts, 0),
+    createdDrafts: createResult?.summary.created ?? 0,
+    skipped: createResult?.summary.skipped ?? 0,
+    blocked: (createResult?.summary.failed ?? 0) + Math.max((createResult?.summary.skipped ?? 0) - existingDrafts, 0),
     existingDrafts,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonNegativeCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function historicalVendorRows(value: unknown, state: 'CREATED' | 'SKIPPED' | 'FAILED') {
+  if (!Array.isArray(value)) return null;
+  if (value.some((item) => {
+    const row = asRecord(item);
+    return !row || typeof row.vendorId !== 'string' ||
+      (state === 'CREATED' && typeof row.settlementApprovalId !== 'string') ||
+      (state !== 'CREATED' && typeof row.reason !== 'string');
+  })) return null;
+  return value.flatMap((item): SettlementScheduleAutoDraftJobVendorResult[] => {
+    const row = asRecord(item);
+    if (!row || typeof row.vendorId !== 'string') return [];
+    const reason = typeof row.reason === 'string' ? row.reason : null;
+    return [{
+      vendorId: row.vendorId,
+      state,
+      due: null,
+      autoDraftEnabled: null,
+      eligibleLineCount: null,
+      pendingRefundAdjustmentCount: null,
+      estimatedNetPayableMinor: state === 'CREATED' ? nonNegativeCount(row.netPayableMinor) : null,
+      createdSettlementApprovalId: state === 'CREATED' && typeof row.settlementApprovalId === 'string'
+        ? row.settlementApprovalId : null,
+      skippedReason: reason,
+      blockers: reason ? [reason] : [],
+    }];
+  });
+}
+
+function existingRunResponse(
+  run: SettlementScheduleJobRun,
+  context: { runDate: string; mode: SettlementScheduleAutoDraftJobMode; enabled: boolean; dryRun: boolean },
+): SettlementScheduleAutoDraftJobResponse {
+  const metadata = asRecord(run.metadataJson);
+  const metadataSummary = asRecord(metadata?.summary);
+  const finalized = run.status !== SettlementScheduleJobRunStatus.PROCESSING;
+  const created = finalized ? historicalVendorRows(metadata?.createdDrafts, 'CREATED') : null;
+  const skipped = finalized ? historicalVendorRows(metadata?.skipped, 'SKIPPED') : null;
+  const failed = finalized ? historicalVendorRows(metadata?.failed, 'FAILED') : null;
+  const hasResultSummary = metadataSummary !== null;
+  const completeVendorMetadata = created !== null && skipped !== null && failed !== null &&
+    created.length === run.createdDraftCount && skipped.length === run.skippedCount &&
+    nonNegativeCount(metadataSummary?.failed) === failed.length;
+  const error = typeof metadata?.error === 'string' ? metadata.error : null;
+  const notes = [
+    `A scheduled settlement auto-draft job already exists for this run date with status ${run.status}; no retry or draft creation occurred.`,
+    'This response reports persisted execution evidence, not a new settlement preview.',
+  ];
+  if (error) notes.push(error);
+  if (!completeVendorMetadata || !hasResultSummary) {
+    notes.push('Historical vendor results are missing or incomplete; unavailable values are unknown.');
+  }
+  if (run.status === SettlementScheduleJobRunStatus.PROCESSING) {
+    notes.push('PROCESSING does not prove that a worker is still active or that its vendor work is complete.');
+  }
+  return {
+    ok: run.status === SettlementScheduleJobRunStatus.COMPLETED,
+    writesPerformed: false,
+    ...context,
+    summary: {
+      vendorsChecked: finalized ? nonNegativeCount(metadataSummary?.vendorsChecked) : null,
+      dueVendors: finalized ? nonNegativeCount(metadataSummary?.dueVendors) : null,
+      readyVendors: null,
+      createdDrafts: finalized && (run.status === SettlementScheduleJobRunStatus.COMPLETED || hasResultSummary)
+        ? run.createdDraftCount : null,
+      skipped: finalized && (run.status === SettlementScheduleJobRunStatus.COMPLETED || hasResultSummary)
+        ? run.skippedCount : null,
+      blocked: finalized && (run.status === SettlementScheduleJobRunStatus.COMPLETED || hasResultSummary)
+        ? run.blockedCount : null,
+      existingDrafts: completeVendorMetadata && skipped
+        ? skipped.filter((item) => item.skippedReason && isExistingDraftReason(item.skippedReason)).length : null,
+    },
+    vendors: [...(created ?? []), ...(skipped ?? []), ...(failed ?? [])],
+    notes,
+    jobRun: {
+      id: run.id,
+      status: run.status,
+      startedAt: run.startedAt.toISOString(),
+      finishedAt: toIso(run.finishedAt),
+      recordedWritesPerformed: run.writesPerformed,
+    },
   };
 }
 
@@ -216,6 +306,12 @@ export async function runSettlementScheduleAutoDraftJob(
   const enabled = input.env.SETTLEMENT_AUTO_DRAFT_JOB_ENABLED;
   const dryRunMode = input.env.SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN;
   const mode: SettlementScheduleAutoDraftJobMode = dryRunMode ? 'DRY_RUN' : 'WRITE';
+  if (enabled && !dryRunMode && input.confirmScheduledSettlementAutoDraftJob === true) {
+    const existingRun = await prisma.settlementScheduleJobRun.findUnique({ where: { runDate } });
+    if (existingRun) {
+      return existingRunResponse(existingRun, { runDate: runDateKey, mode, enabled, dryRun: dryRunMode });
+    }
+  }
   const dryRun = await getSettlementScheduleDryRun({ runDate });
 
   if (!enabled) {
@@ -286,25 +382,9 @@ export async function runSettlementScheduleAutoDraftJob(
   } catch (error) {
     if (isUniqueRunDateError(error)) {
       const existingRun = await prisma.settlementScheduleJobRun.findUnique({ where: { runDate } });
-      return {
-        ok: true,
-        writesPerformed: false,
-        runDate: runDateKey,
-        mode,
-        enabled,
-        dryRun: dryRunMode,
-        summary: buildSummary(dryRun, null, true),
-        vendors: buildVendorResults(dryRun, null, true),
-        notes: ['A scheduled settlement auto-draft job has already been recorded for this run date. No duplicate drafts were created.'],
-        jobRun: existingRun
-          ? {
-              id: existingRun.id,
-              status: existingRun.status,
-              startedAt: existingRun.startedAt.toISOString(),
-              finishedAt: toIso(existingRun.finishedAt),
-            }
-          : null,
-      };
+      if (existingRun) {
+        return existingRunResponse(existingRun, { runDate: runDateKey, mode, enabled, dryRun: dryRunMode });
+      }
     }
     throw error;
   }
