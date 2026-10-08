@@ -16,10 +16,10 @@ try {
   const authority = authorities[0];
   if (authorities.length !== 1 || authority.applicationRoute !== 'PAID_VENDOR_DEBT' ||
       authority.economicDirection !== 'VENDOR_DEDUCTION' || authority.vendorPayableDifferenceMinor !== 1760 ||
-      !authority.historicalPayoutBatchId || authority.historicalPayoutPaidAt?.toISOString() !== '2026-09-01T12:00:00.000Z') {
+      !authority.historicalPayoutBatchId || !authority.historicalPayoutPaidAt) {
     throw new Error('Expected one applied PAID vendor-debt authority was not found.');
   }
-  const [claim, claimCount, debts, creditCount, payout, payoutCount, settlement, saleLine, refundLine] = await Promise.all([
+  const [claim, claimCount, debts, creditCount, payout, payoutCount, settlement, saleLine, refundLine, observation] = await Promise.all([
     db.financialCorrectionBaselineClaim.findUnique({
       where: { acceptedEvidenceSnapshotId: authority.acceptedEvidenceSnapshotId },
     }),
@@ -33,20 +33,28 @@ try {
     db.settlementApproval.findUnique({ where: { id: `${run}-origin` } }),
     db.settlementApprovalLine.findUnique({ where: { id: `${run}-saleLine` } }),
     db.settlementApprovalLine.findUnique({ where: { id: `${run}-refundLine` } }),
+    db.allocationDeliveredObservation.findUnique({ where: { vendorAllocationId: `${run}-allocation` } }),
   ]);
   const debt = debts[0];
   if (!claim || claimCount !== 1 || claim.consumerType !== 'paid_vendor_debt' || claim.consumerId !== authority.id ||
       debts.length !== 1 || debt.type !== 'VENDOR_DEBT_CREATED' || debt.sourceType !== 'financial_correction' ||
       debt.sourceId !== authority.id || debt.vendorId !== authority.vendorId || debt.currency !== 'TRY' ||
       debt.amountMinor !== -authority.vendorPayableDifferenceMinor || creditCount !== 0 ||
-      !payout || payout.status !== 'PAID' || payout.paidAt?.toISOString() !== '2026-09-01T12:00:00.000Z' ||
+      !payout || payout.status !== 'PAID' || !payout.paidAt ||
+      authority.historicalPayoutPaidAt.getTime() !== payout.paidAt.getTime() ||
       payout.grossAmount.toString() !== '200' || payout.commissionAmount.toString() !== '30' ||
       payout.commissionVatAmount.toString() !== '6' || payout.netAmount.toString() !== '88' ||
       payout.paymentReference !== 'browser-smoke-local-paid-evidence' || payoutCount !== 1 ||
       payout.lines.length !== 2 || !payout.lines.some((line) =>
         line.financeLedgerEntryId === `${run}-sale` && line.settlementApprovalLineId === `${run}-saleLine`) ||
+      !payout.lines.some((line) =>
+        line.financeLedgerEntryId === `${run}-refundLedger` && line.settlementApprovalLineId === `${run}-refundLine`) ||
       !settlement || settlement.status !== 'APPROVED' || settlement.vendorId !== authority.vendorId ||
-      settlement.approvedAt?.toISOString() !== '2026-09-01T11:00:00.000Z' ||
+      !settlement.approvedAt || !observation ||
+      observation.outboundMethod !== 'KARGONOMI' ||
+      observation.shipmentExecutionId !== `${run}-shipment-execution` ||
+      settlement.approvedAt.getTime() < observation.firstObservedDeliveredAt.getTime() ||
+      payout.paidAt.getTime() < settlement.approvedAt.getTime() ||
       settlement.grossSalesMinor !== 20000 || settlement.refundTotalMinor !== 10000 ||
       settlement.commissionMinor !== 1000 || settlement.commissionVatMinor !== 200 ||
       settlement.netPayableMinor !== 8800 ||

@@ -302,6 +302,61 @@ describe('settlement schedule auto draft job service', () => {
     }));
   });
 
+  it('reports the second-pass blocker instead of stale preliminary READY and completes partial success', async () => {
+    const reason = 'A pending Financial Correction deduction requires a vendor-wide settlement draft.';
+    const preliminary = dryRunResponse({
+      summary: { vendorsChecked: 3, dueVendors: 3, autoDraftEligibleVendors: 3, totalEligibleLineCount: 3, totalNetPayableMinor: 132000 },
+      vendors: ['a', 'b', 'c'].map((vendorId) => ({
+        ...dryRunResponse().vendors[0], vendorId, state: 'READY', eligibleLineCount: 1, netPayableMinor: 44000,
+      })),
+    });
+    const second = dryRunResponse({
+      summary: { vendorsChecked: 3, dueVendors: 3, autoDraftEligibleVendors: 2, totalEligibleLineCount: 2, totalNetPayableMinor: 88000 },
+      vendors: preliminary.vendors.map((vendor, index) => index === 0
+        ? { ...vendor, state: 'BLOCKED', preview: null, canCreateDraft: false, blockedReason: reason,
+            eligibleLineCount: 0, netPayableMinor: 0 }
+        : vendor),
+    });
+    dryRunMock.mockResolvedValue(preliminary);
+    createDraftsMock.mockResolvedValue(createResult({
+      summary: { vendorsChecked: 3, dueVendors: 3, created: 2, skipped: 1, failed: 0 },
+      createdDrafts: ['b', 'c'].map((vendorId) => ({ vendorId, settlementApprovalId: `approval-${vendorId}`,
+        status: 'draft', lineCount: 1, netPayableMinor: 44000 })),
+      skipped: [{ vendorId: 'a', reason }],
+      dryRun: second,
+    }));
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.jobRun?.status).toBe('COMPLETED');
+    expect(result.summary).toEqual(expect.objectContaining({ readyVendors: 2, createdDrafts: 2, skipped: 1, blocked: 1 }));
+    expect(result.vendors).toEqual([
+      expect.objectContaining({ vendorId: 'a', state: 'BLOCKED', skippedReason: reason, createdSettlementApprovalId: null }),
+      expect.objectContaining({ vendorId: 'b', state: 'CREATED' }),
+      expect.objectContaining({ vendorId: 'c', state: 'CREATED' }),
+    ]);
+    expect(prismaMock.settlementScheduleJobRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'COMPLETED', createdDraftCount: 2, skippedCount: 1, blockedCount: 1,
+        metadataJson: expect.objectContaining({ skipped: [{ vendorId: 'a', reason }] }) }),
+    }));
+  });
+
+  it('keeps genuine create-time failures as a FAILED job', async () => {
+    createDraftsMock.mockResolvedValue(createResult({
+      summary: { vendorsChecked: 3, dueVendors: 2, created: 0, skipped: 2, failed: 1 },
+      createdDrafts: [],
+      failed: [{ vendorId: 'ready-vendor', reason: 'database write failed' }],
+    }));
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(prismaMock.settlementScheduleJobRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'FAILED', blockedCount: 3 }),
+    }));
+  });
+
   it('does not create duplicate drafts for repeated runDate calls', async () => {
     const uniqueError = Object.assign(new Error('Unique constraint failed'), {
       code: 'P2002',

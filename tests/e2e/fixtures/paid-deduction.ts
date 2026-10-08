@@ -14,6 +14,8 @@ const { normalizeRefundEvidence } = await import('../../../backend/src/modules/f
 const { previewTerminalFinancialCorrection } = await import('../../../backend/src/modules/finance/financial-correction-preview.service.js');
 const { getPaidFinancialCorrectionState } = await import('../../../backend/src/modules/finance/financial-correction-paid-debt.service.js');
 const { preparePayoutBatch, markPayoutBatchReview, markPayoutBatchPaid } = await import('../../../backend/src/modules/finance/finance.service.js');
+const { recordVerifiedDeliveredObservation } = await import('../../../backend/src/modules/shipping/allocation-delivered-observation.service.js');
+const { evaluateSaleSettlementDelay } = await import('../../../backend/src/modules/finance/settlement-delay-eligibility.service.js');
 const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
 const run = 'browser-smoke-paid-deduction';
@@ -23,7 +25,6 @@ const ids = Object.fromEntries([
 ].map((key) => [key, `${run}-${key}`]));
 const shopifyOrder = `gid://shopify/Order/${run}`;
 const shopifyRefund = `gid://shopify/Refund/${run}`;
-const paidAt = '2026-09-01T12:00:00.000Z';
 
 function evidence(amount: string) {
   return normalizeRefundEvidence({
@@ -54,6 +55,7 @@ try {
     sourceShopifyOrderNumber: `#${run}` } });
   await db.vendorAllocation.create({ data: { id: ids.allocation, sourceShopifyOrderId: ids.order,
     sourceShopifyOrderNumber: `#${run}`, originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
+    outboundMethodSnapshot: 'KARGONOMI',
     fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered' } });
   await db.fulfillment.create({ data: { id: ids.fulfillment, vendorAllocationId: ids.allocation,
     fulfillmentStatus: 'Fulfilled', fulfilledAt: new Date('2026-08-01T00:00:00Z'),
@@ -102,11 +104,34 @@ try {
   } });
   await db.refundTerminalEvidenceReviewEvent.create({ data: { id: ids.resolved, reviewId: ids.review,
     eventType: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED', actorUserId: admin.id } });
+  const shipmentExecutionId = `${run}-shipment-execution`;
+  const sourceReference = `${run}-shipment`;
+  await db.shipmentExecution.create({ data: {
+    id: shipmentExecutionId, allocationId: ids.allocation, vendorId: ids.vendor,
+    provider: 'KARGONOMI', providerShipmentId: sourceReference,
+    shipmentStatus: 'DELIVERED', requestSnapshot: {},
+  } });
+  const observation = await recordVerifiedDeliveredObservation({
+    allocationId: ids.allocation,
+    source: { method: 'KARGONOMI', shipmentExecutionId, sourceReference },
+  }, db as never);
+  const sale = await db.financeLedgerEntry.findUniqueOrThrow({
+    where: { id: ids.sale }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+  });
+  if (sale.vendorId !== ids.vendor || sale.vendorAllocation?.assignedVendorId !== ids.vendor ||
+      sale.vendorAllocation.outboundMethodSnapshot !== 'KARGONOMI' ||
+      sale.vendorAllocation.outboundIntegrationProviderSnapshot !== null ||
+      sale.vendorAllocation.deliveredObservation?.id !== observation.id ||
+      observation.shipmentExecutionId !== shipmentExecutionId || observation.sourceReference !== sourceReference ||
+      sale.settlementDelayDaysSnapshot !== 0 || !evaluateSaleSettlementDelay(sale).eligible) {
+    throw new Error('Paid-deduction SALE lacks source-aligned, mature delivery authority.');
+  }
+  const approvedAt = new Date(Math.max(Date.now(), observation.firstObservedDeliveredAt.getTime()));
   await db.settlementApproval.create({ data: {
     id: ids.origin, vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY',
     grossSalesMinor: 20000, refundTotalMinor: 10000,
     commissionMinor: 1000, commissionVatMinor: 200, netPayableMinor: 8800,
-    sourceSnapshotJson: {}, approvedBy: admin.id, approvedAt: new Date('2026-09-01T11:00:00Z'),
+    sourceSnapshotJson: {}, approvedBy: admin.id, approvedAt,
     lines: { create: [
       { id: ids.saleLine, financeLedgerEntryId: ids.sale, lineType: 'SALE',
         amountMinor: 20000, commissionMinor: 2000, commissionVatMinor: 400,
@@ -118,6 +143,10 @@ try {
   } });
   const draft = await preparePayoutBatch({ vendorId: ids.vendor }, admin.id);
   await markPayoutBatchReview(draft.id);
+  const paidAt = new Date().toISOString();
+  if (new Date(paidAt).getTime() < approvedAt.getTime()) {
+    throw new Error('Paid-deduction payout time precedes its approved settlement.');
+  }
   await markPayoutBatchPaid(draft.id, { paidAt, paymentReference: 'browser-smoke-local-paid-evidence' }, admin.id);
 
   const [review, preview, state, payout, saleLine, authority, correctionDebts] = await Promise.all([
@@ -136,9 +165,14 @@ try {
       payout.status !== 'PAID' || payout.paidAt?.toISOString() !== paidAt || payout.vendorId !== ids.vendor ||
       payout.grossAmount.toString() !== '200' || payout.commissionAmount.toString() !== '30' ||
       payout.commissionVatAmount.toString() !== '6' || payout.netAmount.toString() !== '88' ||
+      payout.lines.length !== 2 ||
       !payout.lines.some((line) => line.financeLedgerEntryId === ids.sale && line.settlementApprovalLineId === ids.saleLine) ||
+      !payout.lines.some((line) => line.financeLedgerEntryId === ids.refundLedger && line.settlementApprovalLineId === ids.refundLine) ||
       saleLine.settlementApprovalId !== ids.origin || saleLine.settlementApproval.status !== 'APPROVED' ||
-      saleLine.settlementApproval.vendorId !== ids.vendor || authority || correctionDebts !== 0) {
+      saleLine.settlementApproval.vendorId !== ids.vendor ||
+      saleLine.settlementApproval.approvedAt?.getTime() !== approvedAt.getTime() ||
+      approvedAt.getTime() < observation.firstObservedDeliveredAt.getTime() ||
+      authority || correctionDebts !== 0) {
     throw new Error('Browser-smoke PAID deduction fixture failed canonical self-verification.');
   }
   console.log(JSON.stringify({ reviewId: ids.review, vendorId: ids.vendor, payoutId: payout.id,

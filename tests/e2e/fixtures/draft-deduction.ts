@@ -14,6 +14,8 @@ const { normalizeRefundEvidence } = await import('../../../backend/src/modules/f
 const { previewTerminalFinancialCorrection } = await import('../../../backend/src/modules/finance/financial-correction-preview.service.js');
 const { getDraftPayoutFinancialCorrectionState } = await import('../../../backend/src/modules/finance/financial-correction-draft-payout.service.js');
 const { preparePayoutBatch } = await import('../../../backend/src/modules/finance/finance.service.js');
+const { recordVerifiedDeliveredObservation } = await import('../../../backend/src/modules/shipping/allocation-delivered-observation.service.js');
+const { evaluateSaleSettlementDelay } = await import('../../../backend/src/modules/finance/settlement-delay-eligibility.service.js');
 const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
 const run = 'browser-smoke-draft-deduction';
@@ -53,6 +55,7 @@ try {
     sourceShopifyOrderNumber: `#${run}` } });
   await db.vendorAllocation.create({ data: { id: ids.allocation, sourceShopifyOrderId: ids.order,
     sourceShopifyOrderNumber: `#${run}`, originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
+    outboundMethodSnapshot: 'KARGONOMI',
     fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered' } });
   await db.fulfillment.create({ data: { id: ids.fulfillment, vendorAllocationId: ids.allocation,
     fulfillmentStatus: 'Fulfilled', fulfilledAt: new Date('2026-08-01T00:00:00Z'),
@@ -101,11 +104,34 @@ try {
   } });
   await db.refundTerminalEvidenceReviewEvent.create({ data: { id: ids.resolved, reviewId: ids.review,
     eventType: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED', actorUserId: admin.id } });
+  const shipmentExecutionId = `${run}-shipment-execution`;
+  const sourceReference = `${run}-shipment`;
+  await db.shipmentExecution.create({ data: {
+    id: shipmentExecutionId, allocationId: ids.allocation, vendorId: ids.vendor,
+    provider: 'KARGONOMI', providerShipmentId: sourceReference,
+    shipmentStatus: 'DELIVERED', requestSnapshot: {},
+  } });
+  const observation = await recordVerifiedDeliveredObservation({
+    allocationId: ids.allocation,
+    source: { method: 'KARGONOMI', shipmentExecutionId, sourceReference },
+  }, db as never);
+  const sale = await db.financeLedgerEntry.findUniqueOrThrow({
+    where: { id: ids.sale }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+  });
+  if (sale.vendorId !== ids.vendor || sale.vendorAllocation?.assignedVendorId !== ids.vendor ||
+      sale.vendorAllocation.outboundMethodSnapshot !== 'KARGONOMI' ||
+      sale.vendorAllocation.outboundIntegrationProviderSnapshot !== null ||
+      sale.vendorAllocation.deliveredObservation?.id !== observation.id ||
+      observation.shipmentExecutionId !== shipmentExecutionId || observation.sourceReference !== sourceReference ||
+      sale.settlementDelayDaysSnapshot !== 0 || !evaluateSaleSettlementDelay(sale).eligible) {
+    throw new Error('Draft-deduction SALE lacks source-aligned, mature delivery authority.');
+  }
+  const approvedAt = new Date(Math.max(Date.now(), observation.firstObservedDeliveredAt.getTime()));
   await db.settlementApproval.create({ data: {
     id: ids.origin, vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY',
     grossSalesMinor: 105000, refundTotalMinor: 5000,
     commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 100000,
-    sourceSnapshotJson: {}, approvedBy: admin.id, approvedAt: new Date('2026-09-01T11:00:00Z'),
+    sourceSnapshotJson: {}, approvedBy: admin.id, approvedAt,
     lines: { create: [
       { id: ids.saleLine, financeLedgerEntryId: ids.sale, lineType: 'SALE',
         amountMinor: 105000, commissionMinor: 0, commissionVatMinor: 0,
@@ -130,7 +156,11 @@ try {
       preview.vendorAllocationId !== ids.allocation || preview.economicDirection !== 'VENDOR_DEDUCTION' ||
       preview.difference.vendorPayableReversalMinor !== 10000 || !state.eligible || state.application ||
       state.draftPayout?.id !== draft.id || payout.status !== 'DRAFT' || payout.paidAt !== null ||
-      payout.lines.length !== 2 || authority || debts !== 0) {
+      payout.vendorId !== ids.vendor || payout.netAmount.toString() !== '1000' ||
+      payout.lines.length !== 2 ||
+      !payout.lines.some((line) => line.financeLedgerEntryId === ids.sale && line.settlementApprovalLineId === ids.saleLine) ||
+      !payout.lines.some((line) => line.financeLedgerEntryId === ids.refundLedger && line.settlementApprovalLineId === ids.refundLine) ||
+      authority || debts !== 0) {
     throw new Error('Browser-smoke DRAFT deduction fixture failed canonical self-verification.');
   }
   console.log(JSON.stringify({ reviewId: ids.review, vendorId: ids.vendor,

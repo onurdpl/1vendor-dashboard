@@ -5,17 +5,20 @@ const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
 describeWithPostgres('approved-settlement financial correction deduction with isolated PostgreSQL', () => {
-  const runId = `phase2e3b-${process.pid}-${Date.now()}`;
-  const ids = {
-    vendor: `${runId}-vendor`, admin: `${runId}-admin`, order: `${runId}-order`,
-    allocation: `${runId}-allocation`, refundRecord: `${runId}-refund-record`,
-    sale: `${runId}-sale`, refundLedger: `${runId}-refund-ledger`, snapshot: `${runId}-snapshot`,
-    review: `${runId}-review`, incoming: `${runId}-incoming`, resolved: `${runId}-resolved`,
-    origin: `${runId}-origin`, saleLine: `${runId}-sale-line`, refundLine: `${runId}-refund-line`,
-    fulfillment: `${runId}-fulfillment`, historicalPayout: `${runId}-historical-payout`,
-  };
-  const sourceShopifyOrderId = `gid://shopify/Order/${runId}`;
-  const sourceShopifyRefundId = `gid://shopify/Refund/${runId}`;
+  let sequence = 0;
+  let runId: string;
+  const fixtureIds = (prefix: string) => ({
+    vendor: `${prefix}-vendor`, admin: `${prefix}-admin`, order: `${prefix}-order`,
+    allocation: `${prefix}-allocation`, refundRecord: `${prefix}-refund-record`,
+    sale: `${prefix}-sale`, refundLedger: `${prefix}-refund-ledger`, snapshot: `${prefix}-snapshot`,
+    review: `${prefix}-review`, incoming: `${prefix}-incoming`, resolved: `${prefix}-resolved`,
+    origin: `${prefix}-origin`, saleLine: `${prefix}-sale-line`, refundLine: `${prefix}-refund-line`,
+    fulfillment: `${prefix}-fulfillment`, historicalPayout: `${prefix}-historical-payout`,
+  });
+  let ids: ReturnType<typeof fixtureIds>;
+  let sourceShopifyOrderId: string;
+  let sourceShopifyRefundId: string;
+  let serviceCreatedOrigin = false;
   let db: PrismaClient;
   let normalizeRefundEvidence: typeof import('../backend/src/modules/finance/refund-evidence-normalizer.service.js')['normalizeRefundEvidence'];
   let previewTerminalFinancialCorrection: typeof import('../backend/src/modules/finance/financial-correction-preview.service.js')['previewTerminalFinancialCorrection'];
@@ -29,6 +32,8 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   let markPayoutBatchReview: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchReview'];
   let markPayoutBatchPaid: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchPaid'];
   let applyApprovedCredit: typeof import('../backend/src/modules/finance/financial-correction-approved-settlement-credit.service.js')['applyApprovedSettlementFinancialCorrectionCredit'];
+  let recordVerifiedDeliveredObservation: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
+  let evaluateSaleSettlementDelay: typeof import('../backend/src/modules/finance/settlement-delay-eligibility.service.js')['evaluateSaleSettlementDelay'];
   const settlementIds: string[] = [];
   const payoutIds: string[] = [];
   const extraSaleLedgerIds: string[] = [];
@@ -46,6 +51,72 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     });
   }
 
+  async function createDirectOriginForGuardTest() {
+    await db.settlementApproval.create({ data: {
+      id: ids.origin, vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY',
+      grossSalesMinor: 115000, refundTotalMinor: 15000, commissionMinor: 0, commissionVatMinor: 0,
+      netPayableMinor: 100000, sourceSnapshotJson: {}, approvedBy: ids.admin,
+      approvedAt: new Date('2026-09-01T11:00:00.000Z'),
+      lines: { create: [
+        { id: ids.saleLine, financeLedgerEntryId: ids.sale, lineType: 'SALE', amountMinor: 105000,
+          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: 105000, sourceSnapshotJson: {} },
+        { id: ids.refundLine, financeLedgerEntryId: ids.refundLedger, lineType: 'REFUND', amountMinor: 5000,
+          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: -5000, sourceSnapshotJson: {} },
+      ] },
+    } });
+  }
+
+  async function createServiceApprovedOrigin() {
+    const executionId = `${runId}-shipment-execution`;
+    const sourceReference = `${runId}-shipment`;
+    await db.shipmentExecution.create({ data: {
+      id: executionId, allocationId: ids.allocation, vendorId: ids.vendor, provider: 'KARGONOMI',
+      providerShipmentId: sourceReference, shipmentStatus: 'DELIVERED', requestSnapshot: {},
+    } });
+    const observation = await recordVerifiedDeliveredObservation({
+      allocationId: ids.allocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    serviceCreatedOrigin = true;
+    expect(observation).toMatchObject({
+      vendorAllocationId: ids.allocation, outboundMethod: 'KARGONOMI',
+      outboundIntegrationProvider: null, shipmentExecutionId: executionId, sourceReference,
+    });
+    const replayed = await recordVerifiedDeliveredObservation({
+      allocationId: ids.allocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    expect(replayed.id).toBe(observation.id);
+    expect(replayed.firstObservedDeliveredAt).toEqual(observation.firstObservedDeliveredAt);
+    const sale = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: ids.sale }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+    });
+    expect(sale.vendorId).toBe(ids.vendor);
+    expect(sale.vendorAllocation?.assignedVendorId).toBe(ids.vendor);
+    expect(sale.vendorAllocation?.outboundMethodSnapshot).toBe('KARGONOMI');
+    expect(sale.vendorAllocation?.outboundIntegrationProviderSnapshot).toBeNull();
+    expect(sale.settlementDelayDaysSnapshot).toBe(0);
+    expect(evaluateSaleSettlementDelay(sale).eligible).toBe(true);
+
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    ids.origin = draft.id;
+    expect(draft.status).toBe('draft');
+    expect(draft.lines).toHaveLength(2);
+    expect(draft.lines.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(draft.lines.find((line) => line.financeLedgerEntryId === ids.sale)).toMatchObject({
+      lineType: 'SALE', amountMinor: 105000, payableImpactMinor: 105000,
+    });
+    expect(draft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)).toMatchObject({
+      lineType: 'REFUND', amountMinor: 5000, payableImpactMinor: -5000,
+    });
+    expect(draft.netPayableMinor).toBe(100000);
+    const approved = await approveSettlementApproval(draft.id, ids.admin);
+    expect(approved).toMatchObject({ status: 'approved', vendorId: ids.vendor, currency: 'TRY', netPayableMinor: 100000 });
+    expect(new Date(approved.approvedAt!).getTime()).toBeGreaterThanOrEqual(observation.firstObservedDeliveredAt.getTime());
+    ids.saleLine = draft.lines.find((line) => line.financeLedgerEntryId === ids.sale)!.id;
+    ids.refundLine = draft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)!.id;
+  }
+
   beforeEach(async () => {
     const target = new URL(databaseUrl!);
     if (process.env.PHASE2E3B_TEST_DATABASE_ISOLATED !== '1' ||
@@ -53,6 +124,11 @@ describeWithPostgres('approved-settlement financial correction deduction with is
         target.pathname.slice(1) !== 'phase2e3b_validation') {
       throw new Error('Phase 2E3B PostgreSQL test requires the explicitly isolated local phase2e3b_validation database.');
     }
+    runId = `phase2e3b-${process.pid}-${Date.now()}-${++sequence}`;
+    ids = fixtureIds(runId);
+    sourceShopifyOrderId = `gid://shopify/Order/${runId}`;
+    sourceShopifyRefundId = `gid://shopify/Refund/${runId}`;
+    serviceCreatedOrigin = false;
     process.env.DATABASE_URL = databaseUrl;
     ({ normalizeRefundEvidence } = await import('../backend/src/modules/finance/refund-evidence-normalizer.service.js'));
     ({ previewTerminalFinancialCorrection } = await import('../backend/src/modules/finance/financial-correction-preview.service.js'));
@@ -64,6 +140,8 @@ describeWithPostgres('approved-settlement financial correction deduction with is
       await import('../backend/src/modules/finance/finance.service.js'));
     ({ applyApprovedSettlementFinancialCorrectionCredit: applyApprovedCredit } =
       await import('../backend/src/modules/finance/financial-correction-approved-settlement-credit.service.js'));
+    ({ recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
+    ({ evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js'));
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
     const accepted = normalized('50.00');
@@ -74,6 +152,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     await db.vendorAllocation.create({ data: {
       id: ids.allocation, sourceShopifyOrderId: ids.order, sourceShopifyOrderNumber: `#${runId}`,
       originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
+      outboundMethodSnapshot: 'KARGONOMI',
       fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered',
     } });
     await db.fulfillment.create({ data: {
@@ -129,22 +208,20 @@ describeWithPostgres('approved-settlement financial correction deduction with is
       id: ids.resolved, reviewId: ids.review, eventType: 'RESOLVED',
       resolutionOutcome: 'CORRECTION_REQUIRED', actorUserId: ids.admin,
     } });
-    await db.settlementApproval.create({ data: {
-      id: ids.origin, vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY',
-      grossSalesMinor: 115000, refundTotalMinor: 15000, commissionMinor: 0, commissionVatMinor: 0,
-      netPayableMinor: 100000, sourceSnapshotJson: {}, approvedBy: ids.admin,
-      approvedAt: new Date('2026-09-01T11:00:00.000Z'),
-      lines: { create: [
-        { id: ids.saleLine, financeLedgerEntryId: ids.sale, lineType: 'SALE', amountMinor: 105000,
-          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: 105000, sourceSnapshotJson: {} },
-        { id: ids.refundLine, financeLedgerEntryId: ids.refundLedger, lineType: 'REFUND', amountMinor: 5000,
-          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: -5000, sourceSnapshotJson: {} },
-      ] },
-    } });
   });
 
   afterEach(async () => {
     if (!db) return;
+    // The source-aligned observation is immutable and protects its allocation
+    // and execution. Keep unique positive fixtures in the disposable test DB.
+    if (serviceCreatedOrigin) {
+      await db.$disconnect();
+      settlementIds.length = 0;
+      payoutIds.length = 0;
+      extraReviews.length = 0;
+      extraSaleLedgerIds.length = 0;
+      return;
+    }
     if (payoutIds.length) {
       await db.financeEvent.deleteMany({ where: { referenceType: 'payout_batch', referenceId: { in: payoutIds } } });
       await db.vendorBalanceEvent.deleteMany({ where: { payoutBatchId: { in: payoutIds } } });
@@ -279,6 +356,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   }
 
   it('reserves the whole historical approval and deducts from its first payout without debt or rewriting history', async () => {
+    await createServiceApprovedOrigin();
     const originBefore = await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin }, include: { lines: true } });
     const state = await getState(ids.review, db as never);
     expect(state.eligible).toBe(true);
@@ -299,7 +377,9 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     expect(payout.payableBeforeDebtOffset).toBe('900.00');
     expect(payout.netAmount).toBe('900.00');
     expect(payout.lines).toHaveLength(2);
+    expect(payout.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
     expect(payout.approvedDeductionLines).toHaveLength(1);
+    expect(payout.approvedDeductionLines![0]?.coverageId).toBe(applied.coverageId);
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin }, include: { lines: true } })).toEqual(originBefore);
     await cancelPayoutBatch(payout.id);
     const reprepared = await preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
@@ -310,6 +390,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('applies the deduction before existing vendor debt offset', async () => {
+    await createServiceApprovedOrigin();
     await applyDeduction(await inputFor(), db as never);
     await db.vendorBalanceEvent.create({ data: {
       vendorId: ids.vendor, type: 'VENDOR_DEBT_CREATED', amountMinor: -6000, currency: 'TRY',
@@ -325,6 +406,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('keeps separately approved credit, deduction and vendor debt distinct in the same payout', async () => {
+    await createServiceApprovedOrigin();
     await setMainCorrectedAmount('250.00');
     const deduction = await applyDeduction(await inputFor(), db as never);
     expect(deduction.grossDeductionMinor).toBe(20000);
@@ -352,10 +434,18 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     expect(payout.lines).toHaveLength(2);
     expect(payout.correctionCreditLines).toHaveLength(1);
     expect(payout.approvedDeductionLines).toHaveLength(1);
+    expect(payout.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    const creditLine = await db.financialCorrectionCreditSettlementLine.findFirstOrThrow({
+      where: { settlementApprovalId: creditApproval.id, creditId: credit.creditId },
+    });
+    expect(creditApproval.id).not.toBe(ids.origin);
+    expect(payout.correctionCreditLines![0]?.settlementCreditLineId).toBe(creditLine.id);
+    expect(payout.approvedDeductionLines![0]?.coverageId).toBe(deduction.coverageId);
     await cancelPayoutBatch(payout.id);
   });
 
   it('fails closed when the single lineage-matched approval cannot cover the whole deduction', async () => {
+    await createDirectOriginForGuardTest();
     await db.settlementApproval.update({ where: { id: ids.origin }, data: { netPayableMinor: 6000 } });
     await db.settlementApprovalLine.update({ where: { id: ids.saleLine }, data: { payableImpactMinor: 11000 } });
     const state = await getState(ids.review, db as never);
@@ -368,6 +458,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('does not pool another approved settlement without the correction SALE lineage', async () => {
+    await createDirectOriginForGuardTest();
     await db.settlementApproval.update({ where: { id: ids.origin }, data: { netPayableMinor: 6000 } });
     await db.settlementApprovalLine.update({ where: { id: ids.saleLine }, data: { payableImpactMinor: 11000 } });
     const otherSale = `${runId}-other-sale`;
@@ -390,6 +481,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('does not count a separately approved correction credit as coverage', async () => {
+    await createDirectOriginForGuardTest();
     await db.settlementApproval.update({ where: { id: ids.origin }, data: { netPayableMinor: 6000 } });
     await db.settlementApprovalLine.update({ where: { id: ids.saleLine }, data: { payableImpactMinor: 11000 } });
     const creditReview = await addReview('credit', '150.00', '50.00');
@@ -408,6 +500,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('prevents two distinct corrections from over-reserving one 250 TRY origin', async () => {
+    await createDirectOriginForGuardTest();
     await db.financeLedgerEntry.update({ where: { id: ids.sale }, data: { amount: '300.00' } });
     await db.settlementApprovalLine.update({ where: { id: ids.saleLine }, data: {
       amountMinor: 30000, payableImpactMinor: 30000,
@@ -424,6 +517,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('serializes competing distinct deductions against the same approval', async () => {
+    await createDirectOriginForGuardTest();
     await db.financeLedgerEntry.update({ where: { id: ids.sale }, data: { amount: '300.00' } });
     await db.settlementApprovalLine.update({ where: { id: ids.saleLine }, data: {
       amountMinor: 30000, payableImpactMinor: 30000,
@@ -444,12 +538,14 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('blocks cancellation of an origin approval with active coverage', async () => {
+    await createDirectOriginForGuardTest();
     await applyDeduction(await inputFor(), db as never);
     await expect(cancelSettlementApproval(ids.origin, ids.admin)).rejects.toThrow('ORIGIN_SETTLEMENT_CANCELLATION_BLOCKED');
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin } })).status).toBe('APPROVED');
   });
 
   it.each(['DRAFT', 'REVIEW', 'PAID', 'CANCELLED'] as const)('rejects %s payout history before Apply', async (status) => {
+    await createDirectOriginForGuardTest();
     await db.payoutBatch.create({ data: { id: ids.historicalPayout, vendorId: ids.vendor, currency: 'TRY',
       status, paidAt: status === 'PAID' ? new Date('2026-09-01T12:00:00.000Z') : null } });
     await db.payoutBatchLine.create({ data: {
@@ -461,6 +557,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('rolls back authority, deduction and claim if coverage insertion fails', async () => {
+    await createDirectOriginForGuardTest();
     await db.$executeRawUnsafe(`CREATE FUNCTION phase2e3b_reject_coverage_insert() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'phase2e3b injected coverage failure'; END; $$`);
     await db.$executeRawUnsafe(`CREATE TRIGGER phase2e3b_reject_coverage_insert BEFORE INSERT ON "FinancialCorrectionApprovedDeductionCoverage"
@@ -477,6 +574,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('blocks an accepted baseline claimed by another correction route', async () => {
+    await createDirectOriginForGuardTest();
     await db.financialCorrectionBaselineClaim.create({ data: {
       acceptedEvidenceSnapshotId: ids.snapshot,
       consumerType: 'zero_net_acknowledgement', consumerId: `${runId}-other`,
@@ -487,12 +585,17 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('keeps payout review and Mark Paid tied to the covered deduction', async () => {
+    await createServiceApprovedOrigin();
     await applyDeduction(await inputFor(), db as never);
     const draft = await preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
     payoutIds.push(draft.id);
+    expect(draft.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
     const review = await markPayoutBatchReview(draft.id);
     expect(review.status).toBe('review');
-    const paid = await markPayoutBatchPaid(draft.id, { paidAt: '2026-09-02T12:00:00.000Z' }, ids.admin);
+    const paidAt = new Date().toISOString();
+    const approvedOrigin = await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin } });
+    expect(new Date(paidAt).getTime()).toBeGreaterThanOrEqual(approvedOrigin.approvedAt!.getTime());
+    const paid = await markPayoutBatchPaid(draft.id, { paidAt }, ids.admin);
     expect(paid.status).toBe('paid');
     expect(paid.netAmount).toBe('900.00');
     expect((await db.financialCorrectionApprovedDeductionPayoutLine.findFirstOrThrow({
@@ -502,6 +605,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('deduplicates retries and rejects a stale fingerprint', async () => {
+    await createDirectOriginForGuardTest();
     const input = await inputFor();
     await expect(applyDeduction({ ...input, previewFingerprint: `financial-correction-preview-v1:${'0'.repeat(64)}` }, db as never))
       .rejects.toMatchObject({ code: 'PREVIEW_STALE' });
@@ -513,15 +617,17 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it.each([1, 2, 3, 4, 5])('serializes Apply with payout preparation race %i', async () => {
+    await createServiceApprovedOrigin();
     const results = await Promise.allSettled([
       applyDeduction(await inputFor(), db as never), preparePayoutBatch({ vendorId: ids.vendor }, ids.admin),
     ]);
     const applied = results[0].status === 'fulfilled' ? results[0].value : null;
     const payout = results[1].status === 'fulfilled' ? results[1].value : null;
     if (payout) payoutIds.push(payout.id);
-    if (applied && payout) expect(payout.correctionDeductionAmount).toBe('100.00');
-    if (!applied && payout) expect(payout.correctionDeductionAmount).toBe('0.00');
-    if (applied && !payout) expect(await db.financialCorrectionApprovedDeductionCoverage.count({ where: { vendorId: ids.vendor } })).toBe(1);
-    if (payout) await cancelPayoutBatch(payout.id);
+    expect(payout).not.toBeNull();
+    expect(payout?.lines?.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(payout?.payableBeforeDebtOffset).toBe(applied ? '900.00' : '1000.00');
+    expect(payout?.correctionDeductionAmount).toBe(applied ? '100.00' : '0.00');
+    await cancelPayoutBatch(payout!.id);
   });
 });

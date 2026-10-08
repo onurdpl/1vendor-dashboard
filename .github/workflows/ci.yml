@@ -102,6 +102,7 @@ jobs:
             ' "$report" "$file"
           done <<'SUITES'
           fin_bug_001_validation FIN_BUG_001_TEST_DATABASE_ISOLATED src/fin-bug-001-settlement-delay-parity.postgres.test.ts
+          fin_bug_005_validation FIN_BUG_005_TEST_DATABASE_ISOLATED src/fin-bug-005-settlement-preview-isolation.postgres.test.ts
           sopyo_delivery_validation SOPYO_DELIVERY_TEST_DATABASE_ISOLATED src/sopyo-delivery-poll.postgres.test.ts
           sopyo_order_push_validation SOPYO_ORDER_PUSH_TEST_DATABASE_ISOLATED src/sopyo-order-push-intent.postgres.test.ts
           phase2b_validation PHASE2B_TEST_DATABASE_ISOLATED src/financial-correction-zero-net.postgres.test.ts

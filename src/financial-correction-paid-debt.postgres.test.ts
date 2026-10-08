@@ -28,7 +28,8 @@ describeWithPostgres('paid financial correction with real PostgreSQL', () => {
   let getVendorBalanceSummary: typeof import('../backend/src/modules/finance/vendor-balance.service.js')['getVendorBalanceSummary'];
   let createVendorDebtForPaidRefund: typeof import('../backend/src/modules/finance/vendor-balance.service.js')['createVendorDebtForPaidRefund'];
   let preparePayoutBatch: typeof import('../backend/src/modules/finance/finance.service.js')['preparePayoutBatch'];
-  let futurePayoutId: string | null = null;
+  let recordVerifiedDeliveredObservation: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
+  let evaluateSaleSettlementDelay: typeof import('../backend/src/modules/finance/settlement-delay-eligibility.service.js')['evaluateSaleSettlementDelay'];
 
   function normalized(amount: string) {
     return normalizeRefundEvidence({
@@ -54,6 +55,8 @@ describeWithPostgres('paid financial correction with real PostgreSQL', () => {
     ({ applyPaidFinancialCorrectionDebt } = await import('../backend/src/modules/finance/financial-correction-paid-debt.service.js'));
     ({ getVendorBalanceSummary, createVendorDebtForPaidRefund } = await import('../backend/src/modules/finance/vendor-balance.service.js'));
     ({ preparePayoutBatch } = await import('../backend/src/modules/finance/finance.service.js'));
+    ({ recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
+    ({ evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js'));
     db = new PrismaClient({ datasources: { db: { url: testDatabaseUrl } } });
     await db.$connect();
     const accepted = normalized('100.00');
@@ -136,8 +139,25 @@ describeWithPostgres('paid financial correction with real PostgreSQL', () => {
     await db.vendorAllocation.create({ data: {
       id: ids.futureAllocation, sourceShopifyOrderId: ids.order, sourceShopifyOrderNumber: `#${runId}`,
       originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
+      outboundMethodSnapshot: 'KARGONOMI',
       fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered',
     } });
+    const executionId = `${ids.futureAllocation}-execution`;
+    const sourceReference = `${ids.futureAllocation}-shipment`;
+    await db.shipmentExecution.create({ data: {
+      id: executionId, allocationId: ids.futureAllocation, vendorId: ids.vendor,
+      provider: 'KARGONOMI', providerShipmentId: sourceReference,
+      shipmentStatus: 'DELIVERED', requestSnapshot: {},
+    } });
+    const observation = await recordVerifiedDeliveredObservation({
+      allocationId: ids.futureAllocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    expect(observation).toMatchObject({
+      vendorAllocationId: ids.futureAllocation, outboundMethod: 'KARGONOMI',
+      outboundIntegrationProvider: null, shipmentExecutionId: executionId, sourceReference,
+    });
+    expect(observation.firstObservedDeliveredAt).toBeInstanceOf(Date);
     await db.fulfillment.create({ data: {
       id: ids.futureFulfillment, vendorAllocationId: ids.futureAllocation,
       fulfillmentStatus: 'Fulfilled', fulfilledAt: new Date('2026-08-01T00:00:00.000Z'),
@@ -162,30 +182,8 @@ describeWithPostgres('paid financial correction with real PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    if (!db) return;
-    await db.vendorBalanceEvent.deleteMany({ where: { vendorId: ids.vendor } });
-    await db.financialCorrectionAuthority.deleteMany({ where: { reviewId: ids.review } });
-    await db.financialCorrectionBaselineClaim.deleteMany({ where: { acceptedEvidenceSnapshotId: ids.snapshot } });
-    if (futurePayoutId) {
-      await db.payoutBatchLine.deleteMany({ where: { payoutBatchId: futurePayoutId } });
-      await db.payoutBatch.deleteMany({ where: { id: futurePayoutId } });
-    }
-    await db.payoutBatchLine.deleteMany({ where: { id: ids.payoutLine } });
-    await db.payoutBatch.deleteMany({ where: { id: ids.payout } });
-    await db.settlementApprovalLine.deleteMany({ where: { id: { in: [ids.settlementLine, ids.futureSettlementLine] } } });
-    await db.settlementApproval.deleteMany({ where: { id: { in: [ids.settlement, ids.futureSettlement] } } });
-    await db.refundTerminalEvidenceReviewEvent.deleteMany({ where: { id: ids.resolvedEvent } });
-    await db.refundTerminalConflictEvidence.deleteMany({ where: { id: ids.incoming } });
-    await db.refundTerminalEvidenceReview.deleteMany({ where: { id: ids.review } });
-    await db.refundEvidenceSnapshot.deleteMany({ where: { id: ids.snapshot } });
-    await db.financeLedgerEntry.deleteMany({ where: { id: { in: [ids.sale, ids.refundLedger, ids.futureSale] } } });
-    await db.refundRecord.deleteMany({ where: { id: ids.refundRecord } });
-    await db.fulfillment.deleteMany({ where: { id: ids.futureFulfillment } });
-    await db.vendorAllocation.deleteMany({ where: { id: { in: [ids.allocation, ids.futureAllocation] } } });
-    await db.shopifyOrder.deleteMany({ where: { id: ids.order } });
-    await db.vendor.deleteMany({ where: { id: ids.vendor } });
-    await db.user.deleteMany({ where: { id: ids.admin } });
-    await db.$disconnect();
+    // The observation is immutable; the isolated test database owns fixture disposal.
+    await db?.$disconnect();
   });
 
   it('rolls back authority and claim when the correction debt write fails', async () => {
@@ -289,9 +287,32 @@ describeWithPostgres('paid financial correction with real PostgreSQL', () => {
     expect(debts[0]).toMatchObject({ amountMinor: -1760, financialCorrectionAuthorityId: authorities[0].id,
       sourceId: authorities[0].id, sourceType: 'financial_correction' });
     expect(await getVendorBalanceSummary(db as never, ids.vendor, 'TRY')).toMatchObject({ outstandingDebtMinor: 1760 });
+    const futureSale = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: ids.futureSale }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+    });
+    expect(futureSale.amount.toString()).toBe('400');
+    expect(futureSale.vendorId).toBe(ids.vendor);
+    expect(futureSale.vendorAllocation?.assignedVendorId).toBe(ids.vendor);
+    expect(futureSale.vendorAllocation?.outboundMethodSnapshot).toBe('KARGONOMI');
+    expect(futureSale.vendorAllocation?.outboundIntegrationProviderSnapshot).toBeNull();
+    expect(futureSale.vendorAllocation?.deliveredObservation).toMatchObject({
+      vendorAllocationId: ids.futureAllocation, outboundMethod: 'KARGONOMI',
+    });
+    expect(futureSale.settlementDelayDaysSnapshot).toBe(0);
+    const delay = evaluateSaleSettlementDelay(futureSale);
+    expect(delay.eligible).toBe(true);
+    expect(delay.deliveryDate).toEqual(futureSale.vendorAllocation?.deliveredObservation?.firstObservedDeliveredAt);
+    expect(delay.eligibleAt).toEqual(delay.deliveryDate);
     const futurePayout = await preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
-    futurePayoutId = futurePayout.id;
-    const futureBatch = await db.payoutBatch.findUnique({ where: { id: futurePayout.id }, include: { vendorBalanceEvents: true } });
+    const futureBatch = await db.payoutBatch.findUnique({
+      where: { id: futurePayout.id }, include: { vendorBalanceEvents: true, lines: true },
+    });
+    expect(futureBatch?.lines).toHaveLength(1);
+    expect(futureBatch?.lines[0]).toMatchObject({
+      financeLedgerEntryId: ids.futureSale, settlementApprovalLineId: ids.futureSettlementLine,
+    });
+    expect(futureBatch?.lines[0].amountSnapshot.toString()).toBe('400');
+    expect(futureBatch?.grossAmount.toString()).toBe('400');
     expect(futureBatch?.netAmount.toString()).toBe('382.4');
     expect(futureBatch?.vendorBalanceEvents).toEqual([expect.objectContaining({
       type: 'VENDOR_DEBT_OFFSET', amountMinor: 1760, sourceType: 'payout_batch', sourceId: futurePayout.id,

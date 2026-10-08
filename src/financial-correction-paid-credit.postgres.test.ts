@@ -5,19 +5,21 @@ const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = testDatabaseUrl ? describe : describe.skip;
 
 describeWithPostgres('paid financial correction credit with isolated PostgreSQL', () => {
-  const runId = `phase2d-${process.pid}-${Date.now()}`;
-  const ids = {
-    vendor: `${runId}-vendor`, admin: `${runId}-admin`, order: `${runId}-order`,
-    allocation: `${runId}-allocation`, refundRecord: `${runId}-refund-record`,
-    sale: `${runId}-sale`, refundLedger: `${runId}-refund-ledger`, snapshot: `${runId}-snapshot`,
-    review: `${runId}-review`, incoming: `${runId}-incoming`, resolved: `${runId}-resolved`,
-    historicalSettlement: `${runId}-historical-settlement`, historicalLine: `${runId}-historical-line`,
-    historicalPayout: `${runId}-historical-payout`, historicalPayoutLine: `${runId}-historical-payout-line`,
-    futureAllocation: `${runId}-future-allocation`, futureFulfillment: `${runId}-future-fulfillment`,
-    futureSale: `${runId}-future-sale`,
-  };
-  const sourceShopifyOrderId = `gid://shopify/Order/${runId}`;
-  const sourceShopifyRefundId = `gid://shopify/Refund/${runId}`;
+  let sequence = 0;
+  let runId: string;
+  const fixtureIds = (id: string) => ({
+    vendor: `${id}-vendor`, admin: `${id}-admin`, order: `${id}-order`,
+    allocation: `${id}-allocation`, refundRecord: `${id}-refund-record`,
+    sale: `${id}-sale`, refundLedger: `${id}-refund-ledger`, snapshot: `${id}-snapshot`,
+    review: `${id}-review`, incoming: `${id}-incoming`, resolved: `${id}-resolved`,
+    historicalSettlement: `${id}-historical-settlement`, historicalLine: `${id}-historical-line`,
+    historicalPayout: `${id}-historical-payout`, historicalPayoutLine: `${id}-historical-payout-line`,
+    futureAllocation: `${id}-future-allocation`, futureFulfillment: `${id}-future-fulfillment`,
+    futureSale: `${id}-future-sale`,
+  });
+  let ids: ReturnType<typeof fixtureIds>;
+  let sourceShopifyOrderId: string;
+  let sourceShopifyRefundId: string;
   const paidAt = new Date('2026-09-01T12:00:00.000Z');
   let db: PrismaClient;
   let normalizeRefundEvidence: typeof import('../backend/src/modules/finance/refund-evidence-normalizer.service.js')['normalizeRefundEvidence'];
@@ -32,8 +34,8 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
   let cancelPayoutBatch: typeof import('../backend/src/modules/finance/finance.service.js')['cancelPayoutBatch'];
   let markPayoutBatchReview: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchReview'];
   let markPayoutBatchPaid: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchPaid'];
-  const settlementIds: string[] = [];
-  const payoutIds: string[] = [];
+  let recordVerifiedDeliveredObservation: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
+  let evaluateSaleSettlementDelay: typeof import('../backend/src/modules/finance/settlement-delay-eligibility.service.js')['evaluateSaleSettlementDelay'];
 
   function normalized(amount: string) {
     return normalizeRefundEvidence({
@@ -69,6 +71,10 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
   }
 
   beforeEach(async () => {
+    runId = `phase2d-${process.pid}-${Date.now()}-${sequence++}`;
+    ids = fixtureIds(runId);
+    sourceShopifyOrderId = `gid://shopify/Order/${runId}`;
+    sourceShopifyRefundId = `gid://shopify/Refund/${runId}`;
     const target = new URL(testDatabaseUrl!);
     if (process.env.PHASE2D_TEST_DATABASE_ISOLATED !== '1' ||
         !['127.0.0.1', 'localhost'].includes(target.hostname) ||
@@ -81,6 +87,8 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
     ({ applyPaidFinancialCorrectionCredit, getPaidFinancialCorrectionCreditState } = await import('../backend/src/modules/finance/financial-correction-paid-credit.service.js'));
     ({ previewApproval, createDraftApproval, approveSettlementApproval, cancelSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js'));
     ({ preparePayoutBatch, cancelPayoutBatch, markPayoutBatchReview, markPayoutBatchPaid } = await import('../backend/src/modules/finance/finance.service.js'));
+    ({ recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
+    ({ evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js'));
     db = new PrismaClient({ datasources: { db: { url: testDatabaseUrl } } });
     await db.$connect();
     const accepted = normalized('120.00');
@@ -163,43 +171,8 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
   });
 
   afterEach(async () => {
-    if (!db) return;
-    if (payoutIds.length) {
-      await db.financeEvent.deleteMany({ where: { referenceType: 'payout_batch', referenceId: { in: payoutIds } } });
-      await db.vendorBalanceEvent.deleteMany({ where: { payoutBatchId: { in: payoutIds } } });
-      await db.payoutBatchLine.deleteMany({ where: { payoutBatchId: { in: payoutIds } } });
-      await db.financialCorrectionCreditPayoutLine.deleteMany({ where: { payoutBatchId: { in: payoutIds } } });
-      await db.payoutBatch.deleteMany({ where: { id: { in: payoutIds } } });
-    }
-    if (settlementIds.length) {
-      await db.settlementApprovalLine.deleteMany({ where: { settlementApprovalId: { in: settlementIds } } });
-      await db.financialCorrectionCreditSettlementLine.deleteMany({ where: { settlementApprovalId: { in: settlementIds } } });
-      await db.settlementApproval.deleteMany({ where: { id: { in: settlementIds } } });
-    }
-    await db.vendorBalanceEvent.deleteMany({ where: { vendorId: ids.vendor } });
-    await db.financialCorrectionCredit.deleteMany({ where: { authority: { reviewId: ids.review } } });
-    await db.financialCorrectionAuthority.deleteMany({ where: { reviewId: ids.review } });
-    await db.financialCorrectionBaselineClaim.deleteMany({ where: { acceptedEvidenceSnapshotId: ids.snapshot } });
-    await db.payoutBatchLine.deleteMany({ where: { id: ids.historicalPayoutLine } });
-    await db.payoutBatch.deleteMany({ where: { id: ids.historicalPayout } });
-    await db.settlementApprovalLine.deleteMany({ where: { id: ids.historicalLine } });
-    await db.settlementApproval.deleteMany({ where: { id: ids.historicalSettlement } });
-    await db.refundTerminalEvidenceReviewEvent.deleteMany({ where: { id: ids.resolved } });
-    await db.refundTerminalConflictEvidence.deleteMany({ where: { id: ids.incoming } });
-    await db.refundTerminalEvidenceReview.deleteMany({ where: { id: ids.review } });
-    await db.refundEvidenceSnapshot.deleteMany({ where: { id: ids.snapshot } });
-    await db.financeLedgerEntry.deleteMany({ where: { id: { in: [ids.sale, ids.refundLedger] } } });
-    await db.financeLedgerEntry.deleteMany({ where: { id: ids.futureSale } });
-    await db.fulfillment.deleteMany({ where: { id: ids.futureFulfillment } });
-    await db.refundRecord.deleteMany({ where: { id: ids.refundRecord } });
-    await db.vendorAllocation.deleteMany({ where: { id: ids.allocation } });
-    await db.vendorAllocation.deleteMany({ where: { id: ids.futureAllocation } });
-    await db.shopifyOrder.deleteMany({ where: { id: ids.order } });
-    await db.vendor.deleteMany({ where: { id: ids.vendor } });
-    await db.user.deleteMany({ where: { id: ids.admin } });
-    await db.$disconnect();
-    settlementIds.length = 0;
-    payoutIds.length = 0;
+    // The delivery observation is immutable; the isolated suite database owns fixture disposal.
+    await db?.$disconnect();
   });
 
   it('applies one gross credit without changing PAID history and rejects duplicate economic use', async () => {
@@ -296,7 +269,6 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
     ]);
     expect(concurrentDrafts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const draft = (concurrentDrafts.find((result) => result.status === 'fulfilled') as PromiseFulfilledResult<Awaited<ReturnType<typeof createDraftApproval>>>).value;
-    settlementIds.push(draft.id);
     expect(draft.lines).toHaveLength(0);
     expect(draft.correctionCreditLines).toHaveLength(1);
     expect(draft.netPayableMinor).toBe(10000);
@@ -308,7 +280,6 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
     ]);
     expect(concurrentPayouts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const payout = (concurrentPayouts.find((result) => result.status === 'fulfilled') as PromiseFulfilledResult<Awaited<ReturnType<typeof preparePayoutBatch>>>).value;
-    payoutIds.push(payout.id);
     expect(payout.lineCount).toBe(1);
     expect(payout.correctionCreditAmount).toBe('100.00');
     expect(payout.netAmount).toBe('100.00');
@@ -323,10 +294,8 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
       sourceType: 'phase2d_test_existing_debt', sourceId: runId, idempotencyKey: `${runId}-debt`,
     } });
     const rebuiltDraft = await createDraftApproval({ vendorId: ids.vendor });
-    settlementIds.push(rebuiltDraft.id);
     await approveSettlementApproval(rebuiltDraft.id, ids.admin);
     const rebuiltPayout = await preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
-    payoutIds.push(rebuiltPayout.id);
     expect(rebuiltPayout.correctionCreditAmount).toBe('100.00');
     expect(rebuiltPayout.debtOffsetAmount).toBe('60.00');
     expect(rebuiltPayout.netAmount).toBe('40.00');
@@ -339,6 +308,7 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
   });
 
   it('keeps an ordinary SALE, gross credit, debt source and payout offset distinct', async () => {
+    const historicalPayout = await db.payoutBatch.findUniqueOrThrow({ where: { id: ids.historicalPayout } });
     await setHundredTryCreditFixture();
     const correctionPreview = await previewTerminalFinancialCorrection(ids.review, db as never);
     expect(correctionPreview.difference.vendorPayableReversalMinor).toBe(-10000);
@@ -348,8 +318,25 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
     await db.vendorAllocation.create({ data: {
       id: ids.futureAllocation, sourceShopifyOrderId: ids.order, sourceShopifyOrderNumber: `#${runId}`,
       originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
+      outboundMethodSnapshot: 'KARGONOMI',
       fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered',
     } });
+    const executionId = `${ids.futureAllocation}-execution`;
+    const sourceReference = `${ids.futureAllocation}-shipment`;
+    await db.shipmentExecution.create({ data: {
+      id: executionId, allocationId: ids.futureAllocation, vendorId: ids.vendor,
+      provider: 'KARGONOMI', providerShipmentId: sourceReference,
+      shipmentStatus: 'DELIVERED', requestSnapshot: {},
+    } });
+    const observation = await recordVerifiedDeliveredObservation({
+      allocationId: ids.futureAllocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    expect(observation).toMatchObject({
+      vendorAllocationId: ids.futureAllocation, outboundMethod: 'KARGONOMI',
+      outboundIntegrationProvider: null, shipmentExecutionId: executionId, sourceReference,
+    });
+    expect(observation.firstObservedDeliveredAt).toBeInstanceOf(Date);
     await db.fulfillment.create({ data: {
       id: ids.futureFulfillment, vendorAllocationId: ids.futureAllocation,
       fulfillmentStatus: 'Fulfilled', fulfilledAt: new Date('2026-08-01T00:00:00.000Z'),
@@ -361,24 +348,40 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
       settlementStatus: 'PAYABLE', payoutStatus: 'APPROVED',
       commissionPercentSnapshot: '0.00', commissionVatPercentSnapshot: '0.00',
     } });
+    const futureSale = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: ids.futureSale }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+    });
+    expect(futureSale.amount.toString()).toBe('300');
+    expect(futureSale.vendorId).toBe(ids.vendor);
+    expect(futureSale.vendorAllocation?.assignedVendorId).toBe(ids.vendor);
+    expect(futureSale.vendorAllocation?.outboundMethodSnapshot).toBe('KARGONOMI');
+    expect(futureSale.vendorAllocation?.outboundIntegrationProviderSnapshot).toBeNull();
+    expect(futureSale.vendorAllocation?.deliveredObservation?.id).toBe(observation.id);
+    expect(futureSale.settlementDelayDaysSnapshot).toBe(0);
+    const delay = evaluateSaleSettlementDelay(futureSale);
+    expect(delay.eligible).toBe(true);
+    expect(delay.deliveryDate).toEqual(observation.firstObservedDeliveredAt);
+    expect(delay.eligibleAt).toEqual(observation.firstObservedDeliveredAt);
     await db.vendorBalanceEvent.create({ data: {
       vendorId: ids.vendor, type: 'VENDOR_DEBT_CREATED', amountMinor: -6000, currency: 'TRY',
       sourceType: 'phase2d_test_existing_debt', sourceId: runId, idempotencyKey: `${runId}-mixed-debt`,
     } });
     const preview = await previewApproval(ids.vendor);
     expect(preview.summary.eligibleRowCount).toBe(1);
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual([ids.futureSale]);
     expect(preview.correctionCredits).toHaveLength(1);
+    expect(preview.correctionCredits[0]?.id).toBe(applied.creditId);
     expect(preview.summary.grossSalesMinor).toBe(30000);
     expect(preview.summary.correctionCreditMinor).toBe(10000);
     expect(preview.summary.netPayableMinor).toBe(40000);
     const draft = await createDraftApproval({ vendorId: ids.vendor });
-    settlementIds.push(draft.id);
     expect(draft.lines).toHaveLength(1);
+    expect(draft.lines[0]?.financeLedgerEntryId).toBe(ids.futureSale);
     expect(draft.correctionCreditLines).toHaveLength(1);
     expect(draft.correctionCreditLines[0]?.creditId).toBe(applied.creditId);
+    expect(await db.financialCorrectionCreditSettlementLine.count({ where: { creditId: applied.creditId, status: 'ACTIVE' } })).toBe(1);
     await approveSettlementApproval(draft.id, ids.admin);
     const payout = await preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
-    payoutIds.push(payout.id);
     expect(payout.grossAmount).toBe('300.00');
     expect(payout.correctionCreditAmount).toBe('100.00');
     expect(payout.payableBeforeDebtOffset).toBe('400.00');
@@ -386,5 +389,16 @@ describeWithPostgres('paid financial correction credit with isolated PostgreSQL'
     expect(payout.netAmount).toBe('340.00');
     expect(payout.lines).toHaveLength(1);
     expect(payout.correctionCreditLines).toHaveLength(1);
+    expect(payout.lines[0]?.financeLedgerEntryId).toBe(ids.futureSale);
+    const payoutLines = await db.payoutBatchLine.findMany({ where: { payoutBatchId: payout.id } });
+    expect(payoutLines).toHaveLength(1);
+    expect(payoutLines[0]).toMatchObject({ financeLedgerEntryId: ids.futureSale,
+      settlementApprovalLineId: draft.lines[0]?.id });
+    expect(await db.financialCorrectionCreditPayoutLine.count({ where: { payoutBatchId: payout.id, status: 'ACTIVE' } })).toBe(1);
+    expect(await db.vendorBalanceEvent.findMany({ where: { payoutBatchId: payout.id, type: 'VENDOR_DEBT_OFFSET' } }))
+      .toEqual([expect.objectContaining({ amountMinor: 6000, vendorId: ids.vendor })]);
+    expect(await db.payoutBatch.findUniqueOrThrow({ where: { id: ids.historicalPayout } })).toEqual(historicalPayout);
+    expect(historicalPayout.status).toBe('PAID');
+    expect(historicalPayout.netAmount.toString()).toBe('176');
   });
 });

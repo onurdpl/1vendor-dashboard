@@ -127,6 +127,7 @@ type SettlementScheduleCreateDraftsInput = SettlementScheduleRequestInput & {
 };
 
 const WEEKDAYS: SettlementWeekdayDto[] = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+const VENDOR_DEDUCTION_SCOPE_REASON = 'A pending Financial Correction deduction requires a vendor-wide settlement draft.';
 
 function pad2(value: number) {
   return String(value).padStart(2, '0');
@@ -340,6 +341,7 @@ function summarizeDryRunVendor(input: {
   scheduledCycleKey: string;
   existingApproval: ExistingScheduledApproval;
   preview: SettlementApprovalPreviewDto | null;
+  previewBlockedReason?: string;
 }) {
   const schedule = normalizeProfile(input.row);
   const dueResult = evaluateSettlementScheduleDue(schedule, input.runDate);
@@ -348,7 +350,7 @@ function summarizeDryRunVendor(input: {
   const cycleBlocker = input.existingApproval
     ? 'Scheduled settlement cycle already has an approval.'
     : null;
-  const blockedReason = cycleBlocker ?? (!dueResult.due
+  const blockedReason = cycleBlocker ?? input.previewBlockedReason ?? (!dueResult.due
     ? dueResult.reason
     : !schedule.autoSettlementDraftEnabled
       ? 'Auto settlement draft is disabled for this vendor.'
@@ -401,13 +403,24 @@ export async function getSettlementScheduleDryRun(
     const dueResult = evaluateSettlementScheduleDue(schedule, runDate);
     const scheduledCycleKey = buildScheduledSettlementCycleKey(row.vendorId, runDate);
     const existingApproval = await findExistingScheduledApproval(row.vendorId, scheduledCycleKey);
-    const preview = dueResult.due
-      ? await previewApproval(row.vendorId, null, periodEnd, {
+    let preview: SettlementApprovalPreviewDto | null = null;
+    let previewBlockedReason: string | undefined;
+    if (dueResult.due) {
+      try {
+        preview = await previewApproval(row.vendorId, null, periodEnd, {
           candidateScope: 'date_range',
           asOfDate: periodEnd,
-        })
-      : null;
-    vendors.push(summarizeDryRunVendor({ row, runDate, scheduledCycleKey, existingApproval, preview }));
+        });
+      } catch (error) {
+        // Only this exact, fail-closed correction scope guard is a vendor-level blocker.
+        // Unknown preview failures still abort the run.
+        if (!(error instanceof Error) || error.message !== VENDOR_DEDUCTION_SCOPE_REASON) {
+          throw error;
+        }
+        previewBlockedReason = error.message;
+      }
+    }
+    vendors.push(summarizeDryRunVendor({ row, runDate, scheduledCycleKey, existingApproval, preview, previewBlockedReason }));
   }
 
   return {

@@ -1999,6 +1999,7 @@ export type SettlementScheduleDryRunVendor = {
   scheduledCycleKey: string;
   existingSettlementApprovalId: string | null;
   existingSettlementApprovalStatus: 'draft' | 'approved' | 'cancelled' | null;
+  preview?: Record<string, unknown> | null;
   eligibleLineCount: number;
   excludedActiveApprovalRowCount: number;
   netPayableMinor: number;

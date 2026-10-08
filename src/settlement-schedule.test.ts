@@ -242,6 +242,59 @@ describe('settlement schedule service', () => {
     expect(previewApprovalMock).not.toHaveBeenCalled();
   });
 
+  it('isolates only the exact vendor-wide deduction scope blocker and continues vendors in order', async () => {
+    const reason = 'A pending Financial Correction deduction requires a vendor-wide settlement draft.';
+    prismaMock.vendorFinancialProfile.findMany.mockResolvedValue([
+      profileRow({ vendorId: 'a' }), profileRow({ vendorId: 'b' }), profileRow({ vendorId: 'c' }),
+    ]);
+    previewApprovalMock.mockRejectedValueOnce(new Error(reason))
+      .mockResolvedValueOnce(preview({ vendorId: 'b' }))
+      .mockResolvedValueOnce(preview({ vendorId: 'c' }));
+
+    const result = await getSettlementScheduleDryRun({ runDate: '2026-01-21' });
+    expect(result.writesPerformed).toBe(false);
+    expect(result.vendors.map((vendor) => vendor.vendorId)).toEqual(['a', 'b', 'c']);
+    expect(result.vendors[0]).toEqual(expect.objectContaining({
+      state: 'BLOCKED', preview: null, canCreateDraft: false, blockedReason: reason,
+    }));
+    expect(result.vendors.slice(1).map((vendor) => vendor.state)).toEqual(['READY', 'READY']);
+    expect(result.summary.autoDraftEligibleVendors).toBe(2);
+    expect(previewApprovalMock.mock.calls.map((call) => call[0])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('skips only the blocked vendor during draft creation', async () => {
+    const reason = 'A pending Financial Correction deduction requires a vendor-wide settlement draft.';
+    prismaMock.vendorFinancialProfile.findMany.mockResolvedValue([
+      profileRow({ vendorId: 'a' }), profileRow({ vendorId: 'b' }), profileRow({ vendorId: 'c' }),
+    ]);
+    previewApprovalMock.mockRejectedValueOnce(new Error(reason))
+      .mockResolvedValueOnce(preview({ vendorId: 'b' }))
+      .mockResolvedValueOnce(preview({ vendorId: 'c' }));
+    const result = await createSettlementScheduleDrafts({ runDate: '2026-01-21', confirmAutoSettlementDrafts: true });
+    expect(result.summary).toEqual(expect.objectContaining({ created: 2, skipped: 1, failed: 0 }));
+    expect(result.skipped).toEqual([{ vendorId: 'a', reason }]);
+    expect(createDraftApprovalMock.mock.calls.map((call) => call[0].vendorId)).toEqual(['b', 'c']);
+  });
+
+  it('does not swallow unrelated preview errors', async () => {
+    previewApprovalMock.mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(getSettlementScheduleDryRun({ runDate: '2026-01-21' })).rejects.toThrow('database unavailable');
+    expect(createDraftApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('retains create-time failures as failed results while later vendors continue', async () => {
+    prismaMock.vendorFinancialProfile.findMany.mockResolvedValue([
+      profileRow({ vendorId: 'a' }), profileRow({ vendorId: 'b' }),
+    ]);
+    previewApprovalMock.mockResolvedValueOnce(preview({ vendorId: 'a' }))
+      .mockResolvedValueOnce(preview({ vendorId: 'b' }));
+    createDraftApprovalMock.mockRejectedValueOnce(new Error('database write failed'));
+    const result = await createSettlementScheduleDrafts({ runDate: '2026-01-21', confirmAutoSettlementDrafts: true });
+    expect(result.summary).toEqual(expect.objectContaining({ created: 1, skipped: 0, failed: 1 }));
+    expect(result.failed).toEqual([{ vendorId: 'a', reason: 'database write failed' }]);
+    expect(result.createdDrafts).toEqual([expect.objectContaining({ vendorId: 'b' })]);
+  });
+
   it('requires confirmation before creating scheduled drafts', async () => {
     await expect(createSettlementScheduleDrafts({ runDate: '2026-01-21' })).rejects.toThrow(
       'confirmAutoSettlementDrafts must be true',

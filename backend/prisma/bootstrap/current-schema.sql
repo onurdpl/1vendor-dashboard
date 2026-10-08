@@ -549,6 +549,18 @@ CREATE TYPE public."ShippingProvider" AS ENUM (
 
 
 --
+-- Name: SopyoDeliveredSyncStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SopyoDeliveredSyncStatus" AS ENUM (
+    'SUBMISSION_PENDING',
+    'CONFIRMED',
+    'REJECTED',
+    'OUTCOME_UNKNOWN'
+);
+
+
+--
 -- Name: SopyoOrderPushStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -2287,8 +2299,14 @@ CREATE TABLE public."SopyoShipmentIntent" (
     "submissionStartedAt" timestamp(3) without time zone,
     "confirmedAt" timestamp(3) without time zone,
     "shopifyFulfillmentId" text,
+    "deliveredSyncStatus" public."SopyoDeliveredSyncStatus",
+    "deliveredSubmissionStartedAt" timestamp(3) without time zone,
+    "deliveredConfirmedAt" timestamp(3) without time zone,
+    "deliveredRejectedAt" timestamp(3) without time zone,
+    "deliveredRejectReasonCode" text,
     CONSTRAINT "SopyoShipmentIntent_cargo_check" CHECK (((length(btrim(carrier)) >= 1) AND (length(btrim(carrier)) <= 200) AND (length(btrim("trackingNumber")) >= 1) AND (length(btrim("trackingNumber")) <= 200) AND (carrier = btrim(carrier)) AND ("trackingNumber" = btrim("trackingNumber")) AND (("shopifyLocationGid" IS NULL) OR (length(btrim("shopifyLocationGid")) > 0)))),
     CONSTRAINT "SopyoShipmentIntent_conflict_check" CHECK ((((status = 'CONFLICT'::public."SopyoShipmentIntentStatus") AND ("conflictReasonCode" = ANY (ARRAY['CARGO_MISMATCH'::text, 'LOCAL_CARGO_MISMATCH'::text, 'LOCAL_SHIPPING_STATUS_CONFLICT'::text, 'SHOPIFY_PLAN_UNSAFE'::text, 'SHOPIFY_PLAN_CHANGED'::text, 'SHOPIFY_READ_INCOMPLETE'::text, 'SHOPIFY_CREATE_REJECTED'::text, 'SHOPIFY_RECONCILIATION_AMBIGUOUS'::text])) AND ("conflictObservedAt" IS NOT NULL)) OR ((status <> 'CONFLICT'::public."SopyoShipmentIntentStatus") AND ("conflictReasonCode" IS NULL) AND ("conflictObservedAt" IS NULL)))),
+    CONSTRAINT "SopyoShipmentIntent_delivered_sync_check" CHECK (((("deliveredSyncStatus" IS NULL) AND ("deliveredSubmissionStartedAt" IS NULL) AND ("deliveredConfirmedAt" IS NULL) AND ("deliveredRejectedAt" IS NULL) AND ("deliveredRejectReasonCode" IS NULL)) OR (("deliveredSyncStatus" = 'SUBMISSION_PENDING'::public."SopyoDeliveredSyncStatus") AND ("deliveredSubmissionStartedAt" IS NOT NULL) AND ("deliveredConfirmedAt" IS NULL) AND ("deliveredRejectedAt" IS NULL) AND ("deliveredRejectReasonCode" IS NULL)) OR (("deliveredSyncStatus" = 'OUTCOME_UNKNOWN'::public."SopyoDeliveredSyncStatus") AND ("deliveredSubmissionStartedAt" IS NOT NULL) AND ("deliveredConfirmedAt" IS NULL) AND ("deliveredRejectedAt" IS NULL) AND ("deliveredRejectReasonCode" IS NULL)) OR (("deliveredSyncStatus" = 'CONFIRMED'::public."SopyoDeliveredSyncStatus") AND ("deliveredConfirmedAt" IS NOT NULL) AND ("deliveredRejectedAt" IS NULL) AND ("deliveredRejectReasonCode" IS NULL)) OR (("deliveredSyncStatus" = 'REJECTED'::public."SopyoDeliveredSyncStatus") AND ("deliveredSubmissionStartedAt" IS NOT NULL) AND ("deliveredConfirmedAt" IS NULL) AND ("deliveredRejectedAt" IS NOT NULL) AND ("deliveredRejectReasonCode" = 'SHOPIFY_USER_ERROR'::text)))),
     CONSTRAINT "SopyoShipmentIntent_submission_check" CHECK (((((status = 'CONFIRMED'::public."SopyoShipmentIntentStatus") OR ((status = 'CONFLICT'::public."SopyoShipmentIntentStatus") AND ("conflictReasonCode" = ANY (ARRAY['CARGO_MISMATCH'::text, 'LOCAL_CARGO_MISMATCH'::text, 'LOCAL_SHIPPING_STATUS_CONFLICT'::text])))) AND ("shopifyFulfillmentId" IS NOT NULL) AND ("submissionStartedAt" IS NOT NULL) AND ("confirmedAt" IS NOT NULL)) OR ((status <> 'CONFIRMED'::public."SopyoShipmentIntentStatus") AND ("shopifyFulfillmentId" IS NULL) AND ("confirmedAt" IS NULL))))
 );
 
@@ -4802,6 +4820,13 @@ CREATE INDEX "SopyoOrderPush_status_createdAt_idx" ON public."SopyoOrderPush" US
 --
 
 CREATE UNIQUE INDEX "SopyoOrderPush_vendorAllocationId_key" ON public."SopyoOrderPush" USING btree ("vendorAllocationId");
+
+
+--
+-- Name: SopyoShipmentIntent_deliveredSyncStatus_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SopyoShipmentIntent_deliveredSyncStatus_createdAt_idx" ON public."SopyoShipmentIntent" USING btree ("deliveredSyncStatus", "createdAt");
 
 
 --

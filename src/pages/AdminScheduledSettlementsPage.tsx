@@ -213,6 +213,9 @@ function getWaitingReason(vendor: SettlementScheduleDryRunVendor) {
   if (vendor.state === 'NO_ELIGIBLE_ROWS') {
     return 'No eligible rows';
   }
+  if (vendor.state === 'BLOCKED' && vendor.blockedReason) {
+    return vendor.blockedReason;
+  }
   if (vendor.pendingRefundAdjustmentCount > 0 && !vendor.canCreateDraft) {
     return 'Refund adjustment pending';
   }
@@ -570,7 +573,11 @@ export function AdminScheduledSettlementsPage() {
                         label="Eligible Before"
                         value={formatDateTime(dryRun.periodEnd, { month: 'short', day: 'numeric', year: 'numeric' })}
                       />
-                      <MetadataRow label="Estimated Net Payable" value={formatMinor(selectedVendor.netPayableMinor)} />
+                      <MetadataRow label="Estimated Net Payable" value={
+                        selectedVendor.state === 'BLOCKED' && selectedVendor.preview === null
+                          ? 'Not evaluated'
+                          : formatMinor(selectedVendor.netPayableMinor)
+                      } />
                       <MetadataRow label="Current Status" value={selectedState ? STATE_LABELS[selectedState] : 'Not Due'} />
                     </MetadataGroup>
                     {selectedWaitingReason ? (

@@ -319,6 +319,24 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(within(panel).queryByRole('button', { name: 'Create Scheduled Drafts' })).not.toBeInTheDocument();
   });
 
+  it('shows the exact deduction-scope blocker in the Admin detail panel', async () => {
+    const reason = 'A pending Financial Correction deduction requires a vendor-wide settlement draft.';
+    getSettlementScheduleDryRunMock.mockResolvedValue({
+      ...dryRunResponse,
+      summary: { ...dryRunResponse.summary, autoDraftEligibleVendors: 0 },
+      vendors: dryRunResponse.vendors.map((vendor, index) => index === 0
+        ? { ...vendor, state: 'BLOCKED', preview: null, canCreateDraft: false, blockedReason: reason,
+            eligibleLineCount: 0, netPayableMinor: 0 }
+        : vendor),
+    });
+    renderPage();
+    await screen.findAllByText('Yalı Spor');
+    const panel = screen.getByLabelText('Scheduled settlement detail panel');
+    expect(within(panel).getByText(reason)).toBeInTheDocument();
+    expect(within(panel).getByText('Not evaluated')).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Create Scheduled Drafts' })).not.toBeInTheDocument();
+  });
+
   it('orders all schedules by operational priority and keeps not due rows informational', async () => {
     const user = userEvent.setup();
     renderPage();

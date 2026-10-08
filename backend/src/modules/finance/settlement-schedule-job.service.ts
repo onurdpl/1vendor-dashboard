@@ -350,8 +350,8 @@ export async function runSettlementScheduleAutoDraftJob(
       mode,
       enabled,
       dryRun: dryRunMode,
-      summary: buildSummary(dryRun, createResult),
-      vendors: buildVendorResults(dryRun, createResult),
+      summary: buildSummary(createResult.dryRun, createResult),
+      vendors: buildVendorResults(createResult.dryRun, createResult),
       notes: [
         'Scheduled settlement auto-draft job completed using existing settlement draft creation logic.',
         'Approval, Logo invoicing, and payout execution were not automated.',

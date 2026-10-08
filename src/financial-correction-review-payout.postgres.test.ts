@@ -18,9 +18,12 @@ describeWithPostgres('review payout financial correction with isolated PostgreSQ
   let markPaid: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchPaid'];
   let createDraft: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['createDraftApproval'];
   let approve: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['approveSettlementApproval'];
+  let recordVerifiedDeliveredObservation: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
+  let evaluateSaleSettlementDelay: typeof import('../backend/src/modules/finance/settlement-delay-eligibility.service.js')['evaluateSaleSettlementDelay'];
   let ids: Record<string, string>;
   let payoutIds: string[];
   let settlementIds: string[];
+  let immutableObservationRecorded: boolean;
 
   function evidence(amount: string) {
     return normalize({
@@ -48,6 +51,7 @@ describeWithPostgres('review payout financial correction with isolated PostgreSQ
       sourceShopifyOrderNumber: `#${ids.run}` } });
     await db.vendorAllocation.create({ data: { id: ids.allocation, sourceShopifyOrderId: ids.order,
       sourceShopifyOrderNumber: `#${ids.run}`, originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
+      outboundMethodSnapshot: 'KARGONOMI',
       fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered' } });
     await db.fulfillment.create({ data: { id: ids.fulfillment, vendorAllocationId: ids.allocation,
       fulfillmentStatus: 'Fulfilled', fulfilledAt: new Date('2026-08-01T00:00:00Z'),
@@ -96,33 +100,88 @@ describeWithPostgres('review payout financial correction with isolated PostgreSQ
     } });
     await db.refundTerminalEvidenceReviewEvent.create({ data: { id: ids.resolved, reviewId: ids.review,
       eventType: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED', actorUserId: ids.admin } });
-    await db.settlementApproval.create({ data: {
-      id: ids.origin, vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY',
-      grossSalesMinor: direction === 'VENDOR_CREDIT' ? 115000 : 105000,
-      refundTotalMinor: direction === 'VENDOR_CREDIT' ? 15000 : 5000,
-      commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 100000,
-      sourceSnapshotJson: {}, approvedBy: ids.admin, approvedAt: new Date('2026-09-01T11:00:00Z'),
-      lines: { create: [
-        { id: ids.saleLine, financeLedgerEntryId: ids.sale, lineType: 'SALE',
-          amountMinor: direction === 'VENDOR_CREDIT' ? 115000 : 105000,
-          commissionMinor: 0, commissionVatMinor: 0,
-          payableImpactMinor: direction === 'VENDOR_CREDIT' ? 115000 : 105000, sourceSnapshotJson: {} },
-        { id: ids.refundLine, financeLedgerEntryId: ids.refundLedger, lineType: 'REFUND',
-          amountMinor: direction === 'VENDOR_CREDIT' ? 15000 : 5000,
-          commissionMinor: 0, commissionVatMinor: 0,
-          payableImpactMinor: direction === 'VENDOR_CREDIT' ? -15000 : -5000, sourceSnapshotJson: {} },
-      ] },
+    const executionId = `${ids.run}-shipment-execution`;
+    const sourceReference = `${ids.run}-shipment`;
+    await db.shipmentExecution.create({ data: {
+      id: executionId, allocationId: ids.allocation, vendorId: ids.vendor, provider: 'KARGONOMI',
+      providerShipmentId: sourceReference, shipmentStatus: 'DELIVERED', requestSnapshot: {},
     } });
+    const observation = await recordVerifiedDeliveredObservation({
+      allocationId: ids.allocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    immutableObservationRecorded = true;
+    expect(observation).toMatchObject({
+      vendorAllocationId: ids.allocation, outboundMethod: 'KARGONOMI',
+      outboundIntegrationProvider: null, shipmentExecutionId: executionId, sourceReference,
+    });
+    const replayed = await recordVerifiedDeliveredObservation({
+      allocationId: ids.allocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    expect(replayed.id).toBe(observation.id);
+    expect(replayed.firstObservedDeliveredAt).toEqual(observation.firstObservedDeliveredAt);
+    const sale = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: ids.sale }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+    });
+    expect(sale.vendorId).toBe(ids.vendor);
+    expect(sale.vendorAllocation?.assignedVendorId).toBe(ids.vendor);
+    expect(sale.vendorAllocation?.outboundMethodSnapshot).toBe('KARGONOMI');
+    expect(sale.vendorAllocation?.outboundIntegrationProviderSnapshot).toBeNull();
+    expect(sale.settlementDelayDaysSnapshot).toBe(0);
+    expect(evaluateSaleSettlementDelay(sale).eligible).toBe(true);
+
+    const originDraft = await createDraft({ vendorId: ids.vendor });
+    ids.origin = originDraft.id;
+    expect(originDraft.status).toBe('draft');
+    expect(originDraft.lines).toHaveLength(2);
+    expect(originDraft.lines.map((line) => line.financeLedgerEntryId).sort())
+      .toEqual([ids.sale, ids.refundLedger].sort());
+    const saleMinor = direction === 'VENDOR_CREDIT' ? 115000 : 105000;
+    const refundMinor = direction === 'VENDOR_CREDIT' ? 15000 : 5000;
+    expect(originDraft.lines.find((line) => line.financeLedgerEntryId === ids.sale)).toMatchObject({
+      lineType: 'SALE', amountMinor: saleMinor, payableImpactMinor: saleMinor,
+    });
+    expect(originDraft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)).toMatchObject({
+      lineType: 'REFUND', amountMinor: refundMinor, payableImpactMinor: -refundMinor,
+    });
+    expect(originDraft.netPayableMinor).toBe(100000);
+    const originApproved = await approve(originDraft.id, ids.admin);
+    expect(originApproved).toMatchObject({ status: 'approved', vendorId: ids.vendor,
+      currency: 'TRY', netPayableMinor: 100000 });
+    expect(new Date(originApproved.approvedAt!).getTime())
+      .toBeGreaterThanOrEqual(observation.firstObservedDeliveredAt.getTime());
+    ids.saleLine = originDraft.lines.find((line) => line.financeLedgerEntryId === ids.sale)!.id;
+    ids.refundLine = originDraft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)!.id;
     if (debtMinor > 0) await db.vendorBalanceEvent.create({ data: {
       vendorId: ids.vendor, type: 'VENDOR_DEBT_CREATED', amountMinor: -debtMinor, currency: 'TRY',
       sourceType: 'phase2f2_test_debt', sourceId: ids.run, idempotencyKey: `${ids.run}-debt`,
     } });
     const draft = await prepare({ vendorId: ids.vendor }, ids.admin);
     payoutIds.push(draft.id);
+    expect(draft.status).toBe('draft');
+    expect(draft.vendorId).toBe(ids.vendor);
+    expect(draft.lines).toHaveLength(2);
+    expect(draft.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(draft.lines!.find((line) => line.financeLedgerEntryId === ids.sale)).toMatchObject({
+      amountSnapshot: (saleMinor / 100).toFixed(2),
+    });
+    expect(draft.lines!.find((line) => line.financeLedgerEntryId === ids.refundLedger)).toMatchObject({
+      amountSnapshot: (-refundMinor / 100).toFixed(2),
+    });
+    const persistedLines = await db.payoutBatchLine.findMany({ where: { payoutBatchId: draft.id } });
+    expect(persistedLines).toHaveLength(2);
+    expect(persistedLines.find((line) => line.financeLedgerEntryId === ids.sale)?.settlementApprovalLineId).toBe(ids.saleLine);
+    expect(persistedLines.find((line) => line.financeLedgerEntryId === ids.refundLedger)?.settlementApprovalLineId).toBe(ids.refundLine);
+    expect(draft.payableBeforeDebtOffset).toBe('1000.00');
+    expect(draft.debtOffsetAmount).toBe(debtMinor > 0 ? '60.00' : '0.00');
+    expect(draft.netAmount).toBe(debtMinor > 0 ? '940.00' : '1000.00');
     const input = { reviewId: ids.review,
       previewFingerprint: (await preview(ids.review, db as never)).previewFingerprint,
       actorUserId: ids.admin, reason: 'Verified review payout correction', confirmEftNotSent: true };
-    await markReview(draft.id);
+    const reviewPayout = await markReview(draft.id);
+    expect(reviewPayout.status).toBe('review');
+    expect((await state(ids.review, db as never)).eligible).toBe(true);
     return { draft, input };
   }
 
@@ -142,6 +201,8 @@ describeWithPostgres('review payout financial correction with isolated PostgreSQ
       cancelPayoutBatch: cancel, markPayoutBatchPaid: markPaid } = await import('../backend/src/modules/finance/finance.service.js'));
     ({ createDraftApproval: createDraft, approveSettlementApproval: approve } =
       await import('../backend/src/modules/finance/settlement-approval.service.js'));
+    ({ recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
+    ({ evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js'));
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
     const run = `${runId}-${++counter}`;
@@ -153,10 +214,17 @@ describeWithPostgres('review payout financial correction with isolated PostgreSQ
     ids.shopifyRefund = `gid://shopify/Refund/${run}`;
     payoutIds = [];
     settlementIds = [];
+    immutableObservationRecorded = false;
   });
 
   afterEach(async () => {
     if (!db) return;
+    // Source-aligned observations are immutable; unique IDs isolate cases until
+    // the disposable suite database is removed.
+    if (immutableObservationRecorded) {
+      await db.$disconnect();
+      return;
+    }
     await db.vendorBalanceEvent.deleteMany({ where: { vendorId: ids.vendor } });
     await db.financialCorrectionApprovedDeductionPayoutLine.deleteMany({ where: { payoutBatchId: { in: payoutIds } } });
     await db.financialCorrectionCreditPayoutLine.deleteMany({ where: { payoutBatchId: { in: payoutIds } } });

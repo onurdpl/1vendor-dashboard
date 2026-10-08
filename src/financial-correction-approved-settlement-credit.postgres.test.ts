@@ -5,17 +5,20 @@ const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
 describeWithPostgres('approved-settlement financial correction credit with isolated PostgreSQL', () => {
-  const runId = `phase2e3a-${process.pid}-${Date.now()}`;
-  const ids = {
-    vendor: `${runId}-vendor`, admin: `${runId}-admin`, order: `${runId}-order`,
-    allocation: `${runId}-allocation`, refundRecord: `${runId}-refund-record`,
-    sale: `${runId}-sale`, refundLedger: `${runId}-refund-ledger`, snapshot: `${runId}-snapshot`,
-    review: `${runId}-review`, incoming: `${runId}-incoming`, resolved: `${runId}-resolved`,
-    origin: `${runId}-origin`, saleLine: `${runId}-sale-line`, refundLine: `${runId}-refund-line`,
-    fulfillment: `${runId}-fulfillment`, historicalPayout: `${runId}-historical-payout`,
-  };
-  const sourceShopifyOrderId = `gid://shopify/Order/${runId}`;
-  const sourceShopifyRefundId = `gid://shopify/Refund/${runId}`;
+  let sequence = 0;
+  let runId: string;
+  const fixtureIds = (prefix: string) => ({
+    vendor: `${prefix}-vendor`, admin: `${prefix}-admin`, order: `${prefix}-order`,
+    allocation: `${prefix}-allocation`, refundRecord: `${prefix}-refund-record`,
+    sale: `${prefix}-sale`, refundLedger: `${prefix}-refund-ledger`, snapshot: `${prefix}-snapshot`,
+    review: `${prefix}-review`, incoming: `${prefix}-incoming`, resolved: `${prefix}-resolved`,
+    origin: `${prefix}-origin`, saleLine: `${prefix}-sale-line`, refundLine: `${prefix}-refund-line`,
+    fulfillment: `${prefix}-fulfillment`, historicalPayout: `${prefix}-historical-payout`,
+  });
+  let ids: ReturnType<typeof fixtureIds>;
+  let sourceShopifyOrderId: string;
+  let sourceShopifyRefundId: string;
+  let serviceCreatedOrigin = false;
   let db: PrismaClient;
   let normalizeRefundEvidence: typeof import('../backend/src/modules/finance/refund-evidence-normalizer.service.js')['normalizeRefundEvidence'];
   let previewTerminalFinancialCorrection: typeof import('../backend/src/modules/finance/financial-correction-preview.service.js')['previewTerminalFinancialCorrection'];
@@ -26,6 +29,8 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   let cancelSettlementApproval: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['cancelSettlementApproval'];
   let preparePayoutBatch: typeof import('../backend/src/modules/finance/finance.service.js')['preparePayoutBatch'];
   let cancelPayoutBatch: typeof import('../backend/src/modules/finance/finance.service.js')['cancelPayoutBatch'];
+  let recordVerifiedDeliveredObservation: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
+  let evaluateSaleSettlementDelay: typeof import('../backend/src/modules/finance/settlement-delay-eligibility.service.js')['evaluateSaleSettlementDelay'];
   const settlementIds: string[] = [];
   const payoutIds: string[] = [];
 
@@ -40,6 +45,74 @@ describeWithPostgres('approved-settlement financial correction credit with isola
     });
   }
 
+  async function createDirectOriginForGuardTest() {
+    await db.settlementApproval.create({ data: {
+      id: ids.origin, vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY',
+      grossSalesMinor: 115000, refundTotalMinor: 15000, commissionMinor: 0, commissionVatMinor: 0,
+      netPayableMinor: 100000, sourceSnapshotJson: {}, approvedBy: ids.admin,
+      approvedAt: new Date('2026-09-01T11:00:00.000Z'),
+      lines: { create: [
+        { id: ids.saleLine, financeLedgerEntryId: ids.sale, lineType: 'SALE', amountMinor: 115000,
+          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: 115000, sourceSnapshotJson: {} },
+        { id: ids.refundLine, financeLedgerEntryId: ids.refundLedger, lineType: 'REFUND', amountMinor: 15000,
+          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: -15000, sourceSnapshotJson: {} },
+      ] },
+    } });
+  }
+
+  async function createServiceApprovedOrigin() {
+    const executionId = `${runId}-shipment-execution`;
+    const sourceReference = `${runId}-shipment`;
+    await db.shipmentExecution.create({ data: {
+      id: executionId, allocationId: ids.allocation, vendorId: ids.vendor, provider: 'KARGONOMI',
+      providerShipmentId: sourceReference, shipmentStatus: 'DELIVERED', requestSnapshot: {},
+    } });
+    const observation = await recordVerifiedDeliveredObservation({
+      allocationId: ids.allocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    serviceCreatedOrigin = true;
+    expect(observation).toMatchObject({
+      vendorAllocationId: ids.allocation, outboundMethod: 'KARGONOMI',
+      outboundIntegrationProvider: null, shipmentExecutionId: executionId, sourceReference,
+    });
+    expect(observation.firstObservedDeliveredAt).toBeInstanceOf(Date);
+    const replayed = await recordVerifiedDeliveredObservation({
+      allocationId: ids.allocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    expect(replayed.id).toBe(observation.id);
+    expect(replayed.firstObservedDeliveredAt).toEqual(observation.firstObservedDeliveredAt);
+    const sale = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: ids.sale }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+    });
+    expect(sale.vendorId).toBe(ids.vendor);
+    expect(sale.vendorAllocation?.assignedVendorId).toBe(ids.vendor);
+    expect(sale.vendorAllocation?.outboundMethodSnapshot).toBe('KARGONOMI');
+    expect(sale.vendorAllocation?.outboundIntegrationProviderSnapshot).toBeNull();
+    expect(sale.settlementDelayDaysSnapshot).toBe(0);
+    expect(evaluateSaleSettlementDelay(sale).eligible).toBe(true);
+
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    ids.origin = draft.id;
+    expect(draft.status).toBe('draft');
+    expect(draft.lines).toHaveLength(2);
+    expect(draft.lines.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(draft.lines.find((line) => line.financeLedgerEntryId === ids.sale)).toMatchObject({
+      lineType: 'SALE', amountMinor: 115000, payableImpactMinor: 115000,
+    });
+    expect(draft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)).toMatchObject({
+      lineType: 'REFUND', amountMinor: 15000, payableImpactMinor: -15000,
+    });
+    expect(draft.netPayableMinor).toBe(100000);
+    const approved = await approveSettlementApproval(draft.id, ids.admin);
+    expect(approved).toMatchObject({ status: 'approved', vendorId: ids.vendor, currency: 'TRY', netPayableMinor: 100000 });
+    expect(new Date(approved.approvedAt!).getTime()).toBeGreaterThanOrEqual(observation.firstObservedDeliveredAt.getTime());
+    ids.saleLine = draft.lines.find((line) => line.financeLedgerEntryId === ids.sale)!.id;
+    ids.refundLine = draft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)!.id;
+    expect(await db.settlementApprovalLine.count({ where: { settlementApprovalId: ids.origin } })).toBe(2);
+  }
+
   beforeEach(async () => {
     const target = new URL(databaseUrl!);
     if (process.env.PHASE2E3A_TEST_DATABASE_ISOLATED !== '1' ||
@@ -47,6 +120,11 @@ describeWithPostgres('approved-settlement financial correction credit with isola
         target.pathname.slice(1) !== 'phase2e3a_validation') {
       throw new Error('Phase 2E3A PostgreSQL test requires the explicitly isolated local phase2e3a_validation database.');
     }
+    runId = `phase2e3a-${process.pid}-${Date.now()}-${++sequence}`;
+    ids = fixtureIds(runId);
+    sourceShopifyOrderId = `gid://shopify/Order/${runId}`;
+    sourceShopifyRefundId = `gid://shopify/Refund/${runId}`;
+    serviceCreatedOrigin = false;
     process.env.DATABASE_URL = databaseUrl;
     ({ normalizeRefundEvidence } = await import('../backend/src/modules/finance/refund-evidence-normalizer.service.js'));
     ({ previewTerminalFinancialCorrection } = await import('../backend/src/modules/finance/financial-correction-preview.service.js'));
@@ -55,6 +133,8 @@ describeWithPostgres('approved-settlement financial correction credit with isola
       await import('../backend/src/modules/finance/financial-correction-approved-settlement-credit.service.js'));
     ({ createDraftApproval, approveSettlementApproval, cancelSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js'));
     ({ preparePayoutBatch, cancelPayoutBatch } = await import('../backend/src/modules/finance/finance.service.js'));
+    ({ recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
+    ({ evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js'));
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
     const accepted = normalized('150.00');
@@ -65,7 +145,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
     await db.vendorAllocation.create({ data: {
       id: ids.allocation, sourceShopifyOrderId: ids.order, sourceShopifyOrderNumber: `#${runId}`,
       originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
-      fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered',
+      outboundMethodSnapshot: 'KARGONOMI', fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered',
     } });
     await db.fulfillment.create({ data: {
       id: ids.fulfillment, vendorAllocationId: ids.allocation, fulfillmentStatus: 'Fulfilled',
@@ -120,22 +200,18 @@ describeWithPostgres('approved-settlement financial correction credit with isola
       id: ids.resolved, reviewId: ids.review, eventType: 'RESOLVED',
       resolutionOutcome: 'CORRECTION_REQUIRED', actorUserId: ids.admin,
     } });
-    await db.settlementApproval.create({ data: {
-      id: ids.origin, vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY',
-      grossSalesMinor: 115000, refundTotalMinor: 15000, commissionMinor: 0, commissionVatMinor: 0,
-      netPayableMinor: 100000, sourceSnapshotJson: {}, approvedBy: ids.admin,
-      approvedAt: new Date('2026-09-01T11:00:00.000Z'),
-      lines: { create: [
-        { id: ids.saleLine, financeLedgerEntryId: ids.sale, lineType: 'SALE', amountMinor: 115000,
-          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: 115000, sourceSnapshotJson: {} },
-        { id: ids.refundLine, financeLedgerEntryId: ids.refundLedger, lineType: 'REFUND', amountMinor: 15000,
-          commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: -15000, sourceSnapshotJson: {} },
-      ] },
-    } });
   });
 
   afterEach(async () => {
     if (!db) return;
+    // The observation is immutable and protects its allocation and source. The
+    // CI database is disposable; keep this test's unique fixture intact.
+    if (serviceCreatedOrigin) {
+      await db.$disconnect();
+      settlementIds.length = 0;
+      payoutIds.length = 0;
+      return;
+    }
     if (payoutIds.length) {
       await db.financeEvent.deleteMany({ where: { referenceType: 'payout_batch', referenceId: { in: payoutIds } } });
       await db.vendorBalanceEvent.deleteMany({ where: { payoutBatchId: { in: payoutIds } } });
@@ -178,6 +254,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   };
 
   it('applies one gross credit, gates first payout, then pays two distinct approvals with debt offset', async () => {
+    await createServiceApprovedOrigin();
     const originBefore = await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin }, include: { lines: true } });
     const originalSale = await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: ids.sale } });
     const originalRefund = await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: ids.refundLedger } });
@@ -219,12 +296,17 @@ describeWithPostgres('approved-settlement financial correction credit with isola
     expect(payout.netAmount).toBe('1040.00');
     expect(payout.lines).toHaveLength(2);
     expect(payout.correctionCreditLines).toHaveLength(1);
+    expect(payout.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(payout.correctionCreditLines![0]?.settlementCreditLineId).toBe(draft.correctionCreditLines[0]?.id);
+    expect(await db.payoutBatchLine.count({ where: { payoutBatchId: payout.id } })).toBe(2);
+    expect(await db.financialCorrectionCreditPayoutLine.count({ where: { payoutBatchId: payout.id } })).toBe(1);
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin }, include: { lines: true } })).toEqual(originBefore);
     await expect(preparePayoutBatch({ vendorId: ids.vendor }, ids.admin)).rejects.toThrow();
     await cancelPayoutBatch(payout.id);
   });
 
   it.each(['DRAFT', 'REVIEW', 'PAID', 'CANCELLED'] as const)('rejects %s payout history', async (status) => {
+    await createDirectOriginForGuardTest();
     await db.payoutBatch.create({ data: { id: ids.historicalPayout, vendorId: ids.vendor, currency: 'TRY',
       status, paidAt: status === 'PAID' ? new Date('2026-09-01T12:00:00.000Z') : null } });
     await db.payoutBatchLine.create({ data: {
@@ -236,6 +318,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   });
 
   it('rejects a stale preview without consuming the baseline or creating a credit', async () => {
+    await createDirectOriginForGuardTest();
     await expect(applyCredit({ ...await inputFor(), previewFingerprint: `financial-correction-preview-v1:${'0'.repeat(64)}` }, db as never))
       .rejects.toMatchObject({ code: 'PREVIEW_STALE' });
     expect(await db.financialCorrectionAuthority.count({ where: { reviewId: ids.review } })).toBe(0);
@@ -244,6 +327,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   });
 
   it('rolls back authority and baseline claim when the gross credit effect insert fails', async () => {
+    await createDirectOriginForGuardTest();
     await db.$executeRawUnsafe(`CREATE FUNCTION phase2e3a_reject_credit_insert() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'phase2e3a injected credit write failure'; END; $$`);
     await db.$executeRawUnsafe(`CREATE TRIGGER phase2e3a_reject_credit_insert BEFORE INSERT ON "FinancialCorrectionCredit"
@@ -260,6 +344,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   });
 
   it('fails closed if the historical approved settlement changes before Apply', async () => {
+    await createDirectOriginForGuardTest();
     const input = await inputFor();
     await db.settlementApproval.update({ where: { id: ids.origin }, data: { status: 'CANCELLED' } });
     await expect(applyCredit(input, db as never)).rejects.toMatchObject({ code: 'APPROVED_SETTLEMENT_REQUIRED' });
@@ -268,6 +353,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   });
 
   it('rejects a different retry while preserving one immutable applied credit', async () => {
+    await createDirectOriginForGuardTest();
     const input = await inputFor();
     const applied = await applyCredit(input, db as never);
     await expect(applyCredit({ ...input, reason: 'Different authorization' }, db as never))
@@ -277,6 +363,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   });
 
   it('refuses an accepted baseline already claimed by another correction route', async () => {
+    await createDirectOriginForGuardTest();
     await db.financialCorrectionBaselineClaim.create({ data: {
       acceptedEvidenceSnapshotId: ids.snapshot, consumerType: 'zero_net_acknowledgement', consumerId: `${runId}-other`,
     } });
@@ -285,6 +372,7 @@ describeWithPostgres('approved-settlement financial correction credit with isola
   });
 
   it('redrafts a cancelled correction settlement and restores sources after cancelling an unpaid payout', async () => {
+    await createServiceApprovedOrigin();
     const original = await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin }, include: { lines: true } });
     const applied = await applyCredit(await inputFor(), db as never);
     const first = await createDraftApproval({ vendorId: ids.vendor });
@@ -299,16 +387,24 @@ describeWithPostgres('approved-settlement financial correction credit with isola
     const payout = await preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
     payoutIds.push(payout.id);
     expect(payout.correctionCreditAmount).toBe('100.00');
+    expect(payout.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(payout.correctionCreditLines![0]?.settlementCreditLineId).toBe(second.correctionCreditLines[0]?.id);
     await cancelPayoutBatch(payout.id);
     const reprepared = await preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
     payoutIds.push(reprepared.id);
     expect(reprepared.correctionCreditAmount).toBe('100.00');
     expect(reprepared.payableBeforeDebtOffset).toBe('1100.00');
+    expect(reprepared.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(reprepared.correctionCreditLines![0]?.settlementCreditLineId).toBe(second.correctionCreditLines[0]?.id);
+    expect(await db.financialCorrectionCreditPayoutLine.count({
+      where: { settlementCreditLineId: second.correctionCreditLines[0]!.id, status: 'ACTIVE' },
+    })).toBe(1);
     await cancelPayoutBatch(reprepared.id);
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.origin }, include: { lines: true } })).toEqual(original);
   });
 
   it.each([1, 2, 3, 4, 5])('serializes Apply against first payout preparation race %i', async () => {
+    await createServiceApprovedOrigin();
     const input = await inputFor();
     const results = await Promise.allSettled([
       applyCredit(input, db as never), preparePayoutBatch({ vendorId: ids.vendor }, ids.admin),
@@ -319,9 +415,18 @@ describeWithPostgres('approved-settlement financial correction credit with isola
     if (applied) {
       expect(payout).toBeNull();
       expect(await db.financialCorrectionCredit.count({ where: { authorityId: applied.id } })).toBe(1);
+      expect(await db.payoutBatchLine.count({ where: { financeLedgerEntryId: { in: [ids.sale, ids.refundLedger] } } })).toBe(0);
+      if (results[1].status === 'rejected') {
+        expect(String(results[1].reason)).not.toContain('APPROVED_SETTLEMENT_CREDIT_ROUTE_UNAVAILABLE');
+      }
     } else {
       expect(payout).not.toBeNull();
+      expect(payout?.payableBeforeDebtOffset).toBe('1000.00');
+      expect(payout?.lines?.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+      expect(payout?.correctionCreditLines).toHaveLength(0);
       expect(await db.financialCorrectionAuthority.count({ where: { reviewId: ids.review } })).toBe(0);
     }
+    expect(await db.payoutBatchLine.count({ where: { financeLedgerEntryId: ids.sale } })).toBe(payout ? 1 : 0);
+    expect(await db.payoutBatchLine.count({ where: { financeLedgerEntryId: ids.refundLedger } })).toBe(payout ? 1 : 0);
   });
 });

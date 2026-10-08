@@ -8,17 +8,17 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "c7dbd138681fb85b86c284c8a4abf8ea2f26c77a07900bd4ffbb32a67cadc60c"
+    "sha256": "6e9173d0fa090c07a0a433a5639f5ed2ecae2dc48940a784d212efe63d4951c7"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "51d2c605d3cd6064c2fef328381922cf9c145ee0665a4706b39c0283ee6ce7c6"
+    "sha256": "f7926b897cc91f501b8bde5de6638e7080f0ba032dd1a8cac351dd893825cba9"
   },
   "catalog": {
-    "sha256": "f04bf8fb764675b90057a6e60b731550ac182e27f04ba6a01639319f84fb4bd9"
+    "sha256": "b34374177d056427f5be259af0262b0841665bf665b7cee1685953453962bd8f"
   },
-  "migrationCutoff": "20261008210000_allow_sopyo_cargo_without_shopify_location",
-  "baselineMigrationFilesSha256": "e038c0a277038905056666607860bec20ff502071b4c85a643ddbd6e28c484a5",
+  "migrationCutoff": "20261009120000_add_sopyo_delivered_shopify_sync",
+  "baselineMigrationFilesSha256": "fbdf51d7dae6ebe11b4ac9fdcba0918f58b3c234233201f5270088c33bc4e266",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -137,6 +137,8 @@
     "20261008180000_link_sopyo_plan_allocation_line",
     "20261008190000_add_sopyo_shopify_submission_outcome",
     "20261008200000_add_sopyo_local_cargo_conflict_reasons",
-    "20261008210000_allow_sopyo_cargo_without_shopify_location"
+    "20261008210000_allow_sopyo_cargo_without_shopify_location",
+    "20261008220000_project_sopyo_delivered_status",
+    "20261009120000_add_sopyo_delivered_shopify_sync"
   ]
 }
