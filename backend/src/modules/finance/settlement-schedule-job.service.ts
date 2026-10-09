@@ -109,6 +109,21 @@ type JobInput = {
   triggeredBy?: string | null;
 };
 
+export class SettlementJobReportingPersistenceError extends Error {
+  readonly confirmedWritesPerformed: boolean | null;
+  readonly confirmedCreatedDraftCount: number | null;
+
+  constructor(originalError: string, reportingError: unknown, confirmed: SettlementScheduleCreateDraftsResponseDto | null) {
+    const reportingMessage = reportingError instanceof Error ? reportingError.message : String(reportingError);
+    super(`Settlement job reporting could not be persisted; ${confirmed
+      ? `${confirmed.summary.created} DRAFT creation(s) were confirmed by this execution, but persisted JobRun outcome is unknown`
+      : 'financial write outcome is unknown'}. Original error: ${originalError}. Reporting error: ${reportingMessage}`);
+    this.name = 'SettlementJobReportingPersistenceError';
+    this.confirmedWritesPerformed = confirmed?.writesPerformed ?? null;
+    this.confirmedCreatedDraftCount = confirmed?.summary.created ?? null;
+  }
+}
+
 function isUniqueRunDateError(error: unknown) {
   return (
     (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') ||
@@ -521,8 +536,9 @@ export async function runSettlementScheduleAutoDraftJob(
     throw error;
   }
 
+  let createResult: SettlementScheduleCreateDraftsResponseDto | null = null;
   try {
-    const createResult = await createSettlementScheduleDrafts({
+    createResult = await createSettlementScheduleDrafts({
       runDate,
       confirmAutoSettlementDrafts: true,
       createdBy: input.triggeredBy ?? null,
@@ -577,36 +593,59 @@ export async function runSettlementScheduleAutoDraftJob(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Scheduled settlement auto-draft job failed.';
+    // A returned createResult records vendor transactions that committed independently of
+    // the final JobRun update. Never erase those confirmed outcomes on a reporting failure.
+    const confirmed = createResult;
+    const existingDrafts = countExistingDrafts(confirmed);
     const failedRun = await prisma.settlementScheduleJobRun.update({
       where: { id: jobRun.id },
       data: {
         status: SettlementScheduleJobRunStatus.FAILED,
-        writesPerformed: false,
+        writesPerformed: confirmed?.writesPerformed ?? false,
+        createdDraftCount: confirmed?.summary.created ?? 0,
+        skippedCount: confirmed?.summary.skipped ?? 0,
+        blockedCount: confirmed
+          ? confirmed.summary.failed + Math.max(confirmed.summary.skipped - existingDrafts, 0)
+          : 0,
         finishedAt: new Date(),
         metadataJson: {
           triggeredBy: input.triggeredBy ?? null,
           mode,
           runDate: runDateKey,
           error: message,
+          ...(confirmed ? {
+            summary: confirmed.summary,
+            createdDrafts: confirmed.createdDrafts.map((draft) => ({
+              vendorId: draft.vendorId,
+              settlementApprovalId: draft.settlementApprovalId,
+              lineCount: draft.lineCount,
+              netPayableMinor: draft.netPayableMinor,
+            })),
+            skipped: confirmed.skipped,
+            failed: confirmed.failed,
+          } : {}),
         },
       },
+    }).catch((reportingError: unknown) => {
+      throw new SettlementJobReportingPersistenceError(message, reportingError, confirmed);
     });
 
     return {
       ok: false,
-      writesPerformed: false,
+      writesPerformed: confirmed?.writesPerformed ?? false,
       runDate: runDateKey,
       mode,
       enabled,
       dryRun: dryRunMode,
-      summary: buildSummary(dryRun, null),
-      vendors: buildVendorResults(dryRun, null),
-      notes: [message],
+      summary: confirmed ? buildSummary(confirmed.dryRun, confirmed) : buildSummary(dryRun, null),
+      vendors: confirmed ? buildVendorResults(confirmed.dryRun, confirmed) : buildVendorResults(dryRun, null),
+      notes: [message, ...(confirmed ? ['Confirmed vendor results were retained despite JobRun finalization failure.'] : [])],
       jobRun: {
         id: failedRun.id,
         status: failedRun.status,
         startedAt: failedRun.startedAt.toISOString(),
         finishedAt: toIso(failedRun.finishedAt),
+        recordedWritesPerformed: failedRun.writesPerformed,
       },
     };
   }

@@ -99,6 +99,7 @@ import {
 import {
   getSettlementScheduleAutoDraftJobStatus,
   runSettlementScheduleAutoDraftJob,
+  SettlementJobReportingPersistenceError,
 } from './settlement-schedule-job.service.js';
 import {
   acknowledgeFinanceIntegrityAlert,
@@ -1029,6 +1030,15 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Scheduled settlement auto-draft job failed.';
+        if (error instanceof SettlementJobReportingPersistenceError) {
+          // Confirmed in-memory execution results are distinct from unpersisted JobRun status.
+          return reply.code(503).send({
+            message,
+            writesPerformed: error.confirmedWritesPerformed,
+            confirmedCreatedDraftCount: error.confirmedCreatedDraftCount,
+            jobRunFinalized: false,
+          });
+        }
         return reply.code(400).send({ message, writesPerformed: false });
       }
     },

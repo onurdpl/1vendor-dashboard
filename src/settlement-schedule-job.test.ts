@@ -493,6 +493,45 @@ describe('settlement schedule auto draft job service', () => {
     }));
   });
 
+  it('preserves returned committed vendor results when only JobRun finalization fails', async () => {
+    prismaMock.settlementScheduleJobRun.update
+      .mockRejectedValueOnce(new Error('final JobRun update failed'))
+      .mockResolvedValueOnce({
+        id: 'job-run-1', status: 'FAILED', writesPerformed: true,
+        startedAt: new Date('2026-06-24T01:00:00.000Z'),
+        finishedAt: new Date('2026-06-24T01:01:00.000Z'),
+      });
+    const result = await runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    });
+    expect(result).toMatchObject({
+      ok: false, writesPerformed: true, summary: { createdDrafts: 1, skipped: 2, blocked: 2 },
+      jobRun: { status: 'FAILED', recordedWritesPerformed: true },
+    });
+    expect(result.vendors).toContainEqual(expect.objectContaining({
+      vendorId: 'ready-vendor', state: 'CREATED', createdSettlementApprovalId: 'approval-ready',
+    }));
+    expect(prismaMock.settlementScheduleJobRun.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'FAILED', writesPerformed: true, createdDraftCount: 1, skippedCount: 2,
+        metadataJson: expect.objectContaining({
+          error: 'final JobRun update failed',
+          createdDrafts: [expect.objectContaining({ settlementApprovalId: 'approval-ready' })],
+        }),
+      }),
+    }));
+  });
+
+  it('does not fabricate a persisted result when even the FAILED reporting write fails', async () => {
+    prismaMock.settlementScheduleJobRun.update
+      .mockRejectedValueOnce(new Error('final JobRun update failed'))
+      .mockRejectedValueOnce(new Error('FAILED reporting update failed'));
+    await expect(runSettlementScheduleAutoDraftJob({
+      env: envWrite, runDate: '2026-06-24', confirmScheduledSettlementAutoDraftJob: true,
+    })).rejects.toThrow('FAILED reporting update failed');
+    expect(prismaMock.settlementScheduleJobRun.update).toHaveBeenCalledTimes(2);
+  });
+
   it('reports persisted COMPLETED evidence rather than a fresh preview on a repeated runDate', async () => {
     prismaMock.settlementScheduleJobRun.findUnique.mockResolvedValue({
       id: 'job-run-existing', status: 'COMPLETED', writesPerformed: true,

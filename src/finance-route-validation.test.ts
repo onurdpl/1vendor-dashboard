@@ -155,6 +155,10 @@ vi.mock('../backend/src/modules/finance/settlement-schedule.service.js', () => (
 vi.mock('../backend/src/modules/finance/settlement-schedule-job.service.js', () => ({
   getSettlementScheduleAutoDraftJobStatus: getSettlementScheduleAutoDraftJobStatusMock,
   runSettlementScheduleAutoDraftJob: runSettlementScheduleAutoDraftJobMock,
+  SettlementJobReportingPersistenceError: class SettlementJobReportingPersistenceError extends Error {
+    readonly confirmedWritesPerformed = true;
+    readonly confirmedCreatedDraftCount = 1;
+  },
 }));
 
 vi.mock('../backend/src/modules/finance/finance-integrity-scanner.service.js', () => ({
@@ -1856,6 +1860,19 @@ describe('finance route validation', () => {
       summary: expect.objectContaining({ createdDrafts: null }),
       jobRun: expect.objectContaining({ status: 'FAILED' }),
     }));
+  });
+
+  it('does not claim zero writes when scheduled job reporting itself throws', async () => {
+    const { SettlementJobReportingPersistenceError } = await import('../backend/src/modules/finance/settlement-schedule-job.service.js');
+    runSettlementScheduleAutoDraftJobMock.mockRejectedValueOnce(new SettlementJobReportingPersistenceError('JobRun reporting unavailable.'));
+    const result = await createRegisteredPostRoutes().get('/admin/finance/settlement-schedules/run-auto-draft-job')?.(
+      { authUser: { id: 'admin-1', role: 'admin' }, body: { runDate: '2026-01-21', confirmScheduledSettlementAutoDraftJob: true } },
+      createReply(),
+    );
+    expect(result).toEqual({ status: 503, body: {
+      message: 'JobRun reporting unavailable.', writesPerformed: true,
+      confirmedCreatedDraftCount: 1, jobRunFinalized: false,
+    } });
   });
 
   it('requires admin access for scheduled auto draft job trigger', async () => {
