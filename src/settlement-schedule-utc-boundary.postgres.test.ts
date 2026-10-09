@@ -238,34 +238,41 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
     const beforeMidnight = await fixture(['ready']);
     const atMidnight = await fixture(['ready']);
     const afterMidnight = await fixture(['ready']);
-    expect([beforeMidnight, atMidnight, afterMidnight].map((item) => item.runDateKey))
-      .toEqual([startOfDay.runDateKey, startOfDay.runDateKey, startOfDay.runDateKey]);
-    const nextMidnight = new Date(beforeMidnight.periodEnd.getTime() + 1);
+    const fixtures = [startOfDay, beforeMidnight, atMidnight, afterMidnight];
+    const latestObservation = new Date(Math.max(...fixtures.map((item) => item.candidates[0].observedAt.getTime())));
+    const commonRunDate = new Date(Date.UTC(latestObservation.getUTCFullYear(),
+      latestObservation.getUTCMonth(), latestObservation.getUTCDate()));
+    commonRunDate.setUTCDate(commonRunDate.getUTCDate() + ((3 - commonRunDate.getUTCDay() + 7) % 7 || 7));
+    const commonRunDateKey = commonRunDate.toISOString().slice(0, 10);
+    const commonPeriodEnd = new Date(commonRunDate.getTime() + millisecondsPerDay - 1);
+    expect(fixtures.every((item) => item.candidates[0].observedAt.getTime() < commonRunDate.getTime()))
+      .toBe(true);
+    const nextMidnight = new Date(commonPeriodEnd.getTime() + 1);
     expect(nextMidnight.toISOString()).toMatch(/T00:00:00\.000Z$/);
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
-      vi.setSystemTime(startOfDay.runDate);
+      vi.setSystemTime(commonRunDate);
       const atStart = await schedule.createSettlementScheduleDrafts({
-        runDate: startOfDay.runDateKey, vendorId: startOfDay.candidates[0].vendorId,
+        runDate: commonRunDateKey, vendorId: startOfDay.candidates[0].vendorId,
         confirmAutoSettlementDrafts: true,
       });
       expect(atStart.summary.created).toBe(1);
-      vi.setSystemTime(beforeMidnight.periodEnd);
+      vi.setSystemTime(commonPeriodEnd);
       // Existing service never reads the execution clock for this boundary.
       const early = await schedule.createSettlementScheduleDrafts({
-        runDate: beforeMidnight.runDateKey, vendorId: beforeMidnight.candidates[0].vendorId,
+        runDate: commonRunDateKey, vendorId: beforeMidnight.candidates[0].vendorId,
         confirmAutoSettlementDrafts: true,
       });
       expect(early.summary.created).toBe(1);
       vi.setSystemTime(nextMidnight);
       const atBoundary = await schedule.createSettlementScheduleDrafts({
-        runDate: atMidnight.runDateKey, vendorId: atMidnight.candidates[0].vendorId,
+        runDate: commonRunDateKey, vendorId: atMidnight.candidates[0].vendorId,
         confirmAutoSettlementDrafts: true,
       });
       expect(atBoundary.summary.created).toBe(1);
       vi.setSystemTime(new Date(nextMidnight.getTime() + 1));
       const afterBoundary = await schedule.createSettlementScheduleDrafts({
-        runDate: afterMidnight.runDateKey, vendorId: afterMidnight.candidates[0].vendorId,
+        runDate: commonRunDateKey, vendorId: afterMidnight.candidates[0].vendorId,
         confirmAutoSettlementDrafts: true,
       });
       expect(afterBoundary.summary.created).toBe(1);
