@@ -103,6 +103,7 @@ jobs:
           done <<'SUITES'
           fin_bug_001_validation FIN_BUG_001_TEST_DATABASE_ISOLATED src/fin-bug-001-settlement-delay-parity.postgres.test.ts
           fin_bug_005_validation FIN_BUG_005_TEST_DATABASE_ISOLATED src/fin-bug-005-settlement-preview-isolation.postgres.test.ts
+          settlement_utc_boundary_validation SETTLEMENT_UTC_BOUNDARY_TEST_DATABASE_ISOLATED src/settlement-schedule-utc-boundary.postgres.test.ts
           settlement_job_2c_validation SETTLEMENT_JOB_2C_TEST_DATABASE_ISOLATED src/settlement-job-evidence.postgres.test.ts
           settlement_job_http_validation SETTLEMENT_JOB_HTTP_TEST_DATABASE_ISOLATED src/settlement-job-admin-http.postgres.test.ts
           settlement_job_concurrency_validation SETTLEMENT_JOB_CONCURRENCY_TEST_DATABASE_ISOLATED src/settlement-job-multi-worker.postgres.test.ts
