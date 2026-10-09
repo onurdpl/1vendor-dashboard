@@ -104,6 +104,7 @@ jobs:
           fin_bug_001_validation FIN_BUG_001_TEST_DATABASE_ISOLATED src/fin-bug-001-settlement-delay-parity.postgres.test.ts
           fin_bug_005_validation FIN_BUG_005_TEST_DATABASE_ISOLATED src/fin-bug-005-settlement-preview-isolation.postgres.test.ts
           settlement_job_2c_validation SETTLEMENT_JOB_2C_TEST_DATABASE_ISOLATED src/settlement-job-evidence.postgres.test.ts
+          settlement_job_http_validation SETTLEMENT_JOB_HTTP_TEST_DATABASE_ISOLATED src/settlement-job-admin-http.postgres.test.ts
           sopyo_delivery_validation SOPYO_DELIVERY_TEST_DATABASE_ISOLATED src/sopyo-delivery-poll.postgres.test.ts
           sopyo_order_push_validation SOPYO_ORDER_PUSH_TEST_DATABASE_ISOLATED src/sopyo-order-push-intent.postgres.test.ts
           phase2b_validation PHASE2B_TEST_DATABASE_ISOLATED src/financial-correction-zero-net.postgres.test.ts
