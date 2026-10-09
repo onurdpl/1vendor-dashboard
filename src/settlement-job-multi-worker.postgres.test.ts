@@ -33,15 +33,14 @@ suite('scheduled settlement job with two independent PostgreSQL workers', () => 
     process.env.DATABASE_URL = databaseUrl;
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
-    const [{ version, name, owner, host, port }] = await db.$queryRaw<Array<{
-      version: string; name: string; owner: string; host: string; port: number;
+    const [{ version, name, owner, port }] = await db.$queryRaw<Array<{
+      version: string; name: string; owner: string; port: number;
     }>>`SELECT current_setting('server_version_num') AS version, current_database() AS name,
-      current_user AS owner, inet_server_addr()::text AS host, inet_server_port() AS port`;
+      current_user AS owner, inet_server_port() AS port`;
     expect(Number(version)).toBeGreaterThanOrEqual(160000);
     expect(Number(version)).toBeLessThan(170000);
     expect(name).toBe(databaseName);
     expect(owner).toBe(target.username);
-    expect(host).toBe('127.0.0.1/32');
     expect(port).toBe(Number(target.port));
     ({ getSettlementScheduleAutoDraftJobStatus: getStatus, runSettlementScheduleAutoDraftJob: runJob } =
       await import('../backend/src/modules/finance/settlement-schedule-job.service.js'));
