@@ -302,6 +302,24 @@ describe('settlement schedule service', () => {
     expect(createDraftApprovalMock).not.toHaveBeenCalled();
   });
 
+  it('keeps a READY dry-run read-only but rejects an early scheduled write', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-01-21T23:59:59.999Z'));
+    try {
+      const previewResult = await getSettlementScheduleDryRun({ runDate: '2026-01-21' });
+      expect(previewResult.vendors[0].state).toBe('READY');
+      expect(previewResult.scheduledDraftCreationAllowed).toBe(false);
+      expect(previewResult.scheduledDraftAvailableAt).toBe('2026-01-22T00:00:00.000Z');
+      await expect(createSettlementScheduleDrafts({ runDate: '2026-01-21', confirmAutoSettlementDrafts: true }))
+        .rejects.toThrow(/UTC day end/);
+      expect(createDraftApprovalMock).not.toHaveBeenCalled();
+      now.mockReturnValue(Date.parse('2026-01-22T00:00:00.000Z'));
+      const created = await createSettlementScheduleDrafts({ runDate: '2026-01-21', confirmAutoSettlementDrafts: true });
+      expect(created.summary.created).toBe(1);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('creates draft only for due auto-draft vendors with eligible rows', async () => {
     const result = await createSettlementScheduleDrafts({
       runDate: '2026-01-21',

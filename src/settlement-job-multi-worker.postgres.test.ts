@@ -141,6 +141,7 @@ suite('scheduled settlement job with two independent PostgreSQL workers', () => 
 
   it('serializes same-date claims while keeping two vendor DRAFTs and their sources exclusive', async () => {
     const runDateKey = runDate.toISOString().slice(0, 10);
+    const testClockOffsetMs = runDate.getTime() + 86_400_000 - Date.now() + 1_000;
     const first = worker();
     const second = worker();
     await Promise.all([first.readyPromise, second.readyPromise]);
@@ -150,8 +151,8 @@ suite('scheduled settlement job with two independent PostgreSQL workers', () => 
     let blockedWorkerCount = 0;
     await db.$transaction(async (tx) => {
       await tx.$executeRawUnsafe('LOCK TABLE "SettlementScheduleJobRun" IN ACCESS EXCLUSIVE MODE');
-      first.child.send({ type: 'START', runDate: runDateKey });
-      second.child.send({ type: 'START', runDate: runDateKey });
+      first.child.send({ type: 'START', runDate: runDateKey, testClockOffsetMs });
+      second.child.send({ type: 'START', runDate: runDateKey, testClockOffsetMs });
       const deadline = Date.now() + 10_000;
       while (Date.now() < deadline) {
         const [{ count }] = await db.$queryRaw<Array<{ count: bigint }>>`

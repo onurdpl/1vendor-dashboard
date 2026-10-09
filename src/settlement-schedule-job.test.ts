@@ -207,6 +207,26 @@ describe('settlement schedule auto draft job service', () => {
     });
   });
 
+  it('rejects an early confirmed WRITE before creating JobRun while leaving read-only modes intact', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-06-24T23:59:59.999Z'));
+    try {
+      await expect(runSettlementScheduleAutoDraftJob({ env: envWrite, runDate: '2026-06-24',
+        confirmScheduledSettlementAutoDraftJob: true })).rejects.toThrow(/UTC day end/);
+      expect(prismaMock.settlementScheduleJobRun.findUnique).toHaveBeenCalled();
+      expect(prismaMock.settlementScheduleJobRun.create).not.toHaveBeenCalled();
+      expect(dryRunMock).not.toHaveBeenCalled();
+      const readOnly = await runSettlementScheduleAutoDraftJob({ env: envDryRun, runDate: '2026-06-24',
+        confirmScheduledSettlementAutoDraftJob: true });
+      expect(readOnly.writesPerformed).toBe(false);
+      now.mockReturnValue(Date.parse('2026-06-25T00:00:00.000Z'));
+      const later = await runSettlementScheduleAutoDraftJob({ env: envWrite, runDate: '2026-06-24',
+        confirmScheduledSettlementAutoDraftJob: true });
+      expect(later.jobRun?.status).toBe('COMPLETED');
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('reports status with env gates and latest run summary', async () => {
     prismaMock.settlementScheduleJobRun.findFirst.mockResolvedValue({
       id: 'job-run-latest',

@@ -11,6 +11,7 @@ import {
   type SettlementScheduleDryRunResponseDto,
   type SettlementScheduleDryRunVendorDto,
 } from './settlement-schedule.service.js';
+import { assertScheduledDraftDayComplete } from './settlement-schedule-utc-boundary.js';
 
 export type SettlementScheduleAutoDraftJobMode = 'DRY_RUN' | 'WRITE';
 
@@ -458,6 +459,7 @@ export async function runSettlementScheduleAutoDraftJob(
     if (existingRun) {
       return existingRunResponse(existingRun, { runDate: runDateKey, mode, enabled, dryRun: dryRunMode });
     }
+    assertScheduledDraftDayComplete(runDate);
   }
   const dryRun = await getSettlementScheduleDryRun({ runDate });
 
@@ -511,6 +513,10 @@ export async function runSettlementScheduleAutoDraftJob(
       jobRun: null,
     };
   }
+
+  // Preserve read-only modes and same-date idempotency, but never consume a new
+  // JobRun identity before its UTC run date has finished.
+  assertScheduledDraftDayComplete(runDate);
 
   let jobRun;
   try {

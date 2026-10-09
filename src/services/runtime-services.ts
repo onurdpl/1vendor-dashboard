@@ -2605,6 +2605,8 @@ export const runtimeServices = {
             writesPerformed: false as const,
             runDate,
             periodEnd: `${runDate}T23:59:59.999Z`,
+            scheduledDraftCreationAllowed: Date.now() >= Date.parse(`${runDate}T00:00:00.000Z`) + 86_400_000,
+            scheduledDraftAvailableAt: new Date(Date.parse(`${runDate}T00:00:00.000Z`) + 86_400_000).toISOString(),
             summary: {
               vendorsChecked: 1,
               dueVendors: 1,
@@ -2678,6 +2680,8 @@ export const runtimeServices = {
               writesPerformed: false as const,
               runDate: input.runDate ?? new Date().toISOString().slice(0, 10),
               periodEnd: `${input.runDate ?? new Date().toISOString().slice(0, 10)}T23:59:59.999Z`,
+              scheduledDraftCreationAllowed: Date.now() >= Date.parse(`${input.runDate ?? new Date().toISOString().slice(0, 10)}T00:00:00.000Z`) + 86_400_000,
+              scheduledDraftAvailableAt: new Date(Date.parse(`${input.runDate ?? new Date().toISOString().slice(0, 10)}T00:00:00.000Z`) + 86_400_000).toISOString(),
               summary: {
                 vendorsChecked: 1,
                 dueVendors: 1,

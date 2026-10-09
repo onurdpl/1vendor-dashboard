@@ -10,6 +10,7 @@ import {
   type SettlementApprovalLine,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { assertScheduledDraftMetadata } from './settlement-schedule-utc-boundary.js';
 import {
   calculateVendorPayout,
   DEFAULT_VENDOR_FINANCIAL_PROFILE,
@@ -2239,6 +2240,7 @@ export async function previewApproval(
 export async function createDraftApproval(
   input: SettlementApprovalInput,
 ): Promise<SettlementApprovalDto> {
+  assertScheduledDraftMetadata(input);
   return prisma.$transaction(
     async (tx) => {
       // Serialize draft snapshots with before-settlement credit authorization for this vendor.

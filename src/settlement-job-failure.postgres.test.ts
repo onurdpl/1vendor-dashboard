@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -9,6 +9,7 @@ const databaseName = 'settlement_job_failure_validation';
 const workerPath = path.resolve(process.cwd(), 'src/test-support/settlement-job-race-worker.mjs');
 const lockKey = 71842005;
 const env = { SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true, SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false };
+const realNow = Date.now.bind(Date);
 
 type JobResult = Awaited<ReturnType<typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js')['runSettlementScheduleAutoDraftJob']>>;
 type Fixture = { runDate: Date; vendors: string[]; ledgerIds: string[] };
@@ -22,6 +23,7 @@ suite('scheduled settlement job failure and real process crash (PostgreSQL 16)',
   let firstRunDate: Date;
   let root: string;
   const children: ChildProcess[] = [];
+  let testClockOffsetMs = 0;
 
   beforeAll(async () => {
     const target = new URL(databaseUrl!);
@@ -57,6 +59,7 @@ suite('scheduled settlement job failure and real process crash (PostgreSQL 16)',
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     // Test-only triggers are never migrations. Keep immutable observations until the disposable DB is dropped.
     await db.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_4b_approval_trigger ON "SettlementApproval"');
     await db.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_4b_line_trigger ON "SettlementApprovalLine"');
@@ -124,6 +127,8 @@ suite('scheduled settlement job failure and real process crash (PostgreSQL 16)',
         settlementDelayDaysSnapshot: 0,
       } });
     }
+    testClockOffsetMs = runDate.getTime() + 86_400_000 - realNow() + 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow() + testClockOffsetMs);
     return { runDate, vendors, ledgerIds };
   }
 
@@ -293,7 +298,7 @@ suite('scheduled settlement job failure and real process crash (PostgreSQL 16)',
     let checkpoint = 0;
     await db.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`DO $$ BEGIN PERFORM pg_advisory_xact_lock(${lockKey}); END $$`);
-      w.child.send({ type: 'START', runDate: runDateKey });
+      w.child.send({ type: 'START', runDate: runDateKey, testClockOffsetMs });
       checkpoint = await waitForBlockedQuery('SettlementApprovalLine', async () =>
         (await approvals(f)).length === 1 &&
         (await db.settlementScheduleJobRun.findUnique({ where: { runDate: f.runDate } }))?.status === 'PROCESSING');
@@ -311,7 +316,7 @@ suite('scheduled settlement job failure and real process crash (PostgreSQL 16)',
     const restarted = worker();
     await restarted.ready;
     const outcome = restarted.result();
-    restarted.child.send({ type: 'START', runDate: runDateKey });
+    restarted.child.send({ type: 'START', runDate: runDateKey, testClockOffsetMs });
     expect(await outcome).toMatchObject({ writesPerformed: false, jobRun: { id: job.id, status: 'PROCESSING' } });
     expect(await approvals(f)).toHaveLength(1);
     const status = await getStatus(env);
@@ -334,7 +339,7 @@ suite('scheduled settlement job failure and real process crash (PostgreSQL 16)',
     let checkpoint = 0;
     await db.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`DO $$ BEGIN PERFORM pg_advisory_xact_lock(${lockKey}); END $$`);
-      w.child.send({ type: 'START', runDate: runDateKey });
+      w.child.send({ type: 'START', runDate: runDateKey, testClockOffsetMs });
       checkpoint = await waitForBlockedQuery('SettlementScheduleJobRun', async () =>
         (await approvals(f)).length === 1 &&
         (await db.settlementScheduleJobRun.findUnique({ where: { runDate: f.runDate } }))?.status === 'PROCESSING');
@@ -351,7 +356,7 @@ suite('scheduled settlement job failure and real process crash (PostgreSQL 16)',
     const restarted = worker();
     await restarted.ready;
     const outcome = restarted.result();
-    restarted.child.send({ type: 'START', runDate: runDateKey });
+    restarted.child.send({ type: 'START', runDate: runDateKey, testClockOffsetMs });
     expect(await outcome).toMatchObject({ writesPerformed: false, jobRun: { id: job.id, status: 'PROCESSING' } });
     const status = await getStatus(env);
     expect(status.evidence?.settlements[0]).toMatchObject({ vendorId: f.vendors[0], jobProvenance: 'UNKNOWN' });

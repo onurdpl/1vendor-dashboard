@@ -6,6 +6,7 @@ import {
   type SettlementApprovalDto,
   type SettlementApprovalPreviewDto,
 } from './settlement-approval.service.js';
+import { assertScheduledDraftDayComplete, scheduledDraftAvailableAt } from './settlement-schedule-utc-boundary.js';
 
 export type SettlementFrequencyTypeDto = 'WEEKLY' | 'BIWEEKLY';
 export type SettlementWeekdayDto = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY';
@@ -56,6 +57,8 @@ export type SettlementScheduleDryRunResponseDto = {
   writesPerformed: false;
   runDate: string;
   periodEnd: string;
+  scheduledDraftCreationAllowed: boolean;
+  scheduledDraftAvailableAt: string;
   summary: {
     vendorsChecked: number;
     dueVendors: number;
@@ -428,6 +431,8 @@ export async function getSettlementScheduleDryRun(
     writesPerformed: false,
     runDate: toSettlementRunDateKey(runDate),
     periodEnd: periodEnd.toISOString(),
+    scheduledDraftCreationAllowed: Date.now() >= scheduledDraftAvailableAt(runDate).getTime(),
+    scheduledDraftAvailableAt: scheduledDraftAvailableAt(runDate).toISOString(),
     summary: {
       vendorsChecked: vendors.length,
       dueVendors: vendors.filter((vendor) => vendor.due).length,
@@ -439,6 +444,7 @@ export async function getSettlementScheduleDryRun(
     notes: [
       'Dry run is read-only and reuses settlement approval preview eligibility.',
       'Scheduled previews use periodEnd at the end of runDate and asOfDate equal to that periodEnd.',
+      'Candidate READY is not permission to create a scheduled DRAFT before the run date UTC day has ended.',
       'Scheduled cycle identity allows one non-cancelled settlement approval per vendor per run date.',
       'Biweekly schedules use ISO week parity for the every-second-week rule until a dedicated business cycle field is introduced.',
       'Phase 4A creates drafts only; approval, Logo invoicing, and payout execution are not automated.',
@@ -452,6 +458,8 @@ export async function createSettlementScheduleDrafts(
   if (input.confirmAutoSettlementDrafts !== true) {
     throw new Error('confirmAutoSettlementDrafts must be true to create scheduled settlement drafts.');
   }
+
+  assertScheduledDraftDayComplete(toSettlementRunDate(input.runDate));
 
   const dryRun = await getSettlementScheduleDryRun(input);
   const createdDrafts: SettlementScheduleCreateDraftsResponseDto['createdDrafts'] = [];

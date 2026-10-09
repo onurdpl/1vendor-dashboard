@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 const reason = 'A pending Financial Correction deduction requires a vendor-wide settlement draft.';
+const realNow = Date.now.bind(Date);
 
 describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQL', () => {
   let sequence = 0;
@@ -213,6 +214,10 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
       expect(owned[1].preview?.summary).toEqual(expect.objectContaining({ netPayableMinor: baselineB.summary.netPayableMinor }));
       expect(owned[2].preview?.summary).toEqual(expect.objectContaining({ netPayableMinor: baselineC.summary.netPayableMinor }));
       expect(dryRun.writesPerformed).toBe(false);
+      // The canonical observation is recorded at real database time. Only the
+      // application execution clock advances to a valid post-runDate instant.
+      const offset = f.periodEnd.getTime() + 1 - realNow() + 1_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
       const result = await f.createSettlementScheduleDrafts({ runDate: f.runDate, confirmAutoSettlementDrafts: true });
       expect(result.skipped).toContainEqual({ vendorId: f.vendor('a'), reason });
       expect(result.summary).toEqual(expect.objectContaining({ created: 2, skipped: 1, failed: 0 }));
@@ -249,6 +254,7 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
       expect(await f.db.settlementApproval.count({ where: { scheduledRunDate: f.scheduledRunDate,
         vendorId: { in: [f.vendor('b'), f.vendor('c')] } } })).toBe(2);
     } finally {
+      vi.restoreAllMocks();
       await f.db.$disconnect();
     }
   });
@@ -259,6 +265,8 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
       const first = await f.getSettlementScheduleDryRun({ runDate: f.runDate });
       expect(first.vendors.find((item) => item.vendorId === f.vendor('a'))?.state).toBe('READY');
       const applied = await f.applyDeduction();
+      const offset = f.periodEnd.getTime() + 1 - realNow() + 1_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
       const second = await f.createSettlementScheduleDrafts({ runDate: f.runDate, confirmAutoSettlementDrafts: true });
       expect(second.dryRun.vendors.find((item) => item.vendorId === f.vendor('a')))
         .toEqual(expect.objectContaining({ state: 'BLOCKED', preview: null, canCreateDraft: false, blockedReason: reason }));
@@ -267,6 +275,7 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
       expect(await f.db.settlementApproval.count({ where: { vendorId: f.vendor('a') } })).toBe(0);
       expect(await f.db.financialCorrectionDeductionSettlementLine.count({ where: { deductionId: applied.deductionId } })).toBe(0);
     } finally {
+      vi.restoreAllMocks();
       await f.db.$disconnect();
     }
   });

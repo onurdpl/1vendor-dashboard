@@ -2016,6 +2016,8 @@ export type SettlementScheduleDryRunResponse = {
   writesPerformed: false;
   runDate: string;
   periodEnd: string;
+  scheduledDraftCreationAllowed: boolean;
+  scheduledDraftAvailableAt: string;
   summary: {
     vendorsChecked: number;
     dueVendors: number;

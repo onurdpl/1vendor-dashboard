@@ -28,6 +28,8 @@ const dryRunResponse: SettlementScheduleDryRunResponse = {
   writesPerformed: false,
   runDate: '2026-06-24',
   periodEnd: '2026-06-24T23:59:59.999Z',
+  scheduledDraftCreationAllowed: true,
+  scheduledDraftAvailableAt: '2026-06-25T00:00:00.000Z',
   summary: {
     vendorsChecked: 5,
     dueVendors: 4,
@@ -539,6 +541,24 @@ describe('AdminScheduledSettlementsPage', () => {
 
     await screen.findByText('Empty Vendor');
     expect(screen.getByRole('button', { name: 'Create Scheduled Drafts' })).toBeDisabled();
+  });
+
+  it('shows READY candidates without offering creation before the server UTC boundary', async () => {
+    getSettlementScheduleDryRunMock.mockResolvedValue({
+      ...dryRunResponse,
+      scheduledDraftCreationAllowed: false,
+    });
+    renderPage();
+
+    await screen.findAllByText('Yalı Spor');
+    expect(screen.getByText(/Preview readiness is not creation permission/)).toHaveTextContent(
+      '2026-06-25T00:00:00.000Z',
+    );
+    expect(screen.getAllByRole('button', { name: 'Create Scheduled Drafts' })).toHaveLength(2);
+    for (const button of screen.getAllByRole('button', { name: 'Create Scheduled Drafts' })) {
+      expect(button).toBeDisabled();
+    }
+    expect(createSettlementScheduleDraftsMock).not.toHaveBeenCalled();
   });
 
   it('shows state-based scheduled actions in the right panel', async () => {

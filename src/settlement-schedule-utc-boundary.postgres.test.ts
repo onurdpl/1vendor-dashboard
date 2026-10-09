@@ -136,7 +136,7 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
     return { runDate, runDateKey, periodEnd, candidates };
   }
 
-  it('characterizes the current pre-day-end DRAFT for both future-maturing and already-mature SALEs', async () => {
+  it('rejects early scheduled DRAFTs for both future-maturing and already-mature SALEs', async () => {
     const f = await fixture(['late', 'ready']);
     const [late, ready] = f.candidates;
     expect(late.eligibleAt.getTime()).toBeGreaterThan(Date.now());
@@ -152,6 +152,8 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
       vendorId: { in: f.candidates.map((candidate) => candidate.vendorId) },
     } })).toBe(0);
     expect(dryRun.periodEnd).toBe(f.periodEnd.toISOString());
+    expect(dryRun.scheduledDraftCreationAllowed).toBe(false);
+    expect(dryRun.scheduledDraftAvailableAt).toBe(new Date(f.periodEnd.getTime() + 1).toISOString());
     for (const candidate of f.candidates) {
       const result = dryRun.vendors.find((vendor) => vendor.vendorId === candidate.vendorId);
       expect(result).toMatchObject({ state: 'READY', canCreateDraft: true });
@@ -159,23 +161,11 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
       expect(result?.preview?.summary.netPayableMinor).toBe(17_600);
     }
 
-    // Baseline characterization only: 3B2 must invert the premature-write assertion.
-    const created = await schedule.createSettlementScheduleDrafts({
+    await expect(schedule.createSettlementScheduleDrafts({
       runDate: f.runDateKey, confirmAutoSettlementDrafts: true,
-    });
-    expect(created.summary).toMatchObject({ created: 2, failed: 0 });
-    expect(created.writesPerformed).toBe(true);
+    })).rejects.toThrow(/cannot be created before .*UTC day end/);
     for (const candidate of f.candidates) {
-      const draft = await db.settlementApproval.findUniqueOrThrow({
-        where: { scheduledCycleKey: `scheduled-settlement:${candidate.vendorId}:${f.runDateKey}` },
-        include: { lines: true },
-      });
-      expect(draft.status).toBe('DRAFT');
-      expect(draft.scheduledRunDate).toEqual(f.runDate);
-      expect(draft.scheduledPeriodEnd).toEqual(f.periodEnd);
-      expect(draft.netPayableMinor).toBe(17_600);
-      expect(draft.lines.map((line) => line.financeLedgerEntryId)).toEqual([candidate.ledgerId]);
-      expect(draft.createdAt.getTime()).toBeLessThan(f.periodEnd.getTime());
+      expect(await db.settlementApproval.count({ where: { vendorId: candidate.vendorId } })).toBe(0);
       const ledger = await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: candidate.ledgerId } });
       const observation = await db.allocationDeliveredObservation.findUniqueOrThrow({
         where: { vendorAllocationId: candidate.allocationId },
@@ -184,10 +174,9 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
       expect(ledger.settlementDelayDaysSnapshot).toBe(candidate.delayDays);
       expect(observation.id).toBe(candidate.observationId);
       expect(observation.firstObservedDeliveredAt).toEqual(candidate.observedAt);
-      if (candidate.label === 'late') {
-        expect(draft.createdAt.getTime()).toBeLessThan(candidate.eligibleAt.getTime());
-      }
+      expect(ledger.settlementStatus).toBe('PENDING');
     }
+    expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: { in: f.candidates.map((item) => item.ledgerId) } } })).toBe(0);
     expect(await db.payoutBatch.count()).toBe(0);
     expect(await db.financialCorrectionAuthority.count()).toBe(0);
   });
@@ -209,28 +198,36 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
     expect(persisted.scheduledRunDate).toBeNull();
   });
 
-  it('characterizes the direct job entry point and same-date idempotency before day end', async () => {
+  it('does not consume JobRun identity before day end and accepts a later same-date run', async () => {
     const f = await fixture(['ready']);
     const [ready] = f.candidates;
     const input = {
       env: { SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true, SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false },
       runDate: f.runDateKey, confirmScheduledSettlementAutoDraftJob: true,
     };
-    // Baseline characterization only: 3B2 must prohibit this early write.
-    const first = await job.runSettlementScheduleAutoDraftJob(input);
-    expect(first.writesPerformed).toBe(true);
-    expect(first.jobRun?.status).toBe('COMPLETED');
-    expect(first.summary.createdDrafts).toBe(1);
-    expect(first.vendors.find((vendor) => vendor.vendorId === ready.vendorId)?.state).not.toBe('READY');
-    const second = await job.runSettlementScheduleAutoDraftJob(input);
-    expect(second.writesPerformed).toBe(false);
-    expect(await db.settlementApproval.count({ where: { vendorId: ready.vendorId } })).toBe(1);
-    expect(await db.settlementScheduleJobRun.count({ where: { runDate: f.runDate } })).toBe(1);
-    const replay = await schedule.createSettlementScheduleDrafts({
-      runDate: f.runDateKey, vendorId: ready.vendorId, confirmAutoSettlementDrafts: true,
-    });
-    expect(replay.summary.created).toBe(0);
-    expect(replay.skipped).toHaveLength(1);
+    await expect(job.runSettlementScheduleAutoDraftJob(input)).rejects.toThrow(/UTC day end/);
+    expect(await db.settlementScheduleJobRun.count({ where: { runDate: f.runDate } })).toBe(0);
+    expect(await db.settlementApproval.count({ where: { vendorId: ready.vendorId } })).toBe(0);
+    const afterMidnight = new Date(f.periodEnd.getTime() + 1);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(afterMidnight);
+      const first = await job.runSettlementScheduleAutoDraftJob(input);
+      expect(first.writesPerformed).toBe(true);
+      expect(first.jobRun?.status).toBe('COMPLETED');
+      expect(first.summary.createdDrafts).toBe(1);
+      expect(first.vendors.find((vendor) => vendor.vendorId === ready.vendorId)?.state).not.toBe('READY');
+      const second = await job.runSettlementScheduleAutoDraftJob(input);
+      expect(second.writesPerformed).toBe(false);
+      expect(await db.settlementApproval.count({ where: { vendorId: ready.vendorId } })).toBe(1);
+      expect(await db.settlementScheduleJobRun.count({ where: { runDate: f.runDate } })).toBe(1);
+      vi.setSystemTime(f.periodEnd);
+      const existingEvenBeforeMidnight = await job.runSettlementScheduleAutoDraftJob(input);
+      expect(existingEvenBeforeMidnight.writesPerformed).toBe(false);
+      expect(await db.settlementScheduleJobRun.count({ where: { runDate: f.runDate } })).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('characterizes exact UTC midnight and later execution with a controlled application clock', async () => {
@@ -252,19 +249,24 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(commonRunDate);
-      const atStart = await schedule.createSettlementScheduleDrafts({
+      await expect(schedule.createSettlementScheduleDrafts({
         runDate: commonRunDateKey, vendorId: startOfDay.candidates[0].vendorId,
         confirmAutoSettlementDrafts: true,
-      });
-      expect(atStart.summary.created).toBe(1);
+      })).rejects.toThrow(/UTC day end/);
       vi.setSystemTime(commonPeriodEnd);
-      // Existing service never reads the execution clock for this boundary.
-      const early = await schedule.createSettlementScheduleDrafts({
+      const oneMillisecondEarlyPreview = await schedule.getSettlementScheduleDryRun({
+        runDate: commonRunDateKey, vendorId: beforeMidnight.candidates[0].vendorId,
+      });
+      expect(oneMillisecondEarlyPreview.scheduledDraftCreationAllowed).toBe(false);
+      await expect(schedule.createSettlementScheduleDrafts({
         runDate: commonRunDateKey, vendorId: beforeMidnight.candidates[0].vendorId,
         confirmAutoSettlementDrafts: true,
-      });
-      expect(early.summary.created).toBe(1);
+      })).rejects.toThrow(/UTC day end/);
       vi.setSystemTime(nextMidnight);
+      const atMidnightPreview = await schedule.getSettlementScheduleDryRun({
+        runDate: commonRunDateKey, vendorId: atMidnight.candidates[0].vendorId,
+      });
+      expect(atMidnightPreview.scheduledDraftCreationAllowed).toBe(true);
       const atBoundary = await schedule.createSettlementScheduleDrafts({
         runDate: commonRunDateKey, vendorId: atMidnight.candidates[0].vendorId,
         confirmAutoSettlementDrafts: true,
@@ -279,7 +281,47 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
       expect(await db.settlementApproval.count({ where: {
         vendorId: { in: [startOfDay, beforeMidnight, atMidnight, afterMidnight]
           .map((item) => item.candidates[0].vendorId) },
-      } })).toBe(4);
+      } })).toBe(2);
+      expect(await db.settlementApproval.count({ where: {
+        vendorId: { in: [startOfDay, beforeMidnight].map((item) => item.candidates[0].vendorId) },
+      } })).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('blocks direct scheduled approval metadata without affecting ordinary manual drafts', async () => {
+    const f = await fixture(['ready']);
+    const [ready] = f.candidates;
+    const scheduled = {
+      vendorId: ready.vendorId, periodEnd: f.periodEnd, asOfDate: f.periodEnd,
+      scheduledRunDate: f.runDate, scheduledPeriodEnd: f.periodEnd,
+      scheduledCycleKey: `scheduled-settlement:${ready.vendorId}:${f.runDateKey}`,
+      candidateScope: 'date_range' as const,
+    };
+    await expect(approval.createDraftApproval(scheduled)).rejects.toThrow(/UTC day end/);
+    await expect(approval.createDraftApproval({ vendorId: ready.vendorId,
+      scheduledCycleKey: scheduled.scheduledCycleKey })).rejects.toThrow(/complete run date/);
+    await expect(approval.createDraftApproval({ ...scheduled,
+      periodEnd: new Date(f.periodEnd.getTime() + millisecondsPerDay),
+    })).rejects.toThrow(/metadata does not match/);
+    expect(await db.settlementApproval.count({ where: { vendorId: ready.vendorId } })).toBe(0);
+    const manual = await approval.createDraftApproval({ vendorId: ready.vendorId });
+    expect(manual.status).toBe('draft');
+    expect(manual.lines.map((line) => line.financeLedgerEntryId)).toEqual([ready.ledgerId]);
+
+    const later = await fixture(['ready']);
+    const laterVendor = later.candidates[0];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(later.periodEnd.getTime() + 1));
+      const direct = await approval.createDraftApproval({
+        vendorId: laterVendor.vendorId, periodEnd: later.periodEnd, asOfDate: later.periodEnd,
+        scheduledRunDate: later.runDate, scheduledPeriodEnd: later.periodEnd,
+        scheduledCycleKey: `scheduled-settlement:${laterVendor.vendorId}:${later.runDateKey}`,
+        candidateScope: 'date_range',
+      });
+      expect(direct.lines.map((line) => line.financeLedgerEntryId)).toEqual([laterVendor.ledgerId]);
     } finally {
       vi.useRealTimers();
     }

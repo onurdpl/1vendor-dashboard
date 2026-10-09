@@ -376,6 +376,7 @@ export function AdminScheduledSettlementsPage() {
     [filteredVendors, selectedVendorId],
   );
   const readyCount = dryRun?.vendors.filter((vendor) => vendor.state === 'READY').length ?? 0;
+  const scheduledDraftCreationAllowed = dryRun?.scheduledDraftCreationAllowed === true;
 
   async function handleCreateDrafts() {
     setCreating(true);
@@ -496,11 +497,15 @@ export function AdminScheduledSettlementsPage() {
             >
               {loading ? 'Previewing...' : 'Preview Schedule'}
             </button>
-            <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)} disabled={loading || creating || readyCount === 0}>
+            <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)} disabled={loading || creating || readyCount === 0 || !scheduledDraftCreationAllowed}>
               {creating ? 'Creating drafts...' : 'Create Scheduled Drafts'}
             </button>
           </div>
         </div>
+
+        {dryRun && !scheduledDraftCreationAllowed ? (
+          <p role="status">Preview readiness is not creation permission. Scheduled drafts for {dryRun.runDate} can be created after its UTC day ends at {dryRun.scheduledDraftAvailableAt}. Refresh the preview then; the server checks again on creation.</p>
+        ) : null}
 
         {dryRun ? (
           <>
@@ -594,7 +599,7 @@ export function AdminScheduledSettlementsPage() {
                             type="button"
                             className="button button-primary"
                             onClick={() => setCreateOpen(true)}
-                            disabled={loading || creating || readyCount === 0}
+                            disabled={loading || creating || readyCount === 0 || !scheduledDraftCreationAllowed}
                           >
                             {creating ? 'Creating drafts...' : 'Create Scheduled Drafts'}
                           </button>

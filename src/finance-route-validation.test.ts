@@ -1739,6 +1739,23 @@ describe('finance route validation', () => {
     expect(createSettlementScheduleDraftsMock).not.toHaveBeenCalled();
   });
 
+  it('reports the UTC day-end guard as a non-writing Admin rejection on both write routes', async () => {
+    const reason = 'Scheduled settlement drafts for 2026-01-21 cannot be created before 2026-01-22T00:00:00.000Z (UTC day end).';
+    createSettlementScheduleDraftsMock.mockRejectedValueOnce(new Error(reason));
+    runSettlementScheduleAutoDraftJobMock.mockRejectedValueOnce(new Error(reason));
+    const posts = createRegisteredPostRoutes();
+    const drafts = await posts.get('/admin/finance/settlement-schedules/create-drafts')?.(
+      { authUser: { id: 'admin-1', role: 'admin' }, body: { runDate: '2026-01-21', confirmAutoSettlementDrafts: true } },
+      createReply(),
+    );
+    const job = await posts.get('/admin/finance/settlement-schedules/run-auto-draft-job')?.(
+      { authUser: { id: 'admin-1', role: 'admin' }, body: { runDate: '2026-01-21', confirmScheduledSettlementAutoDraftJob: true } },
+      createReply(),
+    );
+    expect(drafts).toEqual({ status: 400, body: { message: reason, writesPerformed: false } });
+    expect(job).toEqual({ status: 400, body: { message: reason, writesPerformed: false } });
+  });
+
   it('creates scheduled settlement drafts through the admin route', async () => {
     const posts = createRegisteredPostRoutes();
     const reply = createReply();
