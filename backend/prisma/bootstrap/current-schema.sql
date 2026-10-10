@@ -1953,7 +1953,14 @@ CREATE TABLE public."SettlementApproval" (
     "scheduledCycleKey" text,
     "sourceSnapshotJson" jsonb NOT NULL,
     "correctionCreditMinor" integer DEFAULT 0 NOT NULL,
-    "correctionDeductionMinor" integer DEFAULT 0 NOT NULL
+    "correctionDeductionMinor" integer DEFAULT 0 NOT NULL,
+    "cancelledFromStatus" public."SettlementApprovalStatus",
+    "replacesSettlementApprovalId" text,
+    "replacementRequestId" text,
+    "replacementRequestedBy" text,
+    "replacementReason" text,
+    "replacementRequestedAt" timestamp(3) without time zone,
+    CONSTRAINT "SettlementApproval_replacement_audit_check" CHECK (((("replacesSettlementApprovalId" IS NULL) AND ("replacementRequestId" IS NULL) AND ("replacementRequestedBy" IS NULL) AND ("replacementReason" IS NULL) AND ("replacementRequestedAt" IS NULL)) OR (("replacesSettlementApprovalId" IS NOT NULL) AND ("replacementRequestId" IS NOT NULL) AND ("replacementRequestedBy" IS NOT NULL) AND (btrim("replacementRequestedBy") <> ''::text) AND ("replacementReason" IS NOT NULL) AND (btrim("replacementReason") <> ''::text) AND ("replacementRequestedAt" IS NOT NULL))))
 );
 
 
@@ -4522,10 +4529,31 @@ CREATE INDEX "SettlementApproval_createdAt_idx" ON public."SettlementApproval" U
 
 
 --
+-- Name: SettlementApproval_id_vendorId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementApproval_id_vendorId_key" ON public."SettlementApproval" USING btree (id, "vendorId");
+
+
+--
 -- Name: SettlementApproval_periodStart_periodEnd_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX "SettlementApproval_periodStart_periodEnd_idx" ON public."SettlementApproval" USING btree ("periodStart", "periodEnd");
+
+
+--
+-- Name: SettlementApproval_replacementRequestId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementApproval_replacementRequestId_key" ON public."SettlementApproval" USING btree ("replacementRequestId");
+
+
+--
+-- Name: SettlementApproval_replacesSettlementApprovalId_vendorId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementApproval_replacesSettlementApprovalId_vendorId_key" ON public."SettlementApproval" USING btree ("replacesSettlementApprovalId", "vendorId");
 
 
 --
@@ -6399,6 +6427,14 @@ ALTER TABLE ONLY public."SettlementApprovalLine"
 
 ALTER TABLE ONLY public."SettlementApprovalLine"
     ADD CONSTRAINT "SettlementApprovalLine_settlementRefundAdjustmentApplicati_fkey" FOREIGN KEY ("settlementRefundAdjustmentApplicationId") REFERENCES public."SettlementRefundAdjustmentApplication"(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: SettlementApproval SettlementApproval_replacesSettlementApprovalId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApproval"
+    ADD CONSTRAINT "SettlementApproval_replacesSettlementApprovalId_fkey" FOREIGN KEY ("replacesSettlementApprovalId", "vendorId") REFERENCES public."SettlementApproval"(id, "vendorId") ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

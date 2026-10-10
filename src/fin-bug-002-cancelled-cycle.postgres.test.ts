@@ -120,6 +120,36 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     vi.setSystemTime(new Date(runDate.getTime() + dayMs + 1_000));
   }
 
+  async function holdVendorLock(vendorId: string) {
+    let signalAcquired!: () => void;
+    let release!: () => void;
+    const acquired = new Promise<void>((resolve) => { signalAcquired = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const blocker = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Vendor" WHERE "id" = ${vendorId} FOR UPDATE`;
+      signalAcquired();
+      await released;
+    }, { timeout: 10_000 });
+    await acquired;
+    return { release: async () => { release(); await blocker; } };
+  }
+
+  async function waitForCancellationLockWaits(count: number) {
+    let observed = 0;
+    const deadline = performance.now() + 3_000;
+    while (performance.now() < deadline) {
+      const [activity] = await db.$queryRaw<Array<{ blocked: bigint }>>`
+        SELECT count(*)::bigint AS "blocked" FROM pg_stat_activity
+        WHERE datname = current_database() AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock' AND query LIKE '%"Vendor"%FOR UPDATE%'
+      `;
+      observed = Number(activity.blocked);
+      if (observed >= count) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    expect(observed).toBeGreaterThanOrEqual(count);
+  }
+
   it('CHARACTERIZATION: cancellation preserves S1 and source history, but READY cannot reuse its key', async () => {
     const f = await fixture();
     const initial = await schedule.getSettlementScheduleDryRun({ runDate: f.runDateKey, vendorId: f.vendorId });
@@ -235,5 +265,146 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       .toEqual([f.ledgerId, f.ledgerId]);
     expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: f.ledgerId,
       settlementApproval: { status: { in: ['DRAFT', 'APPROVED'] } } } })).toBe(1);
+  });
+
+  it('persists cancellation provenance and enforces replacement audit identity without enabling replacement', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const first = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    const originalId = first.createdDrafts[0].settlementApprovalId;
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: originalId } });
+    expect(before.cancelledFromStatus).toBeNull();
+    expect(before.replacesSettlementApprovalId).toBeNull();
+    expect(before.replacementRequestId).toBeNull();
+
+    await approval.cancelSettlementApproval(originalId, `${f.vendorId}-admin`);
+    const cancelled = await db.settlementApproval.findUniqueOrThrow({ where: { id: originalId }, include: { lines: true } });
+    expect(cancelled).toMatchObject({ status: 'CANCELLED', cancelledFromStatus: 'DRAFT',
+      cancelledBy: `${f.vendorId}-admin`, scheduledCycleKey: f.cycleKey });
+    expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+    expect(cancelled.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+
+    // Synthetic rows exercise only the additive database contract. No service creates a replacement.
+    const auditData = (predecessorId: string, requestId: string, vendorId = f.vendorId) => ({
+      vendorId,
+      status: 'DRAFT' as const,
+      grossSalesMinor: 0,
+      refundTotalMinor: 0,
+      commissionMinor: 0,
+      commissionVatMinor: 0,
+      netPayableMinor: 0,
+      sourceSnapshotJson: { testOnlyReplacementAudit: true },
+      replacesSettlementApprovalId: predecessorId,
+      replacementRequestId: requestId,
+      replacementRequestedBy: `${vendorId}-admin`,
+      replacementReason: 'PostgreSQL audit constraint fixture',
+      replacementRequestedAt: new Date(),
+    });
+    const auditRow = await db.settlementApproval.create({ data: auditData(originalId, `${f.vendorId}-request`) });
+    expect(auditRow.replacesSettlementApprovalId).toBe(originalId);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: originalId },
+      include: { replacementSettlementApproval: true } })).replacementSettlementApproval?.id).toBe(auditRow.id);
+    await expect(db.settlementApproval.create({ data: auditData(originalId, `${f.vendorId}-other-request`) }))
+      .rejects.toMatchObject({ code: 'P2002' });
+    await expect(db.settlementApproval.create({ data: auditData(`${f.vendorId}-missing`, `${f.vendorId}-missing-request`) }))
+      .rejects.toMatchObject({ code: 'P2003' });
+    await expect(db.settlementApproval.create({ data: {
+      ...auditData(originalId, `${f.vendorId}-incomplete-request`), replacementReason: null,
+    } })).rejects.toThrow();
+
+    const other = await fixture();
+    await expect(db.settlementApproval.create({ data: auditData(originalId, `${f.vendorId}-cross-vendor`, other.vendorId) }))
+      .rejects.toMatchObject({ code: 'P2003' });
+    const otherPredecessor = await db.settlementApproval.create({ data: {
+      vendorId: other.vendorId, grossSalesMinor: 0, refundTotalMinor: 0,
+      commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 0, sourceSnapshotJson: {},
+    } });
+    await expect(db.settlementApproval.create({ data: auditData(otherPredecessor.id, `${f.vendorId}-request`, other.vendorId) }))
+      .rejects.toMatchObject({ code: 'P2002' });
+
+    const persistedOriginal = await db.settlementApproval.findUniqueOrThrow({ where: { id: originalId } });
+    expect(persistedOriginal.scheduledCycleKey).toBe(f.cycleKey);
+    expect(persistedOriginal.netPayableMinor).toBe(before.netPayableMinor);
+    expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: f.ledgerId,
+      settlementApproval: { status: { in: ['DRAFT', 'APPROVED'] } } } })).toBe(0);
+  });
+
+  it('records APPROVED as the pre-cancellation status without changing the original cycle', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const created = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    const originalId = created.createdDrafts[0].settlementApprovalId;
+    await approval.approveSettlementApproval(originalId, `${f.vendorId}-approver`);
+    await approval.cancelSettlementApproval(originalId, `${f.vendorId}-admin`);
+    const cancelled = await db.settlementApproval.findUniqueOrThrow({ where: { id: originalId } });
+    expect(cancelled).toMatchObject({ status: 'CANCELLED', cancelledFromStatus: 'APPROVED',
+      approvedBy: `${f.vendorId}-approver`, cancelledBy: `${f.vendorId}-admin`, scheduledCycleKey: f.cycleKey });
+    expect(cancelled.approvedAt).toBeInstanceOf(Date);
+    expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+  });
+
+  it('rolls back cancellation audit when approval wins a Serializable race', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const created = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    const id = created.createdDrafts[0].settlementApprovalId;
+    const held = await holdVendorLock(f.vendorId);
+    let outcome!: PromiseSettledResult<Awaited<ReturnType<typeof approval.cancelSettlementApproval>>>;
+    try {
+      const attempt = approval.cancelSettlementApproval(id, `${f.vendorId}-canceller`);
+      const settled = Promise.allSettled([attempt]);
+      await waitForCancellationLockWaits(1);
+      const approved = await approval.approveSettlementApproval(id, `${f.vendorId}-approver`);
+      expect(approved.status).toBe('approved');
+      await held.release();
+      outcome = (await settled)[0];
+    } finally {
+      // Releasing twice is harmless if an assertion fails before the normal release.
+      await held.release();
+    }
+    const persisted = await db.settlementApproval.findUniqueOrThrow({ where: { id }, include: { lines: true } });
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status === 'rejected') expect(outcome.reason).toMatchObject({
+      code: 'P2010', meta: { code: '40001' },
+    });
+    expect(persisted).toMatchObject({ status: 'APPROVED', cancelledFromStatus: null,
+      cancelledBy: null, cancelledAt: null, approvedBy: `${f.vendorId}-approver`, scheduledCycleKey: f.cycleKey });
+    expect(persisted.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
+  it('does not create conflicting cancellation history under two concurrent requests', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const created = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    const id = created.createdDrafts[0].settlementApprovalId;
+    const held = await holdVendorLock(f.vendorId);
+    let outcomes!: PromiseSettledResult<Awaited<ReturnType<typeof approval.cancelSettlementApproval>>>[];
+    try {
+      const attempts = Promise.allSettled([
+        approval.cancelSettlementApproval(id, `${f.vendorId}-admin-1`),
+        approval.cancelSettlementApproval(id, `${f.vendorId}-admin-2`),
+      ]);
+      await waitForCancellationLockWaits(2);
+      await held.release();
+      outcomes = await attempts;
+    } finally {
+      await held.release();
+    }
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    const persisted = await db.settlementApproval.findUniqueOrThrow({ where: { id }, include: { lines: true } });
+    expect(persisted).toMatchObject({ status: 'CANCELLED', cancelledFromStatus: 'DRAFT',
+      scheduledCycleKey: f.cycleKey });
+    expect([`${f.vendorId}-admin-1`, `${f.vendorId}-admin-2`]).toContain(persisted.cancelledBy);
+    expect(persisted.cancelledAt).toBeInstanceOf(Date);
+    expect(persisted.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 });

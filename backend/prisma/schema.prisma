@@ -1934,12 +1934,20 @@ model SettlementApproval {
   approvedAt                   DateTime?
   cancelledBy                  String?
   cancelledAt                  DateTime?
+  cancelledFromStatus          SettlementApprovalStatus?
   notes                        String?
   scheduledRunDate             DateTime?
   scheduledPeriodEnd           DateTime?
   scheduledCycleKey            String?                                 @unique
+  replacesSettlementApprovalId String?
+  replacementRequestId         String?                                 @unique
+  replacementRequestedBy       String?
+  replacementReason            String?
+  replacementRequestedAt       DateTime?
   sourceSnapshotJson           Json
   vendor                       Vendor                                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  replacesSettlementApproval   SettlementApproval?                     @relation("SettlementApprovalReplacement", fields: [replacesSettlementApprovalId, vendorId], references: [id, vendorId], onDelete: Restrict)
+  replacementSettlementApproval SettlementApproval?                    @relation("SettlementApprovalReplacement")
   lines                        SettlementApprovalLine[]
   correctionCreditLines        FinancialCorrectionCreditSettlementLine[]
   correctionDeductionLines     FinancialCorrectionDeductionSettlementLine[]
@@ -1952,6 +1960,8 @@ model SettlementApproval {
   approvedDeductionCoverages FinancialCorrectionApprovedDeductionCoverage[]
 
   @@index([vendorId, status])
+  @@unique([id, vendorId])
+  @@unique([replacesSettlementApprovalId, vendorId])
   @@index([vendorId, scheduledCycleKey])
   @@index([periodStart, periodEnd])
   @@index([createdAt])

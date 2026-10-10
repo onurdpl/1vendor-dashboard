@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
+import { evaluateSaleSettlementDelay } from '../backend/src/modules/finance/settlement-delay-eligibility.service.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -11,6 +12,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
   let prepare: typeof import('../backend/src/modules/finance/finance.service.js')['preparePayoutBatch'];
   let cancelPayout: typeof import('../backend/src/modules/finance/finance.service.js')['cancelPayoutBatch'];
   let cancelApproval: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['cancelSettlementApproval'];
+  let recordDelivery: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
   let ids: Record<string, string>;
   const runPrefix = `fin-bug-009-${process.pid}-${Date.now()}`;
   let counter = 0;
@@ -21,22 +23,46 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
       sourceShopifyOrderNumber: `#${ids.run}` } });
     await db.vendorAllocation.create({ data: { id: ids.allocation, sourceShopifyOrderId: ids.order,
       sourceShopifyOrderNumber: `#${ids.run}`, originalVendorId: ids.vendor, assignedVendorId: ids.vendor,
-      fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered' } });
+      outboundMethodSnapshot: 'KARGONOMI', fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered' } });
+    const executionId = `${ids.run}-shipment-execution`;
+    const sourceReference = `${ids.run}-shipment`;
+    await db.shipmentExecution.create({ data: {
+      id: executionId, allocationId: ids.allocation, vendorId: ids.vendor, provider: 'KARGONOMI',
+      providerShipmentId: sourceReference, shipmentStatus: 'DELIVERED', requestSnapshot: {},
+    } });
+    const observation = await recordDelivery({
+      allocationId: ids.allocation,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference },
+    }, db as never);
+    expect(observation).toMatchObject({
+      vendorAllocationId: ids.allocation, outboundMethod: 'KARGONOMI',
+      outboundIntegrationProvider: null, shipmentExecutionId: executionId, sourceReference,
+    });
+    expect(observation.firstObservedDeliveredAt).toBeInstanceOf(Date);
+    ids.observedAt = observation.firstObservedDeliveredAt.toISOString();
     await db.fulfillment.create({ data: { id: ids.fulfillment, vendorAllocationId: ids.allocation,
       fulfillmentStatus: 'Fulfilled', fulfilledAt: new Date('2026-08-01T00:00:00Z'),
       shipmentUpdatedAt: new Date('2026-08-01T00:00:00Z') } });
     await db.financeLedgerEntry.create({ data: { id: ids.ledger, vendorAllocationId: ids.allocation,
       vendorId: ids.vendor, entryType: 'sale', amount: '100.00', payoutStatus: 'APPROVED',
-      settlementStatus: 'PAYABLE', settlementEligibleAt: new Date('2026-08-01T00:00:00Z'),
+      settlementStatus: 'PAYABLE', settlementEligibleAt: observation.firstObservedDeliveredAt,
       commissionPercentSnapshot: '0.00', commissionVatPercentSnapshot: '0.00',
       settlementDelayDaysSnapshot: 0 } });
-    await db.settlementApproval.create({ data: { id: ids.approval, vendorId: ids.vendor,
+    const sale = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: ids.ledger }, include: { vendorAllocation: { include: { deliveredObservation: true } } },
+    });
+    expect(sale.vendorId).toBe(ids.vendor);
+    expect(sale.vendorAllocation?.assignedVendorId).toBe(ids.vendor);
+    expect(sale.settlementEligibleAt).toEqual(observation.firstObservedDeliveredAt);
+    expect(evaluateSaleSettlementDelay(sale).eligible).toBe(true);
+    const approval = await db.settlementApproval.create({ data: { id: ids.approval, vendorId: ids.vendor,
       status: 'APPROVED', currency: 'TRY', grossSalesMinor: 10000, refundTotalMinor: 0,
       commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 10000,
-      sourceSnapshotJson: {}, approvedBy: ids.admin, approvedAt: new Date('2026-08-02T00:00:00Z'),
+      sourceSnapshotJson: {}, approvedBy: ids.admin, approvedAt: new Date(),
       lines: { create: { id: ids.approvalLine, financeLedgerEntryId: ids.ledger,
         lineType: 'SALE', amountMinor: 10000, commissionMinor: 0, commissionVatMinor: 0,
         payableImpactMinor: 10000, sourceSnapshotJson: {} } } } });
+    expect(approval.approvedAt!.getTime()).toBeGreaterThanOrEqual(observation.firstObservedDeliveredAt.getTime());
     if (input.batch !== false) {
       await db.payoutBatch.create({ data: { id: ids.batch, vendorId: ids.vendor, status: 'DRAFT',
         grossAmount: '100.00', netAmount: '100.00', currency: 'TRY', createdByUserId: ids.admin,
@@ -44,6 +70,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
           settlementApprovalLineId: input.direct ? ids.approvalLine : null,
           amountSnapshot: '100.00' } } } });
     }
+    ids.paidAt = new Date().toISOString();
   }
 
   async function addSecondSettlement(sameApproval = false) {
@@ -51,7 +78,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
     const lineId = `${ids.run}-approval-line-2`;
     await db.financeLedgerEntry.create({ data: { id: ledgerId, vendorAllocationId: ids.allocation,
       vendorId: ids.vendor, entryType: 'sale', amount: '100.00', payoutStatus: 'APPROVED',
-      settlementStatus: 'PAYABLE', settlementEligibleAt: new Date('2026-08-01T00:00:00Z'),
+      settlementStatus: 'PAYABLE', settlementEligibleAt: new Date(ids.observedAt),
       commissionPercentSnapshot: '0.00', commissionVatPercentSnapshot: '0.00',
       settlementDelayDaysSnapshot: 0 } });
     if (sameApproval) {
@@ -63,7 +90,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
       await db.settlementApproval.create({ data: { id: `${ids.run}-approval-2`, vendorId: ids.vendor,
         status: 'APPROVED', currency: 'TRY', grossSalesMinor: 10000, refundTotalMinor: 0,
         commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 10000,
-        sourceSnapshotJson: {}, approvedBy: ids.admin, approvedAt: new Date('2026-08-02T00:00:00Z'),
+        sourceSnapshotJson: {}, approvedBy: ids.admin, approvedAt: new Date(),
         lines: { create: { id: lineId, financeLedgerEntryId: ledgerId,
           lineType: 'SALE', amountMinor: 10000, commissionMinor: 0, commissionVatMinor: 0,
           payableImpactMinor: 10000, sourceSnapshotJson: {} } } } });
@@ -84,6 +111,8 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
       await import('../backend/src/modules/finance/finance.service.js'));
     ({ cancelSettlementApproval: cancelApproval } =
       await import('../backend/src/modules/finance/settlement-approval.service.js'));
+    ({ recordVerifiedDeliveredObservation: recordDelivery } =
+      await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
     const run = `${runPrefix}-${++counter}`;
@@ -95,16 +124,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
 
   afterEach(async () => {
     if (!db) return;
-    await db.financeEvent.deleteMany({ where: { vendorId: ids.vendor } });
-    await db.payoutBatchLine.deleteMany({ where: { payoutBatch: { vendorId: ids.vendor } } });
-    await db.payoutBatch.deleteMany({ where: { vendorId: ids.vendor } });
-    await db.settlementApprovalLine.deleteMany({ where: { settlementApproval: { vendorId: ids.vendor } } });
-    await db.settlementApproval.deleteMany({ where: { vendorId: ids.vendor } });
-    await db.financeLedgerEntry.deleteMany({ where: { vendorId: ids.vendor } });
-    await db.fulfillment.deleteMany({ where: { id: ids.fulfillment } });
-    await db.vendorAllocation.deleteMany({ where: { id: ids.allocation } });
-    await db.shopifyOrder.deleteMany({ where: { id: ids.order } });
-    await db.vendor.deleteMany({ where: { id: ids.vendor } });
+    // Each test has a unique vendor; immutable observations and their parents remain until DB disposal.
     await db.$disconnect();
   });
 
@@ -113,14 +133,14 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
     expect((await review(ids.batch)).status).toBe('review');
     expect((await db.payoutBatchLine.findUniqueOrThrow({ where: { id: ids.batchLine } })).settlementApprovalLineId)
       .toBeNull();
-    expect((await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin)).status).toBe('paid');
+    expect((await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin)).status).toBe('paid');
     const events = await db.financeEvent.findMany({ where: { referenceId: ids.batch, eventType: 'PAYOUT_PAID' } });
     expect(events).toHaveLength(1);
     expect(events[0].idempotencyKey).toBe(`payout-batch:${ids.batch}:mark-paid:${ids.approvalLine}`);
     expect((events[0].metadataJson as Record<string, unknown>).settlementApprovalLineId).toBe(ids.approvalLine);
     expect((await db.payoutBatchLine.findUniqueOrThrow({ where: { id: ids.batchLine } })).settlementApprovalLineId)
       .toBeNull();
-    await expect(paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin))
+    await expect(paid(ids.batch, { paidAt: ids.paidAt }, ids.admin))
       .rejects.toThrow('already paid');
     expect(await db.financeEvent.count({ where: { referenceId: ids.batch, eventType: 'PAYOUT_PAID' } })).toBe(1);
   });
@@ -128,7 +148,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
   it('does not cancel a settlement backing a paid legacy payout', async () => {
     await seed();
     await review(ids.batch);
-    await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin);
+    await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin);
     const payoutBefore = await db.payoutBatch.findUniqueOrThrow({ where: { id: ids.batch } });
     const ledgerBefore = await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: ids.ledger } });
     await expect(cancelApproval(ids.approval, ids.admin)).rejects.toThrow('paid payout batch');
@@ -143,7 +163,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
   it('keeps the existing direct-linked PAID cancellation protection', async () => {
     await seed({ direct: true });
     await review(ids.batch);
-    await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin);
+    await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin);
     await expect(cancelApproval(ids.approval, ids.admin)).rejects.toThrow('paid payout batch');
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.approval } })).status)
       .toBe('APPROVED');
@@ -171,7 +191,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
   it('fails closed if a PAID legacy ledger gains ambiguous settlement lineage', async () => {
     await seed();
     await review(ids.batch);
-    await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin);
+    await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin);
     await db.settlementApproval.create({ data: { id: `${ids.run}-ambiguous-approval`, vendorId: ids.vendor,
       status: 'CANCELLED', currency: 'TRY', grossSalesMinor: 10000, refundTotalMinor: 0,
       commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 10000, sourceSnapshotJson: {},
@@ -185,7 +205,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
   it('does not derive a second settlement from a modern payout direct link', async () => {
     await seed({ direct: true });
     await review(ids.batch);
-    await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin);
+    await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin);
     await db.settlementApproval.create({ data: { id: `${ids.run}-other-approval`, vendorId: ids.vendor,
       status: 'APPROVED', currency: 'TRY', grossSalesMinor: 10000, refundTotalMinor: 0,
       commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 10000, sourceSnapshotJson: {},
@@ -199,7 +219,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
   it('allows cancellation of an unrelated settlement while a legacy payout is PAID', async () => {
     await seed();
     await review(ids.batch);
-    await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin);
+    await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin);
     await addSecondSettlement();
     expect((await cancelApproval(`${ids.run}-approval-2`, ids.admin)).status).toBe('cancelled');
     expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: ids.batch } })).status).toBe('PAID');
@@ -208,7 +228,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
   it('fails closed when a paid legacy line no longer matches its frozen settlement amount', async () => {
     await seed();
     await review(ids.batch);
-    await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin);
+    await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin);
     await db.payoutBatchLine.update({ where: { id: ids.batchLine }, data: { amountSnapshot: '99.00' } });
     await expect(cancelApproval(ids.approval, ids.admin)).rejects.toThrow('lineage is inconsistent');
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: ids.approval } })).status)
@@ -222,7 +242,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
       financeLedgerEntryId: second.ledgerId, settlementApprovalLineId: null,
       amountSnapshot: '100.00' } });
     await review(ids.batch);
-    await paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin);
+    await paid(ids.batch, { paidAt: ids.paidAt }, ids.admin);
     await expect(cancelApproval(ids.approval, ids.admin)).rejects.toThrow('paid payout batch');
     await expect(cancelApproval(`${ids.run}-approval-2`, ids.admin)).rejects.toThrow('paid payout batch');
   });
@@ -231,7 +251,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
     await seed();
     await review(ids.batch);
     const results = await Promise.allSettled([
-      paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin),
+      paid(ids.batch, { paidAt: ids.paidAt }, ids.admin),
       cancelApproval(ids.approval, ids.admin),
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
@@ -247,7 +267,7 @@ describeWithPostgres('FIN-BUG-009 legacy payout lineage with isolated PostgreSQL
     await review(ids.batch);
     const results = await Promise.allSettled([
       cancelApproval(ids.approval, ids.admin),
-      paid(ids.batch, { paidAt: '2026-09-01T00:00:00Z' }, ids.admin),
+      paid(ids.batch, { paidAt: ids.paidAt }, ids.admin),
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const payout = await db.payoutBatch.findUniqueOrThrow({ where: { id: ids.batch } });

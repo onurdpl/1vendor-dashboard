@@ -2573,8 +2573,23 @@ export async function cancelSettlementApproval(
   id: string,
   cancelledBy: string | null,
 ): Promise<SettlementApprovalDto> {
+  // This read locates the vendor lock; it is not cancellation authority.
+  const locator = await prisma.settlementApproval.findUnique({
+    where: { id },
+    select: { vendorId: true },
+  });
+  if (!locator) {
+    throw new Error('Settlement approval could not be found.');
+  }
   return prisma.$transaction(
     async (tx) => {
+      // Preserve the vendor-first lock order used by settlement creation.
+      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "Vendor" WHERE "id" = ${locator.vendorId} FOR UPDATE
+      `);
+      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "SettlementApproval" WHERE "id" = ${id} FOR UPDATE
+      `);
       const existing = await tx.settlementApproval.findUnique({
         where: {
           id,
@@ -2598,13 +2613,13 @@ export async function cancelSettlementApproval(
       if (!existing) {
         throw new Error('Settlement approval could not be found.');
       }
+      if (existing.vendorId !== locator.vendorId) {
+        throw new Error('Settlement approval vendor changed during cancellation.');
+      }
       if (existing.status === SettlementApprovalStatus.CANCELLED) {
         throw new Error('Settlement approval is already cancelled.');
       }
-      // Serialize cancellation with approved-settlement deduction Apply and payout preparation.
-      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT "id" FROM "Vendor" WHERE "id" = ${existing.vendorId} FOR UPDATE
-      `);
+      // All cancellation guards and cancelledFromStatus use this locked read.
       const activeDeductionCoverage = await tx.financialCorrectionApprovedDeductionCoverage.findFirst({
         where: { settlementApprovalId: id, status: 'ACTIVE' }, select: { id: true },
       });
@@ -2707,6 +2722,7 @@ export async function cancelSettlementApproval(
           status: SettlementApprovalStatus.CANCELLED,
           cancelledBy,
           cancelledAt: new Date(),
+          cancelledFromStatus: existing.status,
         },
         include: {
           lines: true,
