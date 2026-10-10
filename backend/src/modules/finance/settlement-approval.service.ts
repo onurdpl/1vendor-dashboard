@@ -91,6 +91,14 @@ type SettlementApprovalInput = {
   selectedAllocationIds?: string[];
 };
 
+type SettlementReplacementAudit = {
+  originalSettlementApprovalId: string;
+  requestId: string;
+  requestedBy: string;
+  reason: string;
+  requestedAt: Date;
+};
+
 type CandidateScope = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
 
 type CandidateSelectionSummaryDto = {
@@ -2242,10 +2250,36 @@ export async function createDraftApproval(
   input: SettlementApprovalInput,
 ): Promise<SettlementApprovalDto> {
   assertScheduledDraftMetadata(input);
-  return prisma.$transaction(
-    async (tx) => {
+  return prisma.$transaction((tx) => createDraftApprovalInTransaction(input, tx), {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  });
+}
+
+/** Only the guarded internal replacement writer may call this with its locked Serializable transaction. */
+export async function createReplacementDraftApprovalInTransaction(
+  input: SettlementApprovalInput,
+  audit: SettlementReplacementAudit,
+  tx: SettlementApprovalTransaction,
+): Promise<SettlementApprovalDto> {
+  if (input.scheduledRunDate != null || input.scheduledPeriodEnd != null || input.scheduledCycleKey != null ||
+      input.periodStart != null || !input.periodEnd || input.asOfDate?.getTime() !== input.periodEnd.getTime() ||
+      input.candidateScope !== 'date_range') {
+    throw new Error('Replacement draft requires its original frozen date-range cutoff and separate predecessor identity.');
+  }
+  if (!audit.originalSettlementApprovalId || !audit.requestId || !audit.requestedBy ||
+      !audit.reason.trim() || Number.isNaN(audit.requestedAt.getTime())) {
+    throw new Error('Replacement draft requires complete audit evidence.');
+  }
+  return createDraftApprovalInTransaction(input, tx, audit);
+}
+
+async function createDraftApprovalInTransaction(
+  input: SettlementApprovalInput,
+  tx: SettlementApprovalTransaction,
+  replacementAudit?: SettlementReplacementAudit,
+): Promise<SettlementApprovalDto> {
       // Serialize draft snapshots with before-settlement credit authorization for this vendor.
-      // This is deliberately the first database operation in the Serializable transaction.
+      // Normal drafts lock first; the replacement writer already locked this same vendor first.
       await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
       `);
@@ -2341,6 +2375,11 @@ export async function createDraftApproval(
           scheduledRunDate: input.scheduledRunDate ?? null,
           scheduledPeriodEnd: input.scheduledPeriodEnd ?? null,
           scheduledCycleKey: input.scheduledCycleKey ?? null,
+          replacesSettlementApprovalId: replacementAudit?.originalSettlementApprovalId ?? null,
+          replacementRequestId: replacementAudit?.requestId ?? null,
+          replacementRequestedBy: replacementAudit?.requestedBy ?? null,
+          replacementReason: replacementAudit?.reason ?? null,
+          replacementRequestedAt: replacementAudit?.requestedAt ?? null,
           status: SettlementApprovalStatus.DRAFT,
           currency: 'TRY',
           grossSalesMinor: settlementTotals.grossSalesMinor,
@@ -2492,11 +2531,6 @@ export async function createDraftApproval(
       });
 
       return mapApproval(refreshedApproval ?? approval, true);
-    },
-    {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    },
-  );
 }
 
 export async function approveSettlementApproval(

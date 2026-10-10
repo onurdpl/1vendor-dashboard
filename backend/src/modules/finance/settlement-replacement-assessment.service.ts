@@ -54,8 +54,8 @@ function source(line: { financeLedgerEntryId: string; lineType: string; amountMi
 export async function assessCancelledScheduledSettlementReplacement(input: {
   originalSettlementApprovalId: string;
   vendorId: string;
-}): Promise<SettlementReplacementAssessment> {
-  return prisma.$transaction(async (tx) => {
+}, transactionClient?: Prisma.TransactionClient): Promise<SettlementReplacementAssessment> {
+  const assess = async (tx: Prisma.TransactionClient): Promise<SettlementReplacementAssessment> => {
     const blockers: Finding[] = [];
     const unknowns: Finding[] = [];
     const original = await tx.settlementApproval.findUnique({
@@ -241,5 +241,8 @@ export async function assessCancelledScheduledSettlementReplacement(input: {
       }
     }
     return finish();
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  };
+  return transactionClient
+    ? assess(transactionClient)
+    : prisma.$transaction(assess, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }

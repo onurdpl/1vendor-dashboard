@@ -13,6 +13,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
   let job: typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js');
   let approval: typeof import('../backend/src/modules/finance/settlement-approval.service.js');
   let replacement: typeof import('../backend/src/modules/finance/settlement-replacement-assessment.service.js');
+  let replacementWriter: typeof import('../backend/src/modules/finance/settlement-replacement-writer.service.js');
   let ingestRefund: typeof import('../backend/src/modules/shopify/refund-ingestion.service.js')['ingestVerifiedShopifyRefund'];
   let normalizeRefundEvidence: typeof import('../backend/src/modules/finance/refund-evidence-normalizer.service.js')['normalizeRefundEvidence'];
   let previewCorrection: typeof import('../backend/src/modules/finance/financial-correction-preview.service.js')['previewTerminalFinancialCorrection'];
@@ -41,7 +42,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(identity.name).toBe(databaseName);
     expect(identity.owner).toBe(target.username);
     expect(identity.port).toBe(Number(target.port));
-    [schedule, job, approval, replacement, { recordVerifiedDeliveredObservation: recordDelivery },
+    [schedule, job, approval, replacement, replacementWriter, { recordVerifiedDeliveredObservation: recordDelivery },
       { ingestVerifiedShopifyRefund: ingestRefund }, { normalizeRefundEvidence },
       { previewTerminalFinancialCorrection: previewCorrection },
       { applyBeforeSettlementFinancialCorrectionCredit: applyCredit },
@@ -50,6 +51,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       import('../backend/src/modules/finance/settlement-schedule-job.service.js'),
       import('../backend/src/modules/finance/settlement-approval.service.js'),
       import('../backend/src/modules/finance/settlement-replacement-assessment.service.js'),
+      import('../backend/src/modules/finance/settlement-replacement-writer.service.js'),
       import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'),
       import('../backend/src/modules/shopify/refund-ingestion.service.js'),
       import('../backend/src/modules/finance/refund-evidence-normalizer.service.js'),
@@ -316,6 +318,16 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     return { approvals, lines, ledgers, adjustments, applications, corrections, balanceEvents, payouts };
   }
 
+  async function replacementRequest(f: Awaited<ReturnType<typeof cancelledFixture>>, suffix: string) {
+    const adminUserId = `${f.vendorId}-replacement-admin`;
+    await db.user.upsert({ where: { id: adminUserId }, update: {}, create: {
+      id: adminUserId, email: `${adminUserId}@example.test`, name: 'Replacement test Admin',
+      role: 'ADMIN', passwordHash: 'test-only',
+    } });
+    return { originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+      requestId: `${f.vendorId}-${suffix}`, adminUserId, reason: 'Rebuild cancelled draft with verified sources' };
+  }
+
   it('2A: assesses a cancelled originally-DRAFT cycle at its frozen cutoff without writes', async () => {
     const f = await cancelledFixture();
     const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId }, include: { lines: true } });
@@ -466,6 +478,11 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(result.safeForAdminConsideration).toBe(false);
     expect(await db.financialCorrectionAuthority.findUniqueOrThrow({ where: { id: authorityBefore.id } }))
       .toEqual(authorityBefore);
+    const request = await replacementRequest(f, `${direction}-blocked`);
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'BLOCKED', blockers: expect.arrayContaining([
+        expect.objectContaining({ code: expectedCode }),
+      ]) } });
     expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
   });
 
@@ -495,6 +512,12 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'PENDING_REFUND_ADJUSTMENT', sourceId: adjustment.id }));
     expect(result.sourceComparison.current.map((item) => item.financeLedgerEntryId)).not.toContain(evidence.refundFinanceLedgerEntryId);
     expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).toEqual(before);
+    const request = await replacementRequest(f, 'partial-adjustment-blocked');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'BLOCKED', blockers: expect.arrayContaining([
+        expect.objectContaining({ code: 'PENDING_REFUND_ADJUSTMENT', sourceId: adjustment.id }),
+      ]) } });
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).toEqual(before);
   });
 
   it('2A: a real post-approval refund creates a PENDING obligation that the old T cannot absorb', async () => {
@@ -517,6 +540,12 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'PENDING_REFUND_ADJUSTMENT', sourceId: pending.id }));
     expect(result.pendingAdjustments).toContainEqual(expect.objectContaining({ id: pending.id,
       refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId, status: 'PENDING', remainingAmountMinor: 1760 }));
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: pending.id } })).toEqual(before);
+    const request = await replacementRequest(f, 'pending-adjustment-blocked');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'BLOCKED', blockers: expect.arrayContaining([
+        expect.objectContaining({ code: 'PENDING_REFUND_ADJUSTMENT', sourceId: pending.id }),
+      ]) } });
     expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: pending.id } })).toEqual(before);
   });
 
@@ -573,6 +602,206 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     });
     expect(result.outcome).toBe('UNKNOWN');
     expect(result.unknowns.map((item) => item.code)).toContain('ORIGINAL_SOURCE_EVIDENCE_MISSING');
+  });
+
+  it('2B: creates one internally guarded DRAFT with B1 lineage and preserves the original history', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'create');
+    const originalBefore = await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId },
+      include: { lines: true } });
+    const jobBefore = await db.settlementScheduleJobRun.create({ data: { runDate: f.runDate,
+      status: 'COMPLETED', writesPerformed: true, createdDraftCount: 1,
+      metadataJson: { syntheticOriginalCycle: f.cycleKey },
+    } });
+    const assessed = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(assessed.outcome).toBe('ELIGIBLE');
+    const result = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    expect(result).toMatchObject({ outcome: 'CREATED', writesPerformed: true, status: 'DRAFT',
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId, requestId: request.requestId });
+    const persisted = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: result.replacementSettlementApprovalId }, include: { lines: true },
+    });
+    expect(persisted).toMatchObject({ status: 'DRAFT', vendorId: f.vendorId,
+      replacesSettlementApprovalId: f.originalId, replacementRequestId: request.requestId,
+      replacementRequestedBy: request.adminUserId, replacementReason: request.reason,
+      scheduledCycleKey: null, scheduledRunDate: null, scheduledPeriodEnd: null,
+      periodEnd: f.periodEnd, grossSalesMinor: originalBefore.grossSalesMinor,
+      netPayableMinor: originalBefore.netPayableMinor });
+    expect(persisted.replacementRequestedAt).toBeInstanceOf(Date);
+    expect(persisted.id).not.toBe(f.originalId);
+    expect(persisted.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(persisted.lines.map((line) => line.payableImpactMinor))
+      .toEqual(originalBefore.lines.map((line) => line.payableImpactMinor));
+    expect((persisted.sourceSnapshotJson as Record<string, unknown>).asOfDate).toBe(f.periodEnd.toISOString());
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId },
+      include: { lines: true } })).toEqual(originalBefore);
+    expect(await db.settlementScheduleJobRun.findUniqueOrThrow({ where: { id: jobBefore.id } })).toEqual(jobBefore);
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(1);
+  });
+
+  it('2B: exact request replay is idempotent, while changed identity or audit evidence is rejected', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'replay');
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    const replayed = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    expect(replayed).toMatchObject({ outcome: 'REPLAYED', writesPerformed: false,
+      replacementSettlementApprovalId: created.replacementSettlementApprovalId, status: 'DRAFT' });
+    await expect(replacementWriter.createControlledSettlementReplacementDraft({ ...request,
+      requestId: `${request.requestId}-other` })).rejects.toThrow('already has a replacement claim');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft({ ...request,
+      adminUserId: `${request.adminUserId}-other` })).rejects.toThrow('active Admin actor');
+    const otherAdminId = `${request.adminUserId}-other`;
+    await db.user.create({ data: { id: otherAdminId, email: `${otherAdminId}@example.test`,
+      name: 'Other Admin', role: 'ADMIN', passwordHash: 'test-only' } });
+    const vendorActorId = `${request.adminUserId}-vendor`;
+    await db.user.create({ data: { id: vendorActorId, email: `${vendorActorId}@example.test`,
+      name: 'Vendor actor', role: 'VENDOR', passwordHash: 'test-only' } });
+    await expect(replacementWriter.createControlledSettlementReplacementDraft({ ...request,
+      requestId: `${request.requestId}-vendor`, adminUserId: vendorActorId }))
+      .rejects.toThrow('active Admin actor');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft({ ...request,
+      adminUserId: otherAdminId })).rejects.toThrow('already bound to different authority');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft({ ...request,
+      reason: 'Different reason' })).rejects.toThrow('already bound to different authority');
+    const another = await cancelledFixture();
+    await expect(replacementWriter.createControlledSettlementReplacementDraft({ ...request,
+      originalSettlementApprovalId: another.originalId })).rejects.toThrow('already bound to different authority');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft({ ...request,
+      vendorId: another.vendorId })).rejects.toThrow('already bound to different authority');
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(1);
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: another.originalId } })).toBe(0);
+  });
+
+  it('2B: concurrent different requests cannot create two replacements or double-claim a source', async () => {
+    const f = await cancelledFixture();
+    const first = await replacementRequest(f, 'race-one');
+    const second = { ...first, requestId: `${f.vendorId}-race-two` };
+    const outcomes = await Promise.allSettled([
+      replacementWriter.createControlledSettlementReplacementDraft(first),
+      replacementWriter.createControlledSettlementReplacementDraft(second),
+    ]);
+    expect(outcomes.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((item) => item.status === 'rejected')).toHaveLength(1);
+    const replacements = await db.settlementApproval.findMany({ where: { replacesSettlementApprovalId: f.originalId },
+      include: { lines: true } });
+    expect(replacements).toHaveLength(1);
+    expect(replacements[0].lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: f.ledgerId,
+      settlementApproval: { status: 'DRAFT' } } })).toBe(1);
+  });
+
+  it('2B: rejects stale eligibility after another DRAFT claims the released source', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'stale-source');
+    const earlier = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(earlier.outcome).toBe('ELIGIBLE');
+    const manual = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(manual.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ name: 'SettlementReplacementNotEligibleError',
+        assessment: { outcome: 'BLOCKED', blockers: expect.arrayContaining([
+          expect.objectContaining({ code: 'ACTIVE_SOURCE_CLAIM', sourceId: f.ledgerId }),
+        ]) } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
+    expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: f.ledgerId,
+      settlementApproval: { status: 'DRAFT' } } })).toBe(1);
+  });
+
+  it('2B: invoice and payout-linked original history remains a hard blocker', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'linked-history');
+    const original = await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId },
+      include: { lines: true } });
+    const invoice = await db.settlementCommissionInvoice.create({ data: {
+      settlementApprovalId: f.originalId, vendorId: f.vendorId, provider: 'LOGO_ISBASI', status: 'PENDING',
+    } });
+    const payout = await db.payoutBatch.create({ data: { vendorId: f.vendorId } });
+    const payoutLine = await db.payoutBatchLine.create({ data: {
+      payoutBatchId: payout.id, financeLedgerEntryId: f.ledgerId,
+      settlementApprovalLineId: original.lines[0].id, amountSnapshot: '176.00',
+    } });
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'BLOCKED', blockers: expect.arrayContaining([
+        expect.objectContaining({ code: 'ORIGINAL_FINANCIAL_LINKS' }),
+        expect.objectContaining({ code: 'ORIGINAL_PAYOUT_LINK' }),
+      ]) } });
+    expect(await db.settlementCommissionInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({
+      settlementApprovalId: f.originalId, status: 'PENDING',
+    });
+    expect(await db.payoutBatchLine.findUniqueOrThrow({ where: { id: payoutLine.id } })).toMatchObject({
+      settlementApprovalLineId: original.lines[0].id,
+    });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
+  });
+
+  it('2B: rejects approved-origin and legacy unknown cancellation provenance', async () => {
+    const approvedOrigin = await cancelledFixture();
+    const approvedRequest = await replacementRequest(approvedOrigin, 'approved-origin');
+    await db.settlementApproval.update({ where: { id: approvedOrigin.originalId },
+      data: { cancelledFromStatus: 'APPROVED' } });
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(approvedRequest))
+      .rejects.toMatchObject({ assessment: { outcome: 'BLOCKED', blockers: expect.arrayContaining([
+        expect.objectContaining({ code: 'NOT_ORIGINALLY_DRAFT' }),
+      ]) } });
+    const legacy = await cancelledFixture();
+    const legacyRequest = await replacementRequest(legacy, 'legacy-origin');
+    await db.settlementApproval.update({ where: { id: legacy.originalId },
+      data: { cancelledFromStatus: null } });
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(legacyRequest))
+      .rejects.toMatchObject({ assessment: { outcome: 'UNKNOWN', unknowns: expect.arrayContaining([
+        expect.objectContaining({ code: 'CANCELLATION_PROVENANCE_MISSING' }),
+      ]) } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: {
+      in: [approvedOrigin.originalId, legacy.originalId],
+    } } })).toBe(0);
+  });
+
+  it('2B: post-cutoff accepted refund with unknown later route cannot create a replacement', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'late-refund');
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'writer-late', '10.00');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'UNKNOWN', unknowns: expect.arrayContaining([
+        expect.objectContaining({ code: 'LATE_REFUND_ROUTE_UNVERIFIED', sourceId: evidence.refundFinanceLedgerEntryId }),
+      ]) } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
+    expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: { id: evidence.id } })).toEqual(evidence);
+  });
+
+  it('2B: a line-write failure rolls back the replacement header, audit and source claim', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'rollback');
+    const originalBefore = await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId },
+      include: { lines: true } });
+    await db.$executeRawUnsafe(`CREATE FUNCTION fin_bug_002_replacement_line_failure() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        IF EXISTS (SELECT 1 FROM "SettlementApproval" WHERE "id" = NEW."settlementApprovalId"
+          AND "replacesSettlementApprovalId" IS NOT NULL) THEN
+          RAISE EXCEPTION 'TEST_REPLACEMENT_LINE_FAILURE';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await db.$executeRawUnsafe(`CREATE TRIGGER fin_bug_002_replacement_line_failure
+      BEFORE INSERT ON "SettlementApprovalLine" FOR EACH ROW
+      EXECUTE FUNCTION fin_bug_002_replacement_line_failure()`);
+    try {
+      await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+        .rejects.toThrow('TEST_REPLACEMENT_LINE_FAILURE');
+    } finally {
+      await db.$executeRawUnsafe('DROP TRIGGER fin_bug_002_replacement_line_failure ON "SettlementApprovalLine"');
+      await db.$executeRawUnsafe('DROP FUNCTION fin_bug_002_replacement_line_failure()');
+    }
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
+    expect(await db.settlementApproval.findUnique({ where: { replacementRequestId: request.requestId } })).toBeNull();
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId },
+      include: { lines: true } })).toEqual(originalBefore);
+    expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: f.ledgerId,
+      settlementApproval: { status: 'DRAFT' } } })).toBe(0);
   });
 
   it('CHARACTERIZATION: cancellation preserves S1 and source history, but READY cannot reuse its key', async () => {
@@ -773,6 +1002,13 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     });
     expect(assessment.outcome).toBe('BLOCKED');
     expect(assessment.blockers.map((item) => item.code)).toContain('NOT_ORIGINALLY_DRAFT');
+    const request = await replacementRequest({ ...f, originalId }, 'approved-history');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'BLOCKED', blockers: expect.arrayContaining([
+        expect.objectContaining({ code: 'NOT_ORIGINALLY_DRAFT' }),
+        expect.objectContaining({ code: 'ORIGINAL_APPROVAL_HISTORY' }),
+      ]) } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: originalId } })).toBe(0);
   });
 
   it('rolls back cancellation audit when approval wins a Serializable race', async () => {
