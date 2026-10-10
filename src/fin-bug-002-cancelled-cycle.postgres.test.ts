@@ -12,6 +12,12 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
   let schedule: typeof import('../backend/src/modules/finance/settlement-schedule.service.js');
   let job: typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js');
   let approval: typeof import('../backend/src/modules/finance/settlement-approval.service.js');
+  let replacement: typeof import('../backend/src/modules/finance/settlement-replacement-assessment.service.js');
+  let ingestRefund: typeof import('../backend/src/modules/shopify/refund-ingestion.service.js')['ingestVerifiedShopifyRefund'];
+  let normalizeRefundEvidence: typeof import('../backend/src/modules/finance/refund-evidence-normalizer.service.js')['normalizeRefundEvidence'];
+  let previewCorrection: typeof import('../backend/src/modules/finance/financial-correction-preview.service.js')['previewTerminalFinancialCorrection'];
+  let applyCredit: typeof import('../backend/src/modules/finance/financial-correction-before-settlement-credit.service.js')['applyBeforeSettlementFinancialCorrectionCredit'];
+  let applyDeduction: typeof import('../backend/src/modules/finance/financial-correction-before-settlement-deduction.service.js')['applyBeforeSettlementFinancialCorrectionDeduction'];
   let recordDelivery: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
   const root = `finbug002-${process.pid}-${Date.now()}`;
   let sequence = 0;
@@ -35,11 +41,21 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(identity.name).toBe(databaseName);
     expect(identity.owner).toBe(target.username);
     expect(identity.port).toBe(Number(target.port));
-    [schedule, job, approval, { recordVerifiedDeliveredObservation: recordDelivery }] = await Promise.all([
+    [schedule, job, approval, replacement, { recordVerifiedDeliveredObservation: recordDelivery },
+      { ingestVerifiedShopifyRefund: ingestRefund }, { normalizeRefundEvidence },
+      { previewTerminalFinancialCorrection: previewCorrection },
+      { applyBeforeSettlementFinancialCorrectionCredit: applyCredit },
+      { applyBeforeSettlementFinancialCorrectionDeduction: applyDeduction }] = await Promise.all([
       import('../backend/src/modules/finance/settlement-schedule.service.js'),
       import('../backend/src/modules/finance/settlement-schedule-job.service.js'),
       import('../backend/src/modules/finance/settlement-approval.service.js'),
+      import('../backend/src/modules/finance/settlement-replacement-assessment.service.js'),
       import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'),
+      import('../backend/src/modules/shopify/refund-ingestion.service.js'),
+      import('../backend/src/modules/finance/refund-evidence-normalizer.service.js'),
+      import('../backend/src/modules/finance/financial-correction-preview.service.js'),
+      import('../backend/src/modules/finance/financial-correction-before-settlement-credit.service.js'),
+      import('../backend/src/modules/finance/financial-correction-before-settlement-deduction.service.js'),
     ]);
   });
 
@@ -111,7 +127,9 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const periodEnd = new Date(runDate.getTime() + dayMs - 1);
     const cycleKey = `scheduled-settlement:${vendorId}:${runDateKey}`;
     expect(observedAt.getTime()).toBeLessThanOrEqual(periodEnd.getTime());
-    expect(runDate.getTime()).toBeGreaterThan(Date.now());
+    // Another fixture may be created while this suite models a later run date.
+    // The authoritative delivery observation, not that simulated clock, anchors eligibility.
+    expect(runDate.getTime()).toBeGreaterThan(observedAt.getTime());
     return { vendorId, allocationId, ledgerId, observedAt, runDate, runDateKey, periodEnd, cycleKey };
   }
 
@@ -149,6 +167,413 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     }
     expect(observed).toBeGreaterThanOrEqual(count);
   }
+
+  async function cancelledFixture() {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const created = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    expect(created.summary.created).toBe(1);
+    const originalId = created.createdDrafts[0].settlementApprovalId;
+    await approval.cancelSettlementApproval(originalId, `${f.vendorId}-admin`);
+    return { ...f, originalId };
+  }
+
+  async function ingestAcceptedTestRefund(f: Awaited<ReturnType<typeof cancelledFixture>>, suffix: string,
+    amount: string, lineAmount = amount) {
+    const order = await db.shopifyOrder.findUniqueOrThrow({ where: { id: f.allocationId.replace(/-allocation$/, '-order') } });
+    const lineId = `${f.allocationId}-line`;
+    await db.shopifyOrderLineItem.upsert({ where: { shopifyOrderId_sourceLineItemId: {
+      shopifyOrderId: order.id, sourceLineItemId: lineId,
+    } }, update: {}, create: { id: lineId, shopifyOrderId: order.id, sourceLineItemId: lineId,
+      sku: `${f.allocationId}-sku`, quantity: 2, unitPrice: '100.00' } });
+    await db.vendorAllocationLineItem.upsert({ where: { vendorAllocationId_shopifyLineItemId: {
+      vendorAllocationId: f.allocationId, shopifyLineItemId: lineId,
+    } }, update: {}, create: { vendorAllocationId: f.allocationId, shopifyLineItemId: lineId,
+      quantity: 2, lineAmount: '200.00' } });
+    const refundId = `gid://shopify/Refund/${f.allocationId}-${suffix}`;
+    const refundLineId = `${f.allocationId}-${suffix}-refund-line`;
+    const transactionGid = `gid://shopify/OrderTransaction/${f.allocationId}-${suffix}`;
+    const result = await db.$transaction((tx) => ingestRefund({
+      transactionClient: tx,
+      payload: { id: refundId, order_id: order.sourceShopifyOrderId,
+        refund_line_items: [{ id: refundLineId, line_item_id: lineId, quantity: 1, subtotal: lineAmount,
+          line_item: { id: lineId, sku: `${f.allocationId}-sku`, title: 'Synthetic test line' } }] },
+      monetaryEvidence: { sourceShopifyRefundId: refundId, classification: 'MONETARY_REFUND',
+        monetaryRefundAmount: amount, currency: 'TRY', reasonCode: 'monetary_refund_verified', sanitizedWarnings: [],
+        selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS', amount, currency: 'TRY' }] },
+      canonicalEvidence: { evidenceSource: 'mock', sourceShopifyRefundId: refundId,
+        sourceShopifyOrderId: order.sourceShopifyOrderId, monetaryClassification: 'MONETARY_REFUND',
+        refundTotalAmount: amount, refundCurrency: 'TRY',
+        selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS', amount, currency: 'TRY' }],
+        lines: [{ sourceRefundLineItemId: refundLineId, sourceLineItemId: lineId,
+          sku: `${f.allocationId}-sku`, quantity: 1, quantityProvenance: 'OBSERVED_VALID',
+          subtotalAmount: lineAmount, subtotalAmountProvenance: 'OBSERVED', subtotalCurrency: 'TRY' }] },
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED', targetVendorAllocationId: f.allocationId,
+    }));
+    expect(result).toMatchObject({ ok: true, processingStatus: 'processed', refundAllocationCount: 1 });
+    const evidence = await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: {
+      sourceShopifyRefundId_vendorAllocationId: { sourceShopifyRefundId: refundId, vendorAllocationId: f.allocationId },
+    } });
+    expect(evidence).toMatchObject({ historicalEconomicVendorId: f.vendorId,
+      historicalSaleFinanceLedgerEntryId: f.ledgerId, evidenceSource: 'mock' });
+    // PostgreSQL's default now() is not controlled by Vitest's simulated post-cutoff
+    // application clock. Align this synthetic ledger creation time with the event
+    // time persisted by the real ingestion service; do not edit accepted evidence.
+    await db.financeLedgerEntry.update({ where: { id: evidence.refundFinanceLedgerEntryId },
+      data: { createdAt: evidence.capturedAt } });
+    expect(await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: evidence.refundFinanceLedgerEntryId } }))
+      .toMatchObject({ vendorId: f.vendorId, vendorAllocationId: f.allocationId,
+        entryType: 'refund', createdAt: evidence.capturedAt });
+    return evidence;
+  }
+
+  async function applyCorrectionFromAcceptedEvidence(f: Awaited<ReturnType<typeof cancelledFixture>>,
+    evidence: Awaited<ReturnType<typeof ingestAcceptedTestRefund>>, acceptedAmount: string,
+    incomingLineAmount: string, direction: 'credit' | 'deduction', suffix: string) {
+    const id = `${f.vendorId}-${direction}-correction`;
+    const actorUserId = `${id}-admin`;
+    await db.user.create({ data: { id: actorUserId, email: `${id}@example.test`, name: 'Synthetic finance admin',
+      role: 'ADMIN', passwordHash: 'test-only' } });
+    const incoming = normalizeRefundEvidence({
+      sourceShopifyRefundId: evidence.sourceShopifyRefundId,
+      sourceShopifyOrderId: evidence.sourceShopifyOrderId,
+      vendorAllocationId: f.allocationId, monetaryClassification: 'MONETARY_REFUND',
+      refundTotalAmount: acceptedAmount, currency: 'TRY',
+      transactions: [{ transactionGid: `gid://shopify/OrderTransaction/${f.allocationId}-${suffix}`,
+        kind: 'REFUND', status: 'SUCCESS', amount: acceptedAmount, currency: 'TRY' }],
+      refundLines: [{ sourceLineItemId: `${f.allocationId}-line`, quantity: 1,
+        subtotalAmount: incomingLineAmount, currency: 'TRY' }],
+      historicalEconomicVendorId: f.vendorId, historicalSaleFinanceLedgerEntryId: f.ledgerId,
+      supersededSaleLedgerIds: [],
+    });
+    await db.refundTerminalEvidenceReview.create({ data: {
+      id, sourceShopifyRefundId: evidence.sourceShopifyRefundId,
+      sourceShopifyOrderId: evidence.sourceShopifyOrderId,
+      vendorAllocationId: f.allocationId, terminalRefundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+      refundRecordId: evidence.refundRecordId, economicVendorId: f.vendorId, storedEvidenceSnapshotId: evidence.id,
+      dedupeKey: `${id}-dedupe`, conflictCategory: 'financial_evidence_conflict',
+      storedEvidenceHash: evidence.evidenceHash, incomingEvidenceHash: incoming.evidenceHash,
+      conflictSummaryJson: {}, status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED',
+    } });
+    await db.refundTerminalConflictEvidence.create({ data: {
+      id: `${id}-incoming`, reviewId: id, sourceShopifyRefundId: evidence.sourceShopifyRefundId,
+      sourceShopifyOrderId: evidence.sourceShopifyOrderId, vendorAllocationId: f.allocationId,
+      economicVendorId: f.vendorId, historicalSaleFinanceLedgerEntryId: f.ledgerId,
+      supersededSaleLedgerIdsJson: [], refundTotalAmount: acceptedAmount, currency: 'TRY',
+      normalizedEvidenceJson: incoming.normalizedEvidenceJson, evidenceHash: incoming.evidenceHash,
+      hashAlgorithm: incoming.hashAlgorithm, evidenceVersion: incoming.evidenceVersion,
+      normalizationVersion: incoming.normalizationVersion,
+    } });
+    await db.refundTerminalEvidenceReviewEvent.create({ data: { id: `${id}-resolved`, reviewId: id,
+      eventType: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED', actorUserId } });
+    const preview = await previewCorrection(id, db as never);
+    const applied = direction === 'credit'
+      ? await applyCredit({ reviewId: id, previewFingerprint: preview.previewFingerprint, actorUserId,
+        reason: 'Synthetic corrected refund evidence' }, db as never)
+      : await applyDeduction({ reviewId: id, previewFingerprint: preview.previewFingerprint, actorUserId,
+        reason: 'Synthetic corrected refund evidence' }, db as never);
+    return applied;
+  }
+
+  async function addEligiblePostCutoffSale(f: Awaited<ReturnType<typeof cancelledFixture>>, amount: string) {
+    const id = `${f.vendorId}-later-sale`;
+    const orderId = `${id}-order`;
+    const allocationId = `${id}-allocation`;
+    const executionId = `${id}-execution`;
+    const sourceReference = `${id}-shipment`;
+    await db.shopifyOrder.create({ data: { id: orderId,
+      sourceShopifyOrderId: `gid://shopify/Order/${orderId}`, sourceShopifyOrderNumber: `#${orderId}` } });
+    await db.vendorAllocation.create({ data: { id: allocationId, sourceShopifyOrderId: orderId,
+      sourceShopifyOrderNumber: `#${orderId}`, originalVendorId: f.vendorId, assignedVendorId: f.vendorId,
+      outboundMethodSnapshot: 'KARGONOMI', fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered' } });
+    await db.shipmentExecution.create({ data: { id: executionId, allocationId, vendorId: f.vendorId,
+      provider: 'KARGONOMI', providerShipmentId: sourceReference, shipmentStatus: 'DELIVERED', requestSnapshot: {} } });
+    const observation = await recordDelivery({ allocationId,
+      source: { method: 'KARGONOMI', shipmentExecutionId: executionId, sourceReference } }, db as never);
+    expect(observation).toMatchObject({ vendorAllocationId: allocationId, shipmentExecutionId: executionId,
+      sourceReference });
+    await db.fulfillment.create({ data: { id: `${id}-fulfillment`, vendorAllocationId: allocationId,
+      fulfillmentStatus: 'Delivered', shipmentUpdatedAt: new Date() } });
+    await db.financeLedgerEntry.create({ data: { id, vendorAllocationId: allocationId, vendorId: f.vendorId,
+      entryType: 'sale', amount, payoutStatus: 'PENDING', settlementStatus: 'PENDING',
+      commissionPercentSnapshot: '10.00', commissionVatPercentSnapshot: '20.00',
+      settlementDelayDaysSnapshot: 0, createdAt: new Date() } });
+    return id;
+  }
+
+  async function financeWriteFootprint(vendorId: string) {
+    const [approvals, lines, ledgers, adjustments, applications, corrections, balanceEvents, payouts] = await Promise.all([
+      db.settlementApproval.count({ where: { vendorId } }),
+      db.settlementApprovalLine.count({ where: { settlementApproval: { vendorId } } }),
+      db.financeLedgerEntry.count({ where: { vendorId } }),
+      db.settlementRefundAdjustment.count({ where: { vendorId } }),
+      db.settlementRefundAdjustmentApplication.count({ where: { settlementApproval: { vendorId } } }),
+      db.financialCorrectionAuthority.count({ where: { vendorId } }),
+      db.vendorBalanceEvent.count({ where: { vendorId } }),
+      db.payoutBatch.count({ where: { vendorId } }),
+    ]);
+    return { approvals, lines, ledgers, adjustments, applications, corrections, balanceEvents, payouts };
+  }
+
+  it('2A: assesses a cancelled originally-DRAFT cycle at its frozen cutoff without writes', async () => {
+    const f = await cancelledFixture();
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId }, include: { lines: true } });
+    const footprintBefore = await financeWriteFootprint(f.vendorId);
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result).toMatchObject({ outcome: 'ELIGIBLE', writesPerformed: false, safeForAdminConsideration: true,
+      originalCutoff: f.periodEnd.toISOString(), cancellationProvenance: 'VERIFIED_DRAFT', replacementLineage: 'CLEAR',
+      blockers: [], unknowns: [] });
+    expect(result.sourceComparison).toMatchObject({ sharedIds: [f.ledgerId], originalOnlyIds: [], currentOnlyIds: [] });
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId }, include: { lines: true } })).toEqual(before);
+    expect(await financeWriteFootprint(f.vendorId)).toEqual(footprintBefore);
+    expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
+  it('2A: rejects non-cancelled, approved-cancelled, legacy and wrong-vendor provenance', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const created = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    const id = created.createdDrafts[0].settlementApprovalId;
+    const assess = (vendorId = f.vendorId) => replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: id, vendorId,
+    });
+    expect((await assess()).blockers.map((item) => item.code)).toContain('NOT_CANCELLED');
+    expect((await assess(`${f.vendorId}-other`)).blockers.map((item) => item.code)).toContain('VENDOR_MISMATCH');
+    await approval.cancelSettlementApproval(id, `${f.vendorId}-admin`);
+    await db.settlementApproval.update({ where: { id }, data: { cancelledFromStatus: null } });
+    expect((await assess()).unknowns.map((item) => item.code)).toContain('CANCELLATION_PROVENANCE_MISSING');
+    await db.settlementApproval.update({ where: { id }, data: { cancelledFromStatus: 'APPROVED' } });
+    expect((await assess()).blockers.map((item) => item.code)).toContain('NOT_ORIGINALLY_DRAFT');
+  });
+
+  it('2A: fails closed on missing scheduled evidence and conflicting active source ownership', async () => {
+    const f = await cancelledFixture();
+    await db.settlementApproval.update({ where: { id: f.originalId }, data: { scheduledPeriodEnd: null } });
+    const missing = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(missing.outcome).toBe('UNKNOWN');
+    expect(missing.unknowns.map((item) => item.code)).toContain('SCHEDULED_PROVENANCE_MISSING');
+    await db.settlementApproval.update({ where: { id: f.originalId }, data: { scheduledPeriodEnd: f.periodEnd } });
+    const manual = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(manual.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    const conflict = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(conflict.outcome).toBe('BLOCKED');
+    expect(conflict.blockers).toContainEqual(expect.objectContaining({ code: 'ACTIVE_SOURCE_CLAIM', sourceId: f.ledgerId }));
+  });
+
+  it('2A: an existing replacement claim prevents another assessment from being eligible', async () => {
+    const f = await cancelledFixture();
+    const replacementRow = await db.settlementApproval.create({ data: {
+      vendorId: f.vendorId, grossSalesMinor: 0, refundTotalMinor: 0, commissionMinor: 0,
+      commissionVatMinor: 0, netPayableMinor: 0, sourceSnapshotJson: { testOnlyReplacementAudit: true },
+      replacesSettlementApprovalId: f.originalId, replacementRequestId: `${f.vendorId}-request`,
+      replacementRequestedBy: `${f.vendorId}-admin`, replacementReason: 'Test-only lineage', replacementRequestedAt: new Date(),
+    } });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).toBe('BLOCKED');
+    expect(result.replacementLineage).toBe('CLAIMED');
+    expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'REPLACEMENT_EXISTS', sourceId: replacementRow.id }));
+  });
+
+  it('2A: post-cutoff refund never joins the original period and incomplete later authority fails closed', async () => {
+    const f = await cancelledFixture();
+    const refundId = `${f.vendorId}-late-refund`;
+    await db.financeLedgerEntry.create({ data: {
+      id: refundId, vendorAllocationId: f.allocationId, vendorId: f.vendorId,
+      entryType: 'refund', amount: '20.00', payoutStatus: 'PENDING', settlementStatus: 'PENDING',
+      commissionPercentSnapshot: '10.00', commissionVatPercentSnapshot: '20.00',
+      createdAt: new Date(f.periodEnd.getTime() + 1_000),
+    } });
+    const siblingRefundId = `${f.vendorId}-second-late-refund`;
+    await db.financeLedgerEntry.create({ data: {
+      id: siblingRefundId, vendorAllocationId: f.allocationId, vendorId: f.vendorId,
+      entryType: 'refund', amount: '5.00', payoutStatus: 'PENDING', settlementStatus: 'PENDING',
+      commissionPercentSnapshot: '10.00', commissionVatPercentSnapshot: '20.00',
+      createdAt: new Date(f.periodEnd.getTime() + 2_000),
+    } });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).toBe('UNKNOWN');
+    expect(result.sourceComparison.current.map((item) => item.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(result.sourceComparison.current.map((item) => item.financeLedgerEntryId)).not.toContain(refundId);
+    expect(result.unknowns).toContainEqual(expect.objectContaining({ code: 'LATE_REFUND_EVIDENCE_MISSING', sourceId: refundId }));
+    expect(result.unknowns).toContainEqual(expect.objectContaining({ code: 'LATE_REFUND_EVIDENCE_MISSING', sourceId: siblingRefundId }));
+    expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
+  });
+
+  it('2A: two accepted refund ingestions retain exact independent late evidence without entering T', async () => {
+    const f = await cancelledFixture();
+    // The scheduled test cutoff is synthetic and in the future relative to PostgreSQL wall time.
+    // The application clock models the later accepted-refund event; ingestion itself persists the evidence.
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const first = await ingestAcceptedTestRefund(f, 'one', '10.00');
+    const second = await ingestAcceptedTestRefund(f, 'two', '15.00');
+    expect(first.refundFinanceLedgerEntryId).not.toBe(second.refundFinanceLedgerEntryId);
+    expect(first.capturedAt.getTime()).toBeGreaterThan(f.periodEnd.getTime());
+    expect(second.capturedAt.getTime()).toBeGreaterThan(f.periodEnd.getTime());
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId }, include: { lines: true } });
+    const evidenceBefore = await db.refundEvidenceSnapshot.findMany({ where: {
+      refundFinanceLedgerEntryId: { in: [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId] },
+    }, orderBy: { refundFinanceLedgerEntryId: 'asc' } });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).not.toBe('ELIGIBLE');
+    expect(result.safeForAdminConsideration).toBe(false);
+    expect(result.sourceComparison.current.map((item) => item.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(result.refundEvidence.map((item) => item.refundFinanceLedgerEntryId).sort()).toEqual([
+      first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId,
+    ].sort());
+    for (const id of [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId]) {
+      expect(result.unknowns).toContainEqual(expect.objectContaining({ code: 'LATE_REFUND_ROUTE_UNVERIFIED', sourceId: id }));
+    }
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId }, include: { lines: true } })).toEqual(before);
+    expect(await db.refundEvidenceSnapshot.findMany({ where: {
+      refundFinanceLedgerEntryId: { in: [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId] },
+    }, orderBy: { refundFinanceLedgerEntryId: 'asc' } })).toEqual(evidenceBefore);
+    expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
+  });
+
+  it.each([
+    { direction: 'credit' as const, acceptedLine: '15.00', incomingLine: '10.00', expectedCode: 'VENDOR_WIDE_CREDIT_SCOPE' },
+    { direction: 'deduction' as const, acceptedLine: '10.00', incomingLine: '15.00', expectedCode: 'VENDOR_WIDE_DEDUCTION_SCOPE' },
+  ])('2A: applied $direction remains a separate vendor-wide correction scope blocker', async ({ direction, acceptedLine, incomingLine, expectedCode }) => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, direction, '15.00', acceptedLine);
+    const applied = await applyCorrectionFromAcceptedEvidence(f, evidence, '15.00', incomingLine, direction, direction);
+    expect(applied).toMatchObject({ route: direction === 'credit'
+      ? 'BEFORE_SETTLEMENT_VENDOR_CREDIT' : 'BEFORE_SETTLEMENT_VENDOR_DEDUCTION' });
+    const authorityBefore = await db.financialCorrectionAuthority.findFirstOrThrow({ where: {
+      acceptedEvidenceSnapshotId: evidence.id,
+    } });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).toBe('BLOCKED');
+    expect(result.blockers.map((item) => item.code)).toContain(expectedCode);
+    expect(result.safeForAdminConsideration).toBe(false);
+    expect(await db.financialCorrectionAuthority.findUniqueOrThrow({ where: { id: authorityBefore.id } }))
+      .toEqual(authorityBefore);
+    expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
+  });
+
+  it('2A: a partially outstanding vendor-wide adjustment cannot silently enter the old cutoff', async () => {
+    const f = await cancelledFixture();
+    const manual = await approval.createDraftApproval({ vendorId: f.vendorId });
+    await approval.approveSettlementApproval(manual.id, `${f.vendorId}-approver`);
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'partial', '20.00');
+    const laterSaleId = await addEligiblePostCutoffSale(f, '10.00');
+    const laterDraft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(laterDraft.lines.map((line) => line.financeLedgerEntryId)).toContain(laterSaleId);
+    const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } });
+    expect(adjustment).toMatchObject({ status: 'PARTIALLY_APPLIED', originalAmountMinor: 1760,
+      appliedAmountMinor: 880, remainingAmountMinor: 880 });
+    expect(await db.settlementRefundAdjustmentApplication.count({ where: { settlementRefundAdjustmentId: adjustment.id } })).toBe(1);
+    const before = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).toBe('BLOCKED');
+    expect(result.pendingAdjustments).toContainEqual(expect.objectContaining({ id: adjustment.id,
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId, remainingAmountMinor: 880,
+      status: 'PARTIALLY_APPLIED' }));
+    expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'PENDING_REFUND_ADJUSTMENT', sourceId: adjustment.id }));
+    expect(result.sourceComparison.current.map((item) => item.financeLedgerEntryId)).not.toContain(evidence.refundFinanceLedgerEntryId);
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).toEqual(before);
+  });
+
+  it('2A: a real post-approval refund creates a PENDING obligation that the old T cannot absorb', async () => {
+    const f = await cancelledFixture();
+    const manual = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(manual.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    await approval.approveSettlementApproval(manual.id, `${f.vendorId}-approver`);
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'pending', '20.00');
+    const pending = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } });
+    expect(pending).toMatchObject({ vendorId: f.vendorId, status: 'PENDING', remainingAmountMinor: 1760 });
+    const before = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: pending.id } });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).toBe('BLOCKED');
+    expect(result.sourceComparison.current.map((item) => item.financeLedgerEntryId)).not.toContain(evidence.refundFinanceLedgerEntryId);
+    expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'PENDING_REFUND_ADJUSTMENT', sourceId: pending.id }));
+    expect(result.pendingAdjustments).toContainEqual(expect.objectContaining({ id: pending.id,
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId, status: 'PENDING', remainingAmountMinor: 1760 }));
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: pending.id } })).toEqual(before);
+  });
+
+  it('2A: unresolved terminal refund evidence on an original allocation blocks consideration', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'conflict', '10.00');
+    const order = await db.shopifyOrder.findUniqueOrThrow({ where: {
+      id: f.allocationId.replace(/-allocation$/, '-order'),
+    } });
+    const refundId = evidence.sourceShopifyRefundId;
+    const lineId = `${f.allocationId}-line`;
+    const refundLineId = `${f.allocationId}-conflict-refund-line`;
+    const transactionGid = `gid://shopify/OrderTransaction/${f.allocationId}-conflict`;
+    const replay = await db.$transaction((tx) => ingestRefund({
+      transactionClient: tx,
+      payload: { id: refundId, order_id: order.sourceShopifyOrderId,
+        refund_line_items: [{ id: refundLineId, line_item_id: lineId, quantity: 1, subtotal: '9.00',
+          line_item: { id: lineId, sku: `${f.allocationId}-sku`, title: 'Synthetic test line' } }] },
+      monetaryEvidence: { sourceShopifyRefundId: refundId, classification: 'MONETARY_REFUND',
+        monetaryRefundAmount: '10.00', currency: 'TRY', reasonCode: 'monetary_refund_verified',
+        sanitizedWarnings: [], selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS',
+          amount: '10.00', currency: 'TRY' }] },
+      canonicalEvidence: { evidenceSource: 'mock', sourceShopifyRefundId: refundId,
+        sourceShopifyOrderId: order.sourceShopifyOrderId, monetaryClassification: 'MONETARY_REFUND',
+        refundTotalAmount: '10.00', refundCurrency: 'TRY',
+        selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS', amount: '10.00', currency: 'TRY' }],
+        lines: [{ sourceRefundLineItemId: refundLineId, sourceLineItemId: lineId,
+          sku: `${f.allocationId}-sku`, quantity: 1, quantityProvenance: 'OBSERVED_VALID',
+          subtotalAmount: '9.00', subtotalAmountProvenance: 'OBSERVED', subtotalCurrency: 'TRY' }] },
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED', targetVendorAllocationId: f.allocationId,
+    }));
+    expect(replay).toMatchObject({ ok: false, reasonCode: 'refund_terminal_evidence_conflict' });
+    const review = await db.refundTerminalEvidenceReview.findFirstOrThrow({ where: {
+      terminalRefundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } });
+    expect(review).toMatchObject({ status: 'ACTIVE', storedEvidenceSnapshotId: evidence.id,
+      economicVendorId: f.vendorId });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).toBe('BLOCKED');
+    expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_REFUND_EVIDENCE',
+      sourceId: evidence.refundFinanceLedgerEntryId }));
+    expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: { id: evidence.id } })).toEqual(evidence);
+  });
+
+  it('2A: missing original frozen source evidence is UNKNOWN, not a matching-total approval', async () => {
+    const f = await cancelledFixture();
+    await db.settlementApprovalLine.updateMany({ where: { settlementApprovalId: f.originalId },
+      data: { sourceSnapshotJson: {} } });
+    const result = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(result.outcome).toBe('UNKNOWN');
+    expect(result.unknowns.map((item) => item.code)).toContain('ORIGINAL_SOURCE_EVIDENCE_MISSING');
+  });
 
   it('CHARACTERIZATION: cancellation preserves S1 and source history, but READY cannot reuse its key', async () => {
     const f = await fixture();
@@ -343,6 +768,11 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       approvedBy: `${f.vendorId}-approver`, cancelledBy: `${f.vendorId}-admin`, scheduledCycleKey: f.cycleKey });
     expect(cancelled.approvedAt).toBeInstanceOf(Date);
     expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+    const assessment = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: originalId, vendorId: f.vendorId,
+    });
+    expect(assessment.outcome).toBe('BLOCKED');
+    expect(assessment.blockers.map((item) => item.code)).toContain('NOT_ORIGINALLY_DRAFT');
   });
 
   it('rolls back cancellation audit when approval wins a Serializable race', async () => {

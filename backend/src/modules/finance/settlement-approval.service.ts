@@ -2233,8 +2233,9 @@ export async function previewApproval(
   periodStart?: Date | null,
   periodEnd?: Date | null,
   selection?: Pick<SettlementApprovalInput, 'candidateScope' | 'selectedOrderIds' | 'selectedShopifyOrderIds' | 'selectedAllocationIds' | 'asOfDate'>,
+  db?: SettlementApprovalTransaction,
 ): Promise<SettlementApprovalPreviewDto> {
-  return buildApprovalPreview({ vendorId, periodStart, periodEnd, ...selection });
+  return buildApprovalPreview({ vendorId, periodStart, periodEnd, ...selection }, db);
 }
 
 export async function createDraftApproval(
