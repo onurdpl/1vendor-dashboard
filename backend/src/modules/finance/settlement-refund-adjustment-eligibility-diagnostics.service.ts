@@ -171,16 +171,19 @@ function normalizeOrderNumber(value: string) {
 }
 
 function chooseRefundRecord(row: RefundLedgerRow) {
-  const suffixMatch = row.id.match(/refund-(.+)$/);
-  const sourceRefundId = suffixMatch?.[1] ?? null;
-  if (sourceRefundId) {
-    const exact = row.vendorAllocation?.refundRecords.find((refund) => refund.sourceShopifyRefundId === sourceRefundId);
-    if (exact) {
-      return exact;
-    }
+  const snapshot = row.refundEvidenceSnapshot;
+  if (!snapshot) return { record: null, blockerReason: 'Refund ledger has no accepted evidence snapshot; adjustment backfill requires review.' };
+  if (snapshot.vendorAllocationId !== row.vendorAllocation?.id) {
+    return { record: null, blockerReason: 'Accepted refund evidence allocation does not match the refund ledger allocation.' };
   }
-
-  return row.vendorAllocation?.refundRecords[0] ?? null;
+  if (snapshot.historicalEconomicVendorId !== row.vendorId) {
+    return { record: null, blockerReason: 'Accepted refund evidence vendor does not match the refund ledger vendor.' };
+  }
+  const record = row.vendorAllocation.refundRecords.find((refund) => refund.id === snapshot.refundRecordId);
+  if (!record || record.sourceShopifyRefundId !== snapshot.sourceShopifyRefundId) {
+    return { record: null, blockerReason: 'Accepted refund evidence does not match a refund record and source on the ledger allocation.' };
+  }
+  return { record, blockerReason: null };
 }
 
 type SaleLedgerSelection = {
@@ -280,7 +283,8 @@ function buildEvidence(input: {
 
 export function classifyRefundAdjustmentEligibility(row: RefundLedgerRow): RefundAdjustmentEligibilityRecord {
   const existingAdjustment = row.refundAdjustments[0] ?? null;
-  const refundRecord = chooseRefundRecord(row);
+  const refundIdentity = chooseRefundRecord(row);
+  const refundRecord = refundIdentity.record;
   const saleLedgerSelection = chooseActiveSaleLedger(row);
   const saleLedger = saleLedgerSelection.saleLedger;
   const activeSaleLedger = saleLedgerSelection.status === 'resolved' ? saleLedger : null;
@@ -331,16 +335,14 @@ export function classifyRefundAdjustmentEligibility(row: RefundLedgerRow): Refun
       commissionPercentSnapshot: row.commissionPercentSnapshot ?? activeSaleLedger.commissionPercentSnapshot,
       commissionVatPercentSnapshot: row.commissionVatPercentSnapshot ?? activeSaleLedger.commissionVatPercentSnapshot,
     });
-    if (offset.vendorPayableReversalMinor <= 0 || amountMinor <= 0 || !orderId || !refundRecord?.id) {
+    if (!refundRecord) {
+      recommendedAction = 'UNKNOWN';
+      blockerReason = refundIdentity.blockerReason;
+    } else if (offset.vendorPayableReversalMinor <= 0 || amountMinor <= 0 || !orderId) {
       recommendedAction = 'ZERO_OR_INVALID_AMOUNT';
       blockerReason = !orderId
         ? 'Original order id is unavailable.'
-        : !refundRecord?.id
-          ? 'Refund record id is unavailable.'
-          : 'Refund payable reversal amount is zero or invalid.';
-    } else if (!row.refundEvidenceSnapshot || row.refundEvidenceSnapshot.refundRecordId !== refundRecord.id) {
-      recommendedAction = 'UNKNOWN';
-      blockerReason = 'Refund ledger has no accepted evidence snapshot for its refund record; adjustment backfill requires review.';
+        : 'Refund payable reversal amount is zero or invalid.';
     } else {
       recommendedAction = 'CREATE_PENDING_ADJUSTMENT';
     }
@@ -450,6 +452,9 @@ async function findRefundLedgerRows(
       refundEvidenceSnapshot: {
         select: {
           refundRecordId: true,
+          vendorAllocationId: true,
+          historicalEconomicVendorId: true,
+          sourceShopifyRefundId: true,
         },
       },
       vendorBalanceEvents: {

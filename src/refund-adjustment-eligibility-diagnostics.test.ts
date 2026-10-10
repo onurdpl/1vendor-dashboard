@@ -17,7 +17,12 @@ function refundLedgerRow(overrides: Record<string, unknown> = {}) {
     commissionPercentSnapshot: 10,
     commissionVatPercentSnapshot: 20,
     refundAdjustments: [],
-    refundEvidenceSnapshot: { refundRecordId: 'refund-record-1001' },
+    refundEvidenceSnapshot: {
+      refundRecordId: 'refund-record-1001',
+      vendorAllocationId: 'allocation-1',
+      historicalEconomicVendorId: 'yalispor',
+      sourceShopifyRefundId: '1001',
+    },
     vendorBalanceEvents: [],
     vendorAllocation: {
       id: 'allocation-1',
@@ -97,6 +102,34 @@ describe('refund adjustment eligibility diagnostics', () => {
     }));
 
     expect(result.recommendedAction).toBe('UNKNOWN');
+    expect(result.refundRecordId).toBeNull();
+  });
+
+  it('uses only the snapshot-linked sibling refund record', () => {
+    const row = refundLedgerRow();
+    row.vendorAllocation.refundRecords.push({ id: 'refund-record-1002', sourceShopifyRefundId: '1002' });
+    row.refundEvidenceSnapshot = { ...row.refundEvidenceSnapshot,
+      refundRecordId: 'refund-record-1002', sourceShopifyRefundId: '1002' };
+
+    const result = classifyRefundAdjustmentEligibility(row);
+
+    expect(result.refundRecordId).toBe('refund-record-1002');
+    expect(result.recommendedAction).toBe('CREATE_PENDING_ADJUSTMENT');
+  });
+
+  it.each([
+    { mismatch: { vendorAllocationId: 'other-allocation' }, reason: 'allocation does not match' },
+    { mismatch: { historicalEconomicVendorId: 'other-vendor' }, reason: 'vendor does not match' },
+    { mismatch: { sourceShopifyRefundId: 'other-refund' }, reason: 'record and source' },
+  ])('fails closed when accepted evidence contradicts ownership or source: %o', ({ mismatch, reason }) => {
+    const row = refundLedgerRow();
+    row.refundEvidenceSnapshot = { ...row.refundEvidenceSnapshot, ...mismatch };
+
+    const result = classifyRefundAdjustmentEligibility(row);
+
+    expect(result.refundRecordId).toBeNull();
+    expect(result.recommendedAction).toBe('UNKNOWN');
+    expect(result.blockerReason).toContain(reason);
   });
 
   it('marks eligible refund after approved settlement as CREATE_PENDING_ADJUSTMENT', () => {
@@ -314,7 +347,12 @@ describe('refund adjustment eligibility diagnostics', () => {
     const second = refundLedgerRow({
       id: 'fin-yalispor-refund-1002',
       amount: 500,
-      refundEvidenceSnapshot: { refundRecordId: 'refund-record-1002' },
+      refundEvidenceSnapshot: {
+        refundRecordId: 'refund-record-1002',
+        vendorAllocationId: 'allocation-1',
+        historicalEconomicVendorId: 'yalispor',
+        sourceShopifyRefundId: '1002',
+      },
       vendorAllocation: {
         ...refundLedgerRow().vendorAllocation,
         refundRecords: [
@@ -452,7 +490,12 @@ describe('refund adjustment eligibility diagnostics', () => {
     expect(tx.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
     expect(tx.refundEvidenceSnapshot.create).not.toHaveBeenCalled();
     expect(tx.vendorBalanceEvent.create).not.toHaveBeenCalled();
-    expect(row.refundEvidenceSnapshot).toEqual({ refundRecordId: 'refund-record-1001' });
+    expect(row.refundEvidenceSnapshot).toEqual({
+      refundRecordId: 'refund-record-1001',
+      vendorAllocationId: 'allocation-1',
+      historicalEconomicVendorId: 'yalispor',
+      sourceShopifyRefundId: '1001',
+    });
   });
 
   it('creates adjustment using active sale ledger while ignoring voided sale ledger rows', async () => {

@@ -457,6 +457,63 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
   });
 
+  it('2C1-B: adjustment diagnostics keep each accepted sibling refund bound to its own record', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const first = await ingestAcceptedTestRefund(f, 'identity-one', '10.00');
+    const second = await ingestAcceptedTestRefund(f, 'identity-two', '15.00');
+    const futurePreview = await approval.previewApproval(f.vendorId,
+      new Date(f.periodEnd.getTime() + 1), new Date(f.periodEnd.getTime() + 2 * dayMs),
+      { candidateScope: 'date_range', asOfDate: new Date(f.periodEnd.getTime() + 2 * dayMs) });
+    expect(futurePreview.writesPerformed).toBe(false);
+    expect(futurePreview.lines.map((line) => [line.financeLedgerEntryId, line.lineType, line.payableImpactMinor]))
+      .toEqual(expect.arrayContaining([
+        [first.refundFinanceLedgerEntryId, 'REFUND', -880],
+        [second.refundFinanceLedgerEntryId, 'REFUND', -1320],
+      ]));
+    expect(futurePreview.lines).toHaveLength(2);
+    const { previewRefundAdjustmentEligibility } = await import(
+      '../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js'
+    );
+    const preview = await previewRefundAdjustmentEligibility({ vendorId: f.vendorId });
+    expect(preview.writesPerformed).toBe(false);
+    expect(preview.records).toHaveLength(2);
+    for (const evidence of [first, second]) {
+      const record = preview.records.find((item) =>
+        item.refundFinanceLedgerEntryId === evidence.refundFinanceLedgerEntryId);
+      expect(record).toMatchObject({
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        refundRecordId: evidence.refundRecordId,
+        vendorId: f.vendorId,
+      });
+    }
+  });
+
+  it('2C1-C: a refund ledger without accepted evidence cannot borrow a sibling identity', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const accepted = await ingestAcceptedTestRefund(f, 'accepted-sibling', '10.00');
+    const legacyLedgerId = `${f.vendorId}-legacy-refund-without-evidence`;
+    await db.financeLedgerEntry.create({ data: {
+      id: legacyLedgerId, vendorId: f.vendorId, vendorAllocationId: f.allocationId,
+      entryType: 'refund', amount: '5.00', payoutStatus: 'PENDING', settlementStatus: 'PENDING',
+      commissionPercentSnapshot: '10.00', commissionVatPercentSnapshot: '20.00',
+    } });
+    const { previewRefundAdjustmentEligibility, backfillPendingRefundAdjustments } = await import(
+      '../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js'
+    );
+    const preview = await previewRefundAdjustmentEligibility({ vendorId: f.vendorId });
+    const acceptedRecord = preview.records.find((item) => item.refundFinanceLedgerEntryId === accepted.refundFinanceLedgerEntryId);
+    const missingRecord = preview.records.find((item) => item.refundFinanceLedgerEntryId === legacyLedgerId);
+    expect(acceptedRecord?.refundRecordId).toBe(accepted.refundRecordId);
+    expect(missingRecord).toMatchObject({ refundRecordId: null, vendorId: f.vendorId });
+    expect(missingRecord?.recommendedAction).not.toBe('CREATE_PENDING_ADJUSTMENT');
+    const backfill = await backfillPendingRefundAdjustments({ vendorId: f.vendorId });
+    expect(backfill.writesPerformed).toBe(false);
+    expect(backfill.createdRecords).toEqual([]);
+    expect(await db.settlementRefundAdjustment.count({ where: { refundFinanceLedgerEntryId: legacyLedgerId } })).toBe(0);
+  });
+
   it.each([
     { direction: 'credit' as const, acceptedLine: '15.00', incomingLine: '10.00', expectedCode: 'VENDOR_WIDE_CREDIT_SCOPE' },
     { direction: 'deduction' as const, acceptedLine: '10.00', incomingLine: '15.00', expectedCode: 'VENDOR_WIDE_DEDUCTION_SCOPE' },
