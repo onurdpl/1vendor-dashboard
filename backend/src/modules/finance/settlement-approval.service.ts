@@ -38,6 +38,8 @@ import {
 } from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
 import { activeFinanceLedgerWhere, isLedgerVoided } from './active-ledger-policy.service.js';
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
+import { createSettlementRefundAdjustmentForRefundLedger } from './settlement-refund-adjustment.service.js';
+import { verifyReplacementLateRefundBridges } from './settlement-replacement-late-refund.service.js';
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
   VENDOR_BLOCKED_FINANCE_HOLD_REASON,
@@ -97,6 +99,7 @@ type SettlementReplacementAudit = {
   requestedBy: string;
   reason: string;
   requestedAt: Date;
+  lateRefundLedgerIds: string[];
 };
 
 type CandidateScope = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
@@ -2471,6 +2474,7 @@ async function createDraftApprovalInTransaction(
               appliedAmountMinor: plan.applyAmountMinor,
               remainingAmountMinorAfter: plan.record.remainingAmountMinor - plan.applyAmountMinor,
             })),
+            ...(replacementAudit ? { lateRefundLedgerIds: replacementAudit.lateRefundLedgerIds } : {}),
             writesPerformed: false,
           },
           lines: {
@@ -2592,8 +2596,16 @@ export async function approveSettlementApproval(
   id: string,
   approvedBy: string | null,
 ): Promise<SettlementApprovalDto> {
+  const replacementLocator = await prisma.settlementApproval.findUnique({
+    where: { id }, select: { vendorId: true, replacesSettlementApprovalId: true },
+  });
   return prisma.$transaction(
     async (tx) => {
+      if (replacementLocator?.replacesSettlementApprovalId) {
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id" FROM "Vendor" WHERE "id" = ${replacementLocator.vendorId} FOR UPDATE
+        `);
+      }
       const existing = await tx.settlementApproval.findUnique({
         where: {
           id,
@@ -2609,6 +2621,54 @@ export async function approveSettlementApproval(
       }
       if (existing.status !== SettlementApprovalStatus.DRAFT) {
         throw new Error('Only draft settlement approvals can be approved.');
+      }
+      if (existing.replacesSettlementApprovalId !== replacementLocator?.replacesSettlementApprovalId ||
+          existing.vendorId !== replacementLocator?.vendorId) {
+        throw new Error('Replacement approval identity changed before validation.');
+      }
+
+      let lateRefundBridges: Awaited<ReturnType<typeof verifyReplacementLateRefundBridges>>['bridges'] = [];
+      if (existing.replacesSettlementApprovalId) {
+        const original = await tx.settlementApproval.findUnique({
+          where: { id: existing.replacesSettlementApprovalId },
+          select: { vendorId: true, status: true, scheduledPeriodEnd: true,
+            lines: { select: { financeLedgerEntryId: true, lineType: true, amountMinor: true,
+              commissionMinor: true, commissionVatMinor: true, payableImpactMinor: true } } },
+        });
+        if (!original?.scheduledPeriodEnd || original.status !== SettlementApprovalStatus.CANCELLED ||
+            original.vendorId !== existing.vendorId ||
+            existing.periodEnd?.getTime() !== original.scheduledPeriodEnd.getTime()) {
+          throw new Error('Replacement frozen cutoff or original authority changed before approval.');
+        }
+        const sourceKey = (line: { financeLedgerEntryId: string; lineType: SettlementApprovalLineType;
+          amountMinor: number; commissionMinor: number; commissionVatMinor: number; payableImpactMinor: number }) =>
+          JSON.stringify([line.financeLedgerEntryId, line.lineType, line.amountMinor, line.commissionMinor,
+            line.commissionVatMinor, line.payableImpactMinor]);
+        if (JSON.stringify(original.lines.map(sourceKey).sort()) !==
+            JSON.stringify(existing.lines.map(sourceKey).sort())) {
+          throw new Error('Replacement frozen financial sources changed before approval.');
+        }
+        const saleIds = existing.lines.filter((line) => line.lineType === SettlementApprovalLineType.SALE)
+          .map((line) => line.financeLedgerEntryId);
+        const saleLedgers = await tx.financeLedgerEntry.findMany({
+          where: { id: { in: saleIds } }, select: { id: true, vendorAllocationId: true },
+        });
+        if (saleLedgers.length !== saleIds.length || saleLedgers.some((row) => !row.vendorAllocationId)) {
+          throw new Error('Replacement SALE authority is incomplete.');
+        }
+        const checked = await verifyReplacementLateRefundBridges(tx, {
+          vendorId: existing.vendorId, cutoff: original.scheduledPeriodEnd, saleLedgerIds: saleIds,
+          allocationIds: [...new Set(saleLedgers.map((row) => row.vendorAllocationId as string))],
+        });
+        const frozenIds = (existing.sourceSnapshotJson as Record<string, unknown> | null)?.lateRefundLedgerIds;
+        const frozenSorted = Array.isArray(frozenIds) && frozenIds.every((value) => typeof value === 'string')
+          ? [...frozenIds].sort() : [];
+        const currentSorted = checked.bridges.map((item) => item.refundFinanceLedgerEntryId).sort();
+        if (checked.unverifiedRefundLedgerIds.length ||
+            JSON.stringify(frozenSorted) !== JSON.stringify(currentSorted)) {
+          throw new Error('Replacement late-refund authority changed before approval.');
+        }
+        lateRefundBridges = checked.bridges;
       }
 
       const revalidation = await validateSettlementApprovalBeforeApprove(tx, existing);
@@ -2650,6 +2710,20 @@ export async function approveSettlementApproval(
           correctionDeductionLines: true,
         },
       });
+
+      for (const bridge of lateRefundBridges) {
+        const adjustment = await createSettlementRefundAdjustmentForRefundLedger(tx, {
+          refundFinanceLedgerEntryId: bridge.refundFinanceLedgerEntryId,
+          refundRecordId: bridge.refundRecordId,
+          createdBy: 'system:settlement_replacement_approval',
+        });
+        if (!adjustment || adjustment.originalSettlementApprovalId !== existing.id ||
+            adjustment.refundRecordId !== bridge.refundRecordId || adjustment.status !== 'pending' ||
+            adjustment.originalAmountMinor <= 0 || adjustment.appliedAmountMinor !== 0 ||
+            adjustment.remainingAmountMinor !== adjustment.originalAmountMinor) {
+          throw new Error('Replacement approval could not establish each late-refund obligation.');
+        }
+      }
 
       return mapApproval(approved, true);
     },

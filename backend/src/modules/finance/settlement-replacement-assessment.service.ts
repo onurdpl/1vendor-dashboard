@@ -4,6 +4,7 @@ import { previewApproval } from './settlement-approval.service.js';
 import { buildScheduledSettlementCycleKey } from './settlement-schedule.service.js';
 import { getAvailableFinancialCorrectionCredits } from './financial-correction-credit-consumption.service.js';
 import { getAvailableFinancialCorrectionDeductions } from './financial-correction-deduction-consumption.service.js';
+import { verifyReplacementLateRefundBridges } from './settlement-replacement-late-refund.service.js';
 
 type Finding = { code: string; detail: string; sourceId?: string };
 type Source = {
@@ -177,10 +178,14 @@ export async function assessCancelledScheduledSettlementReplacement(input: {
     result.refundEvidence = refundEvidence.map((item) => ({ refundFinanceLedgerEntryId: item.refundFinanceLedgerEntryId,
       historicalSaleFinanceLedgerEntryId: item.historicalSaleFinanceLedgerEntryId,
       capturedAt: item.capturedAt.toISOString(), afterCutoff: item.capturedAt > cutoff }));
+    const lateBridge = await verifyReplacementLateRefundBridges(tx, {
+      vendorId: input.vendorId, cutoff, saleLedgerIds: saleIds, allocationIds,
+    });
+    const verifiedLateRefundIds = new Set(lateBridge.bridges.map((item) => item.refundFinanceLedgerEntryId));
     const evidencedRefundIds = new Set(refundEvidence.map((item) => item.refundFinanceLedgerEntryId));
     for (const evidence of result.refundEvidence.filter((item) => item.afterCutoff)) {
-      unknowns.push({ code: 'LATE_REFUND_ROUTE_UNVERIFIED',
-        detail: 'The post-cutoff refund is excluded from this period, but its later economic route is not proven by this assessment.',
+      if (!verifiedLateRefundIds.has(evidence.refundFinanceLedgerEntryId)) unknowns.push({ code: 'LATE_REFUND_ROUTE_UNVERIFIED',
+        detail: 'The post-cutoff refund cannot be bridged to a uniquely owned later adjustment.',
         sourceId: evidence.refundFinanceLedgerEntryId });
     }
     for (const refund of lateRefunds) {

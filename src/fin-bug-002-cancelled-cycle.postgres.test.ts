@@ -422,9 +422,13 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(result.unknowns).toContainEqual(expect.objectContaining({ code: 'LATE_REFUND_EVIDENCE_MISSING', sourceId: refundId }));
     expect(result.unknowns).toContainEqual(expect.objectContaining({ code: 'LATE_REFUND_EVIDENCE_MISSING', sourceId: siblingRefundId }));
     expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
+    const request = await replacementRequest(f, 'legacy-late-refund');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'UNKNOWN' } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
   });
 
-  it('2A: two accepted refund ingestions retain exact independent late evidence without entering T', async () => {
+  it('2D: two verified late refunds retain exact independent evidence without entering T', async () => {
     const f = await cancelledFixture();
     // The scheduled test cutoff is synthetic and in the future relative to PostgreSQL wall time.
     // The application clock models the later accepted-refund event; ingestion itself persists the evidence.
@@ -441,15 +445,13 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const result = await replacement.assessCancelledScheduledSettlementReplacement({
       originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
     });
-    expect(result.outcome).not.toBe('ELIGIBLE');
-    expect(result.safeForAdminConsideration).toBe(false);
+    expect(result.outcome).toBe('ELIGIBLE');
+    expect(result.safeForAdminConsideration).toBe(true);
     expect(result.sourceComparison.current.map((item) => item.financeLedgerEntryId)).toEqual([f.ledgerId]);
     expect(result.refundEvidence.map((item) => item.refundFinanceLedgerEntryId).sort()).toEqual([
       first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId,
     ].sort());
-    for (const id of [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId]) {
-      expect(result.unknowns).toContainEqual(expect.objectContaining({ code: 'LATE_REFUND_ROUTE_UNVERIFIED', sourceId: id }));
-    }
+    expect(result.unknowns).toEqual([]);
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId }, include: { lines: true } })).toEqual(before);
     expect(await db.refundEvidenceSnapshot.findMany({ where: {
       refundFinanceLedgerEntryId: { in: [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId] },
@@ -504,11 +506,11 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const frozenAssessment = await replacement.assessCancelledScheduledSettlementReplacement({
       originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
     });
-    expect(frozenAssessment.outcome).toBe('UNKNOWN');
+    expect(frozenAssessment.outcome).toBe('ELIGIBLE');
     expect(frozenAssessment.sourceComparison.current.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
     for (const refundId of expectedRefundIds) {
-      expect(frozenAssessment.unknowns).toContainEqual(expect.objectContaining({
-        code: 'LATE_REFUND_ROUTE_UNVERIFIED', sourceId: refundId,
+      expect(frozenAssessment.refundEvidence).toContainEqual(expect.objectContaining({
+        refundFinanceLedgerEntryId: refundId, afterCutoff: true,
       }));
       expect(await db.settlementRefundAdjustment.count({ where: { refundFinanceLedgerEntryId: refundId } })).toBe(0);
       expect(await db.vendorBalanceEvent.count({ where: {
@@ -526,9 +528,6 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const backfill = await backfillPendingRefundAdjustments({ vendorId: f.vendorId });
     expect(backfill.writesPerformed).toBe(false);
     expect(backfill.createdRecords).toEqual([]);
-    const replacementAttempt = await replacementRequest(f, 'late-two-refunds');
-    await expect(replacementWriter.createControlledSettlementReplacementDraft(replacementAttempt))
-      .rejects.toMatchObject({ assessment: { outcome: 'UNKNOWN' } });
     expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
     const preview = await approval.previewApproval(f.vendorId);
     expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual(expect.arrayContaining([
@@ -570,6 +569,218 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     }
     expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId, status: 'APPROVED' } })).toBe(1);
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId, status: 'PAID' } })).toBe(0);
+  });
+
+  it('2D: a frozen replacement carries two late refunds into distinct later adjustments', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const first = await ingestAcceptedTestRefund(f, 'bridge-one', '10.00');
+    const second = await ingestAcceptedTestRefund(f, 'bridge-two', '15.00');
+    const refundIds = [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId];
+    const request = await replacementRequest(f, 'late-refund-bridge');
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    expect(created).toMatchObject({ outcome: 'CREATED', status: 'DRAFT' });
+    expect(await replacementWriter.createControlledSettlementReplacementDraft(request))
+      .toMatchObject({ outcome: 'REPLAYED', replacementSettlementApprovalId: created.replacementSettlementApprovalId });
+    const replacementRow = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: created.replacementSettlementApprovalId }, include: { lines: true },
+    });
+    expect(replacementRow).toMatchObject({ replacesSettlementApprovalId: f.originalId, periodEnd: f.periodEnd });
+    expect(replacementRow.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(replacementRow.lines.map((line) => line.financeLedgerEntryId))
+      .not.toEqual(expect.arrayContaining(refundIds));
+    expect((replacementRow.sourceSnapshotJson as { lateRefundLedgerIds: string[] }).lateRefundLedgerIds)
+      .toEqual([...refundIds].sort());
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } }))
+      .toMatchObject({ status: 'CANCELLED' });
+
+    const approved = await approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`);
+    expect(approved.status).toBe('approved');
+    await expect(approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`))
+      .rejects.toThrow('Only draft settlement approvals can be approved.');
+    for (const [evidence, amount] of [[first, 880], [second, 1320]] as const) {
+      expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+      } })).toMatchObject({ refundRecordId: evidence.refundRecordId, vendorId: f.vendorId,
+        originalSettlementApprovalId: replacementRow.id, status: 'PENDING',
+        originalAmountMinor: amount, appliedAmountMinor: 0, remainingAmountMinor: amount });
+    }
+    const { preparePayoutBatch } = await import('../backend/src/modules/finance/finance.service.js');
+    await expect(preparePayoutBatch({ vendorId: f.vendorId }, `${f.vendorId}-admin`)).rejects.toThrow();
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+
+    const laterSaleId = await addEligiblePostCutoffSale(f, '100.00');
+    const laterDraft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(laterDraft.lines.map((line) => [line.financeLedgerEntryId, line.lineType]))
+      .toEqual(expect.arrayContaining([
+        [laterSaleId, 'SALE'],
+        [first.refundFinanceLedgerEntryId, 'REFUND_ADJUSTMENT'],
+        [second.refundFinanceLedgerEntryId, 'REFUND_ADJUSTMENT'],
+      ]));
+    expect(laterDraft.lines.filter((line) => refundIds.includes(line.financeLedgerEntryId))
+      .map((line) => [line.financeLedgerEntryId, line.lineType]).sort())
+      .toEqual(refundIds.map((id) => [id, 'REFUND_ADJUSTMENT']).sort());
+    await approval.approveSettlementApproval(laterDraft.id, `${f.vendorId}-approver`);
+    for (const evidence of [first, second]) {
+      const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+      } });
+      expect(adjustment).toMatchObject({ status: 'APPLIED', remainingAmountMinor: 0 });
+      expect(adjustment.appliedAmountMinor).toBe(adjustment.originalAmountMinor);
+      expect(await db.settlementRefundAdjustmentApplication.count({ where: {
+        settlementRefundAdjustmentId: adjustment.id, status: 'ACTIVE',
+      } })).toBe(1);
+    }
+    expect(await db.vendorBalanceEvent.count({ where: {
+      financeLedgerEntryId: { in: refundIds }, type: 'VENDOR_DEBT_CREATED',
+    } })).toBe(0);
+    const replay = await ingestAcceptedTestRefund(f, 'bridge-one', '10.00');
+    expect(replay.id).toBe(first.id);
+    expect(replay.refundFinanceLedgerEntryId).toBe(first.refundFinanceLedgerEntryId);
+    expect(await db.refundEvidenceSnapshot.count({ where: {
+      refundFinanceLedgerEntryId: first.refundFinanceLedgerEntryId,
+    } })).toBe(1);
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: first.refundFinanceLedgerEntryId,
+    } })).toBe(1);
+    const payout = await preparePayoutBatch({ vendorId: f.vendorId }, `${f.vendorId}-admin`);
+    expect(payout.lines.filter((line) => refundIds.includes(line.financeLedgerEntryId))
+      .map((line) => [line.financeLedgerEntryId, line.amountSnapshot]))
+      .toEqual(expect.arrayContaining([
+        [first.refundFinanceLedgerEntryId, '-8.80'],
+        [second.refundFinanceLedgerEntryId, '-13.20'],
+      ]));
+  });
+
+  it('2D: refund accepted after replacement DRAFT blocks approval without losing its identity', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'refund-after-replacement-draft');
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'after-replacement-draft', '10.00');
+    await expect(approval.approveSettlementApproval(created.replacementSettlementApprovalId,
+      `${f.vendorId}-approver`)).rejects.toThrow();
+    expect(await db.settlementApproval.findUniqueOrThrow({
+      where: { id: created.replacementSettlementApprovalId },
+    })).toMatchObject({ status: 'DRAFT' });
+    expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toMatchObject({ refundRecordId: evidence.refundRecordId,
+      historicalSaleFinanceLedgerEntryId: f.ledgerId, historicalEconomicVendorId: f.vendorId });
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(0);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
+  it('2D: adjustment write failure rolls back replacement approval and can be retried', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'approval-rollback', '10.00');
+    const request = await replacementRequest(f, 'approval-rollback');
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    await db.$executeRawUnsafe(`CREATE FUNCTION fin_bug_002_adjustment_failure() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'TEST_ADJUSTMENT_WRITE_FAILURE'; END $$`);
+    await db.$executeRawUnsafe(`CREATE TRIGGER fin_bug_002_adjustment_failure
+      BEFORE INSERT ON "SettlementRefundAdjustment" FOR EACH ROW
+      EXECUTE FUNCTION fin_bug_002_adjustment_failure()`);
+    try {
+      await expect(approval.approveSettlementApproval(created.replacementSettlementApprovalId,
+        `${f.vendorId}-approver`)).rejects.toThrow('TEST_ADJUSTMENT_WRITE_FAILURE');
+    } finally {
+      await db.$executeRawUnsafe('DROP TRIGGER fin_bug_002_adjustment_failure ON "SettlementRefundAdjustment"');
+      await db.$executeRawUnsafe('DROP FUNCTION fin_bug_002_adjustment_failure()');
+    }
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: {
+      id: created.replacementSettlementApprovalId,
+    } })).toMatchObject({ status: 'DRAFT', approvedAt: null });
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(0);
+    await approval.approveSettlementApproval(created.replacementSettlementApprovalId, `${f.vendorId}-approver`);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: {
+      id: created.replacementSettlementApprovalId,
+    } })).toMatchObject({ status: 'APPROVED' });
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(1);
+  });
+
+  it('2D: concurrent refund ingestion and replacement cannot approve an omitted liability', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const request = await replacementRequest(f, 'concurrent-refund');
+    const held = await holdVendorLock(f.vendorId);
+    const ingestAttempt = ingestAcceptedTestRefund(f, 'concurrent-refund', '10.00');
+    const replacementAttempt = replacementWriter.createControlledSettlementReplacementDraft(request);
+    try {
+      await waitForCancellationLockWaits(2);
+    } finally {
+      await held.release();
+    }
+    const [ingestResult, replacementResult] = await Promise.allSettled([ingestAttempt, replacementAttempt]);
+    expect(ingestResult.status).toBe('fulfilled');
+    if (ingestResult.status !== 'fulfilled') return;
+    const evidence = ingestResult.value;
+    expect(await db.refundEvidenceSnapshot.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(1);
+    if (replacementResult.status === 'fulfilled') {
+      const row = await db.settlementApproval.findUniqueOrThrow({
+        where: { id: replacementResult.value.replacementSettlementApprovalId },
+      });
+      const frozen = row.sourceSnapshotJson as { lateRefundLedgerIds?: string[] };
+      if (frozen.lateRefundLedgerIds?.includes(evidence.refundFinanceLedgerEntryId)) {
+        await approval.approveSettlementApproval(row.id, `${f.vendorId}-approver`);
+        expect(await db.settlementRefundAdjustment.count({ where: {
+          refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        } })).toBe(1);
+      } else {
+        await expect(approval.approveSettlementApproval(row.id, `${f.vendorId}-approver`)).rejects.toThrow();
+        expect(await db.settlementRefundAdjustment.count({ where: {
+          refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        } })).toBe(0);
+      }
+    } else {
+      expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
+    }
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
+  it('2D: concurrent refund ingestion and replacement approval cannot omit an accepted refund', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'concurrent-approval-refund');
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const held = await holdVendorLock(f.vendorId);
+    const ingestAttempt = ingestAcceptedTestRefund(f, 'concurrent-approval-refund', '10.00');
+    const approvalAttempt = approval.approveSettlementApproval(created.replacementSettlementApprovalId,
+      `${f.vendorId}-approver`);
+    try {
+      await waitForCancellationLockWaits(2);
+    } finally {
+      await held.release();
+    }
+    const [ingestResult, approvalResult] = await Promise.allSettled([ingestAttempt, approvalAttempt]);
+    expect(ingestResult.status).toBe('fulfilled');
+    if (ingestResult.status !== 'fulfilled') return;
+    const evidence = ingestResult.value;
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: {
+      id: created.replacementSettlementApprovalId,
+    } });
+    if (approvalResult.status === 'fulfilled') {
+      expect(row.status).toBe('APPROVED');
+      expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+      } })).toMatchObject({ refundRecordId: evidence.refundRecordId,
+        originalSettlementApprovalId: row.id, status: 'PENDING' });
+    } else {
+      expect(row.status).toBe('DRAFT');
+      expect(await db.settlementRefundAdjustment.count({ where: {
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+      } })).toBe(0);
+    }
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
   it('2C1-C: a refund ledger without accepted evidence cannot borrow a sibling identity', async () => {
@@ -791,6 +1002,10 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(result.outcome).toBe('BLOCKED');
     expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_REFUND_EVIDENCE',
       sourceId: evidence.refundFinanceLedgerEntryId }));
+    const request = await replacementRequest(f, 'terminal-refund-conflict');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
+      .rejects.toMatchObject({ assessment: { outcome: 'BLOCKED' } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
     expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: { id: evidence.id } })).toEqual(evidence);
   });
 
@@ -961,16 +1176,21 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     } } })).toBe(0);
   });
 
-  it('2B: post-cutoff accepted refund with unknown later route cannot create a replacement', async () => {
+  it('2D: a verified post-cutoff refund is frozen outside the controlled replacement', async () => {
     const f = await cancelledFixture();
     const request = await replacementRequest(f, 'late-refund');
     vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
     const evidence = await ingestAcceptedTestRefund(f, 'writer-late', '10.00');
-    await expect(replacementWriter.createControlledSettlementReplacementDraft(request))
-      .rejects.toMatchObject({ assessment: { outcome: 'UNKNOWN', unknowns: expect.arrayContaining([
-        expect.objectContaining({ code: 'LATE_REFUND_ROUTE_UNVERIFIED', sourceId: evidence.refundFinanceLedgerEntryId }),
-      ]) } });
-    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    expect(created).toMatchObject({ outcome: 'CREATED', status: 'DRAFT' });
+    const replacementRow = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: created.replacementSettlementApprovalId }, include: { lines: true },
+    });
+    expect(replacementRow.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect(replacementRow.periodEnd).toEqual(f.periodEnd);
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(0);
     expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: { id: evidence.id } })).toEqual(evidence);
   });
 

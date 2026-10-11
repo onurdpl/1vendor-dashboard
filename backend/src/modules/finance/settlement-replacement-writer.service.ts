@@ -86,6 +86,8 @@ export async function createControlledSettlementReplacementDraft(input: Replacem
     }, {
       originalSettlementApprovalId: originalId, requestId,
       requestedBy: adminUserId, reason, requestedAt: new Date(),
+      lateRefundLedgerIds: assessment.refundEvidence.filter((item) => item.afterCutoff)
+        .map((item) => item.refundFinanceLedgerEntryId).sort(),
     }, tx);
     return { outcome: 'CREATED', replacementSettlementApprovalId: created.id,
       originalSettlementApprovalId: originalId, vendorId, requestId,

@@ -1004,6 +1004,15 @@ async function ingestShopifyRefundWebhookInternal(
         });
       }
 
+      // Serialize accepted refund authority with controlled replacement approval.
+      // Approval locks the same vendor before reading late-refund evidence.
+      for (const vendorId of [...new Set(resolvedLineItems.map((item) => item.vendorId))].sort()) {
+        const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id" FROM "Vendor" WHERE "id" = ${vendorId} FOR UPDATE
+        `);
+        if (locked.length !== 1) throw new Error('Refund economic vendor is unavailable.');
+      }
+
       const shopifyRefund = await tx.shopifyRefund.upsert({
         where: {
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,

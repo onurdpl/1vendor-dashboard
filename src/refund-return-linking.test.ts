@@ -2671,9 +2671,12 @@ describe('Shopify refund return linking', () => {
     const acceptanceFinishedAt = Date.now();
 
     expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
-    expect(txMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(txMock.$queryRaw).toHaveBeenCalledTimes(2);
     expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       txMock.refundEvidenceSnapshot.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(txMock.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      txMock.financeLedgerEntry.create.mock.invocationCallOrder[0],
     );
     expect(txMock.financeLedgerEntry.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
