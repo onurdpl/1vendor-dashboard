@@ -153,6 +153,14 @@ type SettlementApprovalLedgerRow = {
   voidReason?: string | null;
   supersededByLedgerId?: string | null;
   createdAt: Date;
+  refundEvidenceSnapshot?: {
+    refundFinanceLedgerEntryId: string;
+    refundRecordId: string;
+    sourceShopifyRefundId: string;
+    vendorAllocationId: string;
+    historicalEconomicVendorId: string;
+    historicalSaleFinanceLedgerEntryId: string;
+  } | null;
   vendorAllocation: ({
     id: string;
     allocationStatus: string;
@@ -187,7 +195,7 @@ type SettlementApprovalLedgerRow = {
       returnLifecycleStatus: string | null;
       sourceShopifyRefundId: string | null;
     }>;
-    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
+    financeEntries?: (RefundOffsetSaleLedgerSnapshot & { vendorId?: string })[];
   } & CustomerCancellationFinanceHoldSnapshot) | null;
   settlementApprovalLines: Array<{
     id: string;
@@ -442,14 +450,28 @@ function sumRefundImpact(refundRecords: Array<{ amount: unknown }> | undefined) 
   return (refundRecords ?? []).reduce((sum, refundRecord) => sum + toNumber(refundRecord.amount), 0);
 }
 
+function getExactRefundEvidence(row: SettlementApprovalLedgerRow) {
+  if (normalizeType(row.entryType) !== 'refund') return null;
+  const allocation = row.vendorAllocation;
+  const evidence = row.refundEvidenceSnapshot;
+  if (!allocation || !evidence || evidence.refundFinanceLedgerEntryId !== row.id ||
+      evidence.vendorAllocationId !== allocation.id || evidence.historicalEconomicVendorId !== row.vendorId) {
+    return null;
+  }
+  const record = allocation.refundRecords.find((refund) => refund.id === evidence.refundRecordId);
+  const sale = allocation.financeEntries?.find((entry) =>
+    entry.id === evidence.historicalSaleFinanceLedgerEntryId && normalizeType(entry.entryType ?? '') === 'sale');
+  if (!record || record.sourceShopifyRefundId !== evidence.sourceShopifyRefundId ||
+      !sale || sale.vendorId !== row.vendorId) return null;
+  return { record, sale };
+}
+
 function getValidRefundRecord(row: SettlementApprovalLedgerRow) {
-  return row.vendorAllocation?.refundRecords.find((refund) => refund.sourceShopifyRefundId || refund.id) ?? null;
+  return getExactRefundEvidence(row)?.record ?? null;
 }
 
 function getRelatedSaleLedgerEntry(row: SettlementApprovalLedgerRow) {
-  return row.vendorAllocation?.financeEntries?.find((entry) =>
-    normalizeType(entry.entryType ?? '') === 'sale' && entry.id !== row.id
-  ) ?? null;
+  return getExactRefundEvidence(row)?.sale ?? null;
 }
 
 function getRefundOffsetEligibility(
@@ -1204,6 +1226,16 @@ async function loadCurrentLedgerRowForApprovalLine(
       voidReason: true,
       supersededByLedgerId: true,
       createdAt: true,
+      refundEvidenceSnapshot: {
+        select: {
+          refundFinanceLedgerEntryId: true,
+          refundRecordId: true,
+          sourceShopifyRefundId: true,
+          vendorAllocationId: true,
+          historicalEconomicVendorId: true,
+          historicalSaleFinanceLedgerEntryId: true,
+        },
+      },
       vendorAllocation: {
         select: {
           id: true,
@@ -1252,6 +1284,7 @@ async function loadCurrentLedgerRowForApprovalLine(
             },
             select: {
               id: true,
+              vendorId: true,
               entryType: true,
               payoutStatus: true,
               settlementStatus: true,
@@ -1750,6 +1783,16 @@ async function buildApprovalPreview(
       settledAt: true,
       settlementHoldReason: true,
       createdAt: true,
+      refundEvidenceSnapshot: {
+        select: {
+          refundFinanceLedgerEntryId: true,
+          refundRecordId: true,
+          sourceShopifyRefundId: true,
+          vendorAllocationId: true,
+          historicalEconomicVendorId: true,
+          historicalSaleFinanceLedgerEntryId: true,
+        },
+      },
       vendorAllocation: {
         select: {
           id: true,
@@ -1798,6 +1841,7 @@ async function buildApprovalPreview(
             },
             select: {
               id: true,
+              vendorId: true,
               entryType: true,
               payoutStatus: true,
               settlementStatus: true,
@@ -1921,6 +1965,16 @@ async function buildApprovalPreview(
         settledAt: true,
         settlementHoldReason: true,
         createdAt: true,
+        refundEvidenceSnapshot: {
+          select: {
+            refundFinanceLedgerEntryId: true,
+            refundRecordId: true,
+            sourceShopifyRefundId: true,
+            vendorAllocationId: true,
+            historicalEconomicVendorId: true,
+            historicalSaleFinanceLedgerEntryId: true,
+          },
+        },
         vendorAllocation: {
           select: {
             id: true,
@@ -1969,6 +2023,7 @@ async function buildApprovalPreview(
               },
               select: {
                 id: true,
+                vendorId: true,
                 entryType: true,
                 payoutStatus: true,
                 settlementStatus: true,
@@ -2949,5 +3004,6 @@ export const __settlementApprovalTesting = {
   buildApprovalPreview,
   buildLine,
   buildSettlementEligibilityExplanation,
+  getExactRefundEvidence,
   resolveSettlementStatus,
 };

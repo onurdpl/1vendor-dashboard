@@ -495,6 +495,47 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     }
   });
 
+  it('2C1-D2: settlement preview, draft and approval retain two exact accepted refund ledgers', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const first = await ingestAcceptedTestRefund(f, 'settlement-one', '10.00');
+    const second = await ingestAcceptedTestRefund(f, 'settlement-two', '15.00');
+    const expectedRefundIds = [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId];
+    const preview = await approval.previewApproval(f.vendorId);
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual(expect.arrayContaining([
+      f.ledgerId, ...expectedRefundIds,
+    ]));
+    expect(preview.lines.filter((line) => expectedRefundIds.includes(line.financeLedgerEntryId))
+      .map((line) => [line.financeLedgerEntryId, line.payableImpactMinor]))
+      .toEqual(expect.arrayContaining([
+        [first.refundFinanceLedgerEntryId, -880],
+        [second.refundFinanceLedgerEntryId, -1320],
+      ]));
+    for (const evidence of [first, second]) {
+      const snapshot = await db.refundEvidenceSnapshot.findUniqueOrThrow({
+        where: { refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId },
+      });
+      expect(snapshot).toMatchObject({
+        refundRecordId: evidence.refundRecordId,
+        sourceShopifyRefundId: evidence.sourceShopifyRefundId,
+        vendorAllocationId: f.allocationId,
+        historicalEconomicVendorId: f.vendorId,
+        historicalSaleFinanceLedgerEntryId: f.ledgerId,
+      });
+    }
+    const draft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(draft.lines.map((line) => line.financeLedgerEntryId)).toEqual(expect.arrayContaining([
+      f.ledgerId, ...expectedRefundIds,
+    ]));
+    const approved = await approval.approveSettlementApproval(draft.id, `${f.vendorId}-approver`);
+    expect(approved.status).toBe('approved');
+    expect(approved.lines.map((line) => line.financeLedgerEntryId)).toEqual(expect.arrayContaining([
+      f.ledgerId, ...expectedRefundIds,
+    ]));
+    expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId, status: 'APPROVED' } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId, status: 'PAID' } })).toBe(0);
+  });
+
   it('2C1-C: a refund ledger without accepted evidence cannot borrow a sibling identity', async () => {
     const f = await cancelledFixture();
     vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
@@ -505,6 +546,9 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       entryType: 'refund', amount: '5.00', payoutStatus: 'PENDING', settlementStatus: 'PENDING',
       commissionPercentSnapshot: '10.00', commissionVatPercentSnapshot: '20.00',
     } });
+    const settlementPreview = await approval.previewApproval(f.vendorId);
+    expect(settlementPreview.lines.map((line) => line.financeLedgerEntryId)).toContain(accepted.refundFinanceLedgerEntryId);
+    expect(settlementPreview.lines.map((line) => line.financeLedgerEntryId)).not.toContain(legacyLedgerId);
     const { previewRefundAdjustmentEligibility, backfillPendingRefundAdjustments } = await import(
       '../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js'
     );

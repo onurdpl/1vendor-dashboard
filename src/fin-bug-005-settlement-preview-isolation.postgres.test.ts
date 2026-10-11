@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -8,6 +8,22 @@ const realNow = Date.now.bind(Date);
 
 describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQL', () => {
   let sequence = 0;
+  const fixtures: Array<{ db: PrismaClient; prefix: string }> = [];
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    for (const { db, prefix } of fixtures.splice(0)) {
+      try {
+        // Immutable observations remain in this disposable database; inactive
+        // profiles cannot be picked up by a later run after any test failure.
+        await db.vendorFinancialProfile.updateMany({
+          where: { vendorId: { startsWith: prefix } }, data: { active: false },
+        });
+      } finally {
+        await db.$disconnect();
+      }
+    }
+  });
 
   async function fixture() {
     const target = new URL(databaseUrl!);
@@ -31,6 +47,7 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
     const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
     const prefix = `finbug005-${process.pid}-${Date.now()}-${++sequence}`;
+    fixtures.push({ db, prefix });
     const vendor = (letter: string) => `${prefix}-${letter}-vendor`;
     const admin = `${prefix}-admin`;
     const observationTimes: Date[] = [];
@@ -57,14 +74,14 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
         providerShipmentId: `${prefix}-${letter}-shipment`, shipmentStatus: 'DELIVERED', requestSnapshot: {},
       } });
       const [{ observedBefore }] = await db.$queryRaw<Array<{ observedBefore: Date }>>`
-        SELECT timezone('UTC', clock_timestamp()) AS "observedBefore"
+        SELECT timezone('UTC', clock_timestamp())::timestamp(3) AS "observedBefore"
       `;
       const observation = await recordVerifiedDeliveredObservation({
         allocationId: allocation,
         source: { method: 'KARGONOMI', shipmentExecutionId: execution, sourceReference: `${prefix}-${letter}-shipment` },
       }, db as never);
       const [{ observedAfter }] = await db.$queryRaw<Array<{ observedAfter: Date }>>`
-        SELECT timezone('UTC', clock_timestamp()) AS "observedAfter"
+        SELECT timezone('UTC', clock_timestamp())::timestamp(3) AS "observedAfter"
       `;
       expect(observation).toMatchObject({
         vendorAllocationId: allocation, outboundMethod: 'KARGONOMI',
@@ -255,7 +272,6 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
         vendorId: { in: [f.vendor('b'), f.vendor('c')] } } })).toBe(2);
     } finally {
       vi.restoreAllMocks();
-      await f.db.$disconnect();
     }
   });
 
@@ -276,7 +292,6 @@ describeWithPostgres('FIN-BUG-005 isolated scheduled preview with real PostgreSQ
       expect(await f.db.financialCorrectionDeductionSettlementLine.count({ where: { deductionId: applied.deductionId } })).toBe(0);
     } finally {
       vi.restoreAllMocks();
-      await f.db.$disconnect();
     }
   });
 });

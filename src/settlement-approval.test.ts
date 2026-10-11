@@ -124,6 +124,11 @@ function buildLedgerRow(input: {
       : input.deliveredAt;
   const settlementDelayDaysSnapshot = input.settlementDelayDaysSnapshot ?? 21;
   const eligibleAt = fulfilled && deliveredAt ? addDays(deliveredAt, settlementDelayDaysSnapshot) : null;
+  const allocationId = `alloc-${input.id}`;
+  const refundRecords = input.refundRecords ?? (input.entryType === 'refund'
+    ? [{ id: `refund-record-${input.id}`, sourceShopifyRefundId: `refund-${input.id}`, amount: input.amount }]
+    : []);
+  const relatedSaleId = `sale-for-${input.id}`;
   return {
     id: input.id,
     vendorId: 'vendor-a',
@@ -156,12 +161,20 @@ function buildLedgerRow(input: {
     voidReason: input.voidedAt ? 'economic transfer superseded source ledger' : null,
     supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt,
+    refundEvidenceSnapshot: input.entryType === 'refund' && refundRecords[0] ? {
+      refundFinanceLedgerEntryId: input.id,
+      refundRecordId: refundRecords[0].id,
+      sourceShopifyRefundId: refundRecords[0].sourceShopifyRefundId,
+      vendorAllocationId: allocationId,
+      historicalEconomicVendorId: 'vendor-a',
+      historicalSaleFinanceLedgerEntryId: relatedSaleId,
+    } : null,
 	    vendorAllocation: {
-	      id: `alloc-${input.id}`,
+	      id: allocationId,
 	      outboundMethodSnapshot: 'KARGONOMI',
 	      outboundIntegrationProviderSnapshot: null,
 	      deliveredObservation: deliveredAt ? {
-	        vendorAllocationId: `alloc-${input.id}`,
+	        vendorAllocationId: allocationId,
 	        outboundMethod: 'KARGONOMI',
 	        outboundIntegrationProvider: null,
 	        firstObservedDeliveredAt: deliveredAt,
@@ -185,11 +198,7 @@ function buildLedgerRow(input: {
         fulfilledAt: fulfilled ? createdAt : null,
         shipmentUpdatedAt: deliveredAt,
       },
-      refundRecords: input.refundRecords ?? (
-        input.entryType === 'refund'
-          ? [{ id: `refund-record-${input.id}`, sourceShopifyRefundId: `refund-${input.id}`, amount: input.amount }]
-          : []
-      ),
+      refundRecords,
       returnRecords: (input.returnRecords ?? []).map((record) => ({
         ...record,
         sourceShopifyRefundId: record.sourceShopifyRefundId ?? null,
@@ -197,7 +206,8 @@ function buildLedgerRow(input: {
       financeEntries: input.entryType === 'refund'
         ? [
             {
-              id: `sale-for-${input.id}`,
+              id: relatedSaleId,
+              vendorId: 'vendor-a',
               entryType: 'sale',
               payoutStatus: input.relatedSalePaid ? 'PAID' : 'PENDING',
               settlementStatus: input.relatedSalePaid ? 'SETTLED' : 'PAYABLE',
@@ -430,6 +440,44 @@ describe('settlement approval foundation', () => {
     ]);
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('resolves a REFUND through its exact accepted snapshot, not the first sibling', () => {
+    const row = buildLedgerRow({ id: 'refund-b', entryType: 'refund', amount: 15,
+      refundRecords: [
+        { id: 'record-a', sourceShopifyRefundId: 'shopify-a', amount: 10 },
+        { id: 'record-b', sourceShopifyRefundId: 'shopify-b', amount: 15 },
+      ],
+    });
+    row.refundEvidenceSnapshot!.refundRecordId = 'record-b';
+    row.refundEvidenceSnapshot!.sourceShopifyRefundId = 'shopify-b';
+    expect(__settlementApprovalTesting.getExactRefundEvidence(row)).toMatchObject({
+      record: { id: 'record-b', sourceShopifyRefundId: 'shopify-b' },
+      sale: { id: 'sale-for-refund-b', vendorId: 'vendor-a' },
+    });
+    expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(row).eligibilityDecision).toBe('included');
+  });
+
+  it('does not borrow a sibling refund for missing or contradictory accepted evidence', () => {
+    const row = buildLedgerRow({ id: 'refund-missing', entryType: 'refund', amount: 15,
+      refundRecords: [
+        { id: 'record-a', sourceShopifyRefundId: 'shopify-a', amount: 10 },
+        { id: 'record-b', sourceShopifyRefundId: 'shopify-b', amount: 15 },
+      ],
+    });
+    row.refundEvidenceSnapshot = null;
+    expect(__settlementApprovalTesting.getExactRefundEvidence(row)).toBeNull();
+    expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(row)).toMatchObject({
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Refund row is not linked to a valid Shopify refund.',
+    });
+    row.refundEvidenceSnapshot = {
+      refundFinanceLedgerEntryId: row.id, refundRecordId: 'record-b', sourceShopifyRefundId: 'shopify-a',
+      vendorAllocationId: row.vendorAllocation.id, historicalEconomicVendorId: row.vendorId,
+      historicalSaleFinanceLedgerEntryId: 'sale-for-refund-missing',
+    };
+    expect(__settlementApprovalTesting.getExactRefundEvidence(row)).toBeNull();
+    expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(row).eligibilityDecision).toBe('excluded');
   });
 
   it('explains observed delivery as the SALE authority after operational status changes', async () => {
