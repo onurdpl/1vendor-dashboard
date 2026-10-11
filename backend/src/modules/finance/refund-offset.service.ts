@@ -65,6 +65,7 @@ export type RefundOffsetEligibility = {
 
 export type PostApprovalRefundRiskState =
   | 'none'
+  | 'evidence_unverified'
   | 'approved_settlement_adjustment_required'
   | 'already_paid_requires_vendor_debt'
   | 'unsettled_offset_eligible';
@@ -95,22 +96,11 @@ function hasApprovedSettlementApproval(lines: ActiveSettlementApprovalLine[] | u
   return (lines ?? []).some((line) => normalize(line.settlementApproval?.status) === 'APPROVED');
 }
 
-function refundAlreadyRepresentedByApprovedSettlement(input: {
-  refundLedgerEntry?: RefundOffsetSaleLedgerSnapshot | null;
-  siblingLedgerEntries?: RefundOffsetSaleLedgerSnapshot[];
-}) {
-  if (hasApprovedSettlementApproval(input.refundLedgerEntry?.settlementApprovalLines)) {
-    return true;
-  }
-
-  return (input.siblingLedgerEntries ?? []).some((entry) =>
-    normalize(entry.entryType) === 'REFUND' && hasApprovedSettlementApproval(entry.settlementApprovalLines)
-  );
-}
+export const REFUND_EVIDENCE_UNVERIFIED_REASON =
+  'Accepted refund evidence cannot be verified for this finance ledger.';
 
 export function classifyPostApprovalRefundRisk(input: RefundOffsetEligibilityInput & {
   refundLedgerEntry?: RefundOffsetSaleLedgerSnapshot | null;
-  siblingLedgerEntries?: RefundOffsetSaleLedgerSnapshot[];
 }): PostApprovalRefundRisk {
   const refundRecordId = input.refundRecord?.sourceShopifyRefundId ?? input.refundRecord?.id ?? null;
   const sale = input.relatedSaleLedgerEntry;
@@ -128,7 +118,7 @@ export function classifyPostApprovalRefundRisk(input: RefundOffsetEligibilityInp
     };
   }
 
-  if (refundAlreadyRepresentedByApprovedSettlement(input)) {
+  if (hasApprovedSettlementApproval(input.refundLedgerEntry?.settlementApprovalLines)) {
     return {
       state: 'none',
       reason: null,

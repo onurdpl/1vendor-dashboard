@@ -40,9 +40,11 @@ import {
 } from './settlement-delay-eligibility.service.js';
 import {
   POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON,
+  REFUND_EVIDENCE_UNVERIFIED_REASON,
   calculateRefundOffsetAmounts,
   classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
+  type PostApprovalRefundRisk,
   type RefundOffsetSaleLedgerSnapshot,
 } from './refund-offset.service.js';
 import {
@@ -678,22 +680,69 @@ function mapShippingCost(cost: {
   };
 }
 
+type FinanceRefundLedger = RefundOffsetSaleLedgerSnapshot & {
+  vendorId?: string | null;
+  refundAdjustments?: Array<{
+    status: string;
+    remainingAmountMinor: number;
+  }>;
+  refundEvidenceSnapshot?: {
+    refundFinanceLedgerEntryId: string;
+    refundRecordId: string;
+    sourceShopifyRefundId: string;
+    vendorAllocationId: string;
+    historicalEconomicVendorId: string;
+    historicalSaleFinanceLedgerEntryId: string;
+  } | null;
+};
+
+type FinanceRefundAllocation = {
+  id?: string | null;
+  refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
+  financeEntries?: FinanceRefundLedger[];
+};
+
+function resolveExactRefundEvidence(allocation: FinanceRefundAllocation | null | undefined, ledger: FinanceRefundLedger) {
+  const evidence = ledger.refundEvidenceSnapshot;
+  if (!allocation?.id || !ledger.id || !ledger.vendorId || !evidence ||
+      evidence.refundFinanceLedgerEntryId !== ledger.id ||
+      evidence.vendorAllocationId !== allocation.id ||
+      evidence.historicalEconomicVendorId !== ledger.vendorId) {
+    return null;
+  }
+  const record = allocation.refundRecords?.find((refund) => refund.id === evidence.refundRecordId);
+  const sale = allocation.financeEntries?.find((entry) =>
+    entry.id === evidence.historicalSaleFinanceLedgerEntryId && normalizeType(entry.entryType ?? '') === 'sale');
+  if (!record || record.sourceShopifyRefundId !== evidence.sourceShopifyRefundId || !sale ||
+      sale.vendorId !== ledger.vendorId) {
+    return null;
+  }
+  return { record, sale };
+}
+
 function mapRelatedReferences(record: {
+  id: string;
   entryType: string;
   vendorAllocation: {
+    id: string;
     sourceShopifyOrderId: string;
     sourceShopifyOrderNumber: string;
     returnRecords: Array<{ id: string }>;
     refundRecords: Array<{ id: string; sourceShopifyRefundId: string; amount?: unknown }>;
+    financeEntries?: FinanceRefundLedger[];
   } | null;
 }) {
   const relatedOrderId = record.vendorAllocation?.sourceShopifyOrderId ?? null;
   const relatedOrderNumber = record.vendorAllocation?.sourceShopifyOrderNumber ?? null;
   const relatedReturnId = record.vendorAllocation?.returnRecords?.[0]?.id ?? null;
-  const relatedRefundId =
-    record.vendorAllocation?.refundRecords?.[0]?.sourceShopifyRefundId ??
-    record.vendorAllocation?.refundRecords?.[0]?.id ??
-    null;
+  const refunds = record.vendorAllocation?.refundRecords ?? [];
+  const exactRefund = normalizeType(record.entryType) === 'refund'
+    ? resolveExactRefundEvidence(record.vendorAllocation,
+      record.vendorAllocation?.financeEntries?.find((entry) => entry.id === record.id) ?? {})?.record
+    : null;
+  const relatedRefundId = normalizeType(record.entryType) === 'refund'
+    ? exactRefund?.sourceShopifyRefundId ?? null
+    : refunds.length === 1 ? refunds[0]?.sourceShopifyRefundId ?? refunds[0]?.id ?? null : null;
 
   return {
     relatedOrderId,
@@ -705,14 +754,6 @@ function mapRelatedReferences(record: {
 
 function sumRefundImpact(refundRecords: Array<{ amount?: unknown }> | undefined) {
   return (refundRecords ?? []).reduce((sum, refundRecord) => sum + toNumber(refundRecord.amount), 0);
-}
-
-function getValidRefundRecord(entry: {
-  vendorAllocation?: {
-    refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
-  } | null;
-}) {
-  return entry.vendorAllocation?.refundRecords?.find((refund) => refund.sourceShopifyRefundId || refund.id) ?? null;
 }
 
 function getRelatedSaleLedgerEntry(entry: {
@@ -751,9 +792,11 @@ function getRefundOffsetEligibility(entry: {
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
   } | null;
 }) {
+  const exact = resolveExactRefundEvidence(entry.vendorAllocation,
+    entry.vendorAllocation?.financeEntries?.find((ledger) => ledger.id === entry.id) ?? {});
   return getUnsettledRefundOffsetEligibility({
-    refundRecord: getValidRefundRecord(entry),
-    relatedSaleLedgerEntry: getRelatedSaleLedgerEntry(entry),
+    refundRecord: exact?.record ?? null,
+    relatedSaleLedgerEntry: exact?.sale ?? null,
   });
 }
 
@@ -767,22 +810,62 @@ function getPostApprovalRefundRisk(entry: {
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
   settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
+    id?: string | null;
     refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
-    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
+    financeEntries?: FinanceRefundLedger[];
   } | null;
-}) {
+}): PostApprovalRefundRisk {
   const type = normalizeType(entry.entryType ?? '');
-  const refundLedgerEntry =
-    type === 'refund'
-      ? entry
-      : entry.vendorAllocation?.financeEntries?.find((ledgerEntry) => normalizeType(ledgerEntry.entryType ?? '') === 'refund') ?? null;
+  if (type !== 'sale' && type !== 'refund') return { state: 'none', reason: null };
+  const allocation = entry.vendorAllocation;
+  const refundLedgers = (allocation?.financeEntries ?? []).filter((ledger) =>
+    normalizeType(ledger.entryType ?? '') === 'refund');
+  const resolved = refundLedgers.map((ledger) => ({ ledger, exact: resolveExactRefundEvidence(allocation, ledger) }));
+  if (resolved.some(({ exact }) => !exact)) {
+    return { state: 'evidence_unverified', reason: REFUND_EVIDENCE_UNVERIFIED_REASON };
+  }
+  const representedRecords = new Set(resolved.map(({ exact }) => exact!.record.id));
+  if (type === 'sale' && (allocation?.refundRecords ?? []).some((record) =>
+    !record.id || !representedRecords.has(record.id))) {
+    return { state: 'evidence_unverified', reason: REFUND_EVIDENCE_UNVERIFIED_REASON };
+  }
+  const relevant = type === 'refund'
+    ? resolved.filter(({ ledger }) => ledger.id === entry.id)
+    : resolved.filter(({ exact }) => exact!.sale.id === entry.id);
+  if (relevant.length === 0) {
+    return type === 'refund'
+      ? { state: 'evidence_unverified', reason: REFUND_EVIDENCE_UNVERIFIED_REASON }
+      : { state: 'none', reason: null };
+  }
+  const risks: PostApprovalRefundRisk[] = [];
+  for (const { ledger, exact } of relevant) {
+    const adjustment = ledger.refundAdjustments?.[0];
+    if (adjustment && (
+      (adjustment.status === 'APPLIED' && adjustment.remainingAmountMinor !== 0) ||
+      (['PENDING', 'PARTIALLY_APPLIED'].includes(adjustment.status) && adjustment.remainingAmountMinor <= 0)
+    )) {
+      return { state: 'evidence_unverified', reason: REFUND_EVIDENCE_UNVERIFIED_REASON };
+    }
+    if (adjustment && ['PENDING', 'PARTIALLY_APPLIED'].includes(adjustment.status) &&
+        adjustment.remainingAmountMinor > 0) {
+      risks.push({ state: 'approved_settlement_adjustment_required',
+        reason: POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON });
+      continue;
+    }
+    risks.push(classifyPostApprovalRefundRisk({
+      refundRecord: exact!.record,
+      relatedSaleLedgerEntry: exact!.sale,
+      refundLedgerEntry: ledger,
+    }));
+  }
+  return risks.find((risk) => risk.state === 'approved_settlement_adjustment_required') ??
+    risks.find((risk) => risk.state === 'already_paid_requires_vendor_debt') ??
+    risks.find((risk) => risk.state === 'unsettled_offset_eligible') ??
+    { state: 'none', reason: null };
+}
 
-  return classifyPostApprovalRefundRisk({
-    refundRecord: getValidRefundRecord(entry),
-    relatedSaleLedgerEntry: getRelatedSaleLedgerEntry(entry),
-    refundLedgerEntry,
-    siblingLedgerEntries: entry.vendorAllocation?.financeEntries ?? [],
-  });
+function isBlockingPostApprovalRefundRisk(risk: PostApprovalRefundRisk) {
+  return risk.state === 'approved_settlement_adjustment_required' || risk.state === 'evidence_unverified';
 }
 
 function resolveRefundCommissionSnapshot(entry: {
@@ -851,13 +934,12 @@ export function getSettlementStatus(entry: {
   } & CustomerCancellationFinanceHoldSnapshot & SaleDeliveryAuthoritySnapshot) | null;
 }): SettlementDto['status'] {
   const type = normalizeType(entry.entryType);
-  if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
-    return 'held';
-  }
-
   const payoutStatus = mapStatus(entry.payoutStatus ?? '');
   if (payoutStatus === 'paid') {
     return 'settled';
+  }
+  if (isBlockingPostApprovalRefundRisk(getPostApprovalRefundRisk(entry))) {
+    return 'held';
   }
   if (isFullOrderCancelled(entry.vendorAllocation?.order)) {
     return 'held';
@@ -947,8 +1029,8 @@ function buildSettlement(entry: {
     payable: 'Delivered sale has satisfied the vendor settlement delay.',
     partially_refunded: 'Refund impact is reducing the vendor balance.',
     held:
-      postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
-        ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+      isBlockingPostApprovalRefundRisk(postApprovalRefundRisk)
+        ? postApprovalRefundRisk.reason ?? REFUND_EVIDENCE_UNVERIFIED_REASON
         : hasActiveVendorBlockedFinanceHold(entry.vendorAllocation)
           ? VENDOR_BLOCKED_FINANCE_HOLD_REASON
         : customerCancellationHoldActive
@@ -971,8 +1053,8 @@ function buildSettlement(entry: {
     payableAt: toIso(payableAt),
     settledAt: toIso(entry.settledAt),
     holdReason:
-      postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
-        ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+      status === 'held' && isBlockingPostApprovalRefundRisk(postApprovalRefundRisk)
+        ? postApprovalRefundRisk.reason ?? REFUND_EVIDENCE_UNVERIFIED_REASON
         : hasActiveVendorBlockedFinanceHold(entry.vendorAllocation)
           ? VENDOR_BLOCKED_FINANCE_HOLD_REASON
         : customerCancellationHoldActive
@@ -1041,7 +1123,7 @@ function isEntryEligibleForPayoutBatch(entry: {
   if (hasBlockingCancelRefundReviewStatus(entry.vendorAllocation)) {
     return false;
   }
-  if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
+  if (isBlockingPostApprovalRefundRisk(getPostApprovalRefundRisk(entry))) {
     return false;
   }
   if (type === 'refund' && !getRefundOffsetEligibility(entry).eligible && !hasApprovedSettlementSnapshot(entry)) {
@@ -1416,7 +1498,21 @@ export async function getVendorFinanceDashboard(
               where: activeFinanceLedgerWhere,
               select: {
                 id: true,
+                vendorId: true,
                 entryType: true,
+                refundEvidenceSnapshot: {
+                  select: {
+                    refundFinanceLedgerEntryId: true,
+                    refundRecordId: true,
+                    sourceShopifyRefundId: true,
+                    vendorAllocationId: true,
+                    historicalEconomicVendorId: true,
+                    historicalSaleFinanceLedgerEntryId: true,
+                  },
+                },
+                refundAdjustments: {
+                  select: { status: true, remainingAmountMinor: true },
+                },
                 payoutStatus: true,
                 settlementStatus: true,
                 commissionPercentSnapshot: true,
@@ -1614,7 +1710,21 @@ export async function getVendorFinanceDashboard(
               where: activeFinanceLedgerWhere,
               select: {
                 id: true,
+                vendorId: true,
                 entryType: true,
+                refundEvidenceSnapshot: {
+                  select: {
+                    refundFinanceLedgerEntryId: true,
+                    refundRecordId: true,
+                    sourceShopifyRefundId: true,
+                    vendorAllocationId: true,
+                    historicalEconomicVendorId: true,
+                    historicalSaleFinanceLedgerEntryId: true,
+                  },
+                },
+                refundAdjustments: {
+                  select: { status: true, remainingAmountMinor: true },
+                },
                 payoutStatus: true,
                 settlementStatus: true,
                 commissionPercentSnapshot: true,
@@ -2525,7 +2635,21 @@ export async function preparePayoutBatch(
                 where: activeFinanceLedgerWhere,
                 select: {
                   id: true,
+                  vendorId: true,
                   entryType: true,
+                  refundEvidenceSnapshot: {
+                    select: {
+                      refundFinanceLedgerEntryId: true,
+                      refundRecordId: true,
+                      sourceShopifyRefundId: true,
+                      vendorAllocationId: true,
+                      historicalEconomicVendorId: true,
+                      historicalSaleFinanceLedgerEntryId: true,
+                    },
+                  },
+                  refundAdjustments: {
+                    select: { status: true, remainingAmountMinor: true },
+                  },
                   payoutStatus: true,
                   settlementStatus: true,
                   commissionPercentSnapshot: true,
@@ -2653,6 +2777,22 @@ export async function preparePayoutBatch(
     const eligibleCandidates = approvedCandidates.filter(({ entry, settlementLine }) =>
       isApprovedSettlementLineEligibleForPayout(settlementLine, entry)
     );
+    // A payout must not select only the apparently eligible lines of an approved
+    // settlement while another line of that same frozen approval has unresolved
+    // refund authority. Unrelated approvals remain independently selectable.
+    const blockedApprovalReasons = new Map<string, string>();
+    for (const entry of entries) {
+      const risk = getPostApprovalRefundRisk(entry);
+      if (!isBlockingPostApprovalRefundRisk(risk)) continue;
+      for (const line of entry.settlementApprovalLines) {
+        blockedApprovalReasons.set(line.settlementApproval.id, risk.reason ?? REFUND_EVIDENCE_UNVERIFIED_REASON);
+      }
+    }
+    const selectedBlockedApproval = eligibleCandidates.find(({ settlementLine }) =>
+      blockedApprovalReasons.has(settlementLine.settlementApproval.id));
+    if (selectedBlockedApproval) {
+      throw new Error(blockedApprovalReasons.get(selectedBlockedApproval.settlementLine.settlementApproval.id));
+    }
     const creditCandidates = await tx.financialCorrectionCreditSettlementLine.findMany({
       where: {
         status: 'ACTIVE',
@@ -2748,6 +2888,9 @@ export async function preparePayoutBatch(
     const adjustmentRequiredEntries = entries.filter(
       (entry) => getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required',
     );
+    const unverifiedRefundEntries = entries.filter(
+      (entry) => getPostApprovalRefundRisk(entry).state === 'evidence_unverified',
+    );
 
     if (eligibleCandidates.length === 0 && creditCandidates.length === 0) {
       if (fullOrderCancelledEntries.length > 0) {
@@ -2758,6 +2901,9 @@ export async function preparePayoutBatch(
       }
       if (adjustmentRequiredEntries.length > 0) {
         throw new Error(POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON);
+      }
+      if (unverifiedRefundEntries.length > 0) {
+        throw new Error(REFUND_EVIDENCE_UNVERIFIED_REASON);
       }
       if (approvedSettlementRequiredEntries.length > 0) {
         throw new Error(APPROVED_SETTLEMENT_SNAPSHOT_REQUIRED_REASON);
@@ -3067,7 +3213,21 @@ async function validatePayoutBatchBeforeTransitionWithClient(
                     where: activeFinanceLedgerWhere,
                     select: {
                       id: true,
+                      vendorId: true,
                       entryType: true,
+                      refundEvidenceSnapshot: {
+                        select: {
+                          refundFinanceLedgerEntryId: true,
+                          refundRecordId: true,
+                          sourceShopifyRefundId: true,
+                          vendorAllocationId: true,
+                          historicalEconomicVendorId: true,
+                          historicalSaleFinanceLedgerEntryId: true,
+                        },
+                      },
+                      refundAdjustments: {
+                        select: { status: true, remainingAmountMinor: true },
+                      },
                       payoutStatus: true,
                       settlementStatus: true,
                       settlementHoldReason: true,

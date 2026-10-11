@@ -106,6 +106,7 @@ type LedgerFixture = {
     sourceShopifyOrderNumber: string;
     returnRecords: Array<{ id: string }>;
     refundRecords: Array<{ id: string; sourceShopifyRefundId: string; amount?: number }>;
+    financeEntries?: Array<Record<string, unknown>>;
   } | null;
 };
 
@@ -141,6 +142,28 @@ function buildSaleFixture(input: {
         : null;
   const settlementDelayDaysSnapshot = input.settlementDelayDaysSnapshot ?? 21;
   const eligibleAt = fulfilled && deliveredAt ? addDays(deliveredAt, settlementDelayDaysSnapshot) : null;
+  const allocationId = `alloc-${input.orderId}`;
+  const refundRecords = input.refundRecords ?? [];
+  const financeEntries = [
+    { id: input.id, vendorId: 'sporjinal', entryType: 'sale', payoutStatus: 'PENDING',
+      settlementStatus: 'PAYABLE', settlementApprovalLines: [], payoutBatchLines: [] },
+    ...refundRecords.map((record, index) => {
+      const refundLedgerId = `refund-ledger-${input.id}-${index}`;
+      return {
+        id: refundLedgerId, vendorId: 'sporjinal', entryType: 'refund', payoutStatus: 'PENDING',
+        settlementStatus: 'PARTIALLY_REFUNDED', settlementApprovalLines: [], payoutBatchLines: [],
+        refundAdjustments: [],
+        refundEvidenceSnapshot: {
+          refundFinanceLedgerEntryId: refundLedgerId,
+          refundRecordId: record.id,
+          sourceShopifyRefundId: record.sourceShopifyRefundId,
+          vendorAllocationId: allocationId,
+          historicalEconomicVendorId: 'sporjinal',
+          historicalSaleFinanceLedgerEntryId: input.id,
+        },
+      };
+    }),
+  ];
   return {
     id: input.id,
     entryType: 'sale',
@@ -171,11 +194,11 @@ function buildSaleFixture(input: {
     remainingAllocationSplitEvents: input.remainingAllocationSplitEvents ?? [],
     childAllocationSplitEvents: input.childAllocationSplitEvents ?? [],
 	    vendorAllocation: {
-	      id: `alloc-${input.orderId}`,
+	      id: allocationId,
 	      outboundMethodSnapshot: 'KARGONOMI',
 	      outboundIntegrationProviderSnapshot: null,
 	      deliveredObservation: deliveredAt ? {
-	        vendorAllocationId: `alloc-${input.orderId}`,
+	        vendorAllocationId: allocationId,
 	        outboundMethod: 'KARGONOMI',
 	        outboundIntegrationProvider: null,
 	        firstObservedDeliveredAt: deliveredAt,
@@ -190,7 +213,8 @@ function buildSaleFixture(input: {
       sourceShopifyOrderId: input.orderId,
       sourceShopifyOrderNumber: input.orderNumber,
       returnRecords: [],
-      refundRecords: input.refundRecords ?? [],
+      refundRecords,
+      financeEntries,
     },
   };
 }
@@ -259,7 +283,20 @@ describe('persisted vendor finance calculations', () => {
           sourceShopifyOrderId: 'refund-order',
           sourceShopifyOrderNumber: '#1018',
           returnRecords: [],
-          refundRecords: [],
+          refundRecords: [{ id: 'refund-record-1018', sourceShopifyRefundId: 'refund-1018', amount: 100 }],
+          financeEntries: [
+            { id: 'historical-sale-1018', vendorId: 'sporjinal', entryType: 'sale',
+              payoutStatus: 'PENDING', settlementStatus: 'PAYABLE', settlementApprovalLines: [], payoutBatchLines: [] },
+            { id: 'fin-sporjinal-refund-1074189959505', vendorId: 'sporjinal', entryType: 'refund',
+              payoutStatus: 'RECORDED', settlementStatus: 'PARTIALLY_REFUNDED',
+              settlementApprovalLines: [], payoutBatchLines: [], refundAdjustments: [],
+              refundEvidenceSnapshot: {
+                refundFinanceLedgerEntryId: 'fin-sporjinal-refund-1074189959505',
+                refundRecordId: 'refund-record-1018', sourceShopifyRefundId: 'refund-1018',
+                vendorAllocationId: 'alloc-refund', historicalEconomicVendorId: 'sporjinal',
+                historicalSaleFinanceLedgerEntryId: 'historical-sale-1018',
+              } },
+          ],
         },
       },
     ];
@@ -338,6 +375,7 @@ describe('persisted vendor finance calculations', () => {
                 fulfillment: row.vendorAllocation.fulfillment,
                 returnRecords: row.vendorAllocation.returnRecords,
                 refundRecords: row.vendorAllocation.refundRecords,
+                financeEntries: row.vendorAllocation.financeEntries,
               }
             : null,
           payoutBatchLines: row.payoutBatchLines ?? [],

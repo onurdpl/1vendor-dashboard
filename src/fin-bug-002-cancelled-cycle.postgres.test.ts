@@ -487,6 +487,12 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
         vendorId: f.vendorId,
       });
     }
+    const { getVendorFinanceDashboard } = await import('../backend/src/modules/finance/finance.service.js');
+    const dashboard = await getVendorFinanceDashboard(f.vendorId);
+    for (const evidence of [first, second]) {
+      expect(dashboard.records.find((record) => record.id === evidence.refundFinanceLedgerEntryId))
+        .toMatchObject({ relatedRefundId: evidence.sourceShopifyRefundId });
+    }
   });
 
   it('2C1-C: a refund ledger without accepted evidence cannot borrow a sibling identity', async () => {
@@ -512,6 +518,37 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(backfill.writesPerformed).toBe(false);
     expect(backfill.createdRecords).toEqual([]);
     expect(await db.settlementRefundAdjustment.count({ where: { refundFinanceLedgerEntryId: legacyLedgerId } })).toBe(0);
+    const { getVendorFinanceDashboard } = await import('../backend/src/modules/finance/finance.service.js');
+    const dashboard = await getVendorFinanceDashboard(f.vendorId);
+    expect(dashboard.records.find((record) => record.id === legacyLedgerId)).toMatchObject({
+      relatedRefundId: null,
+      settlement: { status: 'held', payoutReady: false },
+    });
+    expect(dashboard.records.find((record) => record.id === f.ledgerId)?.settlement.status).toBe('held');
+  });
+
+  it('2C1-D: a later accepted sibling cannot inherit an earlier approved REFUND representation', async () => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const first = await ingestAcceptedTestRefund(f, 'direct-before-approval', '10.00');
+    const draft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(draft.lines.map((line) => line.financeLedgerEntryId)).toEqual(expect.arrayContaining([
+      f.ledgerId, first.refundFinanceLedgerEntryId,
+    ]));
+    await approval.approveSettlementApproval(draft.id, `${f.vendorId}-approver`);
+    const second = await ingestAcceptedTestRefund(f, 'after-approval', '15.00');
+    const secondAdjustment = await db.settlementRefundAdjustment.findUnique({ where: {
+      refundFinanceLedgerEntryId: second.refundFinanceLedgerEntryId,
+    } });
+    expect(secondAdjustment).toMatchObject({ refundRecordId: second.refundRecordId, status: 'PENDING' });
+    const { getVendorFinanceDashboard, preparePayoutBatch } = await import('../backend/src/modules/finance/finance.service.js');
+    const dashboard = await getVendorFinanceDashboard(f.vendorId);
+    const sale = dashboard.records.find((record) => record.id === f.ledgerId);
+    expect(sale?.settlement.status).toBe('held');
+    expect(sale?.settlement.payoutReady).toBe(false);
+    expect(sale?.settlement.holdReason).toContain('Refund after settlement approval requires adjustment');
+    await expect(preparePayoutBatch({ vendorId: f.vendorId }, `${f.vendorId}-admin`)).rejects.toThrow();
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
   it.each([
@@ -557,6 +594,11 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     } });
     expect(adjustment).toMatchObject({ status: 'PARTIALLY_APPLIED', originalAmountMinor: 1760,
       appliedAmountMinor: 880, remainingAmountMinor: 880 });
+    const { getVendorFinanceDashboard } = await import('../backend/src/modules/finance/finance.service.js');
+    const dashboard = await getVendorFinanceDashboard(f.vendorId);
+    expect(dashboard.records.find((record) => record.id === f.ledgerId)?.settlement).toMatchObject({
+      status: 'held', payoutReady: false,
+    });
     expect(await db.settlementRefundAdjustmentApplication.count({ where: { settlementRefundAdjustmentId: adjustment.id } })).toBe(1);
     const before = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } });
     const result = await replacement.assessCancelledScheduledSettlementReplacement({
@@ -575,6 +617,28 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
         expect.objectContaining({ code: 'PENDING_REFUND_ADJUSTMENT', sourceId: adjustment.id }),
       ]) } });
     expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).toEqual(before);
+  });
+
+  it('2C1-D: fully applied and approved exact adjustment has no pending remainder', async () => {
+    const f = await cancelledFixture();
+    const manual = await approval.createDraftApproval({ vendorId: f.vendorId });
+    await approval.approveSettlementApproval(manual.id, `${f.vendorId}-approver`);
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'fully-applied', '20.00');
+    await addEligiblePostCutoffSale(f, '30.00');
+    const laterDraft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } });
+    expect(adjustment).toMatchObject({ status: 'APPLIED', originalAmountMinor: 1760,
+      appliedAmountMinor: 1760, remainingAmountMinor: 0 });
+    await approval.approveSettlementApproval(laterDraft.id, `${f.vendorId}-approver`);
+    const { getVendorFinanceDashboard } = await import('../backend/src/modules/finance/finance.service.js');
+    const dashboard = await getVendorFinanceDashboard(f.vendorId);
+    expect(dashboard.records.find((record) => record.id === f.ledgerId)?.settlement.status)
+      .not.toBe('held');
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } }))
+      .toMatchObject({ status: 'APPLIED', remainingAmountMinor: 0 });
   });
 
   it('2A: a real post-approval refund creates a PENDING obligation that the old T cannot absorb', async () => {

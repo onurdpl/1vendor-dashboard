@@ -66,7 +66,7 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     } });
   }
 
-  async function createServiceApprovedOrigin() {
+  async function createServiceApprovedOrigin(additionalRefundLedgerId?: string) {
     const executionId = `${runId}-shipment-execution`;
     const sourceReference = `${runId}-shipment`;
     await db.shipmentExecution.create({ data: {
@@ -101,17 +101,25 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     const draft = await createDraftApproval({ vendorId: ids.vendor });
     ids.origin = draft.id;
     expect(draft.status).toBe('draft');
-    expect(draft.lines).toHaveLength(2);
-    expect(draft.lines.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    const expectedLedgerIds = [ids.sale, ids.refundLedger, ...(additionalRefundLedgerId ? [additionalRefundLedgerId] : [])];
+    expect(draft.lines).toHaveLength(expectedLedgerIds.length);
+    expect(draft.lines.map((line) => line.financeLedgerEntryId).sort()).toEqual(expectedLedgerIds.sort());
     expect(draft.lines.find((line) => line.financeLedgerEntryId === ids.sale)).toMatchObject({
       lineType: 'SALE', amountMinor: 105000, payableImpactMinor: 105000,
     });
     expect(draft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)).toMatchObject({
       lineType: 'REFUND', amountMinor: 5000, payableImpactMinor: -5000,
     });
-    expect(draft.netPayableMinor).toBe(100000);
+    if (additionalRefundLedgerId) {
+      expect(draft.lines.find((line) => line.financeLedgerEntryId === additionalRefundLedgerId)).toMatchObject({
+        lineType: 'REFUND', amountMinor: 15000, payableImpactMinor: -15000,
+      });
+    }
+    const expectedNetPayableMinor = additionalRefundLedgerId ? 85000 : 100000;
+    expect(draft.netPayableMinor).toBe(expectedNetPayableMinor);
     const approved = await approveSettlementApproval(draft.id, ids.admin);
-    expect(approved).toMatchObject({ status: 'approved', vendorId: ids.vendor, currency: 'TRY', netPayableMinor: 100000 });
+    expect(approved).toMatchObject({ status: 'approved', vendorId: ids.vendor, currency: 'TRY',
+      netPayableMinor: expectedNetPayableMinor });
     expect(new Date(approved.approvedAt!).getTime()).toBeGreaterThanOrEqual(observation.firstObservedDeliveredAt.getTime());
     ids.saleLine = draft.lines.find((line) => line.financeLedgerEntryId === ids.sale)!.id;
     ids.refundLine = draft.lines.find((line) => line.financeLedgerEntryId === ids.refundLedger)!.id;
@@ -406,19 +414,37 @@ describeWithPostgres('approved-settlement financial correction deduction with is
   });
 
   it('keeps separately approved credit, deduction and vendor debt distinct in the same payout', async () => {
-    await createServiceApprovedOrigin();
+    const creditReview = await addReview('credit', '150.00', '50.00');
+    await createServiceApprovedOrigin(creditReview.refundLedger);
+    const approvedOrigin = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: ids.origin }, include: { lines: true },
+    });
+    expect(approvedOrigin.lines.map((line) => line.financeLedgerEntryId).sort()).toEqual(
+      [ids.sale, ids.refundLedger, creditReview.refundLedger].sort(),
+    );
+    expect(approvedOrigin.lines.reduce((sum, line) => sum + line.payableImpactMinor, 0)).toBe(85000);
     await setMainCorrectedAmount('250.00');
     const deduction = await applyDeduction(await inputFor(), db as never);
     expect(deduction.grossDeductionMinor).toBe(20000);
-    const creditReview = await addReview('credit', '150.00', '50.00');
+    expect(await db.financialCorrectionAuthority.findUniqueOrThrow({ where: { id: deduction.id } })).toMatchObject({
+      acceptedRefundFinanceLedgerEntryId: ids.refundLedger,
+      acceptedRefundAmountMinor: 5000,
+      correctedRefundAmountMinor: 25000,
+      historicalApprovedSettlementId: ids.origin,
+    });
     const credit = await applyApprovedCredit(creditReview.input, db as never);
-    const creditApproval = await db.settlementApproval.create({ data: {
-      vendorId: ids.vendor, status: 'APPROVED', currency: 'TRY', grossSalesMinor: 0,
-      refundTotalMinor: 0, commissionMinor: 0, commissionVatMinor: 0,
-      netPayableMinor: 10000, correctionCreditMinor: 10000, sourceSnapshotJson: {},
-      approvedAt: new Date(), approvedBy: ids.admin,
-      correctionCreditLines: { create: [{ creditId: credit.creditId, amountMinor: 10000, status: 'ACTIVE' }] },
-    } });
+    expect(credit.grossCreditMinor).toBe(10000);
+    expect(await db.financialCorrectionAuthority.findUniqueOrThrow({ where: { id: credit.id } })).toMatchObject({
+      acceptedRefundFinanceLedgerEntryId: creditReview.refundLedger,
+      acceptedRefundAmountMinor: 15000,
+      correctedRefundAmountMinor: 5000,
+      historicalApprovedSettlementId: ids.origin,
+    });
+    const creditDraft = await createDraftApproval({ vendorId: ids.vendor });
+    expect(creditDraft.lines).toHaveLength(0);
+    expect(creditDraft.correctionCreditMinor).toBe(10000);
+    const creditApproval = await approveSettlementApproval(creditDraft.id, ids.admin);
+    expect(creditApproval).toMatchObject({ status: 'approved', netPayableMinor: 10000 });
     settlementIds.push(creditApproval.id);
     await db.vendorBalanceEvent.create({ data: {
       vendorId: ids.vendor, type: 'VENDOR_DEBT_CREATED', amountMinor: -6000, currency: 'TRY',
@@ -428,13 +454,15 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     payoutIds.push(payout.id);
     expect(payout.correctionCreditAmount).toBe('100.00');
     expect(payout.correctionDeductionAmount).toBe('200.00');
-    expect(payout.payableBeforeDebtOffset).toBe('900.00');
+    expect(payout.payableBeforeDebtOffset).toBe('750.00');
     expect(payout.debtOffsetAmount).toBe('60.00');
-    expect(payout.netAmount).toBe('840.00');
-    expect(payout.lines).toHaveLength(2);
+    expect(payout.netAmount).toBe('690.00');
+    expect(payout.lines).toHaveLength(3);
     expect(payout.correctionCreditLines).toHaveLength(1);
     expect(payout.approvedDeductionLines).toHaveLength(1);
-    expect(payout.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+    expect(payout.lines!.map((line) => line.financeLedgerEntryId).sort()).toEqual(
+      [ids.sale, ids.refundLedger, creditReview.refundLedger].sort(),
+    );
     const creditLine = await db.financialCorrectionCreditSettlementLine.findFirstOrThrow({
       where: { settlementApprovalId: creditApproval.id, creditId: credit.creditId },
     });
@@ -442,6 +470,34 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     expect(payout.correctionCreditLines![0]?.settlementCreditLineId).toBe(creditLine.id);
     expect(payout.approvedDeductionLines![0]?.coverageId).toBe(deduction.coverageId);
     await cancelPayoutBatch(payout.id);
+  });
+
+  it('rejects payout when a later accepted refund has no approved monetary representation', async () => {
+    await createServiceApprovedOrigin();
+    const originBefore = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: ids.origin }, include: { lines: true },
+    });
+    const lateReview = await addReview('late-credit', '150.00', '50.00');
+    const credit = await applyApprovedCredit(lateReview.input, db as never);
+    expect(credit.grossCreditMinor).toBe(10000);
+    expect(await db.settlementApprovalLine.count({
+      where: { financeLedgerEntryId: lateReview.refundLedger, settlementApproval: { status: 'APPROVED' } },
+    })).toBe(0);
+    const creditDraft = await createDraftApproval({ vendorId: ids.vendor });
+    expect(creditDraft.lines).toHaveLength(0);
+    const creditApproval = await approveSettlementApproval(creditDraft.id, ids.admin);
+    settlementIds.push(creditApproval.id);
+    await expect(preparePayoutBatch({ vendorId: ids.vendor }, ids.admin)).rejects.toThrow(
+      'Refund after settlement approval requires adjustment before payout',
+    );
+    expect(await db.payoutBatch.count({ where: { vendorId: ids.vendor } })).toBe(0);
+    expect(await db.financialCorrectionCreditPayoutLine.count({
+      where: { settlementCreditLine: { creditId: credit.creditId } },
+    })).toBe(0);
+    expect(await db.settlementRefundAdjustment.count({ where: { refundFinanceLedgerEntryId: lateReview.refundLedger } })).toBe(0);
+    expect(await db.settlementApproval.findUniqueOrThrow({
+      where: { id: ids.origin }, include: { lines: true },
+    })).toEqual(originBefore);
   });
 
   it('fails closed when the single lineage-matched approval cannot cover the whole deduction', async () => {

@@ -135,6 +135,56 @@ function buildEntry(input: {
         ? -(amountMinor + commissionMinor)
         : -amountMinor
   );
+  const allocationId = `alloc-${input.id}`;
+  const saleLedgerId = input.entryType === 'sale' ? input.id : `sale-for-${input.id}`;
+  const refundRecords = input.refundRecords ?? (
+    input.entryType === 'refund'
+      ? [{ id: `refund-record-${input.id}`, sourceShopifyRefundId: `refund-${input.id}`, amount: input.amount }]
+      : []
+  );
+  const relatedSale = {
+    id: saleLedgerId,
+    vendorId: 'demo-vendor-a',
+    entryType: 'sale',
+    payoutStatus: input.relatedSalePaid ? 'PAID' : 'PENDING',
+    settlementStatus: input.relatedSalePaid ? 'SETTLED' : 'PAYABLE',
+    commissionPercentSnapshot: 10,
+    commissionVatPercentSnapshot: 0,
+    payoutBatchLines: input.relatedSaleActivePayoutBatch
+      ? [{ payoutBatch: { status: 'DRAFT' } }]
+      : [],
+    settlementApprovalLines: input.relatedSaleActiveApproval ||
+      (input.entryType === 'sale' && settlementApprovalStatus === 'APPROVED')
+      ? [{ settlementApproval: { id: input.entryType === 'sale' ? `approval-${input.id}` : `approval-sale-for-${input.id}`, status: 'APPROVED' } }]
+      : [],
+  };
+  const relatedRefunds = refundRecords.map((refund, index) => {
+    const refundLedgerId = input.entryType === 'refund' ? input.id : `refund-for-${input.id}-${index}`;
+    return {
+      id: refundLedgerId,
+      vendorId: 'demo-vendor-a',
+      entryType: 'refund',
+      payoutStatus: 'PENDING',
+      settlementStatus: 'PARTIALLY_REFUNDED',
+      commissionPercentSnapshot: 10,
+      commissionVatPercentSnapshot: 0,
+      payoutBatchLines: [],
+      settlementApprovalLines: input.entryType === 'refund' && settlementApprovalStatus === 'APPROVED'
+        ? [{ settlementApproval: { id: `approval-${input.id}`, status: 'APPROVED' } }]
+        : input.approvedRefundOffsetRepresented
+          ? [{ settlementApproval: { id: `approval-refund-for-${input.id}`, status: 'APPROVED' } }]
+          : [],
+      refundEvidenceSnapshot: {
+        refundFinanceLedgerEntryId: refundLedgerId,
+        refundRecordId: refund.id,
+        sourceShopifyRefundId: refund.sourceShopifyRefundId,
+        vendorAllocationId: allocationId,
+        historicalEconomicVendorId: 'demo-vendor-a',
+        historicalSaleFinanceLedgerEntryId: saleLedgerId,
+      },
+      refundAdjustments: [],
+    };
+  });
   return {
     id: input.id,
     vendorId: 'demo-vendor-a',
@@ -158,11 +208,11 @@ function buildEntry(input: {
     supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt: new Date('2026-05-13T09:00:00Z'),
     vendorAllocation: {
-      id: `alloc-${input.id}`,
+      id: allocationId,
       outboundMethodSnapshot: 'KARGONOMI',
       outboundIntegrationProviderSnapshot: null,
       deliveredObservation: deliveredAt ? {
-        vendorAllocationId: `alloc-${input.id}`,
+        vendorAllocationId: allocationId,
         outboundMethod: 'KARGONOMI',
         outboundIntegrationProvider: null,
         firstObservedDeliveredAt: deliveredAt,
@@ -184,42 +234,8 @@ function buildEntry(input: {
         fulfilledAt: fulfilled ? new Date('2026-05-13T10:00:00Z') : null,
         shipmentUpdatedAt: deliveredAt,
       },
-      refundRecords: input.refundRecords ?? (
-        input.entryType === 'refund'
-          ? [{ id: `refund-record-${input.id}`, sourceShopifyRefundId: `refund-${input.id}`, amount: input.amount }]
-          : []
-      ),
-      financeEntries: input.entryType === 'refund'
-        ? [
-            {
-              id: `sale-for-${input.id}`,
-              entryType: 'sale',
-              payoutStatus: input.relatedSalePaid ? 'PAID' : 'PENDING',
-              settlementStatus: input.relatedSalePaid ? 'SETTLED' : 'PAYABLE',
-              commissionPercentSnapshot: 10,
-              commissionVatPercentSnapshot: 0,
-              payoutBatchLines: input.relatedSaleActivePayoutBatch
-                ? [{ payoutBatch: { status: 'DRAFT' } }]
-                : [],
-              settlementApprovalLines: input.relatedSaleActiveApproval
-                ? [{ settlementApproval: { id: `approval-sale-for-${input.id}`, status: 'APPROVED' } }]
-                : [],
-            },
-          ]
-        : input.approvedRefundOffsetRepresented
-          ? [
-              {
-                id: `refund-for-${input.id}`,
-                entryType: 'refund',
-                payoutStatus: 'PENDING',
-                settlementStatus: 'PARTIALLY_REFUNDED',
-                commissionPercentSnapshot: 10,
-                commissionVatPercentSnapshot: 0,
-                payoutBatchLines: [],
-                settlementApprovalLines: [{ settlementApproval: { id: `approval-refund-for-${input.id}`, status: 'APPROVED' } }],
-              },
-            ]
-          : [],
+      refundRecords,
+      financeEntries: [relatedSale, ...relatedRefunds],
       returnRecords: (input.returnRecords ?? []).map((record) => ({
         ...record,
         sourceShopifyRefundId: record.sourceShopifyRefundId ?? null,
@@ -992,6 +1008,19 @@ describe('payout batch preparation', () => {
 
     await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
       'No eligible payable ledger rows',
+    );
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when an individual refund snapshot names another economic vendor', async () => {
+    const refund = buildEntry({ id: 'refund-owner-conflict', entryType: 'refund', amount: 100,
+      activeSettlementApproval: true });
+    const exactLedger = refund.vendorAllocation.financeEntries.find((entry) => entry.id === refund.id)!;
+    exactLedger.refundEvidenceSnapshot.historicalEconomicVendorId = 'another-vendor';
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([refund]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'Accepted refund evidence cannot be verified for this finance ledger.',
     );
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
   });
@@ -1908,9 +1937,12 @@ describe('payout batch preparation', () => {
       batched: true,
       activeSettlementApproval: true,
     }) as any;
-    sale.vendorAllocation.financeEntries = [
-      {
+    sale.vendorAllocation.refundRecords = [
+      { id: 'refund-record-held', sourceShopifyRefundId: 'refund-source-held', amount: 100 },
+    ];
+    sale.vendorAllocation.financeEntries.push({
         id: 'refund-held',
+        vendorId: 'demo-vendor-a',
         entryType: 'refund',
         payoutStatus: 'HOLD',
         settlementStatus: 'PARTIALLY_REFUNDED',
@@ -1919,8 +1951,16 @@ describe('payout batch preparation', () => {
         commissionVatPercentSnapshot: 0,
         payoutBatchLines: [],
         settlementApprovalLines: [],
-      },
-    ];
+        refundEvidenceSnapshot: {
+          refundFinanceLedgerEntryId: 'refund-held',
+          refundRecordId: 'refund-record-held',
+          sourceShopifyRefundId: 'refund-source-held',
+          vendorAllocationId: sale.vendorAllocation.id,
+          historicalEconomicVendorId: 'demo-vendor-a',
+          historicalSaleFinanceLedgerEntryId: sale.id,
+        },
+        refundAdjustments: [],
+      });
     mockTransitionBatch(buildTransitionBatch([
       buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
     ]));
@@ -1931,7 +1971,10 @@ describe('payout batch preparation', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(PayoutBatchTransitionRevalidationError);
       expect(error).toMatchObject({
-        blockers: [expect.objectContaining({ code: 'refund_offset_required_before_payout' })],
+        blockers: expect.arrayContaining([
+          expect.objectContaining({ code: 'refund_offset_required_before_payout' }),
+          expect.objectContaining({ code: 'ledger_row_no_longer_eligible' }),
+        ]),
       });
     }
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
