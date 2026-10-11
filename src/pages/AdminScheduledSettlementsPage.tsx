@@ -11,8 +11,12 @@ import {
 } from '../components/OperationalPrimitives';
 import {
   createSettlementScheduleDrafts,
+  createSettlementReplacementDraft,
   getSettlementScheduleAutoDraftJobStatus,
   getSettlementScheduleDryRun,
+  getSettlementReplacementAssessment,
+  type SettlementReplacementAssessmentResponse,
+  type SettlementReplacementDraftResponse,
   type SettlementScheduleAutoDraftJobStatusResponse,
   type SettlementScheduleCreateDraftsResponse,
   type SettlementScheduleDryRunResponse,
@@ -281,6 +285,16 @@ export function AdminScheduledSettlementsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [createResult, setCreateResult] = useState<SettlementScheduleCreateDraftsResponse | null>(null);
+  const [replacementTarget, setReplacementTarget] = useState<{ originalId: string; vendorId: string } | null>(null);
+  const [replacementAssessment, setReplacementAssessment] = useState<SettlementReplacementAssessmentResponse | null>(null);
+  const [replacementResult, setReplacementResult] = useState<SettlementReplacementDraftResponse | null>(null);
+  const [replacementLoading, setReplacementLoading] = useState(false);
+  const [replacementSubmitting, setReplacementSubmitting] = useState(false);
+  const [replacementError, setReplacementError] = useState<string | null>(null);
+  const [replacementReason, setReplacementReason] = useState('');
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  const [replacementRequestId, setReplacementRequestId] = useState<string | null>(null);
+  const [replacementAttempted, setReplacementAttempted] = useState(false);
   const [jobStatus, setJobStatus] = useState<SettlementScheduleAutoDraftJobStatusResponse | null>(null);
   const [jobStatusError, setJobStatusError] = useState<string | null>(null);
   const [workflowTab, setWorkflowTab] = useState<WorkflowTab>('ready_for_draft');
@@ -397,6 +411,68 @@ export function AdminScheduledSettlementsPage() {
       setCreateError(requestError instanceof Error ? requestError.message : 'Scheduled draft creation failed.');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function reviewReplacement(originalId: string, vendorId: string) {
+    if (replacementTarget?.originalId !== originalId || replacementTarget.vendorId !== vendorId) {
+      setReplacementReason('');
+      setReplacementConfirmed(false);
+      setReplacementRequestId(null);
+      setReplacementAttempted(false);
+      setReplacementResult(null);
+    }
+    setReplacementTarget({ originalId, vendorId });
+    setReplacementAssessment(null);
+    setReplacementError(null);
+    setReplacementLoading(true);
+    try {
+      setReplacementAssessment(await getSettlementReplacementAssessment(originalId, vendorId));
+    } catch (requestError) {
+      setReplacementError(requestError instanceof Error ? requestError.message : 'Replacement assessment failed.');
+    } finally {
+      setReplacementLoading(false);
+    }
+  }
+
+  async function submitReplacement() {
+    const target = replacementTarget;
+    if (!target || !replacementConfirmed || !replacementReason.trim() ||
+        replacementAssessment?.outcome !== 'ELIGIBLE' ||
+        replacementAssessment.safeForAdminConsideration !== true ||
+        replacementAssessment.cancellationProvenance !== 'VERIFIED_DRAFT' ||
+        replacementAssessment.replacementLineage !== 'CLEAR' || replacementSubmitting) return;
+    const requestId = replacementRequestId ?? crypto.randomUUID();
+    setReplacementRequestId(requestId);
+    setReplacementAttempted(true);
+    setReplacementSubmitting(true);
+    setReplacementError(null);
+    try {
+      const result = await createSettlementReplacementDraft(target.originalId, {
+        vendorId: target.vendorId, requestId, reason: replacementReason.trim(),
+        confirmCreateReplacementDraft: true,
+      });
+      setReplacementResult(result);
+      setSuccessMessage(`Replacement ${result.status} ${result.replacementSettlementApprovalId} is recorded; this action did not approve or pay.`);
+      await loadDryRun(runDate, vendorFilter);
+      setReplacementAssessment(await getSettlementReplacementAssessment(target.originalId, target.vendorId));
+    } catch (requestError) {
+      // An uncertain network response is not evidence of failure or success. Inspect durable state first.
+      try {
+        const fresh = await getSettlementReplacementAssessment(target.originalId, target.vendorId);
+        setReplacementAssessment(fresh);
+        if (fresh.existingReplacement?.replacementRequestId === requestId) {
+          setReplacementError(null);
+          setSuccessMessage(`Server confirms replacement ${fresh.existingReplacement.status} ${fresh.existingReplacement.id}; this action did not approve or pay.`);
+          await loadDryRun(runDate, vendorFilter);
+        } else {
+          setReplacementError(requestError instanceof Error ? requestError.message : 'Replacement outcome is uncertain. Retry with the same request ID after reviewing server state.');
+        }
+      } catch {
+        setReplacementError('Replacement outcome is uncertain. Server state could not be checked; retry this action with the same request ID.');
+      }
+    } finally {
+      setReplacementSubmitting(false);
     }
   }
 
@@ -617,7 +693,71 @@ export function AdminScheduledSettlementsPage() {
                           </button>
                         </div>
                       ) : null}
+                      {selectedVendor.existingSettlementApprovalStatus === 'cancelled' &&
+                      selectedVendor.existingSettlementApprovalId ? (
+                        <div className="scheduled-panel-actions">
+                          <button type="button" className="button button-secondary"
+                            disabled={replacementLoading || replacementSubmitting}
+                            onClick={() => void reviewReplacement(selectedVendor.existingSettlementApprovalId!, selectedVendor.vendorId)}>
+                            {replacementLoading ? 'Reviewing...' : 'Review Replacement'}
+                          </button>
+                        </div>
+                      ) : null}
                     </MetadataGroup>
+                    {replacementTarget?.originalId === selectedVendor.existingSettlementApprovalId &&
+                    replacementTarget.vendorId === selectedVendor.vendorId ? (
+                      <section className="op-panel-section" aria-label="Controlled replacement review">
+                        <h4>Controlled Replacement</h4>
+                        <p>This action creates a separate DRAFT only. It does not approve a settlement or make a payment.</p>
+                        <MetadataRow label="Original Settlement" value={replacementTarget.originalId} />
+                        <MetadataRow label="Original Status" value={selectedVendor.existingSettlementApprovalStatus?.toUpperCase() ?? 'Unknown'} />
+                        <MetadataRow label="Vendor" value={selectedVendor.vendorId} />
+                        {replacementError ? <p role="alert">{replacementError}</p> : null}
+                        {replacementAssessment ? (
+                          <>
+                            <MetadataRow label="Frozen Cutoff" value={replacementAssessment.originalCutoff ?? 'Unknown'} />
+                            <MetadataRow label="Eligibility" value={replacementAssessment.outcome} />
+                            {replacementAssessment.blockers.length ? (
+                              <ul>{replacementAssessment.blockers.map((finding, index) =>
+                                <li key={`${finding.code}-${index}`}>{finding.code}: {finding.detail}</li>)}</ul>
+                            ) : null}
+                            {replacementAssessment.unknowns.length ? (
+                              <ul>{replacementAssessment.unknowns.map((finding, index) =>
+                                <li key={`${finding.code}-${index}`}>{finding.code}: {finding.detail}</li>)}</ul>
+                            ) : null}
+                            <p>{replacementAssessment.outcome === 'ELIGIBLE' ? 'Verified late-refund evidence' : 'Post-cutoff refund evidence requiring review'}: {replacementAssessment.refundEvidence.filter((item) => item.afterCutoff).length}</p>
+                            {replacementAssessment.refundEvidence.filter((item) => item.afterCutoff).map((item) =>
+                              <p key={item.refundFinanceLedgerEntryId}>Refund ledger {item.refundFinanceLedgerEntryId} · captured {item.capturedAt}</p>)}
+                            {replacementAssessment.existingReplacement ? (
+                              <p>Existing replacement {replacementAssessment.existingReplacement.status}: <Link to={getOpenSettlementHref(replacementAssessment.existingReplacement.id)}>
+                                Open Replacement</Link></p>
+                            ) : null}
+                            {replacementResult && !replacementAssessment.existingReplacement ? (
+                              <p>Replacement {replacementResult.status}: <Link to={getOpenSettlementHref(replacementResult.replacementSettlementApprovalId)}>
+                                Open Replacement</Link></p>
+                            ) : null}
+                            {replacementAssessment.outcome === 'ELIGIBLE' && replacementAssessment.safeForAdminConsideration &&
+                            replacementAssessment.cancellationProvenance === 'VERIFIED_DRAFT' &&
+                            replacementAssessment.replacementLineage === 'CLEAR' &&
+                            !replacementAssessment.existingReplacement && !replacementResult ? (
+                              <div className="scheduled-panel-actions">
+                                <label>Admin reason
+                                  <textarea value={replacementReason} maxLength={500} disabled={replacementAttempted || replacementSubmitting}
+                                    onChange={(event) => setReplacementReason(event.target.value)} />
+                                </label>
+                                <label><input type="checkbox" checked={replacementConfirmed} disabled={replacementSubmitting}
+                                  onChange={(event) => setReplacementConfirmed(event.target.checked)} />
+                                  I confirm creation of a replacement DRAFT only.</label>
+                                <button type="button" className="button button-primary" onClick={() => void submitReplacement()}
+                                  disabled={replacementSubmitting || !replacementReason.trim() || !replacementConfirmed}>
+                                  {replacementSubmitting ? 'Creating replacement...' : 'Create Replacement Draft'}
+                                </button>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </section>
+                    ) : null}
                     <MetadataGroup title="Payment Impact">
                       <MetadataRow
                         label="Refund adjustments"

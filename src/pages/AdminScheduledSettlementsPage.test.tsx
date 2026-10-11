@@ -7,11 +7,15 @@ import type {
   SettlementScheduleAutoDraftJobStatusResponse,
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
+  SettlementReplacementAssessmentResponse,
+  SettlementReplacementDraftResponse,
 } from '../lib/api/contracts';
 
 const getSettlementScheduleDryRunMock = vi.fn<(input?: unknown) => Promise<SettlementScheduleDryRunResponse>>();
 const createSettlementScheduleDraftsMock = vi.fn<(input?: unknown) => Promise<SettlementScheduleCreateDraftsResponse>>();
 const getSettlementScheduleAutoDraftJobStatusMock = vi.fn<() => Promise<SettlementScheduleAutoDraftJobStatusResponse>>();
+const getReplacementAssessmentMock = vi.fn<(originalId: string, vendorId: string) => Promise<SettlementReplacementAssessmentResponse>>();
+const createReplacementDraftMock = vi.fn<(originalId: string, input: unknown) => Promise<SettlementReplacementDraftResponse>>();
 
 vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
@@ -20,6 +24,8 @@ vi.mock('../features/finance/api', async () => {
     getSettlementScheduleDryRun: (input: unknown) => getSettlementScheduleDryRunMock(input),
     createSettlementScheduleDrafts: (input: unknown) => createSettlementScheduleDraftsMock(input as never),
     getSettlementScheduleAutoDraftJobStatus: () => getSettlementScheduleAutoDraftJobStatusMock(),
+    getSettlementReplacementAssessment: (originalId: string, vendorId: string) => getReplacementAssessmentMock(originalId, vendorId),
+    createSettlementReplacementDraft: (originalId: string, input: unknown) => createReplacementDraftMock(originalId, input),
   };
 });
 
@@ -211,6 +217,18 @@ function renderPage() {
   );
 }
 
+const cancelledVendor = {
+  ...dryRunResponse.vendors[0], state: 'BLOCKED' as const, canCreateDraft: false,
+  existingSettlementApprovalId: 'original-cancelled', existingSettlementApprovalStatus: 'cancelled' as const,
+  blockedReason: 'Cancelled scheduled settlement cycle requires controlled replacement.',
+};
+const eligibleReplacement: SettlementReplacementAssessmentResponse = {
+  outcome: 'ELIGIBLE', writesPerformed: false, safeForAdminConsideration: true,
+  originalSettlementApprovalId: 'original-cancelled', vendorId: 'yalispor',
+  originalCutoff: '2026-06-24T23:59:59.999Z', cancellationProvenance: 'VERIFIED_DRAFT',
+  replacementLineage: 'CLEAR', refundEvidence: [], blockers: [], unknowns: [], existingReplacement: null,
+};
+
 describe('AdminScheduledSettlementsPage', () => {
   afterEach(() => {
     cleanup();
@@ -220,6 +238,8 @@ describe('AdminScheduledSettlementsPage', () => {
     getSettlementScheduleDryRunMock.mockReset();
     createSettlementScheduleDraftsMock.mockReset();
     getSettlementScheduleAutoDraftJobStatusMock.mockReset();
+    getReplacementAssessmentMock.mockReset();
+    createReplacementDraftMock.mockReset();
     getSettlementScheduleDryRunMock.mockResolvedValue(dryRunResponse);
     getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue(autoDraftJobStatus);
     createSettlementScheduleDraftsMock.mockResolvedValue({
@@ -626,5 +646,100 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.queryByText('Commission Invoice Records')).not.toBeInTheDocument();
     expect(screen.queryByText('Candidate Selected')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /logo/i })).not.toBeInTheDocument();
+  });
+
+  it('reviews only a cancelled cycle and requires reason and confirmation before creating a separate DRAFT', async () => {
+    const user = userEvent.setup();
+    getSettlementScheduleDryRunMock.mockResolvedValue({ ...dryRunResponse, vendors: [cancelledVendor] });
+    getReplacementAssessmentMock.mockResolvedValueOnce(eligibleReplacement).mockResolvedValueOnce({
+      ...eligibleReplacement, outcome: 'BLOCKED', safeForAdminConsideration: false,
+      replacementLineage: 'CLAIMED', blockers: [{ code: 'REPLACEMENT_EXISTS', detail: 'Already claimed.' }],
+      existingReplacement: { id: 'replacement-draft', status: 'DRAFT', replacementRequestId: 'request-1' },
+    });
+    createReplacementDraftMock.mockResolvedValue({ outcome: 'CREATED', replacementSettlementApprovalId: 'replacement-draft',
+      originalSettlementApprovalId: 'original-cancelled', vendorId: 'yalispor', requestId: 'request-1', status: 'DRAFT', writesPerformed: true });
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Review Replacement' }));
+    expect(getReplacementAssessmentMock).toHaveBeenCalledWith('original-cancelled', 'yalispor');
+    expect(await screen.findByText('ELIGIBLE')).toBeInTheDocument();
+    expect(screen.getByText('2026-06-24T23:59:59.999Z')).toBeInTheDocument();
+    const create = screen.getByRole('button', { name: 'Create Replacement Draft' });
+    expect(create).toBeDisabled();
+    await user.type(screen.getByLabelText('Admin reason'), 'Verified frozen sources');
+    expect(create).toBeDisabled();
+    await user.click(screen.getByLabelText('I confirm creation of a replacement DRAFT only.'));
+    await user.click(create);
+    await waitFor(() => expect(createReplacementDraftMock).toHaveBeenCalledWith('original-cancelled', expect.objectContaining({
+      vendorId: 'yalispor', reason: 'Verified frozen sources', confirmCreateReplacementDraft: true,
+      requestId: expect.any(String),
+    })));
+    expect(await screen.findByRole('link', { name: 'Open Replacement' })).toHaveAttribute('href', '/admin/finance/settlement-approvals?approvalId=replacement-draft');
+    expect(screen.getByText(/This action creates a separate DRAFT only/)).toBeInTheDocument();
+  });
+
+  it.each(['BLOCKED', 'UNKNOWN'] as const)('shows %s assessment reasons without a create action', async (outcome) => {
+    const user = userEvent.setup();
+    getSettlementScheduleDryRunMock.mockResolvedValue({ ...dryRunResponse, vendors: [cancelledVendor] });
+    getReplacementAssessmentMock.mockResolvedValue({ ...eligibleReplacement, outcome, safeForAdminConsideration: false,
+      blockers: outcome === 'BLOCKED' ? [{ code: 'REFUND_HOLD', detail: 'Verified blocker.' }] : [],
+      unknowns: outcome === 'UNKNOWN' ? [{ code: 'EVIDENCE_MISSING', detail: 'Evidence is missing.' }] : [],
+    });
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Review Replacement' }));
+    expect(await screen.findByText(outcome)).toBeInTheDocument();
+    expect(screen.getByText(outcome === 'BLOCKED' ? /Verified blocker/ : /Evidence is missing/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Replacement Draft' })).not.toBeInTheDocument();
+    expect(createReplacementDraftMock).not.toHaveBeenCalled();
+  });
+
+  it('retains the same request ID after an uncertain response and checks server state before retry', async () => {
+    const user = userEvent.setup();
+    getSettlementScheduleDryRunMock.mockResolvedValue({ ...dryRunResponse, vendors: [cancelledVendor] });
+    getReplacementAssessmentMock.mockResolvedValue(eligibleReplacement);
+    createReplacementDraftMock.mockRejectedValueOnce(new Error('Network response lost')).mockResolvedValueOnce({
+      outcome: 'REPLAYED', replacementSettlementApprovalId: 'replacement-draft', originalSettlementApprovalId: 'original-cancelled',
+      vendorId: 'yalispor', requestId: 'request-1', status: 'DRAFT', writesPerformed: false,
+    });
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Review Replacement' }));
+    await screen.findByText('ELIGIBLE');
+    await user.type(screen.getByLabelText('Admin reason'), 'Stable request');
+    await user.click(screen.getByLabelText('I confirm creation of a replacement DRAFT only.'));
+    await user.click(screen.getByRole('button', { name: 'Create Replacement Draft' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Network response lost');
+    expect(getReplacementAssessmentMock).toHaveBeenCalledTimes(2);
+    const firstRequest = createReplacementDraftMock.mock.calls[0][1] as { requestId: string };
+    await user.click(screen.getByRole('button', { name: 'Create Replacement Draft' }));
+    await waitFor(() => expect(createReplacementDraftMock).toHaveBeenCalledTimes(2));
+    expect((createReplacementDraftMock.mock.calls[1][1] as { requestId: string }).requestId).toBe(firstRequest.requestId);
+  });
+
+  it('does not offer replacement for a different BLOCKED cause or report rejected creation as success', async () => {
+    const user = userEvent.setup();
+    getSettlementScheduleDryRunMock.mockResolvedValue({ ...dryRunResponse, vendors: [
+      { ...cancelledVendor, existingSettlementApprovalId: null, existingSettlementApprovalStatus: null,
+        blockedReason: 'A pending correction requires vendor-wide scope.' },
+    ] });
+    renderPage();
+    await screen.findAllByText('Yalı Spor');
+    expect(screen.queryByRole('button', { name: 'Review Replacement' })).not.toBeInTheDocument();
+
+    cleanup();
+    getSettlementScheduleDryRunMock.mockResolvedValue({ ...dryRunResponse, vendors: [cancelledVendor] });
+    getReplacementAssessmentMock.mockResolvedValueOnce(eligibleReplacement).mockResolvedValueOnce({
+      ...eligibleReplacement, outcome: 'BLOCKED', safeForAdminConsideration: false,
+      blockers: [{ code: 'SOURCE_CHANGED', detail: 'Source authority changed.' }],
+    });
+    createReplacementDraftMock.mockRejectedValue(new Error('Writer rejected changed sources'));
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Review Replacement' }));
+    await screen.findByText('ELIGIBLE');
+    await user.type(screen.getByLabelText('Admin reason'), 'Attempt with current authority');
+    await user.click(screen.getByLabelText('I confirm creation of a replacement DRAFT only.'));
+    await user.click(screen.getByRole('button', { name: 'Create Replacement Draft' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Writer rejected changed sources');
+    expect(await screen.findByText('BLOCKED')).toBeInTheDocument();
+    expect(screen.getByText(/Source authority changed/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open Replacement' })).not.toBeInTheDocument();
   });
 });

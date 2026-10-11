@@ -2693,6 +2693,14 @@ export const runtimeServices = {
               notes: ['Draft creation used the existing scheduled settlement endpoint.'],
             },
           }),
+    settlementReplacementAssessment: (originalId: string, vendorId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getSettlementReplacementAssessment(originalId, vendorId)
+        : Promise.reject(new Error('Controlled settlement replacement requires the real Admin API.')),
+    createSettlementReplacementDraft: (originalId: string, input: Parameters<typeof realFinance.createSettlementReplacementDraft>[1]) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.createSettlementReplacementDraft(originalId, input)
+        : Promise.reject(new Error('Controlled settlement replacement requires the real Admin API.')),
     settlementScheduleAutoDraftJobStatus: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.getSettlementScheduleAutoDraftJobStatus({

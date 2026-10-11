@@ -10,6 +10,8 @@ import type {
   SettlementScheduleAutoDraftJobStatusResponse,
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
+  SettlementReplacementAssessmentResponse,
+  SettlementReplacementDraftResponse,
   FinanceIntegrityAlertAcknowledgeResult,
   EconomicTransferRetryResult,
   FinanceIntegrityAlertRescanResult,
@@ -395,6 +397,25 @@ export function createSettlementScheduleDrafts(input: {
 }): Promise<SettlementScheduleCreateDraftsResponse> {
   return apiClient.post<SettlementScheduleCreateDraftsResponse>(
     '/admin/finance/settlement-schedules/create-drafts',
+    input,
+    { skipVendorContext: true },
+  );
+}
+
+export function getSettlementReplacementAssessment(originalId: string, vendorId: string): Promise<SettlementReplacementAssessmentResponse> {
+  const path = `/admin/finance/settlement-approvals/${encodeURIComponent(originalId)}/replacement-assessment`;
+  const params = new URLSearchParams({ vendorId });
+  return apiClient.get<SettlementReplacementAssessmentResponse>(`${path}?${params}`, { skipVendorContext: true });
+}
+
+export function createSettlementReplacementDraft(originalId: string, input: {
+  vendorId: string;
+  requestId: string;
+  reason: string;
+  confirmCreateReplacementDraft: true;
+}): Promise<SettlementReplacementDraftResponse> {
+  return apiClient.post<SettlementReplacementDraftResponse>(
+    `/admin/finance/settlement-approvals/${encodeURIComponent(originalId)}/replacement-draft`,
     input,
     { skipVendorContext: true },
   );

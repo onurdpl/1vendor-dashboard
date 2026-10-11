@@ -4,6 +4,8 @@ import type {
   SettlementScheduleAutoDraftJobStatusResponse,
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
+  SettlementReplacementAssessmentResponse,
+  SettlementReplacementDraftResponse,
   VendorDebtHistory,
   VendorFinancialProfile,
 } from './contracts';
@@ -75,6 +77,19 @@ export function createSettlementScheduleDrafts(input: {
   confirmAutoSettlementDrafts: true;
 }): Promise<SettlementScheduleCreateDraftsResponse> {
   return runtimeServices.finance.createSettlementScheduleDrafts(input);
+}
+
+export function getSettlementReplacementAssessment(originalId: string, vendorId: string): Promise<SettlementReplacementAssessmentResponse> {
+  return runtimeServices.finance.settlementReplacementAssessment(originalId, vendorId);
+}
+
+export function createSettlementReplacementDraft(originalId: string, input: {
+  vendorId: string;
+  requestId: string;
+  reason: string;
+  confirmCreateReplacementDraft: true;
+}): Promise<SettlementReplacementDraftResponse> {
+  return runtimeServices.finance.createSettlementReplacementDraft(originalId, input);
 }
 
 export function getSettlementScheduleAutoDraftJobStatus(options: {

@@ -7,7 +7,9 @@ import {
   RefundTerminalEvidenceResolutionOutcome,
   RefundTerminalEvidenceReviewStatus,
   SettlementCommissionInvoiceProvider,
+  Prisma,
 } from '@prisma/client';
+import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
@@ -101,6 +103,11 @@ import {
   runSettlementScheduleAutoDraftJob,
   SettlementJobReportingPersistenceError,
 } from './settlement-schedule-job.service.js';
+import { assessCancelledScheduledSettlementReplacement } from './settlement-replacement-assessment.service.js';
+import {
+  createControlledSettlementReplacementDraft,
+  SettlementReplacementNotEligibleError,
+} from './settlement-replacement-writer.service.js';
 import {
   acknowledgeFinanceIntegrityAlert,
   FinanceIntegrityAlertLifecycleError,
@@ -960,6 +967,75 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement schedule dry run could not be created.';
         return reply.code(400).send({ message, writesPerformed: false });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-approvals/:id/replacement-assessment',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin' || request.authUser.status !== 'active') {
+        return reply.code(403).send({ message: 'Active Admin access required.' });
+      }
+      const { id } = request.params as { id: string };
+      const vendorId = readOptionalQueryString(request.query, 'vendorId');
+      if (!id?.trim() || !vendorId) {
+        return reply.code(400).send({ message: 'Original settlement ID and vendorId are required.' });
+      }
+      return prisma.$transaction(async (tx) => {
+        const original = await tx.settlementApproval.findUnique({
+          where: { id },
+          select: { vendorId: true, replacementSettlementApproval: {
+            select: { id: true, status: true, replacementRequestId: true },
+          } },
+        });
+        if (!original || original.vendorId !== vendorId) {
+          return reply.code(404).send({ message: 'Original settlement was not found for this vendor.' });
+        }
+        const assessment = await assessCancelledScheduledSettlementReplacement({
+          originalSettlementApprovalId: id, vendorId,
+        }, tx);
+        return { ...assessment, existingReplacement: original.replacementSettlementApproval };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-approvals/:id/replacement-draft',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin' || request.authUser.status !== 'active') {
+        return reply.code(403).send({ message: 'Active Admin access required.' });
+      }
+      const { id } = request.params as { id: string };
+      const vendorId = readOptionalBodyString(request.body, 'vendorId');
+      const requestId = readOptionalBodyString(request.body, 'requestId');
+      const reason = readOptionalBodyString(request.body, 'reason');
+      if (!id?.trim() || !vendorId || !requestId || !reason ||
+          requestId.length > 128 || reason.length > 500 ||
+          !isRecord(request.body) || request.body.confirmCreateReplacementDraft !== true) {
+        return reply.code(400).send({ message: 'Original, vendor, requestId, written reason and explicit confirmation are required.', writesPerformed: false });
+      }
+      const original = await prisma.settlementApproval.findUnique({ where: { id }, select: { vendorId: true } });
+      if (!original || original.vendorId !== vendorId) {
+        return reply.code(404).send({ message: 'Original settlement was not found for this vendor.', writesPerformed: false });
+      }
+      try {
+        return await createControlledSettlementReplacementDraft({
+          originalSettlementApprovalId: id, vendorId, requestId,
+          adminUserId: request.authUser.id, reason,
+        });
+      } catch (error) {
+        if (error instanceof SettlementReplacementNotEligibleError) {
+          return reply.code(409).send({ outcome: error.assessment.outcome,
+            assessment: error.assessment, message: error.message, writesPerformed: false });
+        }
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+          return reply.code(409).send({ outcome: 'UNKNOWN', message: 'Replacement creation conflicted with another write. Refresh assessment before retrying.', writesPerformed: false });
+        }
+        return reply.code(409).send({ outcome: 'UNKNOWN',
+          message: error instanceof Error ? error.message : 'Replacement outcome is uncertain. Reassess before retrying.' });
       }
     },
   );

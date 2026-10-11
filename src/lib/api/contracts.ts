@@ -1989,6 +1989,32 @@ export type SettlementScheduleState =
   | 'BLOCKED'
   | 'CONFIG_MISSING';
 
+export type SettlementReplacementAssessmentResponse = {
+  outcome: 'ELIGIBLE' | 'BLOCKED' | 'UNKNOWN';
+  writesPerformed: false;
+  safeForAdminConsideration: boolean;
+  originalSettlementApprovalId: string;
+  vendorId: string;
+  originalCutoff: string | null;
+  cancellationProvenance: 'VERIFIED_DRAFT' | 'UNVERIFIED' | 'INELIGIBLE';
+  replacementLineage: 'CLEAR' | 'CLAIMED' | 'UNKNOWN';
+  refundEvidence: Array<{ refundFinanceLedgerEntryId: string; historicalSaleFinanceLedgerEntryId: string;
+    capturedAt: string; afterCutoff: boolean }>;
+  blockers: Array<{ code: string; detail: string; sourceId?: string }>;
+  unknowns: Array<{ code: string; detail: string; sourceId?: string }>;
+  existingReplacement: { id: string; status: string; replacementRequestId: string | null } | null;
+};
+
+export type SettlementReplacementDraftResponse = {
+  outcome: 'CREATED' | 'REPLAYED';
+  replacementSettlementApprovalId: string;
+  originalSettlementApprovalId: string;
+  vendorId: string;
+  requestId: string;
+  status: string;
+  writesPerformed: boolean;
+};
+
 export type SettlementScheduleDryRunVendor = {
   vendorId: string;
   vendorName: string | null;

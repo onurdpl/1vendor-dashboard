@@ -1312,6 +1312,119 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       .toMatchObject({ status: 'CANCELLED', scheduledCycleKey: f.cycleKey });
   });
 
+  it('2F: real Admin HTTP assessment and confirmed creation preserve history, ownership and replay', async () => {
+    const f = await cancelledFixture();
+    const concurrent = await cancelledFixture();
+    const before = await financeWriteFootprint(f.vendorId);
+    const { hashPasswordArgon2id } = await import('../backend/src/modules/auth/password-hashing.js');
+    process.env.SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED = 'false';
+    process.env.SHIPPING_PROVIDER = 'kargonomi';
+    process.env.KARGONOMI_BASE_URL = 'http://127.0.0.1:1';
+    process.env.KARGONOMI_API_TOKEN = 'disposable-http-test-only';
+    const password = `${f.vendorId}-http-password`;
+    const passwordHash = await hashPasswordArgon2id(password);
+    const adminId = `${f.vendorId}-http-admin`;
+    const vendorUserId = `${f.vendorId}-http-vendor`;
+    await db.user.createMany({ data: [
+      { id: adminId, email: `${adminId}@example.test`, name: 'Replacement HTTP Admin', role: 'ADMIN', passwordHash },
+      { id: vendorUserId, email: `${vendorUserId}@example.test`, name: 'Replacement HTTP Vendor', role: 'VENDOR', passwordHash },
+    ] });
+    const { createApp } = await import('../backend/src/app.js');
+    const app = createApp();
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+    async function login(email: string) {
+      const response = await fetch(`${origin}/auth/login`, { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      expect(response.status).toBe(200);
+      const body = await response.json() as { csrfToken: string };
+      const cookie = response.headers.get('set-cookie')?.split(';', 1)[0];
+      expect(cookie).toBeTruthy();
+      return { cookie: cookie!, csrf: body.csrfToken };
+    }
+    const path = `/admin/finance/settlement-approvals/${encodeURIComponent(f.originalId)}`;
+    try {
+      const admin = await login(`${adminId}@example.test`);
+      const vendor = await login(`${vendorUserId}@example.test`);
+      const assessmentPath = `${origin}${path}/replacement-assessment?vendorId=${encodeURIComponent(f.vendorId)}`;
+      const createPath = `${origin}${path}/replacement-draft`;
+      expect((await fetch(assessmentPath)).status).toBe(401);
+      expect((await fetch(createPath, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ vendorId: f.vendorId }) })).status).toBe(401);
+      const vendorRead = await fetch(assessmentPath, { headers: { cookie: vendor.cookie } });
+      expect(vendorRead.status).toBe(403);
+      const vendorWrite = await fetch(createPath, { method: 'POST', headers: {
+        cookie: vendor.cookie, 'x-csrf-token': vendor.csrf, 'content-type': 'application/json',
+      }, body: JSON.stringify({ vendorId: f.vendorId, requestId: `${f.vendorId}-http-request`,
+        reason: 'Verified test sources', confirmCreateReplacementDraft: true }) });
+      expect(vendorWrite.status).toBe(403);
+      const assessmentResponse = await fetch(assessmentPath, { headers: { cookie: admin.cookie } });
+      expect(assessmentResponse.status).toBe(200);
+      expect(await assessmentResponse.json()).toMatchObject({ outcome: 'ELIGIBLE', writesPerformed: false,
+        vendorId: f.vendorId, originalCutoff: f.periodEnd.toISOString(), existingReplacement: null });
+      expect(await financeWriteFootprint(f.vendorId)).toEqual(before);
+      const headers = { cookie: admin.cookie, 'x-csrf-token': admin.csrf, 'content-type': 'application/json' };
+      for (const input of [
+        { vendorId: f.vendorId, requestId: `${f.vendorId}-missing-reason`, confirmCreateReplacementDraft: true },
+        { vendorId: f.vendorId, requestId: `${f.vendorId}-missing-confirm`, reason: 'Verified test sources' },
+      ]) {
+        const invalid = await fetch(createPath, { method: 'POST', headers, body: JSON.stringify(input) });
+        expect(invalid.status).toBe(400);
+      }
+      const wrongVendor = await fetch(`${origin}${path}/replacement-assessment?vendorId=another-vendor`,
+        { headers: { cookie: admin.cookie } });
+      expect(wrongVendor.status).toBe(404);
+      expect((await fetch(createPath, { method: 'POST', headers,
+        body: JSON.stringify({ vendorId: 'another-vendor', requestId: `${f.vendorId}-wrong-vendor`,
+          reason: 'Wrong vendor must fail', confirmCreateReplacementDraft: true }) })).status).toBe(404);
+      expect(await financeWriteFootprint(f.vendorId)).toEqual(before);
+      const requestId = `${f.vendorId}-http-request`;
+      const body = { vendorId: f.vendorId, requestId, reason: 'Verified test sources', confirmCreateReplacementDraft: true };
+      const createdResponse = await fetch(createPath, { method: 'POST', headers, body: JSON.stringify(body) });
+      expect(createdResponse.status).toBe(200);
+      const created = await createdResponse.json() as { outcome: string; replacementSettlementApprovalId: string };
+      expect(created.outcome).toBe('CREATED');
+      const replacementRow = await db.settlementApproval.findUniqueOrThrow({ where: { id: created.replacementSettlementApprovalId } });
+      expect(replacementRow).toMatchObject({ vendorId: f.vendorId, status: 'DRAFT',
+        replacesSettlementApprovalId: f.originalId, replacementRequestId: requestId,
+        replacementRequestedBy: adminId, replacementReason: body.reason, scheduledCycleKey: null,
+        periodEnd: f.periodEnd });
+      const originalRow = await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } });
+      expect(replacementRow.netPayableMinor).toBe(originalRow.netPayableMinor);
+      expect((await db.settlementApprovalLine.findMany({ where: { settlementApprovalId: replacementRow.id },
+        select: { financeLedgerEntryId: true } })).map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+      expect(originalRow)
+        .toMatchObject({ status: 'CANCELLED', scheduledCycleKey: f.cycleKey });
+      expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+      const replay = await fetch(createPath, { method: 'POST', headers, body: JSON.stringify(body) });
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toMatchObject({ outcome: 'REPLAYED', writesPerformed: false,
+        replacementSettlementApprovalId: replacementRow.id });
+      expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(1);
+      const afterResponse = await fetch(assessmentPath, { headers: { cookie: admin.cookie } });
+      expect(await afterResponse.json()).toMatchObject({ outcome: 'BLOCKED',
+        existingReplacement: { id: replacementRow.id, status: 'DRAFT', replacementRequestId: requestId } });
+      const anotherRequest = await fetch(createPath, { method: 'POST', headers, body: JSON.stringify({
+        ...body, requestId: `${requestId}-different`,
+      }) });
+      expect(anotherRequest.status).toBe(409);
+      const concurrentPath = `${origin}/admin/finance/settlement-approvals/${encodeURIComponent(concurrent.originalId)}/replacement-draft`;
+      const concurrentResults = await Promise.all(['first', 'second'].map((suffix) => fetch(concurrentPath, {
+        method: 'POST', headers, body: JSON.stringify({ vendorId: concurrent.vendorId,
+          requestId: `${concurrent.vendorId}-${suffix}`, reason: 'Concurrent Admin test',
+          confirmCreateReplacementDraft: true }),
+      })));
+      expect(concurrentResults.map((response) => response.status).sort()).toEqual([200, 409]);
+      expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: concurrent.originalId } })).toBe(1);
+      expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: concurrent.originalId } }))
+        .toMatchObject({ status: 'CANCELLED', scheduledCycleKey: concurrent.cycleKey });
+      expect(await db.payoutBatch.count({ where: { vendorId: concurrent.vendorId } })).toBe(0);
+      await db.user.update({ where: { id: adminId }, data: { status: 'inactive' } });
+      expect((await fetch(assessmentPath, { headers: { cookie: admin.cookie } })).status).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('CHARACTERIZATION: a completed JobRun remains historical after its DRAFT is cancelled', async () => {
     const f = await fixture();
     afterRunDate(f.runDate);
