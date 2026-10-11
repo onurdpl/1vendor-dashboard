@@ -208,9 +208,9 @@ function getStyleBlock(styles: string, selector: string) {
   return start >= 0 && end > start ? styles.slice(start, end + 1) : '';
 }
 
-function renderPage() {
+function renderPage(initialEntry = '/admin/finance/settlement-approvals') {
   return render(
-    <MemoryRouter initialEntries={['/admin/finance/settlement-approvals']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <AdminSettlementApprovalsPage />
     </MemoryRouter>,
   );
@@ -271,6 +271,15 @@ describe('Settlement Review queue cleanup', () => {
     cleanup();
     window.localStorage.clear();
     vi.clearAllMocks();
+  });
+
+  it('opens an explicit replacement deep link from the scheduled settlement page', async () => {
+    const linked = { ...selectedRecentApproval, id: 'replacement-draft-id', vendorId: 'replacement-vendor' };
+    getSettlementApprovalMock.mockResolvedValue(linked);
+    renderPage('/admin/finance/settlement-approvals?approvalId=replacement-draft-id');
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('replacement-draft-id'));
+    await waitFor(() => expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('replacement-vendor'));
   });
 
   it('renders the settlement review queue as the primary page', async () => {

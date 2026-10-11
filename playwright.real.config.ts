@@ -6,10 +6,11 @@ const allowedSpecs = [
   'financial-correction-paid-deduction.real.spec.ts',
   'financial-correction-zero-net.real.spec.ts',
   'financial-correction-approved-no-payout-deduction.real.spec.ts',
+  'settlement-replacement.real.spec.ts',
 ];
 const selectedSpec = process.env.BROWSER_SMOKE_REAL_SPEC ?? allowedSpecs[0];
 if (!allowedSpecs.includes(selectedSpec)) {
-  throw new Error('Real browser smoke spec must be one of the allowlisted Financial Correction scenarios.');
+  throw new Error('Real browser smoke spec must be one of the allowlisted finance scenarios.');
 }
 
 export default defineConfig({

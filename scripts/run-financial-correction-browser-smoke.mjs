@@ -49,10 +49,17 @@ const scenarios = [
     spec: 'financial-correction-approved-no-payout-deduction.real.spec.ts',
     verify: 'tests/e2e/fixtures/verify-approved-no-payout-deduction.ts',
   },
+  {
+    name: 'settlement-replacement',
+    fixture: 'tests/e2e/fixtures/settlement-replacement.ts',
+    reviewId: 'browser-smoke-settlement-replacement',
+    spec: 'settlement-replacement.real.spec.ts',
+    verify: 'tests/e2e/fixtures/verify-settlement-replacement.ts',
+  },
 ];
 const requested = process.argv.slice(2);
-if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction)$/.test(requested[0]))) {
-  throw new Error('Use no arguments for all smokes, or --scenario=review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction.');
+if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement)$/.test(requested[0]))) {
+  throw new Error('Use no arguments for all smokes, or --scenario=review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement.');
 }
 const selectedScenarios = requested.length
   ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])
@@ -146,6 +153,10 @@ async function runScenario(scenario) {
   targetUrl.searchParams.set('schema', 'public');
   const databaseEnv = { ...baseEnv, DATABASE_URL: targetUrl.toString(), BROWSER_SMOKE_ALLOW_LOCAL_DB: '1' };
   const backendEnv = { ...databaseEnv, ...backendDefaults };
+  const fixtureDate = new Date();
+  const nextWednesday = new Date(Date.UTC(fixtureDate.getUTCFullYear(), fixtureDate.getUTCMonth(), fixtureDate.getUTCDate()));
+  nextWednesday.setUTCDate(nextWednesday.getUTCDate() + ((3 - nextWednesday.getUTCDay() + 7) % 7 || 7));
+  const replacementRunDate = nextWednesday.toISOString().slice(0, 10);
   const processes = [];
   let databaseCreated = false;
   console.log(`Running real browser scenario ${scenario.name}.`);
@@ -155,7 +166,7 @@ async function runScenario(scenario) {
     console.log(`Created disposable database ${databaseName}.`);
     await run('npm', ['run', 'backend:db:generate'], databaseEnv);
     await run('npm', ['run', 'backend:db:bootstrap:fresh'], databaseEnv);
-    await run('node_modules/.bin/tsx', [scenario.fixture], databaseEnv);
+    await run('node_modules/.bin/tsx', [scenario.fixture], { ...databaseEnv, BROWSER_SMOKE_RUN_DATE: replacementRunDate });
     await run('npm', ['run', 'backend:build'], backendEnv);
     await run('npm', ['run', 'build'], frontendEnv);
 
@@ -170,6 +181,7 @@ async function runScenario(scenario) {
     await waitFor(localFrontend, async () => true, frontend);
     await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts'], {
       ...baseEnv, BROWSER_SMOKE_REVIEW_ID: scenario.reviewId, BROWSER_SMOKE_REAL_SPEC: scenario.spec,
+      BROWSER_SMOKE_RUN_DATE: replacementRunDate,
     });
     await run('node_modules/.bin/tsx', [scenario.verify], databaseEnv);
     console.log(`Real browser scenario ${scenario.name} passed browser and DB post-check.`);

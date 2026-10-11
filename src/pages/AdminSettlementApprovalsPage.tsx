@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   KPIStatCard,
   MetadataGroup,
@@ -1879,6 +1880,8 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
 }
 
 export function AdminSettlementApprovalsPage() {
+  const [searchParams] = useSearchParams();
+  const linkedApprovalId = searchParams.get('approvalId')?.trim() ?? '';
   const appReadiness = useAppReadiness();
   const initialVendorId = appReadiness.currentVendor.vendorId || 'yalispor';
   const [vendorId, setVendorId] = useState(initialVendorId);
@@ -1922,6 +1925,22 @@ export function AdminSettlementApprovalsPage() {
   useEffect(() => {
     setVendorId((current) => current || appReadiness.currentVendor.vendorId || 'yalispor');
   }, [appReadiness.currentVendor.vendorId]);
+
+  useEffect(() => {
+    if (!linkedApprovalId) return;
+    let cancelled = false;
+    void getSettlementApproval(linkedApprovalId)
+      .then((result) => {
+        if (cancelled) return;
+        setApprovalId(result.id);
+        setApproval(result);
+        setVendorId(result.vendorId);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(getErrorMessage(requestError));
+      });
+    return () => { cancelled = true; };
+  }, [linkedApprovalId]);
 
   useEffect(() => {
     let cancelled = false;
