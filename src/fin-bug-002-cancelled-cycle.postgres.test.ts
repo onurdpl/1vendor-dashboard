@@ -501,6 +501,35 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const first = await ingestAcceptedTestRefund(f, 'settlement-one', '10.00');
     const second = await ingestAcceptedTestRefund(f, 'settlement-two', '15.00');
     const expectedRefundIds = [first.refundFinanceLedgerEntryId, second.refundFinanceLedgerEntryId];
+    const frozenAssessment = await replacement.assessCancelledScheduledSettlementReplacement({
+      originalSettlementApprovalId: f.originalId, vendorId: f.vendorId,
+    });
+    expect(frozenAssessment.outcome).toBe('UNKNOWN');
+    expect(frozenAssessment.sourceComparison.current.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    for (const refundId of expectedRefundIds) {
+      expect(frozenAssessment.unknowns).toContainEqual(expect.objectContaining({
+        code: 'LATE_REFUND_ROUTE_UNVERIFIED', sourceId: refundId,
+      }));
+      expect(await db.settlementRefundAdjustment.count({ where: { refundFinanceLedgerEntryId: refundId } })).toBe(0);
+      expect(await db.vendorBalanceEvent.count({ where: {
+        financeLedgerEntryId: refundId, type: 'VENDOR_DEBT_CREATED',
+      } })).toBe(0);
+    }
+    const { previewRefundAdjustmentEligibility, backfillPendingRefundAdjustments } = await import(
+      '../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js'
+    );
+    const adjustmentPreview = await previewRefundAdjustmentEligibility({ vendorId: f.vendorId });
+    for (const refundId of expectedRefundIds) {
+      expect(adjustmentPreview.records.find((record) => record.refundFinanceLedgerEntryId === refundId))
+        .toMatchObject({ recommendedAction: 'MISSING_APPROVED_SETTLEMENT_LINE' });
+    }
+    const backfill = await backfillPendingRefundAdjustments({ vendorId: f.vendorId });
+    expect(backfill.writesPerformed).toBe(false);
+    expect(backfill.createdRecords).toEqual([]);
+    const replacementAttempt = await replacementRequest(f, 'late-two-refunds');
+    await expect(replacementWriter.createControlledSettlementReplacementDraft(replacementAttempt))
+      .rejects.toMatchObject({ assessment: { outcome: 'UNKNOWN' } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(0);
     const preview = await approval.previewApproval(f.vendorId);
     expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual(expect.arrayContaining([
       f.ledgerId, ...expectedRefundIds,
@@ -532,6 +561,13 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(approved.lines.map((line) => line.financeLedgerEntryId)).toEqual(expect.arrayContaining([
       f.ledgerId, ...expectedRefundIds,
     ]));
+    for (const refundId of expectedRefundIds) {
+      expect(approved.lines.filter((line) => line.financeLedgerEntryId === refundId)).toHaveLength(1);
+      expect(await db.settlementRefundAdjustment.count({ where: { refundFinanceLedgerEntryId: refundId } })).toBe(0);
+      expect(await db.vendorBalanceEvent.count({ where: {
+        financeLedgerEntryId: refundId, type: 'VENDOR_DEBT_CREATED',
+      } })).toBe(0);
+    }
     expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId, status: 'APPROVED' } })).toBe(1);
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId, status: 'PAID' } })).toBe(0);
   });
