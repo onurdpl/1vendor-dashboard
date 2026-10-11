@@ -216,19 +216,42 @@ describe('settlement schedule service', () => {
     }));
   });
 
-  it('ignores cancelled scheduled approvals for cycle blocking', async () => {
-    prismaMock.settlementApproval.findFirst.mockResolvedValue(null);
+  it('blocks ordinary creation when a cancelled approval still owns the scheduled cycle key', async () => {
+    prismaMock.settlementApproval.findFirst.mockResolvedValue({
+      id: 'approval-cancelled', status: 'CANCELLED', replacementSettlementApproval: null,
+    });
 
     const result = await getSettlementScheduleDryRun({ runDate: '2026-01-21', vendorId: 'yalispor' });
 
     expect(prismaMock.settlementApproval.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        status: {
-          not: 'CANCELLED',
-        },
-      }),
+      where: { vendorId: 'yalispor', scheduledCycleKey: 'scheduled-settlement:yalispor:2026-01-21' },
     }));
-    expect(result.vendors[0].state).toBe('READY');
+    expect(result.summary.autoDraftEligibleVendors).toBe(0);
+    expect(result.vendors[0]).toMatchObject({ state: 'BLOCKED', canCreateDraft: false,
+      existingSettlementApprovalId: 'approval-cancelled', existingSettlementApprovalStatus: 'cancelled',
+      blockedReason: 'Cancelled scheduled settlement cycle requires controlled replacement; ordinary scheduling cannot recreate it.',
+    });
+    const creation = await createSettlementScheduleDrafts({ runDate: '2026-01-21', vendorId: 'yalispor',
+      confirmAutoSettlementDrafts: true });
+    expect(creation).toMatchObject({ writesPerformed: false,
+      summary: { created: 0, skipped: 1, failed: 0 },
+      skipped: [{ vendorId: 'yalispor', reason: result.vendors[0].blockedReason }],
+    });
+    expect(createDraftApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['DRAFT', 'APPROVED'] as const)('shows a linked %s replacement without reopening ordinary creation', async (status) => {
+    prismaMock.settlementApproval.findFirst.mockResolvedValue({
+      id: 'approval-cancelled', status: 'CANCELLED',
+      replacementSettlementApproval: { id: 'approval-replacement', status },
+    });
+
+    const result = await getSettlementScheduleDryRun({ runDate: '2026-01-21', vendorId: 'yalispor' });
+
+    expect(result.vendors[0]).toMatchObject({ state: 'BLOCKED', canCreateDraft: false,
+      existingSettlementApprovalId: 'approval-cancelled', existingSettlementApprovalStatus: 'cancelled',
+    });
+    expect(result.vendors[0].blockedReason).toContain(`linked replacement ${status} (approval-replacement)`);
   });
 
   it('does not preview vendors that are not due', async () => {

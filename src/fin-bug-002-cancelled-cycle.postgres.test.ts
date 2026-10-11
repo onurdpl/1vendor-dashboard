@@ -1225,7 +1225,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       settlementApproval: { status: 'DRAFT' } } })).toBe(0);
   });
 
-  it('CHARACTERIZATION: cancellation preserves S1 and source history, but READY cannot reuse its key', async () => {
+  it('2E: cancellation preserves S1 and sources while ordinary scheduling blocks the reserved key', async () => {
     const f = await fixture();
     const initial = await schedule.getSettlementScheduleDryRun({ runDate: f.runDateKey, vendorId: f.vendorId });
     expect(initial.vendors[0]).toMatchObject({ state: 'READY', canCreateDraft: true, scheduledCycleKey: f.cycleKey });
@@ -1255,18 +1255,18 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.financeLedgerEntry.count({ where: { id: f.ledgerId, vendorId: f.vendorId } })).toBe(1);
 
     const preview = await schedule.getSettlementScheduleDryRun({ runDate: f.runDateKey, vendorId: f.vendorId });
-    expect(preview.vendors[0]).toMatchObject({ state: 'READY', canCreateDraft: true,
+    expect(preview.vendors[0]).toMatchObject({ state: 'BLOCKED', canCreateDraft: false,
       scheduledCycleKey: f.cycleKey, eligibleLineCount: 1, netPayableMinor: 17600,
-      existingSettlementApprovalId: null, blockedReason: null });
+      existingSettlementApprovalId: s1Id, existingSettlementApprovalStatus: 'cancelled' });
+    expect(preview.vendors[0].blockedReason).toContain('requires controlled replacement');
     expect(preview.vendors[0].preview?.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
     expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: f.ledgerId,
       settlementApproval: { status: { in: ['DRAFT', 'APPROVED'] } } } })).toBe(0);
 
     const result = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
       confirmAutoSettlementDrafts: true });
-    expect(result).toMatchObject({ writesPerformed: false, summary: { created: 0, failed: 1, skipped: 0 } });
-    expect(result.failed[0].vendorId).toBe(f.vendorId);
-    expect(result.failed[0].reason).toContain('Unique constraint failed on the fields: (`scheduledCycleKey`)');
+    expect(result).toMatchObject({ writesPerformed: false, summary: { created: 0, failed: 0, skipped: 1 } });
+    expect(result.skipped).toEqual([{ vendorId: f.vendorId, reason: preview.vendors[0].blockedReason }]);
     await expect(approval.createDraftApproval({ vendorId: f.vendorId, periodEnd: f.periodEnd,
       asOfDate: f.periodEnd, scheduledRunDate: f.runDate, scheduledPeriodEnd: f.periodEnd,
       scheduledCycleKey: f.cycleKey, candidateScope: 'date_range' })).rejects.toMatchObject({ code: 'P2002' });
@@ -1279,6 +1279,37 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(laterPreview.vendors[0].preview?.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
     expect(laterPreview.vendors[0]).toMatchObject({ state: 'READY', canCreateDraft: true,
       eligibleLineCount: 1, netPayableMinor: 17600 });
+  });
+
+  it('2E: a linked controlled replacement remains visible without reopening ordinary scheduling', async () => {
+    const f = await cancelledFixture();
+    const request = await replacementRequest(f, 'schedule-lineage');
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    expect(created.outcome).toBe('CREATED');
+    const replacementRow = await db.settlementApproval.findUniqueOrThrow({ where: {
+      id: created.replacementSettlementApprovalId,
+    } });
+    expect(replacementRow).toMatchObject({ status: 'DRAFT', scheduledCycleKey: null,
+      replacesSettlementApprovalId: f.originalId });
+
+    const draftPreview = await schedule.getSettlementScheduleDryRun({ runDate: f.runDateKey, vendorId: f.vendorId });
+    expect(draftPreview.vendors[0]).toMatchObject({ state: 'BLOCKED', canCreateDraft: false,
+      existingSettlementApprovalId: f.originalId, existingSettlementApprovalStatus: 'cancelled' });
+    expect(draftPreview.vendors[0].blockedReason)
+      .toContain(`linked replacement DRAFT (${replacementRow.id})`);
+    await approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`);
+    const approvedPreview = await schedule.getSettlementScheduleDryRun({ runDate: f.runDateKey, vendorId: f.vendorId });
+    expect(approvedPreview.vendors[0]).toMatchObject({ state: 'BLOCKED', canCreateDraft: false,
+      existingSettlementApprovalId: f.originalId, existingSettlementApprovalStatus: 'cancelled' });
+    expect(approvedPreview.vendors[0].blockedReason)
+      .toContain(`linked replacement APPROVED (${replacementRow.id})`);
+    const ordinary = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey,
+      vendorId: f.vendorId, confirmAutoSettlementDrafts: true });
+    expect(ordinary).toMatchObject({ writesPerformed: false,
+      summary: { created: 0, skipped: 1, failed: 0 } });
+    expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(1);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } }))
+      .toMatchObject({ status: 'CANCELLED', scheduledCycleKey: f.cycleKey });
   });
 
   it('CHARACTERIZATION: a completed JobRun remains historical after its DRAFT is cancelled', async () => {

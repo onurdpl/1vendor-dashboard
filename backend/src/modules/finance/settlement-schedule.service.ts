@@ -116,6 +116,10 @@ type SettlementScheduleProfileRow = {
 type ExistingScheduledApproval = {
   id: string;
   status: SettlementApprovalStatus;
+  replacementSettlementApproval: {
+    id: string;
+    status: SettlementApprovalStatus;
+  } | null;
 } | null;
 
 type SettlementScheduleRequestInput = {
@@ -289,9 +293,6 @@ async function findExistingScheduledApproval(vendorId: string, scheduledCycleKey
     where: {
       vendorId,
       scheduledCycleKey,
-      status: {
-        not: SettlementApprovalStatus.CANCELLED,
-      },
     },
     orderBy: {
       createdAt: 'desc',
@@ -299,6 +300,9 @@ async function findExistingScheduledApproval(vendorId: string, scheduledCycleKey
     select: {
       id: true,
       status: true,
+      replacementSettlementApproval: {
+        select: { id: true, status: true },
+      },
     },
   });
 }
@@ -319,6 +323,9 @@ function getScheduleState(input: {
   }
   if (input.existingApproval?.status === SettlementApprovalStatus.APPROVED) {
     return 'SETTLEMENT_EXISTS';
+  }
+  if (input.existingApproval?.status === SettlementApprovalStatus.CANCELLED) {
+    return 'BLOCKED';
   }
   if (!input.schedule.weeklySettlementDay || !input.schedule.settlementFrequencyType) {
     return 'CONFIG_MISSING';
@@ -350,9 +357,14 @@ function summarizeDryRunVendor(input: {
   const dueResult = evaluateSettlementScheduleDue(schedule, input.runDate);
   const eligibleLineCount = input.preview?.summary.eligibleRowCount ?? 0;
   const pendingRefundAdjustmentCount = input.preview?.summary.pendingRefundAdjustmentCount ?? 0;
-  const cycleBlocker = input.existingApproval
-    ? 'Scheduled settlement cycle already has an approval.'
-    : null;
+  const replacement = input.existingApproval?.replacementSettlementApproval;
+  const cycleBlocker = input.existingApproval?.status === SettlementApprovalStatus.CANCELLED
+    ? replacement
+      ? `Cancelled scheduled settlement cycle has linked replacement ${replacement.status} (${replacement.id}); ordinary scheduling cannot create another draft.`
+      : 'Cancelled scheduled settlement cycle requires controlled replacement; ordinary scheduling cannot recreate it.'
+    : input.existingApproval
+      ? 'Scheduled settlement cycle already has an approval.'
+      : null;
   const blockedReason = cycleBlocker ?? input.previewBlockedReason ?? (!dueResult.due
     ? dueResult.reason
     : !schedule.autoSettlementDraftEnabled
@@ -445,7 +457,7 @@ export async function getSettlementScheduleDryRun(
       'Dry run is read-only and reuses settlement approval preview eligibility.',
       'Scheduled previews use periodEnd at the end of runDate and asOfDate equal to that periodEnd.',
       'Candidate READY is not permission to create a scheduled DRAFT before the run date UTC day has ended.',
-      'Scheduled cycle identity allows one non-cancelled settlement approval per vendor per run date.',
+      'Scheduled cycle identity remains reserved after cancellation; controlled replacement is a separate path.',
       'Biweekly schedules use ISO week parity for the every-second-week rule until a dedicated business cycle field is introduced.',
       'Phase 4A creates drafts only; approval, Logo invoicing, and payout execution are not automated.',
     ],
