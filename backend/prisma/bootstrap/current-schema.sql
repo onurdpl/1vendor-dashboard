@@ -295,6 +295,38 @@ CREATE TYPE public."PayoutBatchStatus" AS ENUM (
 
 
 --
+-- Name: PayoutOffsetClaimEventType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."PayoutOffsetClaimEventType" AS ENUM (
+    'RESERVED',
+    'FINALIZED',
+    'RELEASED'
+);
+
+
+--
+-- Name: PayoutOffsetClaimStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."PayoutOffsetClaimStatus" AS ENUM (
+    'RESERVED',
+    'FINALIZED',
+    'RELEASED'
+);
+
+
+--
+-- Name: PayoutOffsetSourceType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."PayoutOffsetSourceType" AS ENUM (
+    'REFUND_ADJUSTMENT',
+    'VENDOR_DEBT'
+);
+
+
+--
 -- Name: PayoutStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -774,6 +806,67 @@ BEGIN
     RAISE EXCEPTION 'Financial correction cannot have multiple economic effects';
   END IF;
   RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: payout_offset_claim_append_event(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.payout_offset_claim_append_event() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  INSERT INTO "PayoutOffsetClaimEvent"("id", "payoutOffsetClaimId", "eventType", "actorId", "occurredAt")
+  VALUES (md5(NEW."id" || NEW."status"::text || clock_timestamp()::text), NEW."id",
+    NEW."status"::text::"PayoutOffsetClaimEventType",
+    CASE NEW."status" WHEN 'RESERVED' THEN NEW."reservedBy" WHEN 'FINALIZED' THEN NEW."finalizedBy" ELSE NEW."releasedBy" END,
+    CASE NEW."status" WHEN 'RESERVED' THEN NEW."reservedAt" WHEN 'FINALIZED' THEN NEW."finalizedAt" ELSE NEW."releasedAt" END);
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: payout_offset_claim_audit_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.payout_offset_claim_audit_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Payout offset claim history cannot be deleted';
+  END IF;
+  IF TG_OP = 'UPDATE' THEN
+    IF (OLD."id", OLD."vendorId", OLD."currency", OLD."payoutBatchId", OLD."settlementApprovalId",
+        OLD."sourceType", OLD."settlementRefundAdjustmentId", OLD."vendorDebtOriginEventId",
+        OLD."vendorDebtOriginEventType", OLD."reservedAmountMinor", OLD."idempotencyKey", OLD."reservedBy", OLD."reservedAt")
+       IS DISTINCT FROM
+       (NEW."id", NEW."vendorId", NEW."currency", NEW."payoutBatchId", NEW."settlementApprovalId",
+        NEW."sourceType", NEW."settlementRefundAdjustmentId", NEW."vendorDebtOriginEventId",
+        NEW."vendorDebtOriginEventType", NEW."reservedAmountMinor", NEW."idempotencyKey", NEW."reservedBy", NEW."reservedAt") THEN
+      RAISE EXCEPTION 'Payout offset claim identity and reserved amount are immutable';
+    END IF;
+    IF OLD."status" <> 'RESERVED' OR NEW."status" = OLD."status" THEN
+      RAISE EXCEPTION 'Payout offset claim has no valid lifecycle transition';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: payout_offset_claim_event_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.payout_offset_claim_event_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'Payout offset claim audit events are immutable';
 END;
 $$;
 
@@ -1730,6 +1823,50 @@ CREATE TABLE public."PayoutBatchLine" (
     "settlementApprovalLineId" text,
     "amountSnapshot" numeric(10,2) NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: PayoutOffsetClaim; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutOffsetClaim" (
+    id text NOT NULL,
+    "vendorId" text NOT NULL,
+    currency text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "sourceType" public."PayoutOffsetSourceType" NOT NULL,
+    "settlementRefundAdjustmentId" text,
+    "vendorDebtOriginEventId" text,
+    "vendorDebtOriginEventType" public."VendorBalanceEventType",
+    "reservedAmountMinor" integer NOT NULL,
+    status public."PayoutOffsetClaimStatus" DEFAULT 'RESERVED'::public."PayoutOffsetClaimStatus" NOT NULL,
+    "idempotencyKey" text NOT NULL,
+    "reservedBy" text NOT NULL,
+    "reservedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "finalizedBy" text,
+    "finalizedAt" timestamp(3) without time zone,
+    "releasedBy" text,
+    "releasedAt" timestamp(3) without time zone,
+    CONSTRAINT "PayoutOffsetClaim_identity_check" CHECK (((btrim(currency) <> ''::text) AND (btrim("idempotencyKey") <> ''::text) AND (btrim("reservedBy") <> ''::text) AND ((("sourceType" = 'REFUND_ADJUSTMENT'::public."PayoutOffsetSourceType") AND ("settlementRefundAdjustmentId" IS NOT NULL) AND ("vendorDebtOriginEventId" IS NULL) AND ("vendorDebtOriginEventType" IS NULL)) OR (("sourceType" = 'VENDOR_DEBT'::public."PayoutOffsetSourceType") AND ("settlementRefundAdjustmentId" IS NULL) AND ("vendorDebtOriginEventId" IS NOT NULL) AND ("vendorDebtOriginEventType" = 'VENDOR_DEBT_CREATED'::public."VendorBalanceEventType"))))),
+    CONSTRAINT "PayoutOffsetClaim_lifecycle_check" CHECK ((((status = 'RESERVED'::public."PayoutOffsetClaimStatus") AND ("finalizedBy" IS NULL) AND ("finalizedAt" IS NULL) AND ("releasedBy" IS NULL) AND ("releasedAt" IS NULL)) OR ((status = 'FINALIZED'::public."PayoutOffsetClaimStatus") AND ("finalizedBy" IS NOT NULL) AND (btrim("finalizedBy") <> ''::text) AND ("finalizedAt" IS NOT NULL) AND ("releasedBy" IS NULL) AND ("releasedAt" IS NULL)) OR ((status = 'RELEASED'::public."PayoutOffsetClaimStatus") AND ("releasedBy" IS NOT NULL) AND (btrim("releasedBy") <> ''::text) AND ("releasedAt" IS NOT NULL) AND ("finalizedBy" IS NULL) AND ("finalizedAt" IS NULL)))),
+    CONSTRAINT "PayoutOffsetClaim_positive_amount_check" CHECK (("reservedAmountMinor" > 0))
+);
+
+
+--
+-- Name: PayoutOffsetClaimEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutOffsetClaimEvent" (
+    id text NOT NULL,
+    "payoutOffsetClaimId" text NOT NULL,
+    "eventType" public."PayoutOffsetClaimEventType" NOT NULL,
+    "actorId" text NOT NULL,
+    "occurredAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "evidenceJson" jsonb,
+    CONSTRAINT "PayoutOffsetClaimEvent_actor_check" CHECK ((btrim("actorId") <> ''::text))
 );
 
 
@@ -3063,6 +3200,22 @@ ALTER TABLE ONLY public."PayoutBatch"
 
 
 --
+-- Name: PayoutOffsetClaimEvent PayoutOffsetClaimEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutOffsetClaimEvent"
+    ADD CONSTRAINT "PayoutOffsetClaimEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: PayoutOffsetClaim PayoutOffsetClaim_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutOffsetClaim"
+    ADD CONSTRAINT "PayoutOffsetClaim_pkey" PRIMARY KEY (id);
+
+
+--
 -- Name: ProductPanelVariantDisableOutboxEvent ProductPanelVariantDisableOutboxEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4249,10 +4402,66 @@ CREATE INDEX "PayoutBatch_createdAt_idx" ON public."PayoutBatch" USING btree ("c
 
 
 --
+-- Name: PayoutBatch_id_vendorId_currency_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutBatch_id_vendorId_currency_key" ON public."PayoutBatch" USING btree (id, "vendorId", currency);
+
+
+--
 -- Name: PayoutBatch_vendorId_status_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX "PayoutBatch_vendorId_status_idx" ON public."PayoutBatch" USING btree ("vendorId", status);
+
+
+--
+-- Name: PayoutOffsetClaimEvent_payoutOffsetClaimId_occurredAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "PayoutOffsetClaimEvent_payoutOffsetClaimId_occurredAt_idx" ON public."PayoutOffsetClaimEvent" USING btree ("payoutOffsetClaimId", "occurredAt");
+
+
+--
+-- Name: PayoutOffsetClaim_idempotencyKey_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutOffsetClaim_idempotencyKey_key" ON public."PayoutOffsetClaim" USING btree ("idempotencyKey");
+
+
+--
+-- Name: PayoutOffsetClaim_payoutBatchId_settlementApprovalId_settlement; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutOffsetClaim_payoutBatchId_settlementApprovalId_settlement" ON public."PayoutOffsetClaim" USING btree ("payoutBatchId", "settlementApprovalId", "settlementRefundAdjustmentId");
+
+
+--
+-- Name: PayoutOffsetClaim_payoutBatchId_settlementApprovalId_vendorDebt; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutOffsetClaim_payoutBatchId_settlementApprovalId_vendorDebt" ON public."PayoutOffsetClaim" USING btree ("payoutBatchId", "settlementApprovalId", "vendorDebtOriginEventId");
+
+
+--
+-- Name: PayoutOffsetClaim_settlementRefundAdjustmentId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "PayoutOffsetClaim_settlementRefundAdjustmentId_status_idx" ON public."PayoutOffsetClaim" USING btree ("settlementRefundAdjustmentId", status);
+
+
+--
+-- Name: PayoutOffsetClaim_vendorDebtOriginEventId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "PayoutOffsetClaim_vendorDebtOriginEventId_status_idx" ON public."PayoutOffsetClaim" USING btree ("vendorDebtOriginEventId", status);
+
+
+--
+-- Name: PayoutOffsetClaim_vendorId_currency_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "PayoutOffsetClaim_vendorId_currency_status_idx" ON public."PayoutOffsetClaim" USING btree ("vendorId", currency, status);
 
 
 --
@@ -4529,6 +4738,13 @@ CREATE INDEX "SettlementApproval_createdAt_idx" ON public."SettlementApproval" U
 
 
 --
+-- Name: SettlementApproval_id_vendorId_currency_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementApproval_id_vendorId_currency_key" ON public."SettlementApproval" USING btree (id, "vendorId", currency);
+
+
+--
 -- Name: SettlementApproval_id_vendorId_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4680,6 +4896,13 @@ CREATE INDEX "SettlementRefundAdjustment_appliedSettlementApprovalId_idx" ON pub
 --
 
 CREATE INDEX "SettlementRefundAdjustment_createdAt_idx" ON public."SettlementRefundAdjustment" USING btree ("createdAt");
+
+
+--
+-- Name: SettlementRefundAdjustment_id_vendorId_currencyCode_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementRefundAdjustment_id_vendorId_currencyCode_key" ON public."SettlementRefundAdjustment" USING btree (id, "vendorId", "currencyCode");
 
 
 --
@@ -5061,6 +5284,13 @@ CREATE UNIQUE INDEX "VendorBalanceEvent_financialCorrectionAuthorityId_key" ON p
 
 
 --
+-- Name: VendorBalanceEvent_id_vendorId_currency_type_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorBalanceEvent_id_vendorId_currency_type_key" ON public."VendorBalanceEvent" USING btree (id, "vendorId", currency, type);
+
+
+--
 -- Name: VendorBalanceEvent_idempotencyKey_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5415,6 +5645,27 @@ CREATE TRIGGER "FinancialCorrectionCredit_direction_guard" BEFORE INSERT OR UPDA
 --
 
 CREATE TRIGGER "FinancialCorrectionDeduction_direction_guard" BEFORE INSERT OR UPDATE ON public."FinancialCorrectionDeduction" FOR EACH ROW EXECUTE FUNCTION public."checkFinancialCorrectionDeductionDirection"();
+
+
+--
+-- Name: PayoutOffsetClaimEvent PayoutOffsetClaimEvent_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutOffsetClaimEvent_immutable" BEFORE DELETE OR UPDATE ON public."PayoutOffsetClaimEvent" FOR EACH ROW EXECUTE FUNCTION public.payout_offset_claim_event_immutable();
+
+
+--
+-- Name: PayoutOffsetClaim PayoutOffsetClaim_append_event; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutOffsetClaim_append_event" AFTER INSERT OR UPDATE ON public."PayoutOffsetClaim" FOR EACH ROW EXECUTE FUNCTION public.payout_offset_claim_append_event();
+
+
+--
+-- Name: PayoutOffsetClaim PayoutOffsetClaim_audit_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutOffsetClaim_audit_guard" BEFORE DELETE OR UPDATE ON public."PayoutOffsetClaim" FOR EACH ROW EXECUTE FUNCTION public.payout_offset_claim_audit_guard();
 
 
 --
@@ -6235,6 +6486,46 @@ ALTER TABLE ONLY public."PayoutBatchLine"
 
 ALTER TABLE ONLY public."PayoutBatch"
     ADD CONSTRAINT "PayoutBatch_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: PayoutOffsetClaimEvent PayoutOffsetClaimEvent_payoutOffsetClaim_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutOffsetClaimEvent"
+    ADD CONSTRAINT "PayoutOffsetClaimEvent_payoutOffsetClaim_fkey" FOREIGN KEY ("payoutOffsetClaimId") REFERENCES public."PayoutOffsetClaim"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutOffsetClaim PayoutOffsetClaim_payoutBatch_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutOffsetClaim"
+    ADD CONSTRAINT "PayoutOffsetClaim_payoutBatch_fkey" FOREIGN KEY ("payoutBatchId", "vendorId", currency) REFERENCES public."PayoutBatch"(id, "vendorId", currency) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutOffsetClaim PayoutOffsetClaim_settlementApproval_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutOffsetClaim"
+    ADD CONSTRAINT "PayoutOffsetClaim_settlementApproval_fkey" FOREIGN KEY ("settlementApprovalId", "vendorId", currency) REFERENCES public."SettlementApproval"(id, "vendorId", currency) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutOffsetClaim PayoutOffsetClaim_settlementRefundAdjustment_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutOffsetClaim"
+    ADD CONSTRAINT "PayoutOffsetClaim_settlementRefundAdjustment_fkey" FOREIGN KEY ("settlementRefundAdjustmentId", "vendorId", currency) REFERENCES public."SettlementRefundAdjustment"(id, "vendorId", "currencyCode") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutOffsetClaim PayoutOffsetClaim_vendorDebtOriginEvent_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutOffsetClaim"
+    ADD CONSTRAINT "PayoutOffsetClaim_vendorDebtOriginEvent_fkey" FOREIGN KEY ("vendorDebtOriginEventId", "vendorId", currency, "vendorDebtOriginEventType") REFERENCES public."VendorBalanceEvent"(id, "vendorId", currency, type) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

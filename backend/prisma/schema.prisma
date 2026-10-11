@@ -232,6 +232,23 @@ enum VendorBalanceEventType {
   DEBT_WAIVED
 }
 
+enum PayoutOffsetSourceType {
+  REFUND_ADJUSTMENT
+  VENDOR_DEBT
+}
+
+enum PayoutOffsetClaimStatus {
+  RESERVED
+  FINALIZED
+  RELEASED
+}
+
+enum PayoutOffsetClaimEventType {
+  RESERVED
+  FINALIZED
+  RELEASED
+}
+
 enum FinanceEventType {
   SALE_RECORDED
   COMMISSION_RESERVED
@@ -1958,9 +1975,11 @@ model SettlementApproval {
   vendorBalanceEvents          VendorBalanceEvent[]
   originatingFinancialCorrections FinancialCorrectionAuthority[] @relation("ApprovedSettlementCorrectionOrigin")
   approvedDeductionCoverages FinancialCorrectionApprovedDeductionCoverage[]
+  payoutOffsetClaims PayoutOffsetClaim[]
 
   @@index([vendorId, status])
   @@unique([id, vendorId])
+  @@unique([id, vendorId, currency])
   @@unique([replacesSettlementApprovalId, vendorId])
   @@index([vendorId, scheduledCycleKey])
   @@index([periodStart, periodEnd])
@@ -2094,7 +2113,9 @@ model SettlementRefundAdjustment {
   appliedSettlementApprovalLine         SettlementApprovalLine?                 @relation("AppliedSettlementApprovalLineRefundAdjustments", fields: [appliedSettlementApprovalLineId], references: [id], onDelete: SetNull)
   applications                          SettlementRefundAdjustmentApplication[]
   events                                SettlementRefundAdjustmentEvent[]
+  payoutOffsetClaims                   PayoutOffsetClaim[]
 
+  @@unique([id, vendorId, currencyCode])
   @@index([vendorId, status])
   @@index([refundRecordId])
   @@index([originalOrderId])
@@ -2274,7 +2295,9 @@ model PayoutBatch {
   paidFinancialCorrections FinancialCorrectionAuthority[]
   operationalSignals      OperationalSignal[]
   automationActions       AutomationAction[]
+  payoutOffsetClaims      PayoutOffsetClaim[]
 
+  @@unique([id, vendorId, currency])
   @@index([vendorId, status])
   @@index([createdAt])
 }
@@ -2317,7 +2340,9 @@ model VendorBalanceEvent {
   payoutBatch          PayoutBatch?           @relation(fields: [payoutBatchId], references: [id], onDelete: SetNull)
   settlementApproval   SettlementApproval?    @relation(fields: [settlementApprovalId], references: [id], onDelete: SetNull)
   financialCorrectionAuthority FinancialCorrectionAuthority? @relation("paidFinancialCorrectionDebt", fields: [financialCorrectionAuthorityId], references: [id], onDelete: Restrict, map: "VendorBalanceEvent_correction_authority_fkey")
+  payoutOffsetClaims   PayoutOffsetClaim[]
 
+  @@unique([id, vendorId, currency, type])
   @@index([vendorId, createdAt])
   @@index([vendorId, currency])
   @@index([type, createdAt])
@@ -2326,6 +2351,51 @@ model VendorBalanceEvent {
   @@index([refundRecordId])
   @@index([payoutBatchId])
   @@index([settlementApprovalId])
+}
+
+// Phase 1 authority only. No production service creates or consumes these claims yet.
+model PayoutOffsetClaim {
+  id                           String                      @id @default(cuid())
+  vendorId                     String
+  currency                     String
+  payoutBatchId                String
+  settlementApprovalId         String
+  sourceType                   PayoutOffsetSourceType
+  settlementRefundAdjustmentId String?
+  vendorDebtOriginEventId      String?
+  vendorDebtOriginEventType    VendorBalanceEventType?
+  reservedAmountMinor          Int
+  status                       PayoutOffsetClaimStatus     @default(RESERVED)
+  idempotencyKey               String                      @unique
+  reservedBy                   String
+  reservedAt                   DateTime                    @default(now())
+  finalizedBy                  String?
+  finalizedAt                  DateTime?
+  releasedBy                   String?
+  releasedAt                   DateTime?
+  payoutBatch                  PayoutBatch                 @relation(fields: [payoutBatchId, vendorId, currency], references: [id, vendorId, currency], onDelete: Restrict, map: "PayoutOffsetClaim_payoutBatch_fkey")
+  settlementApproval           SettlementApproval         @relation(fields: [settlementApprovalId, vendorId, currency], references: [id, vendorId, currency], onDelete: Restrict, map: "PayoutOffsetClaim_settlementApproval_fkey")
+  settlementRefundAdjustment   SettlementRefundAdjustment? @relation(fields: [settlementRefundAdjustmentId, vendorId, currency], references: [id, vendorId, currencyCode], onDelete: Restrict, map: "PayoutOffsetClaim_settlementRefundAdjustment_fkey")
+  vendorDebtOriginEvent        VendorBalanceEvent?         @relation(fields: [vendorDebtOriginEventId, vendorId, currency, vendorDebtOriginEventType], references: [id, vendorId, currency, type], onDelete: Restrict, map: "PayoutOffsetClaim_vendorDebtOriginEvent_fkey")
+  events                       PayoutOffsetClaimEvent[]
+
+  @@unique([payoutBatchId, settlementApprovalId, settlementRefundAdjustmentId], map: "PayoutOffsetClaim_payoutBatchId_settlementApprovalId_settlement")
+  @@unique([payoutBatchId, settlementApprovalId, vendorDebtOriginEventId], map: "PayoutOffsetClaim_payoutBatchId_settlementApprovalId_vendorDebt")
+  @@index([vendorId, currency, status])
+  @@index([settlementRefundAdjustmentId, status])
+  @@index([vendorDebtOriginEventId, status])
+}
+
+model PayoutOffsetClaimEvent {
+  id                  String                     @id @default(cuid())
+  payoutOffsetClaimId String
+  eventType           PayoutOffsetClaimEventType
+  actorId             String
+  occurredAt          DateTime                   @default(now())
+  evidenceJson        Json?
+  payoutOffsetClaim   PayoutOffsetClaim          @relation(fields: [payoutOffsetClaimId], references: [id], onDelete: Restrict, map: "PayoutOffsetClaimEvent_payoutOffsetClaim_fkey")
+
+  @@index([payoutOffsetClaimId, occurredAt])
 }
 
 model WebhookEvent {
