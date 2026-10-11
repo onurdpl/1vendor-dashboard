@@ -278,8 +278,9 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     return applied;
   }
 
-  async function addEligiblePostCutoffSale(f: Awaited<ReturnType<typeof cancelledFixture>>, amount: string) {
-    const id = `${f.vendorId}-later-sale`;
+  async function addEligiblePostCutoffSale(f: Awaited<ReturnType<typeof cancelledFixture>>, amount: string,
+    suffix = 'later-sale') {
+    const id = `${f.vendorId}-${suffix}`;
     const orderId = `${id}-order`;
     const allocationId = `${id}-allocation`;
     const executionId = `${id}-execution`;
@@ -650,6 +651,134 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
         [first.refundFinanceLedgerEntryId, '-8.80'],
         [second.refundFinanceLedgerEntryId, '-13.20'],
       ]));
+  });
+
+  it('R-1: an approved SALE with a pending accepted-refund adjustment has no standalone payout', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const first = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    expect(first.summary.created).toBe(1);
+    const approvalAId = first.createdDrafts[0].settlementApprovalId;
+    await approval.approveSettlementApproval(approvalAId, `${f.vendorId}-approver`);
+    const accepted = await ingestAcceptedTestRefund({ ...f, originalId: approvalAId }, 'r1-hold', '10.00');
+    const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: accepted.refundFinanceLedgerEntryId,
+    } });
+    expect(adjustment).toMatchObject({ originalSettlementApprovalId: approvalAId,
+      refundRecordId: accepted.refundRecordId, vendorId: f.vendorId, status: 'PENDING',
+      originalAmountMinor: 880, appliedAmountMinor: 0, remainingAmountMinor: 880 });
+    expect(await db.settlementApprovalLine.findMany({ where: { settlementApprovalId: approvalAId },
+      select: { financeLedgerEntryId: true } })).toEqual([{ financeLedgerEntryId: f.ledgerId }]);
+    const { preparePayoutBatch } = await import('../backend/src/modules/finance/finance.service.js');
+    await expect(preparePayoutBatch({ vendorId: f.vendorId }, `${f.vendorId}-admin`))
+      .rejects.toThrow('Refund after settlement approval requires adjustment before payout');
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } }))
+      .toMatchObject({ status: 'PENDING', appliedAmountMinor: 0, remainingAmountMinor: 880 });
+    expect(await db.vendorBalanceEvent.count({ where: { financeLedgerEntryId: accepted.refundFinanceLedgerEntryId,
+      type: 'VENDOR_DEBT_CREATED' } })).toBe(0);
+  });
+
+  it('R-1: unrelated approved B can progress to PAID while A refund remains pending, then C applies it once', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const first = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    expect(first.summary.created).toBe(1);
+    const approvalAId = first.createdDrafts[0].settlementApprovalId;
+    await approval.approveSettlementApproval(approvalAId, `${f.vendorId}-approver`);
+    const saleBId = await addEligiblePostCutoffSale(f, '100.00');
+    const draftB = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(draftB.lines.map((line) => line.financeLedgerEntryId)).toEqual([saleBId]);
+    await approval.approveSettlementApproval(draftB.id, `${f.vendorId}-approver`);
+
+    const accepted = await ingestAcceptedTestRefund({ ...f, originalId: approvalAId }, 'r1-cross-approval', '10.00');
+    const refundLedgerId = accepted.refundFinanceLedgerEntryId;
+    const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: refundLedgerId,
+    } });
+    expect(adjustment).toMatchObject({ originalSettlementApprovalId: approvalAId,
+      refundRecordId: accepted.refundRecordId, status: 'PENDING', originalAmountMinor: 880,
+      appliedAmountMinor: 0, remainingAmountMinor: 880 });
+    const { preparePayoutBatch, markPayoutBatchReview, markPayoutBatchPaid } =
+      await import('../backend/src/modules/finance/finance.service.js');
+    const payoutB = await preparePayoutBatch({ vendorId: f.vendorId }, `${f.vendorId}-admin`);
+    expect(payoutB.status).toBe('draft');
+    expect(payoutB.netAmount).toBe('88.00');
+    expect(payoutB.lines.map((line) => [line.financeLedgerEntryId, line.amountSnapshot]))
+      .toEqual([[saleBId, '88.00']]);
+    expect(await db.payoutBatchLine.findMany({ where: { payoutBatchId: payoutB.id },
+      select: { settlementApprovalLine: { select: { settlementApprovalId: true } } } }))
+      .toEqual([{ settlementApprovalLine: { settlementApprovalId: draftB.id } }]);
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } }))
+      .toMatchObject({ status: 'PENDING', appliedAmountMinor: 0, remainingAmountMinor: 880 });
+    expect(await db.vendorBalanceEvent.count({ where: { financeLedgerEntryId: refundLedgerId,
+      type: 'VENDOR_DEBT_CREATED' } })).toBe(0);
+
+    const reviewed = await markPayoutBatchReview(payoutB.id);
+    expect(reviewed.status).toBe('review');
+    const paid = await markPayoutBatchPaid(payoutB.id, {
+      paidAt: new Date().toISOString(), paymentReference: `${f.vendorId}-synthetic-manual-eft`,
+    }, `${f.vendorId}-admin`);
+    expect(paid.status).toBe('paid');
+    expect(paid.netAmount).toBe('88.00');
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } }))
+      .toMatchObject({ status: 'PENDING', appliedAmountMinor: 0, remainingAmountMinor: 880 });
+    expect(await db.settlementRefundAdjustmentApplication.count({ where: {
+      settlementRefundAdjustmentId: adjustment.id, status: 'ACTIVE',
+    } })).toBe(0);
+    expect(await db.vendorBalanceEvent.count({ where: { vendorId: f.vendorId } })).toBe(0);
+
+    const saleCId = await addEligiblePostCutoffSale(f, '100.00', 'later-sale-c');
+    const draftC = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(draftC.lines.map((line) => [line.financeLedgerEntryId, line.lineType]))
+      .toEqual(expect.arrayContaining([[saleCId, 'SALE'], [refundLedgerId, 'REFUND_ADJUSTMENT']]));
+    const adjustmentLines = draftC.lines.filter((line) => line.financeLedgerEntryId === refundLedgerId);
+    expect(adjustmentLines).toHaveLength(1);
+    expect(adjustmentLines[0].payableImpactMinor).toBe(-880);
+    expect(draftC.netPayableMinor).toBe(7920);
+    await approval.approveSettlementApproval(draftC.id, `${f.vendorId}-approver`);
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } }))
+      .toMatchObject({ status: 'APPLIED', originalAmountMinor: 880,
+        appliedAmountMinor: 880, remainingAmountMinor: 0 });
+    expect(await db.settlementRefundAdjustmentApplication.count({ where: {
+      settlementRefundAdjustmentId: adjustment.id, status: 'ACTIVE',
+    } })).toBe(1);
+    expect((await approval.previewApproval(f.vendorId)).pendingRefundAdjustments.pendingAdjustmentCount).toBe(0);
+    expect(await db.payoutBatch.findUniqueOrThrow({ where: { id: payoutB.id } }))
+      .toMatchObject({ status: 'PAID', netAmount: expect.anything() });
+  });
+
+  it('R-1: payout B smaller than the outstanding refund does not consume its adjustment', async () => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const first = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+      confirmAutoSettlementDrafts: true });
+    expect(first.summary.created).toBe(1);
+    const approvalAId = first.createdDrafts[0].settlementApprovalId;
+    await approval.approveSettlementApproval(approvalAId, `${f.vendorId}-approver`);
+    const saleBId = await addEligiblePostCutoffSale(f, '5.00');
+    const draftB = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(draftB.lines.map((line) => line.financeLedgerEntryId)).toEqual([saleBId]);
+    await approval.approveSettlementApproval(draftB.id, `${f.vendorId}-approver`);
+    const accepted = await ingestAcceptedTestRefund({ ...f, originalId: approvalAId }, 'r1-small-b', '10.00');
+    const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: accepted.refundFinanceLedgerEntryId,
+    } });
+    const { preparePayoutBatch, markPayoutBatchReview } =
+      await import('../backend/src/modules/finance/finance.service.js');
+    const payoutB = await preparePayoutBatch({ vendorId: f.vendorId }, `${f.vendorId}-admin`);
+    expect(payoutB.lines.map((line) => line.financeLedgerEntryId)).toEqual([saleBId]);
+    expect(payoutB.netAmount).toBe('4.40');
+    expect(await db.payoutBatchLine.count({ where: { payoutBatchId: payoutB.id,
+      financeLedgerEntryId: accepted.refundFinanceLedgerEntryId } })).toBe(0);
+    expect(await markPayoutBatchReview(payoutB.id)).toMatchObject({ status: 'review' });
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } }))
+      .toMatchObject({ status: 'PENDING', originalAmountMinor: 880,
+        appliedAmountMinor: 0, remainingAmountMinor: 880 });
+    expect(await db.vendorBalanceEvent.count({ where: { financeLedgerEntryId: accepted.refundFinanceLedgerEntryId,
+      type: 'VENDOR_DEBT_CREATED' } })).toBe(0);
   });
 
   it('2D: refund accepted after replacement DRAFT blocks approval without losing its identity', async () => {
