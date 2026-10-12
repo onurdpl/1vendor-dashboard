@@ -59,6 +59,7 @@ enum PayoutStatus {
   APPROVED
   PAID
   HOLD
+  CASHLESS_COMPLETED
 }
 
 enum OperationalJobStatus {
@@ -117,6 +118,7 @@ enum SettlementStatus {
   HELD
   SETTLED
   DISPUTED
+  CASHLESS_COMPLETED
 }
 
 enum SettlementApprovalStatus {
@@ -222,6 +224,7 @@ enum PayoutBatchStatus {
   EXECUTION_PENDING
   PAID
   PAID_PLACEHOLDER
+  CASHLESS_COMPLETED
 }
 
 enum VendorBalanceEventType {
@@ -444,6 +447,7 @@ model User {
   paidFinancialCorrections              FinancialCorrectionAuthority[] @relation("paidFinancialCorrectionActor")
   legacyRefundFinanceReviewEvents      LegacyRefundFinanceReviewEvent[] @relation("legacyRefundFinanceReviewEventActor")
   r1ReviewCancellationAttestations      PayoutR1ReviewCancellationAttestation[]
+  r1CashlessCompletions                  PayoutR1CashlessCompletion[]
 }
 
 model Vendor {
@@ -2307,6 +2311,7 @@ model PayoutBatch {
   payoutOffsetClaims      PayoutOffsetClaim[]
   r1MissedRefundReconciliations PayoutR1MissedRefundReconciliation[]
   r1ReviewCancellationAttestation PayoutR1ReviewCancellationAttestation?
+  r1CashlessCompletion PayoutR1CashlessCompletion?
 
   @@unique([id, vendorId, currency])
   @@index([vendorId, status])
@@ -2444,6 +2449,21 @@ model PayoutR1ReviewCancellationAttestation {
   confirmedAt              DateTime @default(now())
   payoutBatch              PayoutBatch @relation(fields: [payoutBatchId], references: [id], onDelete: Restrict)
   actorUser                User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+}
+
+// An immutable, non-EFT confirmation that exact R1 claims consumed a zero-net payout.
+model PayoutR1CashlessCompletion {
+  id                  String      @id @default(cuid())
+  payoutBatchId       String      @unique
+  actorUserId         String
+  reason              String
+  confirmedNoEft      Boolean
+  confirmedNetMinor   Int
+  finalizedOffsetMinor Int
+  claimIdsJson        Json
+  completedAt         DateTime    @default(now())
+  payoutBatch         PayoutBatch @relation(fields: [payoutBatchId], references: [id], onDelete: Restrict)
+  actorUser           User        @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
 }
 
 model WebhookEvent {

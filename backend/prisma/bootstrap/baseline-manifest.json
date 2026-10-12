@@ -8,17 +8,17 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "162940ea651e4b17637ee06127f7a6c51bb47b9c098f05489c4517de579d9b24"
+    "sha256": "69da5e8dc226daa6c03f19e7480d846afc4f501124b859f0772702f8d2b44fda"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "f7e137629a49dd91b2a73de06889188cf988ad74da8225579b3289d7b9b0cebf"
+    "sha256": "84d22cd3abd276a5fb180041921c521bc14b86797408a3533d1add2fff822ccf"
   },
   "catalog": {
-    "sha256": "a2c981926e9a479d160141ea7eb5bfc01cffc4b436f921a6f8ba3a87381218df"
+    "sha256": "5f69411a47b5cb8d34a951e70fceb95b6a3bf7331e4cda1ef6b82e0d2769d686"
   },
-  "migrationCutoff": "20261012130000_add_r1_payout_monetary_snapshot",
-  "baselineMigrationFilesSha256": "3c151149949d7a80e4c4a084d2f82c6cf843cc8eb057c9d8e901056a3e89f1ba",
+  "migrationCutoff": "20261012210000_add_r1_cashless_completion",
+  "baselineMigrationFilesSha256": "d3bf09971015b2712b2810d49956ce1685e586175dccca8b0f94b406d2f7783a",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -143,6 +143,8 @@
     "20261009180000_add_settlement_replacement_audit_foundation",
     "20261011120000_add_payout_offset_claim_authority",
     "20261012120000_add_manual_eft_attestation",
-    "20261012130000_add_r1_payout_monetary_snapshot"
+    "20261012130000_add_r1_payout_monetary_snapshot",
+    "20261012200000_add_r1_cashless_status",
+    "20261012210000_add_r1_cashless_completion"
   ]
 }

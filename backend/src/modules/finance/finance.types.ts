@@ -25,7 +25,8 @@ export type PayoutBatchStatusDto =
   | 'cancelled'
   | 'execution_pending'
   | 'paid'
-  | 'paid_placeholder';
+  | 'paid_placeholder'
+  | 'cashless_completed';
 
 export type AllocationFinanceSummaryDto = {
   available: boolean;
@@ -46,7 +47,7 @@ export type AllocationFinanceSummaryDto = {
   shippingDeduction: string | null;
   shippingDeductionStatus: 'available' | 'pending' | 'unavailable';
   primaryPayable: {
-    type: 'estimated' | 'approved' | 'paid_payout_contribution';
+    type: 'estimated' | 'approved' | 'paid_payout_contribution' | 'cashless_offset_contribution';
     amount: string;
   } | null;
   settlementStatus: SettlementDto['status'] | null;
@@ -205,7 +206,7 @@ export type ShippingCostInputDto = {
 };
 
 export type SettlementDto = {
-  status: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed';
+  status: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed' | 'cashless_completed';
   payoutReady: boolean;
   eligibleAt: string | null;
   accruedAt: string | null;
@@ -368,6 +369,7 @@ export type PayoutBatchDto = {
   outstandingDebtAmount: string;
   debtOffsetAmount: string;
   netAmount: string;
+  r1OffsetAmount: string;
   remainingDebtAmount: string;
   currency: string;
   createdByUserId: string | null;

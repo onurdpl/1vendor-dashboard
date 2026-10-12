@@ -100,6 +100,9 @@ export function getPayoutBatchStatusLabel(status?: string, audience: FinanceAudi
   if (status === 'paid') {
     return 'Paid';
   }
+  if (status === 'cashless_completed') {
+    return 'Completed by verified offsets (no EFT)';
+  }
   if (status === 'paid_placeholder') {
     return audience === 'vendor' ? 'Pending review' : 'Payment evidence pending';
   }
@@ -194,6 +197,9 @@ function resolveSettlementState(record: FinanceTransaction) {
   }
   if (record.settlement?.status === 'settled') {
     return 'Settled';
+  }
+  if (record.settlement?.status === 'cashless_completed') {
+    return 'Completed by offsets';
   }
   return 'Estimated';
 }

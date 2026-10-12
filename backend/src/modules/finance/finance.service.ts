@@ -83,7 +83,7 @@ import {
   type CustomerCancellationFinanceHoldSnapshot,
 } from './customer-cancellation-finance-hold.service.js';
 
-const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER'] as const;
+const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER', 'CASHLESS_COMPLETED'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
   'Payout batch requires revision because financial facts changed after batch creation.';
 const REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON = 'Refund offset required before payout.';
@@ -897,6 +897,7 @@ function normalizeSettlementStatus(status: string | null | undefined): Settlemen
     normalized === 'partially_refunded' ||
     normalized === 'held' ||
     normalized === 'settled' ||
+    normalized === 'cashless_completed' ||
     normalized === 'disputed'
   ) {
     return normalized;
@@ -944,6 +945,9 @@ export function getSettlementStatus(entry: {
   const payoutStatus = mapStatus(entry.payoutStatus ?? '');
   if (payoutStatus === 'paid') {
     return 'settled';
+  }
+  if (payoutStatus === 'cashless_completed') {
+    return 'cashless_completed';
   }
   if (isBlockingPostApprovalRefundRisk(getPostApprovalRefundRisk(entry))) {
     return 'held';
@@ -1048,6 +1052,7 @@ function buildSettlement(entry: {
           ? FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE
         : entry.settlementHoldReason ?? 'Settlement is held for operator review.',
     settled: 'Marked settled in the operational ledger.',
+    cashless_completed: 'Approved payable was fully consumed by verified offsets; no bank payment was made.',
     disputed: 'Settlement is disputed and requires operator review.',
   };
   const reviewNote = review ? getSettlementReviewNote(review) : null;
@@ -1314,6 +1319,7 @@ function mapPayoutBatch(batch: {
   correctionCreditAmount: unknown;
   correctionDeductionAmount: unknown;
   netAmount: unknown;
+  r1OffsetTotalMinor?: number;
   currency: string;
   createdByUserId: string | null;
   paidAt?: Date | null;
@@ -1382,6 +1388,7 @@ function mapPayoutBatch(batch: {
     outstandingDebtAmount: toAmountString(outstandingDebtMinor / 100),
     debtOffsetAmount: toAmountString(debtOffsetMinor / 100),
     netAmount: toAmountString(netAmount),
+    r1OffsetAmount: toAmountString((batch.r1OffsetTotalMinor ?? 0) / 100),
     remainingDebtAmount: toAmountString(remainingDebtMinor / 100),
     currency: batch.currency,
     createdByUserId: batch.createdByUserId,
@@ -1997,7 +2004,7 @@ export async function getVendorFinanceDashboard(
     (summary, entry) => {
       const type = normalizeType(entry.entryType);
       const ledgerSettlementStatus = mapStatus(entry.settlementStatus);
-      if (ledgerSettlementStatus === 'settled') {
+      if (ledgerSettlementStatus === 'settled' || ledgerSettlementStatus === 'cashless_completed') {
         return summary;
       }
       const settlement = buildSettlement(entry);
@@ -4061,7 +4068,7 @@ export async function cancelPayoutBatch(batchId: string, actorId?: string): Prom
         id: batchId,
         vendorId: initialBatch.vendorId,
         status: {
-          notIn: ['PAID', 'CANCELLED', 'REVIEW'],
+          notIn: ['PAID', 'CASHLESS_COMPLETED', 'CANCELLED', 'REVIEW'],
         },
         paidAt: null,
       },
@@ -4086,6 +4093,9 @@ export async function cancelPayoutBatch(batchId: string, actorId?: string): Prom
       }
       if (currentBatch.status === 'PAID' || currentBatch.paidAt) {
         throw new Error('Paid payout batches cannot be cancelled.');
+      }
+      if (currentBatch.status === 'CASHLESS_COMPLETED') {
+        throw new Error('Cashless completed payout batches cannot be cancelled.');
       }
       if (currentBatch.status === 'REVIEW') {
         throw new Error('REVIEW_GENERAL_CANCELLATION_FORBIDDEN');
@@ -4262,6 +4272,92 @@ export async function markR1PayoutBatchReview(batchId: string): Promise<PayoutBa
         approvedDeductionLines: true, vendorBalanceEvents: true } });
     if (!batch) throw new Error('Payout batch not found.');
     return mapPayoutBatch(batch);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+/** Isolated R1-only operation. No production route or worker invokes it. */
+export async function completeR1CashlessPayout(input: {
+  payoutBatchId: string;
+  actorUserId: string;
+  reason: string;
+  confirmCashlessCompletion: boolean;
+  confirmEftNotSent: boolean;
+}): Promise<PayoutBatchDto> {
+  const reason = input.reason?.trim();
+  if (!input.payoutBatchId?.trim() || !input.actorUserId?.trim() || !reason ||
+      reason.length > 500 || input.confirmCashlessCompletion !== true ||
+      input.confirmEftNotSent !== true) {
+    throw new Error('R1_CASHLESS_ADMIN_CONFIRMATION_REQUIRED');
+  }
+  return prisma.$transaction(async (tx) => {
+    const initial = await tx.payoutBatch.findUnique({ where: { id: input.payoutBatchId },
+      select: { vendorId: true } });
+    if (!initial) throw new Error('R1_CASHLESS_PAYOUT_NOT_FOUND');
+    const vendor = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${initial.vendorId} FOR UPDATE
+    `);
+    if (vendor.length !== 1) throw new Error('R1_CASHLESS_VENDOR_NOT_FOUND');
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "PayoutBatch" WHERE "id" = ${input.payoutBatchId} FOR UPDATE
+    `);
+    const actor = await tx.user.findUnique({ where: { id: input.actorUserId },
+      select: { role: true, status: true } });
+    if (actor?.role !== 'ADMIN' || actor.status !== 'active') throw new Error('R1_ACTIVE_ADMIN_REQUIRED');
+    const authority = await assertR1PayoutMonetaryAuthority(tx, input.payoutBatchId,
+      { requireCurrentOwnRefundCoverage: true });
+    const batch = authority.batch;
+    if (batch.status !== 'REVIEW' || authority.netCashMinor !== 0 ||
+        authority.approvedBaseMinor !== authority.offsetMinor) {
+      throw new Error('R1_CASHLESS_ZERO_NET_REVIEW_REQUIRED');
+    }
+    if (batch.paidAt || batch.paidByUserId || batch.eftExecutedAt || batch.eftDeclaredAt ||
+        batch.eftAttestedAt || batch.eftAttestedByUserId || batch.eftAmountMinor !== null ||
+        batch.paymentReference) {
+      throw new Error('R1_CASHLESS_EXTERNAL_EFT_STATE_UNSAFE');
+    }
+    const claimCoveredRefunds = await proveR1ClaimCoveredRefunds(tx, input.payoutBatchId);
+    const effectiveSettlementLineIds = await validatePayoutBatchBeforeTransitionWithClient(
+      tx, input.payoutBatchId, authority.offsetMinor, claimCoveredRefunds);
+    if (effectiveSettlementLineIds.size !== batch.lines.length) {
+      throw new Error('R1_CASHLESS_APPROVED_LINEAGE_CHANGED');
+    }
+    const [{ completedAt }] = await tx.$queryRaw<Array<{ completedAt: Date }>>(Prisma.sql`
+      SELECT clock_timestamp() AS "completedAt"
+    `);
+    const finalized = await finalizeR1PayoutOffsetClaimsInTransaction(tx, {
+      payoutBatchId: input.payoutBatchId, vendorId: batch.vendorId, currency: batch.currency,
+      actorId: input.actorUserId, finalizedAt: completedAt,
+    });
+    if (finalized.finalizedAmountMinor !== authority.offsetMinor ||
+        finalized.claimIds.length !== authority.claims.length) {
+      throw new Error('R1_CASHLESS_FINALIZATION_RECONCILIATION_FAILED');
+    }
+    await tx.payoutR1CashlessCompletion.create({ data: {
+      payoutBatchId: input.payoutBatchId, actorUserId: input.actorUserId,
+      reason, confirmedNoEft: true, confirmedNetMinor: 0,
+      finalizedOffsetMinor: finalized.finalizedAmountMinor,
+      claimIdsJson: finalized.claimIds,
+      completedAt,
+    } });
+    const changed = await tx.payoutBatch.updateMany({ where: {
+      id: input.payoutBatchId, vendorId: batch.vendorId, status: 'REVIEW', paidAt: null,
+      eftExecutedAt: null, eftAttestedAt: null,
+    }, data: { status: 'CASHLESS_COMPLETED' } });
+    if (changed.count !== 1) throw new Error('R1_CASHLESS_PAYOUT_STATE_CHANGED');
+    const ledgerEntryIds = [...new Set(batch.lines.map((line) => line.financeLedgerEntryId))];
+    const ledgerChanged = await tx.financeLedgerEntry.updateMany({ where: {
+      id: { in: ledgerEntryIds }, vendorId: batch.vendorId,
+      payoutStatus: { not: 'PAID' }, settledAt: null,
+    }, data: { payoutStatus: 'CASHLESS_COMPLETED', settlementStatus: 'CASHLESS_COMPLETED' } });
+    if (ledgerChanged.count !== ledgerEntryIds.length) {
+      throw new Error('R1_CASHLESS_LEDGER_LINEAGE_CHANGED');
+    }
+    const completed = await tx.payoutBatch.findUnique({ where: { id: input.payoutBatchId }, include: {
+      lines: true, correctionCreditLines: true, correctionDeductionLines: true,
+      approvedDeductionLines: true, vendorBalanceEvents: true,
+    } });
+    if (!completed) throw new Error('R1_CASHLESS_PAYOUT_NOT_FOUND');
+    return mapPayoutBatch(completed);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 

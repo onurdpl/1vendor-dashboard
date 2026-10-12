@@ -75,6 +75,7 @@ const ACTIVE_PAYOUT_BATCH_STATUSES = [
   PayoutBatchStatus.EXECUTION_PENDING,
   PayoutBatchStatus.PAID,
   PayoutBatchStatus.PAID_PLACEHOLDER,
+  PayoutBatchStatus.CASHLESS_COMPLETED,
 ];
 const PAYOUT_REVIEW_STATUSES = [PayoutBatchStatus.DRAFT, PayoutBatchStatus.REVIEW];
 const UNRESOLVED_RETURN_STATUSES = new Set(['pending', 'open', 'needs_review', 'requested', 'in review', 'in_review']);

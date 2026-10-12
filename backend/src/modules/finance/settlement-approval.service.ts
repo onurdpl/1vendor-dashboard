@@ -39,6 +39,7 @@ import {
 import { activeFinanceLedgerWhere, isLedgerVoided } from './active-ledger-policy.service.js';
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
 import { createSettlementRefundAdjustmentForRefundLedger } from './settlement-refund-adjustment.service.js';
+import { reconcilePayoutOffsetAuthorityInTransaction } from './payout-offset-authority-diagnostics.service.js';
 import { verifyReplacementLateRefundBridges } from './settlement-replacement-late-refund.service.js';
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
@@ -59,7 +60,7 @@ import {
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
-const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER'] as const;
+const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER', 'CASHLESS_COMPLETED'] as const;
 
 async function createSettlementRefundAdjustmentEvent(
   tx: Prisma.TransactionClient,
@@ -2385,11 +2386,29 @@ async function createDraftApprovalInTransaction(
           where: { settlementRefundAdjustmentId: { in: adjustmentIds }, status: { in: ['RESERVED', 'FINALIZED'] } },
           select: { settlementRefundAdjustmentId: true, reservedAmountMinor: true, status: true },
         }) : [];
-      if (payoutClaims.some((claim) => claim.status === 'FINALIZED')) {
-        throw new Error('R1_FINALIZED_PAYOUT_ADJUSTMENT_REQUIRES_RECONCILIATION');
+      if (payoutClaims.length > 0) {
+        const currencies = [...new Set(preview.pendingRefundAdjustments.records
+          .filter((record) => payoutClaims.some((claim) => claim.settlementRefundAdjustmentId === record.adjustmentId))
+          .map((record) => record.currencyCode))];
+        for (const currency of currencies) {
+          const diagnostic = await reconcilePayoutOffsetAuthorityInTransaction(tx, {
+            vendorId: input.vendorId, currency,
+          });
+          for (const record of preview.pendingRefundAdjustments.records.filter((item) => item.currencyCode === currency)) {
+            if (!payoutClaims.some((claim) => claim.settlementRefundAdjustmentId === record.adjustmentId)) continue;
+            const source = diagnostic.sources.find((item) =>
+              item.sourceType === 'REFUND_ADJUSTMENT' && item.sourceId === record.adjustmentId);
+            if (source?.status !== 'VERIFIED' || source.remainingAmountMinor !== record.remainingAmountMinor ||
+                source.appliedAmountMinor !== record.appliedAmountMinor || source.unreservedAmountMinor === null) {
+              throw new Error('R1_PAYOUT_ADJUSTMENT_RECONCILIATION_FAILED');
+            }
+          }
+        }
       }
       const reservedByAdjustment = new Map<string, number>();
       for (const claim of payoutClaims) {
+        // FINALIZED is already included in appliedAmountMinor and removed from remainingAmountMinor.
+        if (claim.status !== 'RESERVED') continue;
         const id = claim.settlementRefundAdjustmentId!;
         reservedByAdjustment.set(id, (reservedByAdjustment.get(id) ?? 0) + claim.reservedAmountMinor);
       }
@@ -2840,6 +2859,9 @@ export async function cancelSettlementApproval(
       if (linkedPayoutBatches.some((batch) => batch.status === 'PAID' || batch.paidAt)) {
         throw new Error('Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
       }
+      if (linkedPayoutBatches.some((batch) => batch.status === 'CASHLESS_COMPLETED')) {
+        throw new Error('Settlement approval cannot be cancelled because it is linked to a cashless completed payout batch.');
+      }
       // The direct-link query above is authoritative for modern payout lines.
       // Lock potential historical NULL-link batches too, including unpaid ones,
       // so Mark Paid and settlement cancellation cannot pass each other.
@@ -2866,7 +2888,8 @@ export async function cancelSettlementApproval(
         FOR UPDATE OF payout_batch
       `);
       for (const payoutLine of legacyPayoutLines) {
-        if (payoutLine.payoutStatus !== 'PAID' && !payoutLine.paidAt) continue;
+        if (payoutLine.payoutStatus !== 'PAID' &&
+            payoutLine.payoutStatus !== 'CASHLESS_COMPLETED' && !payoutLine.paidAt) continue;
         // Match the transition resolver: count all settlement-line candidates,
         // including DRAFT/CANCELLED parents, before considering validity.
         const candidates = await tx.settlementApprovalLine.findMany({

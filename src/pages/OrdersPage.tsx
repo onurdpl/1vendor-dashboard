@@ -131,6 +131,7 @@ function formatVatRate(value: string | null | undefined) {
 function getAllocationPrimaryPayableLabel(type: NonNullable<NonNullable<OrderDetail['allocationFinanceSummary']>['primaryPayable']>['type']) {
   if (type === 'approved') return 'Approved payable';
   if (type === 'paid_payout_contribution') return 'Paid payout contribution';
+  if (type === 'cashless_offset_contribution') return 'Completed by offsets (no EFT)';
   return 'Estimated payable';
 }
 
@@ -140,6 +141,7 @@ function getAllocationPayoutStatusLabel(status: NonNullable<OrderDetail['allocat
   if (status === 'review') return 'Pending review';
   if (status === 'execution_pending') return 'Scheduled';
   if (status === 'paid_placeholder') return 'Payment evidence pending';
+  if (status === 'cashless_completed') return 'Completed by offsets (no EFT)';
   return status ? safeStatusLabel(status) : 'Not available';
 }
 

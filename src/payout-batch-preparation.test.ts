@@ -2430,7 +2430,7 @@ describe('payout batch preparation', () => {
       where: {
         id: 'batch-review',
         vendorId: 'demo-vendor-a',
-        status: { notIn: ['PAID', 'CANCELLED', 'REVIEW'] },
+        status: { notIn: ['PAID', 'CASHLESS_COMPLETED', 'CANCELLED', 'REVIEW'] },
         paidAt: null,
       },
       data: { status: 'CANCELLED' },
@@ -2481,7 +2481,7 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatch.findUnique.mockResolvedValueOnce({ status: 'REVIEW', paidAt: null });
     await expect(cancelPayoutBatch('batch-review')).rejects.toThrow('REVIEW_GENERAL_CANCELLATION_FORBIDDEN');
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ status: { notIn: ['PAID', 'CANCELLED', 'REVIEW'] } }),
+      where: expect.objectContaining({ status: { notIn: ['PAID', 'CASHLESS_COMPLETED', 'CANCELLED', 'REVIEW'] } }),
     }));
     expect(prismaMock.financialCorrectionCreditPayoutLine.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.financialCorrectionDeductionPayoutLine.updateMany).not.toHaveBeenCalled();

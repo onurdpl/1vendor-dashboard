@@ -290,7 +290,8 @@ CREATE TYPE public."PayoutBatchStatus" AS ENUM (
     'CANCELLED',
     'EXECUTION_PENDING',
     'PAID',
-    'PAID_PLACEHOLDER'
+    'PAID_PLACEHOLDER',
+    'CASHLESS_COMPLETED'
 );
 
 
@@ -334,7 +335,8 @@ CREATE TYPE public."PayoutStatus" AS ENUM (
     'PENDING',
     'APPROVED',
     'PAID',
-    'HOLD'
+    'HOLD',
+    'CASHLESS_COMPLETED'
 );
 
 
@@ -498,7 +500,8 @@ CREATE TYPE public."SettlementStatus" AS ENUM (
     'PARTIALLY_REFUNDED',
     'HELD',
     'SETTLED',
-    'DISPUTED'
+    'DISPUTED',
+    'CASHLESS_COMPLETED'
 );
 
 
@@ -906,6 +909,39 @@ BEGIN
       NEW."eftAttestedByUserId" IS DISTINCT FROM OLD."eftAttestedByUserId" OR
       NEW."eftAmountMinor" IS DISTINCT FROM OLD."eftAmountMinor") THEN
     RAISE EXCEPTION 'Payout EFT attestation is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: protectR1CashlessPayout(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."protectR1CashlessPayout"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF OLD."status" = 'CASHLESS_COMPLETED' THEN
+    IF NEW."status" IS DISTINCT FROM OLD."status" OR
+       NEW."netAmount" IS DISTINCT FROM OLD."netAmount" OR
+       NEW."r1OffsetTotalMinor" IS DISTINCT FROM OLD."r1OffsetTotalMinor" OR
+       NEW."paidAt" IS DISTINCT FROM OLD."paidAt" OR
+       NEW."eftExecutedAt" IS DISTINCT FROM OLD."eftExecutedAt" THEN
+      RAISE EXCEPTION 'Cashless R1 payout history is immutable';
+    END IF;
+  ELSIF NEW."status" = 'CASHLESS_COMPLETED' THEN
+    IF OLD."status" <> 'REVIEW' OR NOT EXISTS (
+      SELECT 1 FROM "PayoutR1CashlessCompletion" c
+      WHERE c."payoutBatchId" = NEW."id" AND
+        c."finalizedOffsetMinor" = NEW."r1OffsetTotalMinor"
+    ) OR EXISTS (
+      SELECT 1 FROM "PayoutOffsetClaim" c
+      WHERE c."payoutBatchId" = NEW."id" AND c."status" <> 'FINALIZED'
+    ) THEN
+      RAISE EXCEPTION 'Cashless R1 payout requires reviewed, audited finalized claims';
+    END IF;
   END IF;
   RETURN NEW;
 END;
@@ -1857,6 +1893,7 @@ CREATE TABLE public."PayoutBatch" (
     "r1OffsetTotalMinor" integer DEFAULT 0 NOT NULL,
     "eftAmountMinor" integer,
     CONSTRAINT "PayoutBatch_eft_attestation_complete_check" CHECK (((("eftExecutedAt" IS NULL) AND ("eftDeclaredAt" IS NULL) AND ("eftAttestedAt" IS NULL) AND ("eftAttestedByUserId" IS NULL)) OR (("eftExecutedAt" IS NOT NULL) AND ("eftDeclaredAt" IS NOT NULL) AND ("eftAttestedAt" IS NOT NULL) AND ("eftAttestedByUserId" IS NOT NULL) AND ("eftExecutedAt" <= "eftAttestedAt") AND (status = 'PAID'::public."PayoutBatchStatus")))),
+    CONSTRAINT "PayoutBatch_r1_cashless_non_eft_check" CHECK (((status <> 'CASHLESS_COMPLETED'::public."PayoutBatchStatus") OR (("netAmount" = (0)::numeric) AND ("r1OffsetTotalMinor" > 0) AND ("paidAt" IS NULL) AND ("paidByUserId" IS NULL) AND ("eftExecutedAt" IS NULL) AND ("eftDeclaredAt" IS NULL) AND ("eftAttestedAt" IS NULL) AND ("eftAttestedByUserId" IS NULL) AND ("eftAmountMinor" IS NULL) AND ("paymentReference" IS NULL)))),
     CONSTRAINT "PayoutBatch_r1_eft_amount_check" CHECK ((("eftAmountMinor" IS NULL) OR (("eftAmountMinor" > 0) AND ("r1OffsetTotalMinor" > 0) AND (status = 'PAID'::public."PayoutBatchStatus") AND ("eftAttestedAt" IS NOT NULL) AND ("eftAmountMinor" = (("netAmount" * (100)::numeric))::integer)))),
     CONSTRAINT "PayoutBatch_r1_offset_nonnegative_check" CHECK (("r1OffsetTotalMinor" >= 0))
 );
@@ -1917,6 +1954,24 @@ CREATE TABLE public."PayoutOffsetClaimEvent" (
     "occurredAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "evidenceJson" jsonb,
     CONSTRAINT "PayoutOffsetClaimEvent_actor_check" CHECK ((btrim("actorId") <> ''::text))
+);
+
+
+--
+-- Name: PayoutR1CashlessCompletion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutR1CashlessCompletion" (
+    id text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "actorUserId" text NOT NULL,
+    reason text NOT NULL,
+    "confirmedNoEft" boolean NOT NULL,
+    "confirmedNetMinor" integer NOT NULL,
+    "finalizedOffsetMinor" integer NOT NULL,
+    "claimIdsJson" jsonb NOT NULL,
+    "completedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "PayoutR1CashlessCompletion_proof_check" CHECK (("confirmedNoEft" AND ("confirmedNetMinor" = 0) AND ("finalizedOffsetMinor" > 0) AND (btrim(reason) <> ''::text)))
 );
 
 
@@ -3303,6 +3358,14 @@ ALTER TABLE ONLY public."PayoutOffsetClaim"
 
 
 --
+-- Name: PayoutR1CashlessCompletion PayoutR1CashlessCompletion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1CashlessCompletion"
+    ADD CONSTRAINT "PayoutR1CashlessCompletion_pkey" PRIMARY KEY (id);
+
+
+--
 -- Name: PayoutR1MissedRefundReconciliation PayoutR1MissedRefundReconciliation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4568,6 +4631,13 @@ CREATE INDEX "PayoutOffsetClaim_vendorId_currency_status_idx" ON public."PayoutO
 
 
 --
+-- Name: PayoutR1CashlessCompletion_payoutBatchId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutR1CashlessCompletion_payoutBatchId_key" ON public."PayoutR1CashlessCompletion" USING btree ("payoutBatchId");
+
+
+--
 -- Name: PayoutR1MissedRefundReconciliation_batch_refund_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5779,6 +5849,13 @@ CREATE TRIGGER "PayoutBatch_eft_attestation_immutable" BEFORE UPDATE ON public."
 
 
 --
+-- Name: PayoutBatch PayoutBatch_r1_cashless_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutBatch_r1_cashless_guard" BEFORE UPDATE ON public."PayoutBatch" FOR EACH ROW EXECUTE FUNCTION public."protectR1CashlessPayout"();
+
+
+--
 -- Name: PayoutOffsetClaimEvent PayoutOffsetClaimEvent_immutable; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5797,6 +5874,13 @@ CREATE TRIGGER "PayoutOffsetClaim_append_event" AFTER INSERT OR UPDATE ON public
 --
 
 CREATE TRIGGER "PayoutOffsetClaim_audit_guard" BEFORE DELETE OR UPDATE ON public."PayoutOffsetClaim" FOR EACH ROW EXECUTE FUNCTION public.payout_offset_claim_audit_guard();
+
+
+--
+-- Name: PayoutR1CashlessCompletion PayoutR1CashlessCompletion_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutR1CashlessCompletion_immutable" BEFORE DELETE OR UPDATE ON public."PayoutR1CashlessCompletion" FOR EACH ROW EXECUTE FUNCTION public."protectR1MissedRefundReconciliation"();
 
 
 --
@@ -6671,6 +6755,22 @@ ALTER TABLE ONLY public."PayoutOffsetClaim"
 
 ALTER TABLE ONLY public."PayoutOffsetClaim"
     ADD CONSTRAINT "PayoutOffsetClaim_vendorDebtOriginEvent_fkey" FOREIGN KEY ("vendorDebtOriginEventId", "vendorId", currency, "vendorDebtOriginEventType") REFERENCES public."VendorBalanceEvent"(id, "vendorId", currency, type) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutR1CashlessCompletion PayoutR1CashlessCompletion_actorUser_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1CashlessCompletion"
+    ADD CONSTRAINT "PayoutR1CashlessCompletion_actorUser_fkey" FOREIGN KEY ("actorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutR1CashlessCompletion PayoutR1CashlessCompletion_payoutBatch_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1CashlessCompletion"
+    ADD CONSTRAINT "PayoutR1CashlessCompletion_payoutBatch_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

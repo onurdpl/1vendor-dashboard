@@ -12,6 +12,7 @@ const ACTIVE_PAYOUT_BATCH_STATUSES = new Set([
   'EXECUTION_PENDING',
   'PAID',
   'PAID_PLACEHOLDER',
+  'CASHLESS_COMPLETED',
 ]);
 
 const allocationFinanceSummarySelect = {
@@ -291,7 +292,8 @@ function snapshotProfile(ledger: AllocationFinanceSummaryLedger): VendorFinanceP
 
 function mapLedgerPayoutStatus(status: unknown): AllocationFinanceSummaryDto['payoutStatus'] {
   const normalized = normalize(status).toLowerCase();
-  return normalized === 'pending' || normalized === 'approved' || normalized === 'paid' || normalized === 'hold'
+  return normalized === 'pending' || normalized === 'approved' || normalized === 'paid' ||
+    normalized === 'hold' || normalized === 'cashless_completed'
     ? normalized
     : null;
 }
@@ -303,7 +305,8 @@ function mapBatchPayoutStatus(status: unknown): AllocationFinanceSummaryDto['pay
     normalized === 'approved' ||
     normalized === 'execution_pending' ||
     normalized === 'paid' ||
-    normalized === 'paid_placeholder'
+    normalized === 'paid_placeholder' ||
+    normalized === 'cashless_completed'
     ? normalized
     : null;
 }
@@ -411,9 +414,22 @@ export function buildAllocationFinanceSummary(
         Boolean(payoutLine.payoutBatch.paidAt),
       ),
     );
+    const allApprovedLinesCashless = approvedLines.length > 0 && approvedLines.every((line) =>
+      line.payoutBatchLines.some((payoutLine) =>
+        payoutLine.settlementApprovalLineId === line.id &&
+        payoutLine.payoutBatch.id === activeBatch?.id &&
+        normalize(payoutLine.payoutBatch.status) === 'CASHLESS_COMPLETED' &&
+        !payoutLine.payoutBatch.paidAt,
+      ),
+    );
     if (allApprovedLinesPaid && activeBatch) {
       primaryPayable = {
         type: 'paid_payout_contribution',
+        amount: toAmountString(activePayoutLines.reduce((sum, line) => sum + Number(line.amountSnapshot), 0)),
+      };
+    } else if (allApprovedLinesCashless && activeBatch) {
+      primaryPayable = {
+        type: 'cashless_offset_contribution',
         amount: toAmountString(activePayoutLines.reduce((sum, line) => sum + Number(line.amountSnapshot), 0)),
       };
     } else if (approvedLines.length > 0) {

@@ -545,6 +545,9 @@ function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof
 }
 
 function getVendorPayoutBatchStatusLabel(status: string, hasPaidEvidence = false) {
+  if (status === 'cashless_completed') {
+    return 'Nakitsiz mahsup tamamlandı (EFT yok)';
+  }
   if (status === 'approved') {
     return 'Hazır';
   }

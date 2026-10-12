@@ -11,7 +11,7 @@ type ReservationInput = {
   actorId: string;
 };
 
-const ACTIVE_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER'] as const;
+const ACTIVE_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER', 'CASHLESS_COMPLETED'] as const;
 
 function toMinor(value: Prisma.Decimal): number {
   const amount = value.mul(100);
@@ -174,9 +174,12 @@ export async function reserveVerifiedPayoutOffsetsInTransaction(
     });
     for (const approval of earlierApprovals) {
       if (approval.lines.length > 0 && approval.lines.every((line) =>
-        line.financeLedgerEntry.payoutStatus === 'PAID' &&
-        line.payoutBatchLines.some((membership) => membership.payoutBatch.status === 'PAID' &&
-          membership.payoutBatch.paidAt !== null))) continue;
+        (line.financeLedgerEntry.payoutStatus === 'PAID' &&
+         line.payoutBatchLines.some((membership) => membership.payoutBatch.status === 'PAID' &&
+           membership.payoutBatch.paidAt !== null)) ||
+        (line.financeLedgerEntry.payoutStatus === 'CASHLESS_COMPLETED' &&
+         line.payoutBatchLines.some((membership) => membership.payoutBatch.status === 'CASHLESS_COMPLETED' &&
+           membership.payoutBatch.paidAt === null)))) continue;
       // The existing payout selector may skip an approval held by its own
       // unresolved post-approval refund. Any other omission needs a fresh
       // eligibility proof, which this isolated Phase 2 writer does not have.

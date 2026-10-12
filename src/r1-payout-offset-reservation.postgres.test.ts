@@ -13,6 +13,7 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
   let normalize: typeof import('../backend/src/modules/finance/refund-evidence-normalizer.service.js')['normalizeRefundEvidence'];
   let recordDelivery: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
   let createDraft: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['createDraftApproval'];
+  let cancelSettlement: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['cancelSettlementApproval'];
   let cancelPayout: typeof import('../backend/src/modules/finance/finance.service.js')['cancelPayoutBatch'];
   let markReview: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchReview'];
   let markPaid: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchPaid'];
@@ -21,6 +22,9 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
   let prepareR1Payout: typeof import('../backend/src/modules/finance/finance.service.js')['prepareR1PayoutBatch'];
   let markR1Review: typeof import('../backend/src/modules/finance/finance.service.js')['markR1PayoutBatchReview'];
   let markR1Paid: typeof import('../backend/src/modules/finance/finance.service.js')['markR1PayoutBatchPaid'];
+  let completeR1Cashless: typeof import('../backend/src/modules/finance/finance.service.js')['completeR1CashlessPayout'];
+  let getVendorDashboard: typeof import('../backend/src/modules/finance/finance.service.js')['getVendorFinanceDashboard'];
+  let getAllocationSummary: typeof import('../backend/src/modules/finance/allocation-finance-summary.service.js')['getAllocationFinanceSummary'];
   let cancelR1Review: typeof import('../backend/src/modules/finance/finance.service.js')['cancelR1ReviewPayoutBeforeEft'];
   let classifyEftRefundTiming: typeof import('../backend/src/modules/finance/r1-eft-refund-timing.service.js')['classifyR1EftRefundTiming'];
   let cancelDraftWithClient: typeof import('../backend/src/modules/finance/finance.service.js')['cancelDraftPayoutBatchWithClient'];
@@ -54,9 +58,13 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
     ({ approveSettlementApproval: approveSettlement } = await import('../backend/src/modules/finance/settlement-approval.service.js'));
     ({ preparePayoutBatch: preparePayout, prepareR1PayoutBatch: prepareR1Payout,
       markR1PayoutBatchReview: markR1Review, markR1PayoutBatchPaid: markR1Paid,
+      completeR1CashlessPayout: completeR1Cashless,
+      getVendorFinanceDashboard: getVendorDashboard,
       cancelR1ReviewPayoutBeforeEft: cancelR1Review } = await import('../backend/src/modules/finance/finance.service.js'));
     ({ classifyR1EftRefundTiming: classifyEftRefundTiming } = await import('../backend/src/modules/finance/r1-eft-refund-timing.service.js'));
-    ({ createDraftApproval: createDraft } = await import('../backend/src/modules/finance/settlement-approval.service.js'));
+    ({ getAllocationFinanceSummary: getAllocationSummary } = await import('../backend/src/modules/finance/allocation-finance-summary.service.js'));
+    ({ createDraftApproval: createDraft, cancelSettlementApproval: cancelSettlement } =
+      await import('../backend/src/modules/finance/settlement-approval.service.js'));
     ({ cancelPayoutBatch: cancelPayout, markPayoutBatchReview: markReview,
       markPayoutBatchPaid: markPaid, cancelDraftPayoutBatchWithClient: cancelDraftWithClient,
       cancelReviewPayoutBatchWithClient: cancelReviewWithClient } = await import('../backend/src/modules/finance/finance.service.js'));
@@ -237,10 +245,11 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
     return { vendorId, original, source, capacity, batchId, input };
   }
 
-  async function r1MonetaryFixture(capacityMinor = 100000, refundMinor = 20000) {
+  async function r1MonetaryFixture(capacityMinor = 100000, refundMinor = 20000,
+    originalSaleMinor = 30000) {
     const vendorId = next('r1-monetary-vendor');
     await db.vendor.create({ data: { id: vendorId, name: vendorId } });
-    const original = await makeSale(vendorId, 30000, new Date('2026-01-01T00:00:00.000Z'), 0);
+    const original = await makeSale(vendorId, originalSaleMinor, new Date('2026-01-01T00:00:00.000Z'), 0);
     const capacity = await makeEligibleUnsettledSale(vendorId, capacityMinor, 0);
     const draft = await createDraft({ vendorId, candidateScope: 'selected_allocations',
       selectedAllocationIds: [capacity.allocationId], asOfDate: new Date() });
@@ -1006,6 +1015,320 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
     expect(adjustment).toMatchObject({ status: 'PENDING', appliedAmountMinor: 0,
       remainingAmountMinor: 30000 });
     expect(claim.status).toBe('RESERVED');
+  });
+
+  it('cashlessly completes 440 of an 880 refund, retains 440, and never fabricates EFT payment', async () => {
+    const { vendorId, capacity, refund, draft, prepared } = await r1MonetaryFixture(440, 880, 1000);
+    expect(prepared).toMatchObject({ approvedBaseMinor: 440, offsetMinor: 440, netCashMinor: 0 });
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    const input = { payoutBatchId: prepared.payoutBatchId, actorUserId,
+      reason: 'Verified exact zero-net offset; no EFT sent', confirmCashlessCompletion: true,
+      confirmEftNotSent: true };
+    const completed = await completeR1Cashless(input);
+    expect(completed).toMatchObject({ status: 'cashless_completed', paidAt: null,
+      paidByUserId: null, paymentReference: null, eftExecutedAt: null,
+      netAmount: '0.00' });
+    const [batch, audit, claim, adjustment, ledger, originalApproval] = await Promise.all([
+      db.payoutBatch.findUniqueOrThrow({ where: { id: prepared.payoutBatchId } }),
+      db.payoutR1CashlessCompletion.findUniqueOrThrow({ where: { payoutBatchId: prepared.payoutBatchId } }),
+      db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: prepared.claims[0].id }, include: { events: true } }),
+      db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } }),
+      db.financeLedgerEntry.findUniqueOrThrow({ where: { id: capacity.saleId } }),
+      db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } }),
+    ]);
+    expect(audit).toMatchObject({ actorUserId, confirmedNoEft: true, confirmedNetMinor: 0,
+      finalizedOffsetMinor: 440, claimIdsJson: [claim.id] });
+    expect(batch).toMatchObject({ status: 'CASHLESS_COMPLETED', eftAmountMinor: null,
+      eftExecutedAt: null, paidAt: null, paymentReference: null });
+    expect(claim).toMatchObject({ status: 'FINALIZED', finalizedBy: actorUserId });
+    expect(claim.events.map((event) => event.eventType)).toEqual(['RESERVED', 'FINALIZED']);
+    expect(adjustment).toMatchObject({ status: 'PARTIALLY_APPLIED', appliedAmountMinor: 440,
+      remainingAmountMinor: 440 });
+    expect(ledger).toMatchObject({ payoutStatus: 'CASHLESS_COMPLETED',
+      settlementStatus: 'CASHLESS_COMPLETED', settledAt: null });
+    expect(originalApproval).toMatchObject({ status: 'APPROVED', netPayableMinor: 440 });
+    const dashboard = await getVendorDashboard(vendorId);
+    expect(dashboard.records.find((record) => record.id === capacity.saleId))
+      .toMatchObject({ payoutStatus: 'cashless_completed',
+        settlement: { status: 'cashless_completed', settledAt: null },
+        payoutBatch: { id: prepared.payoutBatchId, status: 'cashless_completed', paidAt: null } });
+    const allocationSummary = await getAllocationSummary({
+      vendorAllocationId: capacity.allocationId, expectedVendorId: vendorId, db: db as never,
+    });
+    expect(allocationSummary).toMatchObject({ payoutStatus: 'cashless_completed',
+      settlementStatus: 'cashless_completed', paidAt: null,
+      primaryPayable: { type: 'cashless_offset_contribution', amount: '4.40' } });
+    expect(await db.financeEvent.count({ where: { referenceId: prepared.payoutBatchId,
+      eventType: 'PAYOUT_PAID' } })).toBe(0);
+    await expect(cancelPayout(prepared.payoutBatchId, actorUserId))
+      .rejects.toThrow('Cashless completed payout batches cannot be cancelled.');
+    await expect(cancelSettlement(draft.id, actorUserId))
+      .rejects.toThrow('linked to a cashless completed payout batch');
+    await expect(completeR1Cashless(input)).rejects.toThrow();
+    await expect(prepareR1Payout({ vendorId }, actorUserId, next('duplicate-cashless-source'))).rejects.toThrow();
+
+    const nextCapacity = await makeEligibleUnsettledSale(vendorId, 440, 0);
+    const nextDraft = await createDraft({ vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [nextCapacity.allocationId], asOfDate: new Date() });
+    expect(nextDraft.lines).toHaveLength(2);
+    expect(nextDraft.lines.map((line) => [line.lineType, line.financeLedgerEntryId, line.payableImpactMinor]))
+      .toEqual(expect.arrayContaining([
+        ['SALE', nextCapacity.saleId, 440], ['REFUND_ADJUSTMENT', refund.refundLedgerId, -440],
+      ]));
+    await approveSettlement(nextDraft.id, actorUserId);
+    const [fullyApplied, applications, claims, sourceDiagnostic, approvedNext] = await Promise.all([
+      db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } }),
+      db.settlementRefundAdjustmentApplication.findMany({ where: { settlementRefundAdjustmentId: refund.sourceId } }),
+      db.payoutOffsetClaim.findMany({ where: { settlementRefundAdjustmentId: refund.sourceId } }),
+      reconcile({ vendorId, currency: 'TRY' }),
+      db.settlementApproval.findUniqueOrThrow({ where: { id: nextDraft.id } }),
+    ]);
+    expect(approvedNext).toMatchObject({ status: 'APPROVED', netPayableMinor: 0 });
+    expect(fullyApplied).toMatchObject({ status: 'APPLIED', originalAmountMinor: 880,
+      appliedAmountMinor: 880, remainingAmountMinor: 0 });
+    expect(applications.filter((application) => application.status === 'ACTIVE'))
+      .toMatchObject([{ settlementApprovalId: nextDraft.id, amountMinor: 440 }]);
+    expect(claims).toMatchObject([{ id: claim.id, status: 'FINALIZED', reservedAmountMinor: 440 }]);
+    expect(sourceDiagnostic.sources.find((source) => source.sourceId === refund.sourceId))
+      .toMatchObject({ status: 'VERIFIED', appliedAmountMinor: 880,
+        remainingAmountMinor: 0, activeReservationMinor: 0, unreservedAmountMinor: 0 });
+  });
+
+  it('reconciles finalized, reserved and settlement-applied slices through cancellation and release', async () => {
+    const { vendorId, refund, prepared } = await r1MonetaryFixture(440, 880, 1000);
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    await completeR1Cashless({ payoutBatchId: prepared.payoutBatchId, actorUserId,
+      reason: 'Verified zero-net payment without EFT', confirmCashlessCompletion: true,
+      confirmEftNotSent: true });
+
+    const reservedCapacity = await makeSale(vendorId, 200, new Date());
+    const reservedBatchId = await makeBatch(vendorId, [reservedCapacity]);
+    const reservation = await reserve({ vendorId, currency: 'TRY', payoutBatchId: reservedBatchId,
+      requestId: next('partial-reservation'), actorId: actorUserId });
+    expect(reservation.claims).toMatchObject([{ settlementRefundAdjustmentId: refund.sourceId,
+      status: 'RESERVED', reservedAmountMinor: 200 }]);
+
+    const future = await makeEligibleUnsettledSale(vendorId, 440, 0);
+    const draft = await createDraft({ vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [future.allocationId], asOfDate: new Date() });
+    expect(draft.lines).toHaveLength(2);
+    expect(draft.lines.map((line) => [line.lineType, line.financeLedgerEntryId, line.payableImpactMinor]))
+      .toEqual(expect.arrayContaining([
+        ['SALE', future.saleId, 440], ['REFUND_ADJUSTMENT', refund.refundLedgerId, -240],
+      ]));
+    expect((await reconcile({ vendorId, currency: 'TRY' })).sources.find((source) => source.sourceId === refund.sourceId))
+      .toMatchObject({ status: 'VERIFIED', originalAmountMinor: 880, appliedAmountMinor: 680,
+        remainingAmountMinor: 200, activeReservationMinor: 200, unreservedAmountMinor: 0 });
+
+    await cancelSettlement(draft.id, actorUserId);
+    expect((await reconcile({ vendorId, currency: 'TRY' })).sources.find((source) => source.sourceId === refund.sourceId))
+      .toMatchObject({ status: 'VERIFIED', appliedAmountMinor: 440,
+        remainingAmountMinor: 440, activeReservationMinor: 200, unreservedAmountMinor: 240 });
+    await cancelPayout(reservedBatchId, actorUserId);
+    expect((await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: reservation.claims[0].id } })).status)
+      .toBe('RELEASED');
+    expect((await reconcile({ vendorId, currency: 'TRY' })).sources.find((source) => source.sourceId === refund.sourceId))
+      .toMatchObject({ status: 'VERIFIED', appliedAmountMinor: 440,
+        remainingAmountMinor: 440, activeReservationMinor: 0, unreservedAmountMinor: 440 });
+  });
+
+  it('carries the post-cashless 440 into the next already drafted settlement payout exactly once', async () => {
+    const vendorId = next('cashless-carry-vendor');
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    const original = await makeSale(vendorId, 1000, new Date('2026-01-01T00:00:00.000Z'), 0);
+    const firstSale = await makeEligibleUnsettledSale(vendorId, 440, 0);
+    const firstDraft = await createDraft({ vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [firstSale.allocationId], asOfDate: new Date() });
+    await approveSettlement(firstDraft.id, 'r1-monetary-admin');
+    const laterSale = await makeEligibleUnsettledSale(vendorId, 440, 0);
+    const laterDraft = await createDraft({ vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [laterSale.allocationId], asOfDate: new Date() });
+    expect(laterDraft.lines.map((line) => line.financeLedgerEntryId)).toEqual([laterSale.saleId]);
+    const refund = await makeRefund(vendorId, original, 880);
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+
+    const firstPayout = await prepareR1Payout({ vendorId }, actorUserId, next('first-cashless-request'));
+    expect(firstPayout).toMatchObject({ approvedBaseMinor: 440, offsetMinor: 440, netCashMinor: 0 });
+    expect(firstPayout.claims).toMatchObject([{ settlementRefundAdjustmentId: refund.sourceId,
+      reservedAmountMinor: 440 }]);
+    await markR1Review(firstPayout.payoutBatchId);
+    await completeR1Cashless({ payoutBatchId: firstPayout.payoutBatchId, actorUserId,
+      reason: 'First verified zero-net offset; no EFT sent', confirmCashlessCompletion: true,
+      confirmEftNotSent: true });
+    expect((await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } }))
+      .remainingAmountMinor).toBe(440);
+
+    const approvedLater = await approveSettlement(laterDraft.id, actorUserId);
+    expect(approvedLater).toMatchObject({ status: 'approved', netPayableMinor: 440 });
+    const secondPayout = await prepareR1Payout({ vendorId }, actorUserId, next('second-cashless-request'));
+    expect(secondPayout).toMatchObject({ approvedBaseMinor: 440, offsetMinor: 440, netCashMinor: 0 });
+    expect(secondPayout.claims).toMatchObject([{ settlementRefundAdjustmentId: refund.sourceId,
+      settlementApprovalId: laterDraft.id, reservedAmountMinor: 440 }]);
+    expect((await db.payoutBatchLine.findMany({ where: { payoutBatchId: secondPayout.payoutBatchId },
+      select: { financeLedgerEntryId: true } })).map((line) => line.financeLedgerEntryId))
+      .toEqual([laterSale.saleId]);
+    await markR1Review(secondPayout.payoutBatchId);
+    await completeR1Cashless({ payoutBatchId: secondPayout.payoutBatchId, actorUserId,
+      reason: 'Remaining verified zero-net offset; no EFT sent', confirmCashlessCompletion: true,
+      confirmEftNotSent: true });
+    const [adjustment, claims, applications] = await Promise.all([
+      db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } }),
+      db.payoutOffsetClaim.findMany({ where: { settlementRefundAdjustmentId: refund.sourceId } }),
+      db.settlementRefundAdjustmentApplication.findMany({ where: { settlementRefundAdjustmentId: refund.sourceId } }),
+    ]);
+    expect(adjustment).toMatchObject({ status: 'APPLIED', originalAmountMinor: 880,
+      appliedAmountMinor: 880, remainingAmountMinor: 0 });
+    expect(claims.map((claim) => [claim.status, claim.reservedAmountMinor]).sort())
+      .toEqual([['FINALIZED', 440], ['FINALIZED', 440]]);
+    expect(applications).toHaveLength(0);
+    expect((await reconcile({ vendorId, currency: 'TRY' })).sources.find((source) => source.sourceId === refund.sourceId))
+      .toMatchObject({ status: 'VERIFIED', activeReservationMinor: 0, unreservedAmountMinor: 0 });
+    expect(await db.payoutR1CashlessCompletion.count({ where: {
+      payoutBatchId: { in: [firstPayout.payoutBatchId, secondPayout.payoutBatchId] },
+    } })).toBe(2);
+  });
+
+  it('fails closed when finalized claim money no longer matches the adjustment source', async () => {
+    const { vendorId, refund, prepared } = await r1MonetaryFixture(440, 880, 1000);
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    await completeR1Cashless({ payoutBatchId: prepared.payoutBatchId, actorUserId,
+      reason: 'Verified zero-net payment without EFT', confirmCashlessCompletion: true,
+      confirmEftNotSent: true });
+    // Corrupt only this disposable fixture to prove that a sibling source cannot fill a missing minor unit.
+    await db.settlementRefundAdjustment.update({ where: { id: refund.sourceId },
+      data: { appliedAmountMinor: 441, remainingAmountMinor: 439 } });
+    const future = await makeEligibleUnsettledSale(vendorId, 440, 0);
+    await expect(createDraft({ vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [future.allocationId], asOfDate: new Date() }))
+      .rejects.toThrow('R1_PAYOUT_ADJUSTMENT_RECONCILIATION_FAILED');
+    expect(await db.settlementRefundAdjustmentApplication.count({
+      where: { settlementRefundAdjustmentId: refund.sourceId },
+    })).toBe(0);
+    expect(await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: prepared.claims[0].id } }))
+      .toMatchObject({ status: 'FINALIZED', reservedAmountMinor: 440 });
+  });
+
+  it('serializes post-cashless settlement and payout claims without double-consuming the remaining source', async () => {
+    const { vendorId, refund, prepared } = await r1MonetaryFixture(440, 880, 1000);
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    await completeR1Cashless({ payoutBatchId: prepared.payoutBatchId, actorUserId,
+      reason: 'Verified zero-net payment without EFT', confirmCashlessCompletion: true,
+      confirmEftNotSent: true });
+    const payoutCapacity = await makeSale(vendorId, 440, new Date());
+    const payoutBatchId = await makeBatch(vendorId, [payoutCapacity]);
+    const settlementCapacity = await makeEligibleUnsettledSale(vendorId, 440, 0);
+    const results = await Promise.allSettled([
+      reserve({ vendorId, currency: 'TRY', payoutBatchId, requestId: next('remaining-claim'), actorId: actorUserId }),
+      createDraft({ vendorId, candidateScope: 'selected_allocations',
+        selectedAllocationIds: [settlementCapacity.allocationId], asOfDate: new Date() }),
+    ]);
+    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+    const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } });
+    const claims = await db.payoutOffsetClaim.findMany({
+      where: { settlementRefundAdjustmentId: refund.sourceId },
+    });
+    const reservedMinor = claims.filter((claim) => claim.status === 'RESERVED')
+      .reduce((sum, claim) => sum + claim.reservedAmountMinor, 0);
+    expect(claims.filter((claim) => claim.status === 'FINALIZED').map((claim) => claim.reservedAmountMinor))
+      .toEqual([440]);
+    expect(adjustment.originalAmountMinor).toBe(880);
+    expect(adjustment.appliedAmountMinor + adjustment.remainingAmountMinor).toBe(880);
+    expect(adjustment.appliedAmountMinor + reservedMinor).toBeLessThanOrEqual(880);
+    expect((await reconcile({ vendorId, currency: 'TRY' })).sources.find((source) => source.sourceId === refund.sourceId))
+      .toMatchObject({ status: 'VERIFIED' });
+  });
+
+  it('requires an active Admin and explicit no-EFT confirmation for zero-net completion', async () => {
+    const { refund, prepared } = await r1MonetaryFixture(440, 880, 1000);
+    const actorUserId = next('cashless-vendor');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Not an admin', role: 'VENDOR', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    const input = { payoutBatchId: prepared.payoutBatchId, actorUserId,
+      reason: 'No EFT sent', confirmCashlessCompletion: true, confirmEftNotSent: true };
+    await expect(completeR1Cashless(input)).rejects.toThrow('R1_ACTIVE_ADMIN_REQUIRED');
+    await db.user.update({ where: { id: actorUserId }, data: { role: 'ADMIN' } });
+    await expect(completeR1Cashless({ ...input, confirmEftNotSent: false }))
+      .rejects.toThrow('R1_CASHLESS_ADMIN_CONFIRMATION_REQUIRED');
+    expect(await db.payoutR1CashlessCompletion.count({ where: { payoutBatchId: prepared.payoutBatchId } }))
+      .toBe(0);
+    expect((await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } }))
+      .remainingAmountMinor).toBe(880);
+  });
+
+  it('serializes concurrent cashless confirmations and finalizes exact money once', async () => {
+    const { refund, prepared } = await r1MonetaryFixture(440, 880, 1000);
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    const input = { payoutBatchId: prepared.payoutBatchId, actorUserId,
+      reason: 'No EFT sent', confirmCashlessCompletion: true, confirmEftNotSent: true };
+    const outcomes = await Promise.allSettled([completeR1Cashless(input), completeR1Cashless(input)]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    expect(await db.payoutR1CashlessCompletion.count({ where: { payoutBatchId: prepared.payoutBatchId } }))
+      .toBe(1);
+    expect((await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } })))
+      .toMatchObject({ appliedAmountMinor: 440, remainingAmountMinor: 440 });
+  });
+
+  it('rejects a positive-net R1 REVIEW batch on the cashless path without altering its claim', async () => {
+    const { refund, prepared } = await r1MonetaryFixture();
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    await expect(completeR1Cashless({ payoutBatchId: prepared.payoutBatchId, actorUserId,
+      reason: 'No EFT sent', confirmCashlessCompletion: true, confirmEftNotSent: true }))
+      .rejects.toThrow('R1_CASHLESS_ZERO_NET_REVIEW_REQUIRED');
+    expect((await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: prepared.claims[0].id } }))
+      .status).toBe('RESERVED');
+    expect((await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } }))
+      .remainingAmountMinor).toBe(20000);
+    expect(await db.payoutR1CashlessCompletion.count({ where: { payoutBatchId: prepared.payoutBatchId } }))
+      .toBe(0);
+  });
+
+  it('rolls back claim finalization and refund money if cashless audit insertion fails', async () => {
+    const { refund, prepared } = await r1MonetaryFixture(440, 880, 1000);
+    const actorUserId = next('cashless-admin');
+    await db.user.create({ data: { id: actorUserId, email: `${actorUserId}@example.test`,
+      name: 'Cashless test admin', role: 'ADMIN', status: 'active', passwordHash: 'test-only' } });
+    await markR1Review(prepared.payoutBatchId);
+    await db.$executeRawUnsafe(`CREATE FUNCTION "r1_cashless_test_fail_audit"() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'TEST_R1_CASHLESS_AUDIT_FAILURE'; END; $$ LANGUAGE plpgsql`);
+    await db.$executeRawUnsafe(`CREATE TRIGGER "r1_cashless_test_fail_audit_trigger"
+      BEFORE INSERT ON "PayoutR1CashlessCompletion" FOR EACH ROW
+      EXECUTE FUNCTION "r1_cashless_test_fail_audit"()`);
+    try {
+      await expect(completeR1Cashless({ payoutBatchId: prepared.payoutBatchId, actorUserId,
+        reason: 'No EFT sent', confirmCashlessCompletion: true, confirmEftNotSent: true }))
+        .rejects.toThrow('TEST_R1_CASHLESS_AUDIT_FAILURE');
+      expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: prepared.payoutBatchId } }))
+        .status).toBe('REVIEW');
+      expect((await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: prepared.claims[0].id } }))
+        .status).toBe('RESERVED');
+      expect((await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } })))
+        .toMatchObject({ appliedAmountMinor: 0, remainingAmountMinor: 880 });
+    } finally {
+      await db.$executeRawUnsafe('DROP TRIGGER "r1_cashless_test_fail_audit_trigger" ON "PayoutR1CashlessCompletion"');
+      await db.$executeRawUnsafe('DROP FUNCTION "r1_cashless_test_fail_audit"()');
+    }
   });
 
   it('classifies exact accepted refunds on its SALE as pre- or post-EFT and fails closed on missing evidence', async () => {

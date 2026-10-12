@@ -1031,10 +1031,10 @@ export type AllocationFinanceSummary = {
   shippingDeduction: string | null;
   shippingDeductionStatus: 'available' | 'pending' | 'unavailable';
   primaryPayable: {
-    type: 'estimated' | 'approved' | 'paid_payout_contribution';
+    type: 'estimated' | 'approved' | 'paid_payout_contribution' | 'cashless_offset_contribution';
     amount: string;
   } | null;
-  settlementStatus: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed' | null;
+  settlementStatus: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed' | 'cashless_completed' | null;
   payoutStatus:
     | 'pending'
     | 'approved'
@@ -1044,6 +1044,7 @@ export type AllocationFinanceSummary = {
     | 'review'
     | 'execution_pending'
     | 'paid_placeholder'
+    | 'cashless_completed'
     | null;
   paidAt: string | null;
 };
@@ -1793,7 +1794,8 @@ export type PayoutBatchStatus =
   | 'cancelled'
   | 'execution_pending'
   | 'paid'
-  | 'paid_placeholder';
+  | 'paid_placeholder'
+  | 'cashless_completed';
 
 export type PayoutBatch = {
   id: string;
@@ -1810,6 +1812,7 @@ export type PayoutBatch = {
   outstandingDebtAmount?: string;
   debtOffsetAmount?: string;
   netAmount: string;
+  r1OffsetAmount?: string;
   remainingDebtAmount?: string;
   currency: string;
   createdByUserId: string | null;
@@ -2704,7 +2707,7 @@ export type FinanceTransaction = {
   shopifyRefundId?: string;
   payoutCalculation?: PayoutCalculation | null;
   settlement?: {
-    status: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed';
+    status: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed' | 'cashless_completed';
     payoutReady: boolean;
     eligibleAt: string | null;
     accruedAt: string | null;

@@ -842,7 +842,8 @@ export function AdminPaymentPreparationPage() {
                       <MetadataRow label="Financial correction deduction" value={`-${formatPaymentAmount(selectedItem.batch.correctionDeductionAmount ?? '0')}`} />
                     ) : null}
                     <MetadataRow
-                      label="Refund deductions"
+                      label={selectedItem.source === 'batch' && hasAmount(selectedItem.batch.r1OffsetAmount)
+                        ? 'Settlement refund deductions' : 'Refund deductions'}
                       value={
                         selectedItem.source === 'batch'
                           ? hasAmount(selectedItem.batch.refundAmount)
@@ -851,6 +852,10 @@ export function AdminPaymentPreparationPage() {
                           : 'No refund adjustment'
                       }
                     />
+                    {selectedItem.source === 'batch' && hasAmount(selectedItem.batch.r1OffsetAmount) ? (
+                      <MetadataRow label="Verified R1 payout offsets (refund/debt)"
+                        value={formatPaymentAmount(selectedItem.batch.r1OffsetAmount ?? '0')} />
+                    ) : null}
                     <MetadataRow
                       label="Debt deductions"
                       value={

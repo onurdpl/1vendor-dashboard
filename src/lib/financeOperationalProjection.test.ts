@@ -4,6 +4,7 @@ import {
   VENDOR_BLOCKED_FINANCE_HOLD_REASON,
   getFinanceNeedsReviewBreakdown,
   getFinanceOperationalProjection,
+  getPayoutBatchStatusLabel,
 } from './financeOperationalProjection';
 
 const baseSale: FinanceTransaction = {
@@ -42,6 +43,21 @@ const baseSale: FinanceTransaction = {
 };
 
 describe('financeOperationalProjection', () => {
+  it('labels cashless completion as an offset, never as an EFT payment', () => {
+    expect(getPayoutBatchStatusLabel('cashless_completed', 'vendor'))
+      .toBe('Completed by verified offsets (no EFT)');
+    const projection = getFinanceOperationalProjection({
+      ...baseSale,
+      status: 'Recorded',
+      settlement: { ...baseSale.settlement!, status: 'cashless_completed',
+        payoutReady: false, settledAt: null },
+      payoutBatch: { id: 'cashless-batch', status: 'cashless_completed',
+        netAmount: '0.00', createdAt: '2026-06-20T10:00:00Z', paidAt: null,
+        paymentReference: null },
+    });
+    expect(projection.settlementState).toBe('Completed by offsets');
+    expect(projection.payoutState).toBe('Completed by verified offsets (no EFT)');
+  });
   it('separates settlement, payout, and blocker states for payable rows', () => {
     const projection = getFinanceOperationalProjection(baseSale);
 
