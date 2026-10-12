@@ -892,14 +892,35 @@ CREATE FUNCTION public."protectPayoutEftAttestation"() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+  IF OLD."status" = 'PAID' AND OLD."r1OffsetTotalMinor" > 0 AND
+     (NEW."status" IS DISTINCT FROM OLD."status" OR
+      NEW."paidAt" IS DISTINCT FROM OLD."paidAt" OR
+      NEW."netAmount" IS DISTINCT FROM OLD."netAmount" OR
+      NEW."r1OffsetTotalMinor" IS DISTINCT FROM OLD."r1OffsetTotalMinor") THEN
+    RAISE EXCEPTION 'Paid R1 payout monetary history is immutable';
+  END IF;
   IF OLD."eftAttestedAt" IS NOT NULL AND
      (NEW."eftExecutedAt" IS DISTINCT FROM OLD."eftExecutedAt" OR
       NEW."eftDeclaredAt" IS DISTINCT FROM OLD."eftDeclaredAt" OR
       NEW."eftAttestedAt" IS DISTINCT FROM OLD."eftAttestedAt" OR
-      NEW."eftAttestedByUserId" IS DISTINCT FROM OLD."eftAttestedByUserId") THEN
+      NEW."eftAttestedByUserId" IS DISTINCT FROM OLD."eftAttestedByUserId" OR
+      NEW."eftAmountMinor" IS DISTINCT FROM OLD."eftAmountMinor") THEN
     RAISE EXCEPTION 'Payout EFT attestation is immutable';
   END IF;
   RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: protectR1MissedRefundReconciliation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."protectR1MissedRefundReconciliation"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'R1 missed refund reconciliation is immutable';
 END;
 $$;
 
@@ -1833,7 +1854,11 @@ CREATE TABLE public."PayoutBatch" (
     "eftDeclaredAt" text,
     "eftAttestedAt" timestamp(3) without time zone,
     "eftAttestedByUserId" text,
-    CONSTRAINT "PayoutBatch_eft_attestation_complete_check" CHECK (((("eftExecutedAt" IS NULL) AND ("eftDeclaredAt" IS NULL) AND ("eftAttestedAt" IS NULL) AND ("eftAttestedByUserId" IS NULL)) OR (("eftExecutedAt" IS NOT NULL) AND ("eftDeclaredAt" IS NOT NULL) AND ("eftAttestedAt" IS NOT NULL) AND ("eftAttestedByUserId" IS NOT NULL) AND ("eftExecutedAt" <= "eftAttestedAt") AND (status = 'PAID'::public."PayoutBatchStatus"))))
+    "r1OffsetTotalMinor" integer DEFAULT 0 NOT NULL,
+    "eftAmountMinor" integer,
+    CONSTRAINT "PayoutBatch_eft_attestation_complete_check" CHECK (((("eftExecutedAt" IS NULL) AND ("eftDeclaredAt" IS NULL) AND ("eftAttestedAt" IS NULL) AND ("eftAttestedByUserId" IS NULL)) OR (("eftExecutedAt" IS NOT NULL) AND ("eftDeclaredAt" IS NOT NULL) AND ("eftAttestedAt" IS NOT NULL) AND ("eftAttestedByUserId" IS NOT NULL) AND ("eftExecutedAt" <= "eftAttestedAt") AND (status = 'PAID'::public."PayoutBatchStatus")))),
+    CONSTRAINT "PayoutBatch_r1_eft_amount_check" CHECK ((("eftAmountMinor" IS NULL) OR (("eftAmountMinor" > 0) AND ("r1OffsetTotalMinor" > 0) AND (status = 'PAID'::public."PayoutBatchStatus") AND ("eftAttestedAt" IS NOT NULL) AND ("eftAmountMinor" = (("netAmount" * (100)::numeric))::integer)))),
+    CONSTRAINT "PayoutBatch_r1_offset_nonnegative_check" CHECK (("r1OffsetTotalMinor" >= 0))
 );
 
 
@@ -1892,6 +1917,43 @@ CREATE TABLE public."PayoutOffsetClaimEvent" (
     "occurredAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "evidenceJson" jsonb,
     CONSTRAINT "PayoutOffsetClaimEvent_actor_check" CHECK ((btrim("actorId") <> ''::text))
+);
+
+
+--
+-- Name: PayoutR1MissedRefundReconciliation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutR1MissedRefundReconciliation" (
+    id text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    currency text NOT NULL,
+    "refundFinanceLedgerEntryId" text NOT NULL,
+    "settlementRefundAdjustmentId" text NOT NULL,
+    "acceptedAt" timestamp(3) without time zone NOT NULL,
+    "eftExecutedAt" timestamp(3) without time zone NOT NULL,
+    "outstandingAmountMinor" integer NOT NULL,
+    "recordedBy" text NOT NULL,
+    "recordedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "PayoutR1MissedRefundReconciliation_amount_check" CHECK ((("outstandingAmountMinor" >= 0) AND (btrim("recordedBy") <> ''::text)))
+);
+
+
+--
+-- Name: PayoutR1ReviewCancellationAttestation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutR1ReviewCancellationAttestation" (
+    id text NOT NULL,
+    "payoutBatchId" text NOT NULL,
+    "actorUserId" text NOT NULL,
+    reason text NOT NULL,
+    "confirmedEftNotSent" boolean NOT NULL,
+    "frozenNetMinor" integer NOT NULL,
+    "frozenOffsetMinor" integer NOT NULL,
+    "confirmedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "PayoutR1ReviewCancellationAttestation_proof_check" CHECK (("confirmedEftNotSent" AND (btrim(reason) <> ''::text) AND ("frozenNetMinor" >= 0) AND ("frozenOffsetMinor" > 0)))
 );
 
 
@@ -3241,6 +3303,22 @@ ALTER TABLE ONLY public."PayoutOffsetClaim"
 
 
 --
+-- Name: PayoutR1MissedRefundReconciliation PayoutR1MissedRefundReconciliation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1MissedRefundReconciliation"
+    ADD CONSTRAINT "PayoutR1MissedRefundReconciliation_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: PayoutR1ReviewCancellationAttestation PayoutR1ReviewCancellationAttestation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1ReviewCancellationAttestation"
+    ADD CONSTRAINT "PayoutR1ReviewCancellationAttestation_pkey" PRIMARY KEY (id);
+
+
+--
 -- Name: ProductPanelVariantDisableOutboxEvent ProductPanelVariantDisableOutboxEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4490,6 +4568,27 @@ CREATE INDEX "PayoutOffsetClaim_vendorId_currency_status_idx" ON public."PayoutO
 
 
 --
+-- Name: PayoutR1MissedRefundReconciliation_batch_refund_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutR1MissedRefundReconciliation_batch_refund_key" ON public."PayoutR1MissedRefundReconciliation" USING btree ("payoutBatchId", "refundFinanceLedgerEntryId");
+
+
+--
+-- Name: PayoutR1MissedRefundReconciliation_vendor_currency_recorded_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "PayoutR1MissedRefundReconciliation_vendor_currency_recorded_idx" ON public."PayoutR1MissedRefundReconciliation" USING btree ("vendorId", currency, "recordedAt");
+
+
+--
+-- Name: PayoutR1ReviewCancellationAttestation_payoutBatch_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutR1ReviewCancellationAttestation_payoutBatch_key" ON public."PayoutR1ReviewCancellationAttestation" USING btree ("payoutBatchId");
+
+
+--
 -- Name: ProductPanelVariantDisableOutboxEvent_allocationId_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5701,6 +5800,20 @@ CREATE TRIGGER "PayoutOffsetClaim_audit_guard" BEFORE DELETE OR UPDATE ON public
 
 
 --
+-- Name: PayoutR1MissedRefundReconciliation PayoutR1MissedRefundReconciliation_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutR1MissedRefundReconciliation_immutable" BEFORE DELETE OR UPDATE ON public."PayoutR1MissedRefundReconciliation" FOR EACH ROW EXECUTE FUNCTION public."protectR1MissedRefundReconciliation"();
+
+
+--
+-- Name: PayoutR1ReviewCancellationAttestation PayoutR1ReviewCancellationAttestation_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutR1ReviewCancellationAttestation_immutable" BEFORE DELETE OR UPDATE ON public."PayoutR1ReviewCancellationAttestation" FOR EACH ROW EXECUTE FUNCTION public."protectR1MissedRefundReconciliation"();
+
+
+--
 -- Name: SopyoShipmentIntent SopyoShipmentIntent_validate; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -6558,6 +6671,46 @@ ALTER TABLE ONLY public."PayoutOffsetClaim"
 
 ALTER TABLE ONLY public."PayoutOffsetClaim"
     ADD CONSTRAINT "PayoutOffsetClaim_vendorDebtOriginEvent_fkey" FOREIGN KEY ("vendorDebtOriginEventId", "vendorId", currency, "vendorDebtOriginEventType") REFERENCES public."VendorBalanceEvent"(id, "vendorId", currency, type) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutR1MissedRefundReconciliation PayoutR1MissedRefundReconciliation_adjustment_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1MissedRefundReconciliation"
+    ADD CONSTRAINT "PayoutR1MissedRefundReconciliation_adjustment_fkey" FOREIGN KEY ("settlementRefundAdjustmentId", "vendorId", currency) REFERENCES public."SettlementRefundAdjustment"(id, "vendorId", "currencyCode") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutR1MissedRefundReconciliation PayoutR1MissedRefundReconciliation_payoutBatch_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1MissedRefundReconciliation"
+    ADD CONSTRAINT "PayoutR1MissedRefundReconciliation_payoutBatch_fkey" FOREIGN KEY ("payoutBatchId", "vendorId", currency) REFERENCES public."PayoutBatch"(id, "vendorId", currency) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutR1MissedRefundReconciliation PayoutR1MissedRefundReconciliation_refundLedger_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1MissedRefundReconciliation"
+    ADD CONSTRAINT "PayoutR1MissedRefundReconciliation_refundLedger_fkey" FOREIGN KEY ("refundFinanceLedgerEntryId") REFERENCES public."FinanceLedgerEntry"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutR1ReviewCancellationAttestation PayoutR1ReviewCancellationAttestation_actorUser_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1ReviewCancellationAttestation"
+    ADD CONSTRAINT "PayoutR1ReviewCancellationAttestation_actorUser_fkey" FOREIGN KEY ("actorUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutR1ReviewCancellationAttestation PayoutR1ReviewCancellationAttestation_payoutBatch_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutR1ReviewCancellationAttestation"
+    ADD CONSTRAINT "PayoutR1ReviewCancellationAttestation_payoutBatch_fkey" FOREIGN KEY ("payoutBatchId") REFERENCES public."PayoutBatch"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

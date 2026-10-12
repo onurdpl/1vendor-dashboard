@@ -61,6 +61,11 @@ import {
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
 import { parseAdminDeclaredEftTime } from './manual-eft-attestation.js';
 import { classifyR1EftRefundTiming } from './r1-eft-refund-timing.service.js';
+import { reserveVerifiedPayoutOffsetsInTransaction } from './payout-offset-reservation.service.js';
+import { assertR1PayoutMonetaryAuthority } from './payout-offset-lifecycle.service.js';
+import { proveR1ClaimCoveredRefunds, proveR1MissedRefundsForSentEft, type R1MissedRefundProof } from './payout-offset-missed-refund.service.js';
+import { finalizeR1PayoutOffsetClaimsInTransaction } from './payout-offset-finalization.service.js';
+import { reconcilePayoutOffsetAuthorityInTransaction } from './payout-offset-authority-diagnostics.service.js';
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
   VENDOR_BLOCKED_FINANCE_HOLD_REASON,
@@ -2600,7 +2605,43 @@ export async function preparePayoutBatch(
     throw new Error('vendorId is required.');
   }
 
+  return prisma.$transaction((tx) => preparePayoutBatchInTransaction(tx, input, createdByUserId, false), {
+    isolationLevel: 'Serializable',
+  });
+}
+
+/** Isolated R1 path; intentionally not registered in any route or worker. */
+export async function prepareR1PayoutBatch(input: PreparePayoutBatchDto, actorId: string, requestId: string) {
+  if (!input.vendorId?.trim() || !actorId?.trim() || !requestId?.trim()) {
+    throw new Error('R1_PAYOUT_PREPARATION_IDENTITY_REQUIRED');
+  }
   return prisma.$transaction(async (tx) => {
+    const prepared = await preparePayoutBatchInTransaction(tx, input, actorId, true);
+    const reservation = await reserveVerifiedPayoutOffsetsInTransaction(tx, {
+      vendorId: input.vendorId, currency: prepared.currency, payoutBatchId: prepared.id,
+      requestId, actorId,
+    }, { allowExactOwnOriginRefund: true });
+    if (reservation.claims.length === 0) throw new Error('R1_PAYOUT_NO_VERIFIED_OFFSET');
+    const baseMinor = toMinorUnits(prepared.netAmount);
+    const offsetMinor = reservation.claims.reduce((sum, claim) => sum + claim.reservedAmountMinor, 0);
+    if (!Number.isSafeInteger(offsetMinor) || offsetMinor <= 0 || offsetMinor > baseMinor) {
+      throw new Error('R1_PAYOUT_OFFSET_EXCEEDS_APPROVED_BASE');
+    }
+    const netCashMinor = baseMinor - offsetMinor;
+    await tx.payoutBatch.update({ where: { id: prepared.id },
+      data: { netAmount: netCashMinor / 100, r1OffsetTotalMinor: offsetMinor } });
+    await assertR1PayoutMonetaryAuthority(tx, prepared.id, { requireCurrentOwnRefundCoverage: true });
+    return { payoutBatchId: prepared.id, currency: prepared.currency, approvedBaseMinor: baseMinor,
+      offsetMinor, netCashMinor, claims: reservation.claims };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+async function preparePayoutBatchInTransaction(
+  tx: Prisma.TransactionClient,
+  input: PreparePayoutBatchDto,
+  createdByUserId: string | null,
+  r1Isolated: boolean,
+): Promise<PayoutBatchDto> {
     // Serialize first-payout selection with approved-settlement correction Apply.
     await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
@@ -2608,7 +2649,7 @@ export async function preparePayoutBatch(
     // R1 remains disconnected from normal preparation. If an isolated R1 debt
     // reservation exists, the legacy aggregate debt route cannot safely assign
     // that same debt to a new payout without source-level reconciliation.
-    if (await tx.payoutOffsetClaim.count({
+    if (!r1Isolated && await tx.payoutOffsetClaim.count({
       where: { vendorId: input.vendorId, sourceType: 'VENDOR_DEBT', status: { in: ['RESERVED', 'FINALIZED'] } },
     })) throw new Error('R1_VENDOR_DEBT_RESERVATION_REQUIRES_SOURCE_LEVEL_RECONCILIATION');
     const unsettledApprovedCorrectionCredit = await tx.financialCorrectionCredit.findFirst({
@@ -2664,7 +2705,8 @@ export async function preparePayoutBatch(
                     },
                   },
                   refundAdjustments: {
-                    select: { status: true, remainingAmountMinor: true },
+                    select: { id: true, status: true, remainingAmountMinor: true,
+                      originalSettlementApprovalLineId: true },
                   },
                   payoutStatus: true,
                   settlementStatus: true,
@@ -2780,6 +2822,50 @@ export async function preparePayoutBatch(
           createdAt: 'asc',
         },
       });
+    const r1Currencies = new Set(entries.flatMap((entry) => entry.settlementApprovalLines.map(
+      (line) => line.settlementApproval.currency)));
+    if (r1Isolated && r1Currencies.size !== 1) throw new Error('R1_APPROVED_CURRENCY_SCOPE_UNKNOWN');
+    const r1Diagnostic = r1Isolated ? await reconcilePayoutOffsetAuthorityInTransaction(tx, {
+      vendorId: input.vendorId, currency: [...r1Currencies][0]!,
+    }) : null;
+    if (r1Diagnostic && r1Diagnostic.status !== 'VERIFIED') {
+      throw new Error('R1_PREPARATION_REFUND_AUTHORITY_NOT_VERIFIED');
+    }
+    const r1OwnRefundBySale = new Map<string, { refundLedgerIds: Set<string>; refundRecordIds: Set<string> }>();
+    if (r1Diagnostic) {
+      for (const entry of entries) {
+        if (entry.entryType.toLowerCase() !== 'sale' || !entry.vendorAllocation) continue;
+        for (const line of entry.settlementApprovalLines) {
+          for (const refund of entry.vendorAllocation.financeEntries.filter((item) =>
+            item.entryType.toLowerCase() === 'refund')) {
+            const exact = resolveExactRefundEvidence(entry.vendorAllocation, refund);
+            const adjustment = refund.refundAdjustments[0];
+            const source = r1Diagnostic.sources.find((candidate) =>
+              candidate.sourceType === 'REFUND_ADJUSTMENT' && candidate.sourceId === adjustment?.id);
+            if (!exact || exact.sale.id !== entry.id || !adjustment ||
+                adjustment.originalSettlementApprovalLineId !== line.id ||
+                adjustment.remainingAmountMinor <= 0 || !source || source.status !== 'VERIFIED' ||
+                source.refundFinanceLedgerEntryId !== refund.id) continue;
+            const covered = r1OwnRefundBySale.get(entry.id) ?? {
+              refundLedgerIds: new Set<string>(), refundRecordIds: new Set<string>(),
+            };
+            covered.refundLedgerIds.add(refund.id);
+            covered.refundRecordIds.add(exact.record.id!);
+            r1OwnRefundBySale.set(entry.id, covered);
+          }
+        }
+      }
+    }
+    const r1EligibleProjection = (entry: typeof entries[number]) => {
+      const covered = r1OwnRefundBySale.get(entry.id);
+      if (!covered || !entry.vendorAllocation) return entry;
+      return { ...entry, vendorAllocation: { ...entry.vendorAllocation,
+        refundRecords: entry.vendorAllocation.refundRecords.filter((record) =>
+          !covered.refundRecordIds.has(record.id)),
+        financeEntries: entry.vendorAllocation.financeEntries.filter((row) =>
+          !covered.refundLedgerIds.has(row.id)),
+      } };
+    };
     const fullOrderCancelledEntries = entries.filter((entry) =>
       isFullOrderCancelled(entry.vendorAllocation?.order));
     const customerCancellationHeldEntries = entries.filter((entry) =>
@@ -2791,14 +2877,14 @@ export async function preparePayoutBatch(
       }))
     );
     const eligibleCandidates = approvedCandidates.filter(({ entry, settlementLine }) =>
-      isApprovedSettlementLineEligibleForPayout(settlementLine, entry)
+      isApprovedSettlementLineEligibleForPayout(settlementLine, r1EligibleProjection(entry))
     );
     // A payout must not select only the apparently eligible lines of an approved
     // settlement while another line of that same frozen approval has unresolved
     // refund authority. Unrelated approvals remain independently selectable.
     const blockedApprovalReasons = new Map<string, string>();
     for (const entry of entries) {
-      const risk = getPostApprovalRefundRisk(entry);
+      const risk = getPostApprovalRefundRisk(r1EligibleProjection(entry));
       if (!isBlockingPostApprovalRefundRisk(risk)) continue;
       for (const line of entry.settlementApprovalLines) {
         blockedApprovalReasons.set(line.settlementApproval.id, risk.reason ?? REFUND_EVIDENCE_UNVERIFIED_REASON);
@@ -2902,7 +2988,7 @@ export async function preparePayoutBatch(
         isEntryEligibleForPayoutBatch(entry, { requireApprovedSettlementSnapshot: false }),
     );
     const adjustmentRequiredEntries = entries.filter(
-      (entry) => getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required',
+      (entry) => getPostApprovalRefundRisk(r1EligibleProjection(entry)).state === 'approved_settlement_adjustment_required',
     );
     const unverifiedRefundEntries = entries.filter(
       (entry) => getPostApprovalRefundRisk(entry).state === 'evidence_unverified',
@@ -2972,7 +3058,7 @@ export async function preparePayoutBatch(
     }
     const debtOffset = calculateVendorDebtOffset({
       grossPayableMinor: Math.max(totalsMinor.netAmountMinor, 0),
-      outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
+      outstandingDebtMinor: r1Isolated ? 0 : vendorBalance.outstandingDebtMinor,
     });
     const netAmountAfterDebtOffsetMinor =
       totalsMinor.netAmountMinor > 0
@@ -3044,9 +3130,6 @@ export async function preparePayoutBatch(
       ...batch,
       vendorBalanceEvents: debtOffsetEvent ? [debtOffsetEvent] : [],
     });
-  }, {
-    isolationLevel: 'Serializable',
-  });
 }
 
 function buildPayoutBatchTransitionBlocker(input: {
@@ -3161,6 +3244,8 @@ function addPayoutAmountChangedBlocker(input: {
 async function validatePayoutBatchBeforeTransitionWithClient(
   db: FinanceDbClient,
   payoutBatchId: string,
+  r1OffsetMinor = 0,
+  r1MissedRefunds?: R1MissedRefundProof['bySaleLedgerId'],
 ): Promise<Map<string, string>> {
   const batch = await db.payoutBatch.findUnique({
     where: {
@@ -3501,6 +3586,19 @@ async function validatePayoutBatchBeforeTransitionWithClient(
 
     const transitionEntry = stripCurrentPayoutBatchEvidence(ledgerEntry, batch.id);
     const ledgerEntryId = ledgerEntry.id;
+    const exactMissed = r1MissedRefunds?.get(ledgerEntryId);
+    // Only exact refund siblings proven either covered by this R1 batch's
+    // reserved claim or missed by an already sent EFT leave this projection.
+    const eligibilityEntry = exactMissed && transitionEntry.vendorAllocation ? {
+      ...transitionEntry,
+      vendorAllocation: {
+        ...transitionEntry.vendorAllocation,
+        refundRecords: transitionEntry.vendorAllocation.refundRecords.filter((record) =>
+          !exactMissed.refundRecordIds.has(record.id)),
+        financeEntries: transitionEntry.vendorAllocation.financeEntries.filter((entry) =>
+          !exactMissed.refundLedgerIds.has(entry.id)),
+      },
+    } : transitionEntry;
     const type = normalizeType(transitionEntry.entryType);
     const payoutStatus = mapStatus(transitionEntry.payoutStatus ?? '');
     const vendorAllocationId = ledgerEntry.vendorAllocation?.id ?? ledgerEntry.vendorAllocationId ?? null;
@@ -3558,7 +3656,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
-    const lateRefundRecords = hasRefundRecordCreatedAfterBatch(transitionEntry, batch.createdAt);
+    const lateRefundRecords = hasRefundRecordCreatedAfterBatch(eligibilityEntry, batch.createdAt);
     if (lateRefundRecords.length > 0) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'refund_arrived_after_batch_creation',
@@ -3571,7 +3669,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
-    const refundHoldEntries = getRefundOffsetRequiredLedgerEntries(transitionEntry);
+    const refundHoldEntries = getRefundOffsetRequiredLedgerEntries(eligibilityEntry);
     if (refundHoldEntries.length > 0) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'refund_offset_required_before_payout',
@@ -3645,7 +3743,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
         !customerCancellationHoldActive &&
         !cancelRefundReviewActive &&
         !approvedSettlementSnapshotMissing &&
-        !isEntryEligibleForPayoutBatch(transitionEntry))
+        !isEntryEligibleForPayoutBatch(eligibilityEntry))
     ) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'ledger_row_no_longer_eligible',
@@ -3795,7 +3893,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
     });
     const ordinaryMinor = batch.lines.reduce((sum, line) => sum + toMinorUnits(line.amountSnapshot), 0);
     const debtOffsetMinor = debtEvents.reduce((sum, event) => sum + event.amountMinor, 0);
-    const expectedNetMinor = ordinaryMinor + creditMinor - deductionMinor - debtOffsetMinor;
+    const expectedNetMinor = ordinaryMinor + creditMinor - deductionMinor - debtOffsetMinor - r1OffsetMinor;
     if (expectedNetMinor < 0 || expectedNetMinor !== toMinorUnits(batch.netAmount)) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'correction_deduction_source_changed',
@@ -3838,10 +3936,18 @@ async function releaseCancelledPayoutOffsetClaims(
   const claims = await tx.payoutOffsetClaim.findMany({ where: { payoutBatchId: batchId } });
   if (claims.length === 0) return;
   const batch = await tx.payoutBatch.findUnique({
-    where: { id: batchId }, select: { vendorId: true, currency: true, status: true, paidAt: true },
+    where: { id: batchId }, select: { vendorId: true, currency: true, status: true, paidAt: true,
+      netAmount: true, r1OffsetTotalMinor: true },
   });
-  if (!batch || originalStatus !== 'DRAFT' || batch.status !== 'CANCELLED' ||
+  const reviewEvidence = originalStatus === 'REVIEW'
+    ? await tx.payoutR1ReviewCancellationAttestation.findUnique({ where: { payoutBatchId: batchId } })
+    : null;
+  if (!batch || !['DRAFT', 'REVIEW'].includes(originalStatus) || batch.status !== 'CANCELLED' ||
       batch.paidAt || !actorId?.trim() ||
+      (originalStatus === 'REVIEW' && (!reviewEvidence || !reviewEvidence.confirmedEftNotSent ||
+        reviewEvidence.actorUserId !== actorId ||
+        reviewEvidence.frozenNetMinor !== toMinorUnits(batch.netAmount) ||
+        reviewEvidence.frozenOffsetMinor !== batch.r1OffsetTotalMinor)) ||
       claims.some((claim) => claim.status !== 'RESERVED' || claim.vendorId !== batch.vendorId ||
         claim.currency !== batch.currency || claim.payoutBatchId !== batchId)) {
     throw new Error('R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED');
@@ -3883,6 +3989,61 @@ export async function cancelReviewPayoutBatchWithClient(tx: Prisma.TransactionCl
   });
   if (cancellation.count !== 1) throw new Error('REVIEW_PAYOUT_STATE_CHANGED');
   await releaseCancelledPayoutSources(tx, batchId, cancelledAt);
+}
+
+/** Isolated R1 pre-EFT recovery; deliberately not registered in Admin routes. */
+export async function cancelR1ReviewPayoutBeforeEft(input: {
+  payoutBatchId: string;
+  actorUserId: string;
+  reason: string;
+  confirmEftNotSent: boolean;
+}): Promise<PayoutBatchDto> {
+  const reason = input.reason?.trim();
+  if (!input.payoutBatchId?.trim() || !input.actorUserId?.trim() || !reason ||
+      reason.length > 500 || input.confirmEftNotSent !== true) {
+    throw new Error('R1_REVIEW_EFT_NOT_SENT_ATTESTATION_REQUIRED');
+  }
+  return prisma.$transaction(async (tx) => {
+    const initial = await tx.payoutBatch.findUnique({ where: { id: input.payoutBatchId },
+      select: { vendorId: true } });
+    if (!initial) throw new Error('R1_REVIEW_PAYOUT_NOT_FOUND');
+    const vendor = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${initial.vendorId} FOR UPDATE
+    `);
+    if (vendor.length !== 1) throw new Error('R1_REVIEW_VENDOR_NOT_FOUND');
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "PayoutBatch" WHERE "id" = ${input.payoutBatchId} FOR UPDATE
+    `);
+    const actor = await tx.user.findUnique({ where: { id: input.actorUserId },
+      select: { role: true, status: true } });
+    if (actor?.role !== 'ADMIN' || actor.status !== 'active') throw new Error('R1_ACTIVE_ADMIN_REQUIRED');
+    const authority = await assertR1PayoutMonetaryAuthority(tx, input.payoutBatchId);
+    if (authority.batch.status !== 'REVIEW' || authority.batch.eftExecutedAt ||
+        authority.batch.eftAttestedAt || authority.batch.paidAt) {
+      throw new Error('R1_REVIEW_EXTERNAL_EFT_STATE_UNSAFE');
+    }
+    const [{ cancelledAt }] = await tx.$queryRaw<Array<{ cancelledAt: Date }>>(Prisma.sql`
+      SELECT clock_timestamp() AS "cancelledAt"
+    `);
+    await tx.payoutR1ReviewCancellationAttestation.create({ data: {
+      payoutBatchId: input.payoutBatchId, actorUserId: input.actorUserId,
+      reason, confirmedEftNotSent: true, frozenNetMinor: authority.netCashMinor,
+      frozenOffsetMinor: authority.offsetMinor, confirmedAt: cancelledAt,
+    } });
+    const changed = await tx.payoutBatch.updateMany({ where: {
+      id: input.payoutBatchId, vendorId: initial.vendorId, status: 'REVIEW', paidAt: null,
+      eftExecutedAt: null, eftAttestedAt: null,
+    }, data: { status: 'CANCELLED' } });
+    if (changed.count !== 1) throw new Error('R1_REVIEW_PAYOUT_STATE_CHANGED');
+    await releaseCancelledPayoutOffsetClaims(tx, input.payoutBatchId, cancelledAt, input.actorUserId, 'REVIEW');
+    await releaseCancelledPayoutSources(tx, input.payoutBatchId, cancelledAt);
+    const batch = await tx.payoutBatch.findUnique({ where: { id: input.payoutBatchId }, include: {
+      lines: true, correctionCreditLines: true, correctionDeductionLines: true,
+      approvedDeductionLines: true, vendorBalanceEvents: true,
+    } });
+    if (!batch) throw new Error('R1_REVIEW_PAYOUT_NOT_FOUND');
+    return mapPayoutBatch(batch);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 export async function cancelPayoutBatch(batchId: string, actorId?: string): Promise<PayoutBatchDto> {
@@ -4073,14 +4234,71 @@ export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatc
   });
 }
 
+/** R1 transition is deliberately not registered on the ordinary Admin route. */
+export async function markR1PayoutBatchReview(batchId: string): Promise<PayoutBatchDto> {
+  return prisma.$transaction(async (tx) => {
+    const initial = await tx.payoutBatch.findUnique({ where: { id: batchId }, select: { vendorId: true } });
+    if (!initial) throw new Error('Payout batch not found.');
+    const vendor = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${initial.vendorId} FOR UPDATE
+    `);
+    if (vendor.length !== 1) throw new Error('R1_VENDOR_NOT_FOUND');
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "PayoutBatch" WHERE "id" = ${batchId} FOR UPDATE
+    `);
+    const authority = await assertR1PayoutMonetaryAuthority(tx, batchId,
+      { requireCurrentOwnRefundCoverage: true });
+    if (authority.batch.status !== 'DRAFT') throw new Error('R1_PAYOUT_REVIEW_STATE_CHANGED');
+    const claimCoveredRefunds = await proveR1ClaimCoveredRefunds(tx, batchId);
+    await validatePayoutBatchBeforeTransitionWithClient(tx, batchId, authority.offsetMinor,
+      claimCoveredRefunds);
+    const changed = await tx.payoutBatch.updateMany({
+      where: { id: batchId, vendorId: initial.vendorId, status: 'DRAFT', paidAt: null },
+      data: { status: 'REVIEW' },
+    });
+    if (changed.count !== 1) throw new Error('R1_PAYOUT_REVIEW_STATE_CHANGED');
+    const batch = await tx.payoutBatch.findUnique({ where: { id: batchId },
+      include: { lines: true, correctionCreditLines: true, correctionDeductionLines: true,
+        approvedDeductionLines: true, vendorBalanceEvents: true } });
+    if (!batch) throw new Error('Payout batch not found.');
+    return mapPayoutBatch(batch);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
 export async function markPayoutBatchPaid(
   batchId: string,
   input: MarkPayoutBatchPaidDto,
   paidByUserId: string,
 ): Promise<PayoutBatchDto> {
   const paymentEvidence = parseMarkPayoutBatchPaidInput(input);
+  return prisma.$transaction((tx) => markPayoutBatchPaidInTransaction(
+    tx, batchId, paymentEvidence, paidByUserId, null,
+  ));
+}
 
-  return prisma.$transaction(async (tx) => {
+/** Isolated R1 path; no Admin route or worker calls this service. */
+export async function markR1PayoutBatchPaid(
+  batchId: string,
+  input: MarkPayoutBatchPaidDto,
+  paidByUserId: string,
+  actualEftAmountMinor: number,
+): Promise<PayoutBatchDto> {
+  const paymentEvidence = parseMarkPayoutBatchPaidInput(input);
+  if (!paymentEvidence.eftExecutedAt || !paymentEvidence.eftDeclaredAt ||
+      !Number.isSafeInteger(actualEftAmountMinor) || actualEftAmountMinor <= 0 ||
+      !paidByUserId.trim()) throw new Error('R1_ACTUAL_EFT_ATTESTATION_REQUIRED');
+  return prisma.$transaction((tx) => markPayoutBatchPaidInTransaction(
+    tx, batchId, paymentEvidence, paidByUserId, actualEftAmountMinor,
+  ), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+async function markPayoutBatchPaidInTransaction(
+  tx: Prisma.TransactionClient,
+  batchId: string,
+  paymentEvidence: ReturnType<typeof parseMarkPayoutBatchPaidInput>,
+  paidByUserId: string,
+  actualR1EftAmountMinor: number | null,
+): Promise<PayoutBatchDto> {
     const [initialBatch] = await tx.$queryRaw<Array<{ vendorId: string }>>(Prisma.sql`
       SELECT "vendorId" FROM "PayoutBatch" WHERE "id" = ${batchId}
     `);
@@ -4125,29 +4343,49 @@ export async function markPayoutBatchPaid(
     if (batch.status !== 'REVIEW') {
       throw new Error('Only review payout batches can be marked paid.');
     }
-    // Phase 3A still forbids monetary R1 claim finalization. Classify exact
-    // accepted refund evidence first, but never interpret a post-EFT refund as
-    // permission to bypass the existing RESERVED-claim transition guard.
-    if (paymentEvidence.eftExecutedAt && await tx.payoutOffsetClaim.count({
-      where: { payoutBatchId: batchId, status: 'RESERVED' },
-    })) {
-      const timing = await classifyR1EftRefundTiming(tx, batchId, paymentEvidence.eftExecutedAt);
-      if (timing.unknownRefundLedgerIds.length) throw new Error('R1_EFT_REFUND_TIMING_UNKNOWN');
-      if (timing.beforeEftRefundLedgerIds.length) throw new Error('R1_REFUND_ACCEPTED_BEFORE_EFT');
+    const r1Authority = actualR1EftAmountMinor === null ? null :
+      await assertR1PayoutMonetaryAuthority(tx, batchId);
+    let missedRefunds: R1MissedRefundProof | null = null;
+    if (r1Authority) {
+      if (!paymentEvidence.eftExecutedAt || !paymentEvidence.eftDeclaredAt ||
+          r1Authority.batch.status !== 'REVIEW' || r1Authority.netCashMinor <= 0 ||
+          r1Authority.netCashMinor !== actualR1EftAmountMinor) {
+        throw new Error('R1_ACTUAL_EFT_AMOUNT_OR_STATE_CONFLICT');
+      }
+      // The bank transfer is already external and immutable. Permit only
+      // independently verified post-preparation refunds to remain outstanding.
+      missedRefunds = await proveR1MissedRefundsForSentEft(tx, batchId, paymentEvidence.eftExecutedAt);
+    } else {
+      // Ordinary Admin Mark Paid remains fail-closed for every RESERVED claim.
+      if (paymentEvidence.eftExecutedAt && await tx.payoutOffsetClaim.count({
+        where: { payoutBatchId: batchId, status: 'RESERVED' },
+      })) {
+        const timing = await classifyR1EftRefundTiming(tx, batchId, paymentEvidence.eftExecutedAt);
+        if (timing.unknownRefundLedgerIds.length) throw new Error('R1_EFT_REFUND_TIMING_UNKNOWN');
+        if (timing.beforeEftRefundLedgerIds.length) throw new Error('R1_REFUND_ACCEPTED_BEFORE_EFT');
+      }
+      await assertNoReservedPayoutOffsetClaims(tx, batchId);
     }
-    await assertNoReservedPayoutOffsetClaims(tx, batchId);
     if (batch.lines.length === 0 && batch.correctionCreditLines.length === 0 &&
         batch.correctionDeductionLines.length === 0 && batch.approvedDeductionLines.length === 0) {
       throw new Error('Payout batch has no lines to mark paid.');
     }
 
-    const effectiveSettlementLineIds = await validatePayoutBatchBeforeTransitionWithClient(tx, batchId);
+    const effectiveSettlementLineIds = await validatePayoutBatchBeforeTransitionWithClient(
+      tx, batchId, r1Authority?.offsetMinor ?? 0, missedRefunds?.bySaleLedgerId,
+    );
 
     const [{ attestedAt }] = await tx.$queryRaw<Array<{ attestedAt: Date }>>(Prisma.sql`
       SELECT clock_timestamp() AS "attestedAt"
     `);
     if (paymentEvidence.eftExecutedAt && paymentEvidence.eftExecutedAt.getTime() > attestedAt.getTime()) {
       throw new Error('EFT execution time cannot be after its Admin attestation.');
+    }
+    if (r1Authority) {
+      await finalizeR1PayoutOffsetClaimsInTransaction(tx, {
+        payoutBatchId: batchId, vendorId: batch.vendorId, currency: batch.currency,
+        actorId: paidByUserId, finalizedAt: attestedAt,
+      });
     }
 
     const batchUpdate = await tx.payoutBatch.updateMany({
@@ -4167,10 +4405,22 @@ export async function markPayoutBatchPaid(
         } : {}),
         paymentReference: paymentEvidence.paymentReference,
         internalNote: paymentEvidence.internalNote,
+        ...(r1Authority ? { eftAmountMinor: actualR1EftAmountMinor } : {}),
       },
     });
     if (batchUpdate.count !== 1) {
       throw new Error('Payout batch could not be marked paid because its status changed.');
+    }
+    if (missedRefunds && paymentEvidence.eftExecutedAt) {
+      for (const refund of missedRefunds.records) {
+        await tx.payoutR1MissedRefundReconciliation.create({ data: {
+          payoutBatchId: batchId, vendorId: batch.vendorId, currency: batch.currency,
+          refundFinanceLedgerEntryId: refund.refundFinanceLedgerEntryId,
+          settlementRefundAdjustmentId: refund.settlementRefundAdjustmentId,
+          acceptedAt: refund.acceptedAt, eftExecutedAt: paymentEvidence.eftExecutedAt,
+          outstandingAmountMinor: refund.outstandingAmountMinor, recordedBy: paidByUserId,
+        } });
+      }
     }
 
     const ledgerEntryIds = [...new Set(batch.lines.map((line) => line.financeLedgerEntryId))];
@@ -4294,7 +4544,6 @@ export async function markPayoutBatchPaid(
     }
 
     return mapPayoutBatch(paidBatch);
-  });
 }
 
 function normalizePercent(value: number | undefined, fallback: number) {

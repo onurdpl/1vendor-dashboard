@@ -443,6 +443,7 @@ model User {
   zeroNetCorrectionAcknowledgements    FinancialCorrectionZeroNetAcknowledgement[] @relation("zeroNetCorrectionAcknowledgementActor")
   paidFinancialCorrections              FinancialCorrectionAuthority[] @relation("paidFinancialCorrectionActor")
   legacyRefundFinanceReviewEvents      LegacyRefundFinanceReviewEvent[] @relation("legacyRefundFinanceReviewEventActor")
+  r1ReviewCancellationAttestations      PayoutR1ReviewCancellationAttestation[]
 }
 
 model Vendor {
@@ -1890,6 +1891,7 @@ model FinanceLedgerEntry {
   financeEvents                  FinanceEvent[]
   settlementApprovalLines        SettlementApprovalLine[]
   refundAdjustments              SettlementRefundAdjustment[]
+  r1MissedRefundReconciliations   PayoutR1MissedRefundReconciliation[]
   vendorBalanceEvents            VendorBalanceEvent[]
   operationalSignals             OperationalSignal[]
   automationActions              AutomationAction[]
@@ -2114,6 +2116,7 @@ model SettlementRefundAdjustment {
   applications                          SettlementRefundAdjustmentApplication[]
   events                                SettlementRefundAdjustmentEvent[]
   payoutOffsetClaims                   PayoutOffsetClaim[]
+  r1MissedRefundReconciliations         PayoutR1MissedRefundReconciliation[]
 
   @@unique([id, vendorId, currencyCode])
   @@index([vendorId, status])
@@ -2276,6 +2279,7 @@ model PayoutBatch {
   shippingDeductionAmount Decimal              @default(0.00) @db.Decimal(10, 2)
   refundAmount            Decimal              @default(0.00) @db.Decimal(10, 2)
   netAmount               Decimal              @default(0.00) @db.Decimal(10, 2)
+  r1OffsetTotalMinor      Int                  @default(0)
   correctionCreditAmount  Decimal              @default(0.00) @db.Decimal(10, 2)
   correctionDeductionAmount Decimal             @default(0.00) @db.Decimal(10, 2)
   currency                String               @default("TRY")
@@ -2283,6 +2287,7 @@ model PayoutBatch {
   paidAt                  DateTime?
   paidByUserId            String?
   eftExecutedAt           DateTime?
+  eftAmountMinor          Int?
   eftDeclaredAt           String?
   eftAttestedAt           DateTime?
   eftAttestedByUserId     String?
@@ -2300,6 +2305,8 @@ model PayoutBatch {
   operationalSignals      OperationalSignal[]
   automationActions       AutomationAction[]
   payoutOffsetClaims      PayoutOffsetClaim[]
+  r1MissedRefundReconciliations PayoutR1MissedRefundReconciliation[]
+  r1ReviewCancellationAttestation PayoutR1ReviewCancellationAttestation?
 
   @@unique([id, vendorId, currency])
   @@index([vendorId, status])
@@ -2400,6 +2407,43 @@ model PayoutOffsetClaimEvent {
   payoutOffsetClaim   PayoutOffsetClaim          @relation(fields: [payoutOffsetClaimId], references: [id], onDelete: Restrict, map: "PayoutOffsetClaimEvent_payoutOffsetClaim_fkey")
 
   @@index([payoutOffsetClaimId, occurredAt])
+}
+
+// Audit-only evidence: an external EFT was already sent when a newly accepted
+// exact refund could not be included in that frozen payout. This is not an offset.
+model PayoutR1MissedRefundReconciliation {
+  id                           String @id @default(cuid())
+  payoutBatchId                String
+  vendorId                     String
+  currency                     String
+  refundFinanceLedgerEntryId   String
+  settlementRefundAdjustmentId String
+  acceptedAt                   DateTime
+  eftExecutedAt                DateTime
+  outstandingAmountMinor       Int
+  recordedBy                   String
+  recordedAt                   DateTime @default(now())
+  payoutBatch                  PayoutBatch @relation(fields: [payoutBatchId, vendorId, currency], references: [id, vendorId, currency], onDelete: Restrict)
+  refundFinanceLedgerEntry     FinanceLedgerEntry @relation(fields: [refundFinanceLedgerEntryId], references: [id], onDelete: Restrict)
+  settlementRefundAdjustment   SettlementRefundAdjustment @relation(fields: [settlementRefundAdjustmentId, vendorId, currency], references: [id, vendorId, currencyCode], onDelete: Restrict)
+
+  @@unique([payoutBatchId, refundFinanceLedgerEntryId])
+  @@index([vendorId, currency, recordedAt])
+}
+
+// Admin's explicit evidence that no external EFT was sent before R1 REVIEW
+// cancellation. The row is append-only and does not authorize a payment.
+model PayoutR1ReviewCancellationAttestation {
+  id                       String @id @default(cuid())
+  payoutBatchId            String @unique
+  actorUserId              String
+  reason                   String
+  confirmedEftNotSent      Boolean
+  frozenNetMinor           Int
+  frozenOffsetMinor        Int
+  confirmedAt              DateTime @default(now())
+  payoutBatch              PayoutBatch @relation(fields: [payoutBatchId], references: [id], onDelete: Restrict)
+  actorUser                User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
 }
 
 model WebhookEvent {

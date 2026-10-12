@@ -75,7 +75,7 @@ export async function reconcilePayoutOffsetAuthorityInTransaction(
       }),
       tx.vendorBalanceEvent.findMany({
         where: { vendorId: input.vendorId, currency: input.currency, type: VendorBalanceEventType.VENDOR_DEBT_OFFSET },
-        select: { id: true, amountMinor: true, payoutBatchId: true },
+        select: { id: true, amountMinor: true, payoutBatchId: true, sourceType: true, sourceId: true },
       }),
       tx.vendorBalanceEvent.count({
         where: { vendorId: input.vendorId, currency: input.currency,
@@ -92,6 +92,13 @@ export async function reconcilePayoutOffsetAuthorityInTransaction(
       }),
     ]);
 
+    const attributedDebtOffsets = aggregateOffsets.filter((event) => {
+      if (event.sourceType !== 'r1_payout_offset_claim' || !event.payoutBatchId || event.amountMinor <= 0) return false;
+      const claim = claims.find((item) => item.id === event.sourceId);
+      return claim?.sourceType === 'VENDOR_DEBT' && claim.status === 'FINALIZED' &&
+        claim.payoutBatchId === event.payoutBatchId && claim.reservedAmountMinor === event.amountMinor;
+    });
+    const unattributedDebtOffsets = aggregateOffsets.filter((event) => !attributedDebtOffsets.includes(event));
     const refundLedgerIds = [...new Set([
       ...adjustments.map((item) => item.refundFinanceLedgerEntryId),
       ...debtEvents.flatMap((item) => item.financeLedgerEntryId ? [item.financeLedgerEntryId] : []),
@@ -163,7 +170,8 @@ export async function reconcilePayoutOffsetAuthorityInTransaction(
       if (debtByRefundLedger.has(adjustment.refundFinanceLedgerEntryId)) reasons.push('REFUND_ADJUSTMENT_AND_DEBT_CONFLICT');
       if (directRefundLedgerIds.has(adjustment.refundFinanceLedgerEntryId)) reasons.push('DIRECT_REFUND_AND_ADJUSTMENT_CONFLICT');
       if (adjustment.applications.filter((application) => application.status === 'ACTIVE')
-        .reduce((total, application) => total + application.amountMinor, 0) !== adjustment.appliedAmountMinor) {
+        .reduce((total, application) => total + application.amountMinor, 0) +
+        finalizedFor('REFUND_ADJUSTMENT', adjustment.id) !== adjustment.appliedAmountMinor) {
         reasons.push('ADJUSTMENT_APPLICATION_TOTAL_CONFLICT');
       }
       if (adjustment.originalAmountMinor < 0 || adjustment.appliedAmountMinor < 0 || adjustment.remainingAmountMinor < 0 ||
@@ -171,9 +179,6 @@ export async function reconcilePayoutOffsetAuthorityInTransaction(
         reasons.push('ADJUSTMENT_AMOUNT_RECONCILIATION_FAILED');
       }
       const activeReservationMinor = reservedFor('REFUND_ADJUSTMENT', adjustment.id);
-      if (finalizedFor('REFUND_ADJUSTMENT', adjustment.id) > 0) {
-        reasons.push('PAYOUT_FINALIZATION_RECONCILIATION_NOT_ENABLED');
-      }
       if (activeReservationMinor > adjustment.remainingAmountMinor) reasons.push('RESERVATION_EXCEEDS_REMAINING');
       sources.push({
         sourceType: 'REFUND_ADJUSTMENT', sourceId: adjustment.id,
@@ -226,19 +231,24 @@ export async function reconcilePayoutOffsetAuthorityInTransaction(
         } else verifiedAt = authority.appliedAt.toISOString();
       } else reasons.push('DEBT_SOURCE_AUTHORITY_AMBIGUOUS');
       if (event.amountMinor >= 0) reasons.push('DEBT_AMOUNT_INVALID');
-      if (aggregateOffsets.length > 0) reasons.push('HISTORICAL_DEBT_OFFSET_SOURCE_ALLOCATION_UNKNOWN');
+      if (unattributedDebtOffsets.length > 0) reasons.push('HISTORICAL_DEBT_OFFSET_SOURCE_ALLOCATION_UNKNOWN');
       if (ambiguousDebtChanges > 0) reasons.push('HISTORICAL_DEBT_BALANCE_CHANGE_SOURCE_ALLOCATION_UNKNOWN');
       const activeReservationMinor = reservedFor('VENDOR_DEBT', event.id);
-      if (finalizedFor('VENDOR_DEBT', event.id) > 0) reasons.push('PAYOUT_FINALIZATION_RECONCILIATION_NOT_ENABLED');
-      if (activeReservationMinor > -event.amountMinor) reasons.push('RESERVATION_EXCEEDS_SOURCE');
-      const unreservedAmountMinor = reasons.length === 0 ? -event.amountMinor - activeReservationMinor : null;
+      const finalizedMinor = finalizedFor('VENDOR_DEBT', event.id);
+      const attributedMinor = attributedDebtOffsets.filter((offset) =>
+        claims.some((claim) => claim.id === offset.sourceId && claim.vendorDebtOriginEventId === event.id))
+        .reduce((sum, offset) => sum + offset.amountMinor, 0);
+      if (finalizedMinor !== attributedMinor) reasons.push('PAYOUT_FINALIZED_DEBT_OFFSET_CONFLICT');
+      if (activeReservationMinor + finalizedMinor > -event.amountMinor) reasons.push('RESERVATION_EXCEEDS_SOURCE');
+      const remainingMinor = -event.amountMinor - finalizedMinor;
+      const unreservedAmountMinor = reasons.length === 0 ? remainingMinor - activeReservationMinor : null;
       sources.push({
         sourceType: 'VENDOR_DEBT', sourceId: event.id,
         refundFinanceLedgerEntryId: event.financeLedgerEntryId,
         vendorId: event.vendorId, currency: event.currency, verifiedAt,
         originalAmountMinor: -event.amountMinor,
-        appliedAmountMinor: reasons.length === 0 ? 0 : null,
-        remainingAmountMinor: reasons.length === 0 ? -event.amountMinor : null,
+        appliedAmountMinor: reasons.length === 0 ? finalizedMinor : null,
+        remainingAmountMinor: reasons.length === 0 ? remainingMinor : null,
         activeReservationMinor, unreservedAmountMinor,
         status: reasons.includes('REFUND_ADJUSTMENT_AND_DEBT_CONFLICT') ||
           reasons.includes('DIRECT_REFUND_AND_DEBT_CONFLICT') || reasons.includes('RESERVATION_EXCEEDS_SOURCE')
@@ -251,7 +261,7 @@ export async function reconcilePayoutOffsetAuthorityInTransaction(
       ? a.verifiedAt.localeCompare(b.verifiedAt) || a.sourceType.localeCompare(b.sourceType) || a.sourceId.localeCompare(b.sourceId)
       : a.verifiedAt ? -1 : b.verifiedAt ? 1 : a.sourceType.localeCompare(b.sourceType) || a.sourceId.localeCompare(b.sourceId));
     const reasons: string[] = [];
-    if (aggregateOffsets.length > 0) reasons.push('AGGREGATE_DEBT_OFFSETS_NOT_SOURCE_ATTRIBUTED');
+    if (unattributedDebtOffsets.length > 0) reasons.push('AGGREGATE_DEBT_OFFSETS_NOT_SOURCE_ATTRIBUTED');
     if (ambiguousDebtChanges > 0) reasons.push('DEBT_BALANCE_CHANGES_NOT_SOURCE_ATTRIBUTED');
     if (sources.some((source) => source.status === 'BLOCKED')) reasons.push('SOURCE_CONFLICT_OR_OVERSUBSCRIPTION');
     if (sources.some((source) => source.status === 'UNKNOWN')) reasons.push('SOURCE_AUTHORITY_INCOMPLETE');

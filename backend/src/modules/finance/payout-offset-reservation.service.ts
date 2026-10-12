@@ -26,15 +26,25 @@ function assertMinor(value: number): void {
 }
 
 /**
- * Phase 2 foundation only. No route, worker or ordinary payout path calls this function.
- * Reservations do not change payout netAmount or source appliedAmountMinor.
+ * Standalone Phase 2 reservation path. No route, worker or ordinary payout path
+ * calls it; reservations alone never change payout or source money.
  */
 export async function reserveVerifiedPayoutOffsets(input: ReservationInput) {
+  return prisma.$transaction((tx) => reserveVerifiedPayoutOffsetsInTransaction(tx, input), {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  });
+}
+
+/** Caller must hold the Vendor row lock in a Serializable transaction. */
+export async function reserveVerifiedPayoutOffsetsInTransaction(
+  tx: Prisma.TransactionClient,
+  input: ReservationInput,
+  options: { allowExactOwnOriginRefund?: boolean } = {},
+) {
   if (![input.vendorId, input.currency, input.payoutBatchId, input.requestId, input.actorId]
     .every((value) => value.trim()) || input.requestId.includes(':')) {
     throw new Error('R1_RESERVATION_IDENTITY_INVALID');
   }
-  return prisma.$transaction(async (tx) => {
     // This is the same first lock taken by settlement draft and ordinary payout preparation.
     const vendors = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
@@ -195,8 +205,21 @@ export async function reserveVerifiedPayoutOffsets(input: ReservationInput) {
           where: { id: source.sourceId },
           select: { originalSettlementApprovalId: true, originalSettlementApprovalLineId: true,
             originalSettlementCommissionInvoiceId: true,
+            refundFinanceLedgerEntryId: true,
             originalSettlementApproval: { select: { status: true, vendorId: true, currency: true } } },
         });
+        const ownOrigin = !!adjustment?.originalSettlementApprovalId &&
+          capacity.has(adjustment.originalSettlementApprovalId) &&
+          options.allowExactOwnOriginRefund === true;
+        const accepted = ownOrigin ? await tx.refundEvidenceSnapshot.findUnique({
+          where: { refundFinanceLedgerEntryId: adjustment.refundFinanceLedgerEntryId },
+          select: { historicalSaleFinanceLedgerEntryId: true, refundFinanceLedgerEntryId: true },
+        }) : null;
+        const exactOwnOrigin = ownOrigin && !!accepted &&
+          accepted.refundFinanceLedgerEntryId === source.refundFinanceLedgerEntryId &&
+          batch.lines.some((line) => line.settlementApprovalLineId === adjustment.originalSettlementApprovalLineId &&
+            line.financeLedgerEntryId === accepted.historicalSaleFinanceLedgerEntryId &&
+            line.settlementApprovalLine?.settlementApprovalId === adjustment.originalSettlementApprovalId);
         // An unpaid original approval has a separate refund hold. It cannot
         // supply the capacity that discharges its own post-approval refund.
         if (!adjustment || !adjustment.originalSettlementApprovalId ||
@@ -205,7 +228,7 @@ export async function reserveVerifiedPayoutOffsets(input: ReservationInput) {
             adjustment.originalSettlementApproval.status !== 'APPROVED' ||
             adjustment.originalSettlementApproval.vendorId !== input.vendorId ||
             adjustment.originalSettlementApproval.currency !== input.currency ||
-            capacity.has(adjustment.originalSettlementApprovalId)) {
+            (capacity.has(adjustment.originalSettlementApprovalId) && !exactOwnOrigin)) {
           throw new Error('R1_REFUND_ADJUSTMENT_ORIGIN_NOT_ELIGIBLE_FOR_THIS_PAYOUT');
         }
       }
@@ -277,5 +300,4 @@ export async function reserveVerifiedPayoutOffsets(input: ReservationInput) {
       }
     }
     return { writesPerformed: claims.length > 0, claims };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
