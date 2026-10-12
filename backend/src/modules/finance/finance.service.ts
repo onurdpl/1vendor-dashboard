@@ -3821,16 +3821,52 @@ async function releaseCancelledPayoutSources(tx: Prisma.TransactionClient, batch
     });
 }
 
-export async function cancelDraftPayoutBatchWithClient(tx: Prisma.TransactionClient, batchId: string, cancelledAt: Date) {
+async function releaseCancelledPayoutOffsetClaims(
+  tx: Prisma.TransactionClient, batchId: string, cancelledAt: Date, actorId?: string,
+  originalStatus: string = 'DRAFT',
+) {
+  const claims = await tx.payoutOffsetClaim.findMany({ where: { payoutBatchId: batchId } });
+  if (claims.length === 0) return;
+  const batch = await tx.payoutBatch.findUnique({
+    where: { id: batchId }, select: { vendorId: true, currency: true, status: true, paidAt: true },
+  });
+  if (!batch || originalStatus !== 'DRAFT' || batch.status !== 'CANCELLED' ||
+      batch.paidAt || !actorId?.trim() ||
+      claims.some((claim) => claim.status !== 'RESERVED' || claim.vendorId !== batch.vendorId ||
+        claim.currency !== batch.currency || claim.payoutBatchId !== batchId)) {
+    throw new Error('R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED');
+  }
+  for (const claim of claims) {
+    const released = await tx.payoutOffsetClaim.updateMany({
+      where: { id: claim.id, payoutBatchId: batchId, vendorId: batch.vendorId,
+        currency: batch.currency, status: 'RESERVED' },
+      data: { status: 'RELEASED', releasedBy: actorId.trim(), releasedAt: cancelledAt },
+    });
+    if (released.count !== 1) throw new Error('R1_PAYOUT_CLAIM_RELEASE_RACE');
+  }
+}
+
+async function assertNoReservedPayoutOffsetClaims(tx: Prisma.TransactionClient, batchId: string) {
+  if (await tx.payoutOffsetClaim.count({ where: { payoutBatchId: batchId, status: 'RESERVED' } })) {
+    throw new Error('R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION');
+  }
+}
+
+export async function cancelDraftPayoutBatchWithClient(
+  tx: Prisma.TransactionClient, batchId: string, cancelledAt: Date, actorId?: string,
+) {
+  // Caller (Financial Correction) already holds the vendor lock before the payout row lock.
   const cancellation = await tx.payoutBatch.updateMany({
     where: { id: batchId, status: 'DRAFT', paidAt: null },
     data: { status: 'CANCELLED' },
   });
   if (cancellation.count !== 1) throw new Error('DRAFT_PAYOUT_STATE_CHANGED');
+  await releaseCancelledPayoutOffsetClaims(tx, batchId, cancelledAt, actorId);
   await releaseCancelledPayoutSources(tx, batchId, cancelledAt);
 }
 
 export async function cancelReviewPayoutBatchWithClient(tx: Prisma.TransactionClient, batchId: string, cancelledAt: Date) {
+  await assertNoReservedPayoutOffsetClaims(tx, batchId);
   const cancellation = await tx.payoutBatch.updateMany({
     where: { id: batchId, status: 'REVIEW', paidAt: null },
     data: { status: 'CANCELLED' },
@@ -3839,11 +3875,20 @@ export async function cancelReviewPayoutBatchWithClient(tx: Prisma.TransactionCl
   await releaseCancelledPayoutSources(tx, batchId, cancelledAt);
 }
 
-export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto> {
+export async function cancelPayoutBatch(batchId: string, actorId?: string): Promise<PayoutBatchDto> {
   return prisma.$transaction(async (tx) => {
+    const [initialBatch] = await tx.$queryRaw<Array<{ vendorId: string; status: string }>>(Prisma.sql`
+      SELECT "vendorId", "status" FROM "PayoutBatch" WHERE "id" = ${batchId}
+    `);
+    if (!initialBatch) throw new Error('Payout batch not found.');
+    const vendor = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${initialBatch.vendorId} FOR UPDATE
+    `);
+    if (vendor.length !== 1) throw new Error('Payout batch vendor not found.');
     const cancellation = await tx.payoutBatch.updateMany({
       where: {
         id: batchId,
+        vendorId: initialBatch.vendorId,
         status: {
           notIn: ['PAID', 'CANCELLED', 'REVIEW'],
         },
@@ -3878,7 +3923,9 @@ export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto
       throw new Error('Payout batch could not be cancelled because its status changed.');
     }
 
-    await releaseCancelledPayoutSources(tx, batchId, new Date());
+    const cancelledAt = new Date();
+    await releaseCancelledPayoutOffsetClaims(tx, batchId, cancelledAt, actorId, initialBatch.status);
+    await releaseCancelledPayoutSources(tx, batchId, cancelledAt);
 
     const batch = await tx.payoutBatch.findUnique({
       where: {
@@ -3980,10 +4027,19 @@ function buildPayoutPaidEvents(input: {
 
 export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatchDto> {
   return prisma.$transaction(async (tx) => {
+    const [initialBatch] = await tx.$queryRaw<Array<{ vendorId: string }>>(Prisma.sql`
+      SELECT "vendorId" FROM "PayoutBatch" WHERE "id" = ${batchId}
+    `);
+    if (!initialBatch) throw new Error('Payout batch not found.');
+    const vendor = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${initialBatch.vendorId} FOR UPDATE
+    `);
+    if (vendor.length !== 1) throw new Error('Payout batch vendor not found.');
+    await assertNoReservedPayoutOffsetClaims(tx, batchId);
     await validatePayoutBatchBeforeTransitionWithClient(tx, batchId);
 
     const transition = await tx.payoutBatch.updateMany({
-      where: { id: batchId, status: 'DRAFT', paidAt: null },
+      where: { id: batchId, vendorId: initialBatch.vendorId, status: 'DRAFT', paidAt: null },
       data: { status: 'REVIEW' },
     });
     if (transition.count !== 1) throw new Error('Payout batch must still be DRAFT to enter review.');
@@ -4048,6 +4104,7 @@ export async function markPayoutBatchPaid(
     if (batch.status !== 'REVIEW') {
       throw new Error('Only review payout batches can be marked paid.');
     }
+    await assertNoReservedPayoutOffsetClaims(tx, batchId);
     if (batch.lines.length === 0 && batch.correctionCreditLines.length === 0 &&
         batch.correctionDeductionLines.length === 0 && batch.approvedDeductionLines.length === 0) {
       throw new Error('Payout batch has no lines to mark paid.');

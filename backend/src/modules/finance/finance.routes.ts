@@ -882,10 +882,12 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { id } = request.params as { id: string };
       try {
-        return await cancelPayoutBatch(id);
+        return await cancelPayoutBatch(id, request.authUser.id);
       } catch (error) {
-        if (error instanceof Error && error.message === 'REVIEW_GENERAL_CANCELLATION_FORBIDDEN') {
-          return reply.code(409).send({ code: 'REVIEW_GENERAL_CANCELLATION_FORBIDDEN', message: error.message });
+        if (error instanceof Error && [
+          'REVIEW_GENERAL_CANCELLATION_FORBIDDEN', 'R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED',
+        ].includes(error.message)) {
+          return reply.code(409).send({ code: error.message, message: error.message });
         }
         throw error;
       }
@@ -906,6 +908,9 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       try {
         return await markPayoutBatchReview(id);
       } catch (error) {
+        if (error instanceof Error && error.message === 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION') {
+          return reply.code(409).send({ code: error.message, message: error.message });
+        }
         if (error instanceof PayoutBatchTransitionRevalidationError) {
           return reply.code(409).send({
             message: error.message,
@@ -936,6 +941,9 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       try {
         return await markPayoutBatchPaid(id, input, request.authUser.id);
       } catch (error) {
+        if (error instanceof Error && error.message === 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION') {
+          return reply.code(409).send({ code: error.message, message: error.message });
+        }
         if (error instanceof PayoutBatchTransitionRevalidationError) {
           return reply.code(409).send({
             message: error.message,

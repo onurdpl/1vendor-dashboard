@@ -281,7 +281,7 @@ export async function applyDraftPayoutFinancialCorrection(input: {
       if (preview.economicDirection === 'VENDOR_DEDUCTION' &&
           position.availableCoverageMinor < difference) return fail('INSUFFICIENT_APPROVED_PAYABLE');
       const cancelledAt = new Date();
-      try { await cancelDraftPayoutBatchWithClient(tx, position.payout.id, cancelledAt); }
+      try { await cancelDraftPayoutBatchWithClient(tx, position.payout.id, cancelledAt, input.actorUserId); }
       catch (error) {
         if (error instanceof Error && error.message === 'DRAFT_PAYOUT_STATE_CHANGED') return fail('PAYOUT_CANCELLATION_FAILED');
         throw error;

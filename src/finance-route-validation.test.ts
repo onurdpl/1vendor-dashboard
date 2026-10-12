@@ -36,6 +36,8 @@ const applyDraftPayoutCorrectionMock = vi.hoisted(() => vi.fn());
 const getReviewPayoutCorrectionStateMock = vi.hoisted(() => vi.fn());
 const applyReviewPayoutCorrectionMock = vi.hoisted(() => vi.fn());
 const cancelPayoutBatchMock = vi.hoisted(() => vi.fn());
+const markPayoutBatchReviewMock = vi.hoisted(() => vi.fn());
+const markPayoutBatchPaidMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -128,8 +130,8 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getAdminVendorFinancialProfile: getAdminVendorFinancialProfileMock,
   getVendorReturnFinanceRecords: getVendorReturnFinanceRecordsMock,
   listPayoutBatches: vi.fn(),
-  markPayoutBatchPaid: vi.fn(),
-  markPayoutBatchReview: vi.fn(),
+  markPayoutBatchPaid: markPayoutBatchPaidMock,
+  markPayoutBatchReview: markPayoutBatchReviewMock,
   PayoutBatchTransitionRevalidationError: class PayoutBatchTransitionRevalidationError extends Error {
     blockers: unknown[];
 
@@ -323,6 +325,8 @@ async function updateFinancialProfile(body: unknown) {
 describe('finance route validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    markPayoutBatchReviewMock.mockReset();
+    markPayoutBatchPaidMock.mockReset();
     acknowledgeZeroNetMock.mockReset();
     getZeroNetMock.mockReset();
     runFinanceIntegrityScannerDiagnosticsMock.mockReset();
@@ -772,6 +776,34 @@ describe('finance route validation', () => {
     }, reply)).toEqual({ status: 409, body: { code: 'REVIEW_GENERAL_CANCELLATION_FORBIDDEN',
       message: 'REVIEW_GENERAL_CANCELLATION_FORBIDDEN' } });
     expect(reply.statusCode).toBe(409);
+    expect(cancelPayoutBatchMock).toHaveBeenCalledWith('review-payout-1', 'admin-1');
+  });
+
+  it('returns a conflict when an R1 claim cannot be released on cancellation', async () => {
+    cancelPayoutBatchMock.mockRejectedValueOnce(new Error('R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED'));
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+    expect(await posts.get('/admin/payout-batches/:id/cancel')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'draft-with-claim' },
+    }, reply)).toEqual({ status: 409, body: { code: 'R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED',
+      message: 'R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED' } });
+  });
+
+  it('reports active R1 reservation as a conflict at both unsupported payout transitions', async () => {
+    markPayoutBatchReviewMock.mockRejectedValueOnce(new Error('R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION'));
+    markPayoutBatchPaidMock.mockRejectedValueOnce(new Error('R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION'));
+    const posts = createRegisteredPostRoutes();
+    const review = createReply();
+    expect(await posts.get('/admin/payout-batches/:id/mark-review')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'draft-with-claim' },
+    }, review)).toEqual({ status: 409, body: { code: 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION',
+      message: 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION' } });
+    const paid = createReply();
+    expect(await posts.get('/admin/payout-batches/:id/mark-paid')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'review-with-claim' },
+      body: { paidAt: '2026-10-12T12:00:00.000Z' },
+    }, paid)).toEqual({ status: 409, body: { code: 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION',
+      message: 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION' } });
   });
 
   it('returns only dashboard finance summary fields', async () => {

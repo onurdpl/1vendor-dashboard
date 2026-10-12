@@ -22,6 +22,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   payoutOffsetClaim: {
     count: vi.fn(),
+    findMany: vi.fn(),
   },
   settlementApprovalLine: {
     findMany: vi.fn(),
@@ -377,7 +378,7 @@ describe('payout batch preparation', () => {
   beforeEach(() => {
     prismaMock.$transaction.mockReset();
     prismaMock.$queryRaw.mockReset();
-    prismaMock.$queryRaw.mockResolvedValue([{ id: 'batch-review' }]);
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'batch-review', vendorId: 'demo-vendor-a', status: 'DRAFT' }]);
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.financeLedgerEntry.updateMany.mockReset();
@@ -390,6 +391,8 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatchLine.findFirst.mockResolvedValue(null);
     prismaMock.payoutOffsetClaim.count.mockReset();
     prismaMock.payoutOffsetClaim.count.mockResolvedValue(0);
+    prismaMock.payoutOffsetClaim.findMany.mockReset();
+    prismaMock.payoutOffsetClaim.findMany.mockResolvedValue([]);
     prismaMock.settlementApprovalLine.findMany.mockReset();
     prismaMock.settlementApprovalLine.findMany.mockResolvedValue([]);
     prismaMock.financialCorrectionCredit.findFirst.mockReset();
@@ -1587,7 +1590,7 @@ describe('payout batch preparation', () => {
 
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
+        where: { id: 'batch-review', vendorId: 'demo-vendor-a', status: 'DRAFT', paidAt: null },
         data: { status: 'REVIEW' },
       }),
     );
@@ -1687,7 +1690,7 @@ describe('payout batch preparation', () => {
     }));
     expect(prismaMock.payoutBatchLine.findFirst).toHaveBeenCalled();
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
+      where: { id: 'batch-review', vendorId: 'demo-vendor-a', status: 'DRAFT', paidAt: null },
       data: { status: 'REVIEW' },
     }));
   });
@@ -1903,7 +1906,7 @@ describe('payout batch preparation', () => {
       status: 'review',
     });
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'batch-review', status: 'DRAFT', paidAt: null },
+      where: { id: 'batch-review', vendorId: 'demo-vendor-a', status: 'DRAFT', paidAt: null },
       data: expect.objectContaining({ status: 'REVIEW' }),
     }));
   });
@@ -2426,6 +2429,7 @@ describe('payout batch preparation', () => {
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'batch-review',
+        vendorId: 'demo-vendor-a',
         status: { notIn: ['PAID', 'CANCELLED', 'REVIEW'] },
         paidAt: null,
       },

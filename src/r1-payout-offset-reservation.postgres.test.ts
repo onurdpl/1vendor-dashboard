@@ -12,6 +12,11 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
   let normalize: typeof import('../backend/src/modules/finance/refund-evidence-normalizer.service.js')['normalizeRefundEvidence'];
   let recordDelivery: typeof import('../backend/src/modules/shipping/allocation-delivered-observation.service.js')['recordVerifiedDeliveredObservation'];
   let createDraft: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['createDraftApproval'];
+  let cancelPayout: typeof import('../backend/src/modules/finance/finance.service.js')['cancelPayoutBatch'];
+  let markReview: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchReview'];
+  let markPaid: typeof import('../backend/src/modules/finance/finance.service.js')['markPayoutBatchPaid'];
+  let cancelDraftWithClient: typeof import('../backend/src/modules/finance/finance.service.js')['cancelDraftPayoutBatchWithClient'];
+  let cancelReviewWithClient: typeof import('../backend/src/modules/finance/finance.service.js')['cancelReviewPayoutBatchWithClient'];
   const prefix = `r1-phase2-${process.pid}-${Date.now()}`;
   let sequence = 0;
   const next = (name: string) => `${prefix}-${++sequence}-${name}`;
@@ -39,6 +44,9 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
     ({ normalizeRefundEvidence: normalize } = await import('../backend/src/modules/finance/refund-evidence-normalizer.service.js'));
     ({ recordVerifiedDeliveredObservation: recordDelivery } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
     ({ createDraftApproval: createDraft } = await import('../backend/src/modules/finance/settlement-approval.service.js'));
+    ({ cancelPayoutBatch: cancelPayout, markPayoutBatchReview: markReview,
+      markPayoutBatchPaid: markPaid, cancelDraftPayoutBatchWithClient: cancelDraftWithClient,
+      cancelReviewPayoutBatchWithClient: cancelReviewWithClient } = await import('../backend/src/modules/finance/finance.service.js'));
   });
 
   afterAll(async () => {
@@ -492,5 +500,125 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
     });
     expect(adjustment.appliedAmountMinor + (reserved._sum.reservedAmountMinor ?? 0)).toBeLessThanOrEqual(880);
     expect(adjustment.originalAmountMinor).toBe(880);
+  });
+
+  it('releases a DRAFT reservation atomically with exact actor and immutable audit, without changing money', async () => {
+    const fixture = await baseFixture();
+    const reserved = await reserve(fixture.input);
+    const beforeAdjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: fixture.source.sourceId } });
+    const beforeBatch = await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } });
+    await expect(markReview(fixture.batchId)).rejects.toThrow('R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION');
+    expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } })).status).toBe('DRAFT');
+
+    const cancelled = await cancelPayout(fixture.batchId, 'r1-cancelling-admin');
+    expect(cancelled.status).toBe('cancelled');
+    const claim = await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: reserved.claims[0].id } });
+    expect(claim).toMatchObject({ status: 'RELEASED', releasedBy: 'r1-cancelling-admin',
+      reservedAmountMinor: 880, vendorId: fixture.vendorId, currency: 'TRY', payoutBatchId: fixture.batchId });
+    expect(claim.releasedAt).toBeInstanceOf(Date);
+    expect(await db.payoutOffsetClaimEvent.findMany({ where: { payoutOffsetClaimId: claim.id },
+      orderBy: { occurredAt: 'asc' }, select: { eventType: true, actorId: true, occurredAt: true } }))
+      .toEqual([{ eventType: 'RESERVED', actorId: fixture.input.actorId, occurredAt: claim.reservedAt },
+        { eventType: 'RELEASED', actorId: 'r1-cancelling-admin', occurredAt: claim.releasedAt }]);
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: fixture.source.sourceId } }))
+      .toEqual(beforeAdjustment);
+    const afterBatch = await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } });
+    expect(afterBatch.netAmount).toEqual(beforeBatch.netAmount);
+    expect(afterBatch.paidAt).toBeNull();
+    expect(afterBatch.paymentReference).toBeNull();
+    expect((await reconcile({ vendorId: fixture.vendorId, currency: 'TRY' })).sources[0])
+      .toMatchObject({ activeReservationMinor: 0, unreservedAmountMinor: 880 });
+    await expect(cancelPayout(fixture.batchId, 'r1-cancelling-admin'))
+      .rejects.toThrow('Payout batch could not be cancelled because its status changed.');
+    expect(await db.payoutOffsetClaimEvent.count({ where: { payoutOffsetClaimId: claim.id } })).toBe(2);
+
+    const replacementBatchId = await makeBatch(fixture.vendorId, [fixture.capacity]);
+    const replacement = await reserve({ ...fixture.input, payoutBatchId: replacementBatchId,
+      requestId: next('replacement-request') });
+    expect(replacement.claims.map((item) => item.reservedAmountMinor)).toEqual([880]);
+  });
+
+  it('rolls back DRAFT cancellation if a reserved claim cannot be released', async () => {
+    const fixture = await baseFixture();
+    const reserved = await reserve(fixture.input);
+    await expect(cancelPayout(fixture.batchId)).rejects.toThrow('R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED');
+    expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } })).status).toBe('DRAFT');
+    expect((await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: reserved.claims[0].id } })).status)
+      .toBe('RESERVED');
+    expect(await db.payoutOffsetClaimEvent.count({ where: { payoutOffsetClaimId: reserved.claims[0].id } })).toBe(1);
+  });
+
+  it('releases claims in the existing Financial Correction DRAFT cancellation transaction', async () => {
+    const fixture = await baseFixture();
+    const reserved = await reserve(fixture.input);
+    const cancelledAt = new Date();
+    await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Vendor" WHERE "id" = ${fixture.vendorId} FOR UPDATE`;
+      await cancelDraftWithClient(tx, fixture.batchId, cancelledAt, 'r1-correction-admin');
+    });
+    expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } })).status).toBe('CANCELLED');
+    expect(await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: reserved.claims[0].id } }))
+      .toMatchObject({ status: 'RELEASED', releasedBy: 'r1-correction-admin', releasedAt: cancelledAt });
+  });
+
+  it('never releases a FINALIZED claim or cancels its DRAFT payout', async () => {
+    const fixture = await baseFixture();
+    const reserved = await reserve(fixture.input);
+    await db.payoutOffsetClaim.update({ where: { id: reserved.claims[0].id }, data: {
+      status: 'FINALIZED', finalizedBy: 'r1-test-finalizer', finalizedAt: new Date(),
+    } });
+    await expect(cancelPayout(fixture.batchId, 'r1-cancelling-admin'))
+      .rejects.toThrow('R1_PAYOUT_CLAIM_RELEASE_NOT_AUTHORIZED');
+    expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } })).status).toBe('DRAFT');
+    expect((await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: reserved.claims[0].id } })).status)
+      .toBe('FINALIZED');
+  });
+
+  it('rejects unsupported REVIEW payment with an active claim and preserves PAID protections', async () => {
+    const fixture = await baseFixture();
+    await reserve(fixture.input);
+    // A legacy/manual status mutation is deliberately simulated; the live REVIEW service rejects it above.
+    await db.payoutBatch.update({ where: { id: fixture.batchId }, data: { status: 'REVIEW' } });
+    await expect(markPaid(fixture.batchId, { paidAt: new Date().toISOString() }, 'r1-paying-admin'))
+      .rejects.toThrow('R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION');
+    await expect(cancelPayout(fixture.batchId, 'r1-cancelling-admin'))
+      .rejects.toThrow('REVIEW_GENERAL_CANCELLATION_FORBIDDEN');
+    await expect(db.$transaction((tx) => cancelReviewWithClient(tx, fixture.batchId, new Date())))
+      .rejects.toThrow('R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION');
+    const batch = await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } });
+    expect(batch.status).toBe('REVIEW');
+    expect(batch.paidAt).toBeNull();
+    expect((await db.payoutOffsetClaim.findMany({ where: { payoutBatchId: fixture.batchId } }))
+      .map((claim) => claim.status)).toEqual(['RESERVED']);
+  });
+
+  it('serializes concurrent DRAFT cancellation and reservation without stranded active claims', async () => {
+    const fixture = await baseFixture();
+    const outcomes = await Promise.allSettled([
+      reserve(fixture.input), cancelPayout(fixture.batchId, 'r1-cancelling-admin'),
+    ]);
+    expect(outcomes[1].status).toBe('fulfilled');
+    expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } })).status).toBe('CANCELLED');
+    expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: fixture.batchId, status: 'RESERVED' } }))
+      .toBe(0);
+  });
+
+  it('makes a released adjustment slice available to settlement only once', async () => {
+    const fixture = await baseFixture();
+    const reserved = await reserve(fixture.input);
+    await cancelPayout(fixture.batchId, 'r1-cancelling-admin');
+    const future = await makeEligibleUnsettledSale(fixture.vendorId);
+    const draft = await createDraft({ vendorId: fixture.vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [future.allocationId], asOfDate: new Date() });
+    expect(draft.lines.some((line) => line.financeLedgerEntryId === future.saleId)).toBe(true);
+    const applications = await db.settlementRefundAdjustmentApplication.findMany({
+      where: { settlementApprovalId: draft.id, settlementRefundAdjustmentId: fixture.source.sourceId,
+        status: 'ACTIVE' },
+    });
+    expect(applications.map((application) => application.amountMinor)).toEqual([880]);
+    expect((await db.payoutOffsetClaim.findUniqueOrThrow({ where: { id: reserved.claims[0].id } })).status)
+      .toBe('RELEASED');
+    expect((await reconcile({ vendorId: fixture.vendorId, currency: 'TRY' })).sources[0])
+      .toMatchObject({ originalAmountMinor: 880, remainingAmountMinor: 0, activeReservationMinor: 0 });
   });
 });
