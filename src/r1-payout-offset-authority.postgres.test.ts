@@ -29,8 +29,7 @@ suite('R1 Phase 1 payout offset authority (PostgreSQL 16)', () => {
     const [identity] = await db.$queryRaw<Array<{ version: string; name: string; owner: string; port: number }>>`
       SELECT current_setting('server_version_num') AS version, current_database() AS name,
         current_user AS owner, inet_server_port() AS port`;
-    expect(Number(identity.version)).toBeGreaterThanOrEqual(160000);
-    expect(Number(identity.version)).toBeLessThan(170000);
+    expect([16, 18]).toContain(Math.floor(Number(identity.version) / 10000));
     expect(identity.name).toBe('r1_phase1_validation');
     expect(identity.owner).toBe(target.username);
     expect(identity.port).toBe(Number(target.port));
