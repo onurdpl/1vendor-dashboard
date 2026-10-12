@@ -806,6 +806,27 @@ describe('finance route validation', () => {
       message: 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION' } });
   });
 
+  it('passes bank EFT attestation only from an authenticated Admin to Mark Paid', async () => {
+    const posts = createRegisteredPostRoutes();
+    const path = '/admin/payout-batches/:id/mark-paid';
+    const body = { paidAt: '2026-10-12T12:10:00.000Z',
+      eftDeclaredAt: '2026-10-12T15:00:00+03:00', paymentReference: 'BANK-123' };
+    const denied = createReply();
+    await posts.get(path)?.({ authUser: { role: 'vendor', id: 'vendor-1' },
+      params: { id: 'batch-1' }, body }, denied);
+    expect(denied.statusCode).toBe(403);
+    expect(markPayoutBatchPaidMock).not.toHaveBeenCalled();
+
+    markPayoutBatchPaidMock.mockResolvedValueOnce({ id: 'batch-1', status: 'paid' });
+    const allowed = createReply();
+    await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' },
+      params: { id: 'batch-1' }, body }, allowed);
+    expect(markPayoutBatchPaidMock).toHaveBeenCalledWith('batch-1', {
+      paidAt: body.paidAt, eftDeclaredAt: body.eftDeclaredAt,
+      paymentReference: body.paymentReference, internalNote: null,
+    }, 'admin-1');
+  });
+
   it('returns only dashboard finance summary fields', async () => {
     const gets = createRegisteredGetRoutes();
     const reply = createReply();

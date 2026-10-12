@@ -383,20 +383,32 @@ function buildQueueItems(vendorId: string, dashboard: FinanceDashboard | null, b
 
 function PaymentActionConfirmationModal({
   action,
+  eftDate,
+  eftTime,
+  eftUtcOffset,
   paymentReference,
   internalNote,
   submitting,
   onCancel,
   onConfirm,
+  onEftDateChange,
+  onEftTimeChange,
+  onEftUtcOffsetChange,
   onPaymentReferenceChange,
   onInternalNoteChange,
 }: {
   action: PaymentAction;
+  eftDate: string;
+  eftTime: string;
+  eftUtcOffset: string;
   paymentReference: string;
   internalNote: string;
   submitting: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  onEftDateChange: (value: string) => void;
+  onEftTimeChange: (value: string) => void;
+  onEftUtcOffsetChange: (value: string) => void;
   onPaymentReferenceChange: (value: string) => void;
   onInternalNoteChange: (value: string) => void;
 }) {
@@ -436,6 +448,19 @@ function PaymentActionConfirmationModal({
         <p className="page-description">{config.body}</p>
         {action === 'mark_paid' ? (
           <div className="op-form-grid">
+            <p className="page-description">Enter the actual bank-record EFT time. This is your Admin attestation, not bank verification.</p>
+            <label>
+              <span>Bank EFT execution date</span>
+              <input type="date" value={eftDate} onChange={(event) => onEftDateChange(event.currentTarget.value)} required />
+            </label>
+            <label>
+              <span>Bank EFT execution time</span>
+              <input type="time" step="1" value={eftTime} onChange={(event) => onEftTimeChange(event.currentTarget.value)} required />
+            </label>
+            <label>
+              <span>Bank record UTC offset (for example +03:00)</span>
+              <input value={eftUtcOffset} onChange={(event) => onEftUtcOffsetChange(event.currentTarget.value)} placeholder="+03:00" required />
+            </label>
             <label>
               <span>Payment reference optional</span>
               <input
@@ -482,6 +507,9 @@ export function AdminPaymentPreparationPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [paymentReference, setPaymentReference] = useState('');
+  const [eftDate, setEftDate] = useState('');
+  const [eftTime, setEftTime] = useState('');
+  const [eftUtcOffset, setEftUtcOffset] = useState('');
   const [internalNote, setInternalNote] = useState('');
 
   const batchesQuery = useQueryResource(
@@ -564,6 +592,9 @@ export function AdminPaymentPreparationPage() {
     setActionError(null);
     setActionSuccess(null);
     setPaymentReference('');
+    setEftDate('');
+    setEftTime('');
+    setEftUtcOffset('');
     setInternalNote('');
     setPendingAction(action);
   }
@@ -583,7 +614,12 @@ export function AdminPaymentPreparationPage() {
         await markPayoutBatchReview(selectedItem.batch.id);
         setActionSuccess('Payment batch moved to review.');
       } else if (pendingAction === 'mark_paid' && selectedItem.source === 'batch') {
+        if (!eftDate || !eftTime || !/^(Z|[+-]\d{2}:\d{2})$/.test(eftUtcOffset.trim())) {
+          throw new Error('Enter the bank EFT date, time and explicit UTC offset.');
+        }
+        const seconds = eftTime.length === 5 ? ':00' : '';
         await markPayoutBatchPaid(selectedItem.batch.id, {
+          eftDeclaredAt: `${eftDate}T${eftTime}${seconds}${eftUtcOffset.trim()}`,
           paymentReference: paymentReference.trim() || undefined,
           internalNote: internalNote.trim() || undefined,
         });
@@ -873,6 +909,7 @@ export function AdminPaymentPreparationPage() {
                             <li>
                               <strong>Paid</strong>
                               <span>{formatDate(selectedItem.batch.paidAt)}</span>
+                              {selectedItem.batch.eftDeclaredAt ? <small>Admin-attested bank EFT time {selectedItem.batch.eftDeclaredAt}</small> : null}
                               {selectedItem.batch.paymentReference ? <small>Payment reference {selectedItem.batch.paymentReference}</small> : null}
                             </li>
                           ) : null}
@@ -894,11 +931,17 @@ export function AdminPaymentPreparationPage() {
       {pendingAction ? (
         <PaymentActionConfirmationModal
           action={pendingAction}
+          eftDate={eftDate}
+          eftTime={eftTime}
+          eftUtcOffset={eftUtcOffset}
           paymentReference={paymentReference}
           internalNote={internalNote}
           submitting={actionSubmitting}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void handleConfirmAction()}
+          onEftDateChange={setEftDate}
+          onEftTimeChange={setEftTime}
+          onEftUtcOffsetChange={setEftUtcOffset}
           onPaymentReferenceChange={setPaymentReference}
           onInternalNoteChange={setInternalNote}
         />

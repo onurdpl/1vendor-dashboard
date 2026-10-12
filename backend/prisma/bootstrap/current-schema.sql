@@ -885,6 +885,26 @@ $$;
 
 
 --
+-- Name: protectPayoutEftAttestation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."protectPayoutEftAttestation"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF OLD."eftAttestedAt" IS NOT NULL AND
+     (NEW."eftExecutedAt" IS DISTINCT FROM OLD."eftExecutedAt" OR
+      NEW."eftDeclaredAt" IS DISTINCT FROM OLD."eftDeclaredAt" OR
+      NEW."eftAttestedAt" IS DISTINCT FROM OLD."eftAttestedAt" OR
+      NEW."eftAttestedByUserId" IS DISTINCT FROM OLD."eftAttestedByUserId") THEN
+    RAISE EXCEPTION 'Payout EFT attestation is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: reject_sopyo_shopify_plan_rewrite(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1808,7 +1828,12 @@ CREATE TABLE public."PayoutBatch" (
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "updatedAt" timestamp(3) without time zone NOT NULL,
     "correctionCreditAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
-    "correctionDeductionAmount" numeric(10,2) DEFAULT 0.00 NOT NULL
+    "correctionDeductionAmount" numeric(10,2) DEFAULT 0.00 NOT NULL,
+    "eftExecutedAt" timestamp(3) without time zone,
+    "eftDeclaredAt" text,
+    "eftAttestedAt" timestamp(3) without time zone,
+    "eftAttestedByUserId" text,
+    CONSTRAINT "PayoutBatch_eft_attestation_complete_check" CHECK (((("eftExecutedAt" IS NULL) AND ("eftDeclaredAt" IS NULL) AND ("eftAttestedAt" IS NULL) AND ("eftAttestedByUserId" IS NULL)) OR (("eftExecutedAt" IS NOT NULL) AND ("eftDeclaredAt" IS NOT NULL) AND ("eftAttestedAt" IS NOT NULL) AND ("eftAttestedByUserId" IS NOT NULL) AND ("eftExecutedAt" <= "eftAttestedAt") AND (status = 'PAID'::public."PayoutBatchStatus"))))
 );
 
 
@@ -5645,6 +5670,13 @@ CREATE TRIGGER "FinancialCorrectionCredit_direction_guard" BEFORE INSERT OR UPDA
 --
 
 CREATE TRIGGER "FinancialCorrectionDeduction_direction_guard" BEFORE INSERT OR UPDATE ON public."FinancialCorrectionDeduction" FOR EACH ROW EXECUTE FUNCTION public."checkFinancialCorrectionDeductionDirection"();
+
+
+--
+-- Name: PayoutBatch PayoutBatch_eft_attestation_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "PayoutBatch_eft_attestation_immutable" BEFORE UPDATE ON public."PayoutBatch" FOR EACH ROW EXECUTE FUNCTION public."protectPayoutEftAttestation"();
 
 
 --

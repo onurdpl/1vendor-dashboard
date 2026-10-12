@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +35,14 @@ const preparePayoutBatchMock = vi.mocked(preparePayoutBatch);
 const markPayoutBatchReviewMock = vi.mocked(markPayoutBatchReview);
 const markPayoutBatchPaidMock = vi.mocked(markPayoutBatchPaid);
 const cancelPayoutBatchMock = vi.mocked(cancelPayoutBatch);
+
+function enterBankEftTime() {
+  const dialog = screen.getByRole('dialog');
+  fireEvent.change(within(dialog).getByLabelText('Bank EFT execution date'), { target: { value: '2026-07-04' } });
+  fireEvent.change(within(dialog).getByLabelText('Bank EFT execution time'), { target: { value: '11:30:00' } });
+  fireEvent.change(within(dialog).getByLabelText('Bank record UTC offset (for example +03:00)'),
+    { target: { value: '+03:00' } });
+}
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -455,11 +463,13 @@ describe('AdminPaymentPreparationPage', () => {
     expect(within(dialog).getByLabelText('Payment reference optional')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Internal note optional')).toBeInTheDocument();
 
+    enterBankEftTime();
     await user.type(within(dialog).getByLabelText('Payment reference optional'), 'EFT-UI-123');
     await user.type(within(dialog).getByLabelText('Internal note optional'), 'Confirmed in bank portal');
     await user.click(within(dialog).getByRole('button', { name: 'Mark Paid' }));
 
     await waitFor(() => expect(markPayoutBatchPaidMock).toHaveBeenCalledWith('batch-review-raw-22222222', {
+      eftDeclaredAt: '2026-07-04T11:30:00+03:00',
       paymentReference: 'EFT-UI-123',
       internalNote: 'Confirmed in bank portal',
     }));
@@ -476,12 +486,25 @@ describe('AdminPaymentPreparationPage', () => {
 
     const panel = screen.getByLabelText('Payment preparation detail panel');
     await user.click(within(panel).getByRole('button', { name: 'Mark Paid' }));
+    enterBankEftTime();
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark Paid' }));
 
     await waitFor(() => expect(markPayoutBatchPaidMock).toHaveBeenCalledWith('batch-review-raw-22222222', {
+      eftDeclaredAt: '2026-07-04T11:30:00+03:00',
       paymentReference: undefined,
       internalNote: undefined,
     }));
+  });
+
+  it('does not send Mark Paid without an explicit bank EFT time and UTC offset', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await selectQueueRow(user, (row) => row.textContent?.includes('Mark Paid') ?? false);
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    await user.click(within(panel).getByRole('button', { name: 'Mark Paid' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark Paid' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter the bank EFT date, time and explicit UTC offset.');
+    expect(markPayoutBatchPaidMock).not.toHaveBeenCalled();
   });
 
   it('disables mark paid confirmation while pending', async () => {
@@ -496,6 +519,7 @@ describe('AdminPaymentPreparationPage', () => {
 
     const panel = screen.getByLabelText('Payment preparation detail panel');
     await user.click(within(panel).getByRole('button', { name: 'Mark Paid' }));
+    enterBankEftTime();
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark Paid' }));
 
     expect(screen.getByRole('button', { name: 'Marking paid...' })).toBeDisabled();
@@ -516,6 +540,7 @@ describe('AdminPaymentPreparationPage', () => {
 
     const panel = screen.getByLabelText('Payment preparation detail panel');
     await user.click(within(panel).getByRole('button', { name: 'Mark Paid' }));
+    enterBankEftTime();
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark Paid' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Only review payout batches can be marked paid.');

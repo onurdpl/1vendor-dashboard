@@ -33,12 +33,13 @@ export function markPayoutBatchReview(batchId: string) {
 
 export function markPayoutBatchPaid(
   batchId: string,
-  input: { paymentReference?: string | null; internalNote?: string | null } = {},
+  input: { eftDeclaredAt?: string | null; paymentReference?: string | null; internalNote?: string | null } = {},
 ) {
   const paymentReference = input.paymentReference?.trim();
   const internalNote = input.internalNote?.trim();
   return apiClient.post<PayoutBatch>(`/admin/payout-batches/${encodeURIComponent(batchId)}/mark-paid`, {
     paidAt: new Date().toISOString(),
+    ...(input.eftDeclaredAt ? { eftDeclaredAt: input.eftDeclaredAt } : {}),
     ...(paymentReference ? { paymentReference } : {}),
     ...(internalNote ? { internalNote } : {}),
   });

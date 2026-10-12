@@ -2278,7 +2278,7 @@ describe('payout batch preparation', () => {
       'admin-user',
     );
 
-    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(4);
     expect(prismaMock.$queryRaw.mock.invocationCallOrder[0])
       .toBeLessThan(prismaMock.payoutBatch.findUnique.mock.invocationCallOrder[0]);
     expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({

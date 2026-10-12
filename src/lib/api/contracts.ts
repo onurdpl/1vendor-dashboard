@@ -1815,6 +1815,10 @@ export type PayoutBatch = {
   createdByUserId: string | null;
   paidAt?: string | null;
   paidByUserId?: string | null;
+  eftExecutedAt?: string | null;
+  eftDeclaredAt?: string | null;
+  eftAttestedAt?: string | null;
+  eftAttestedByUserId?: string | null;
   paymentReference?: string | null;
   internalNote?: string | null;
   createdAt: string;

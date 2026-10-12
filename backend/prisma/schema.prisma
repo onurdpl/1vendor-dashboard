@@ -2282,6 +2282,10 @@ model PayoutBatch {
   createdByUserId         String?
   paidAt                  DateTime?
   paidByUserId            String?
+  eftExecutedAt           DateTime?
+  eftDeclaredAt           String?
+  eftAttestedAt           DateTime?
+  eftAttestedByUserId     String?
   paymentReference        String?
   internalNote            String?
   createdAt               DateTime             @default(now())

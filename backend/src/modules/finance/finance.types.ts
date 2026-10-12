@@ -373,6 +373,10 @@ export type PayoutBatchDto = {
   createdByUserId: string | null;
   paidAt: string | null;
   paidByUserId: string | null;
+  eftExecutedAt: string | null;
+  eftDeclaredAt: string | null;
+  eftAttestedAt: string | null;
+  eftAttestedByUserId: string | null;
   paymentReference: string | null;
   internalNote: string | null;
   createdAt: string;
@@ -391,6 +395,7 @@ export type PreparePayoutBatchDto = {
 
 export type MarkPayoutBatchPaidDto = {
   paidAt: string;
+  eftDeclaredAt?: string | null;
   paymentReference?: string | null;
   internalNote?: string | null;
 };

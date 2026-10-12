@@ -59,6 +59,8 @@ import {
   isLedgerVoided,
 } from './active-ledger-policy.service.js';
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
+import { parseAdminDeclaredEftTime } from './manual-eft-attestation.js';
+import { classifyR1EftRefundTiming } from './r1-eft-refund-timing.service.js';
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
   VENDOR_BLOCKED_FINANCE_HOLD_REASON,
@@ -1311,6 +1313,10 @@ function mapPayoutBatch(batch: {
   createdByUserId: string | null;
   paidAt?: Date | null;
   paidByUserId?: string | null;
+  eftExecutedAt?: Date | null;
+  eftDeclaredAt?: string | null;
+  eftAttestedAt?: Date | null;
+  eftAttestedByUserId?: string | null;
   paymentReference?: string | null;
   internalNote?: string | null;
   createdAt: Date;
@@ -1376,6 +1382,10 @@ function mapPayoutBatch(batch: {
     createdByUserId: batch.createdByUserId,
     paidAt: toIso(batch.paidAt),
     paidByUserId: batch.paidByUserId ?? null,
+    eftExecutedAt: toIso(batch.eftExecutedAt),
+    eftDeclaredAt: batch.eftDeclaredAt ?? null,
+    eftAttestedAt: toIso(batch.eftAttestedAt),
+    eftAttestedByUserId: batch.eftAttestedByUserId ?? null,
     paymentReference: batch.paymentReference ?? null,
     internalNote: batch.internalNote ?? null,
     createdAt: batch.createdAt.toISOString(),
@@ -3968,6 +3978,8 @@ function parseMarkPayoutBatchPaidInput(input: MarkPayoutBatchPaidDto) {
 
   return {
     paidAt,
+    eftDeclaredAt: normalizeOptionalPaymentEvidenceString(input.eftDeclaredAt),
+    eftExecutedAt: input.eftDeclaredAt?.trim() ? parseAdminDeclaredEftTime(input.eftDeclaredAt.trim()) : null,
     paymentReference: normalizeOptionalPaymentEvidenceString(input.paymentReference),
     internalNote: normalizeOptionalPaymentEvidenceString(input.internalNote),
   };
@@ -4069,6 +4081,14 @@ export async function markPayoutBatchPaid(
   const paymentEvidence = parseMarkPayoutBatchPaidInput(input);
 
   return prisma.$transaction(async (tx) => {
+    const [initialBatch] = await tx.$queryRaw<Array<{ vendorId: string }>>(Prisma.sql`
+      SELECT "vendorId" FROM "PayoutBatch" WHERE "id" = ${batchId}
+    `);
+    if (!initialBatch) throw new Error('Payout batch not found.');
+    const vendor = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${initialBatch.vendorId} FOR UPDATE
+    `);
+    if (vendor.length !== 1) throw new Error('Payout batch vendor not found.');
     await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT "id"
       FROM "PayoutBatch"
@@ -4095,6 +4115,7 @@ export async function markPayoutBatchPaid(
     if (!batch) {
       throw new Error('Payout batch not found.');
     }
+    if (batch.vendorId !== initialBatch.vendorId) throw new Error('Payout batch vendor changed.');
     if (batch.status === 'PAID') {
       throw new Error('Payout batch is already paid.');
     }
@@ -4104,6 +4125,16 @@ export async function markPayoutBatchPaid(
     if (batch.status !== 'REVIEW') {
       throw new Error('Only review payout batches can be marked paid.');
     }
+    // Phase 3A still forbids monetary R1 claim finalization. Classify exact
+    // accepted refund evidence first, but never interpret a post-EFT refund as
+    // permission to bypass the existing RESERVED-claim transition guard.
+    if (paymentEvidence.eftExecutedAt && await tx.payoutOffsetClaim.count({
+      where: { payoutBatchId: batchId, status: 'RESERVED' },
+    })) {
+      const timing = await classifyR1EftRefundTiming(tx, batchId, paymentEvidence.eftExecutedAt);
+      if (timing.unknownRefundLedgerIds.length) throw new Error('R1_EFT_REFUND_TIMING_UNKNOWN');
+      if (timing.beforeEftRefundLedgerIds.length) throw new Error('R1_REFUND_ACCEPTED_BEFORE_EFT');
+    }
     await assertNoReservedPayoutOffsetClaims(tx, batchId);
     if (batch.lines.length === 0 && batch.correctionCreditLines.length === 0 &&
         batch.correctionDeductionLines.length === 0 && batch.approvedDeductionLines.length === 0) {
@@ -4111,6 +4142,13 @@ export async function markPayoutBatchPaid(
     }
 
     const effectiveSettlementLineIds = await validatePayoutBatchBeforeTransitionWithClient(tx, batchId);
+
+    const [{ attestedAt }] = await tx.$queryRaw<Array<{ attestedAt: Date }>>(Prisma.sql`
+      SELECT clock_timestamp() AS "attestedAt"
+    `);
+    if (paymentEvidence.eftExecutedAt && paymentEvidence.eftExecutedAt.getTime() > attestedAt.getTime()) {
+      throw new Error('EFT execution time cannot be after its Admin attestation.');
+    }
 
     const batchUpdate = await tx.payoutBatch.updateMany({
       where: {
@@ -4121,6 +4159,12 @@ export async function markPayoutBatchPaid(
         status: 'PAID',
         paidAt: paymentEvidence.paidAt,
         paidByUserId,
+        ...(paymentEvidence.eftExecutedAt && paymentEvidence.eftDeclaredAt ? {
+          eftExecutedAt: paymentEvidence.eftExecutedAt,
+          eftDeclaredAt: paymentEvidence.eftDeclaredAt,
+          eftAttestedAt: attestedAt,
+          eftAttestedByUserId: paidByUserId,
+        } : {}),
         paymentReference: paymentEvidence.paymentReference,
         internalNote: paymentEvidence.internalNote,
       },

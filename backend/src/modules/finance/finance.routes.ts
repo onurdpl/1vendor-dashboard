@@ -935,13 +935,18 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       const { id } = request.params as { id: string };
       const input: MarkPayoutBatchPaidDto = {
         paidAt: readOptionalBodyString(request.body, 'paidAt') ?? '',
+        eftDeclaredAt: readOptionalBodyString(request.body, 'eftDeclaredAt'),
         paymentReference: readOptionalBodyString(request.body, 'paymentReference'),
         internalNote: readOptionalBodyString(request.body, 'internalNote'),
       };
       try {
         return await markPayoutBatchPaid(id, input, request.authUser.id);
       } catch (error) {
-        if (error instanceof Error && error.message === 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION') {
+        if (error instanceof Error && [
+          'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION',
+          'R1_EFT_REFUND_TIMING_UNKNOWN',
+          'R1_REFUND_ACCEPTED_BEFORE_EFT',
+        ].includes(error.message)) {
           return reply.code(409).send({ code: error.message, message: error.message });
         }
         if (error instanceof PayoutBatchTransitionRevalidationError) {
