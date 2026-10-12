@@ -2595,6 +2595,12 @@ export async function preparePayoutBatch(
     await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
     `);
+    // R1 remains disconnected from normal preparation. If an isolated R1 debt
+    // reservation exists, the legacy aggregate debt route cannot safely assign
+    // that same debt to a new payout without source-level reconciliation.
+    if (await tx.payoutOffsetClaim.count({
+      where: { vendorId: input.vendorId, sourceType: 'VENDOR_DEBT', status: { in: ['RESERVED', 'FINALIZED'] } },
+    })) throw new Error('R1_VENDOR_DEBT_RESERVATION_REQUIRES_SOURCE_LEVEL_RECONCILIATION');
     const unsettledApprovedCorrectionCredit = await tx.financialCorrectionCredit.findFirst({
       where: {
         vendorId: input.vendorId,

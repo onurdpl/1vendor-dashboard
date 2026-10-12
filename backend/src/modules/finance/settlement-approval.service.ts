@@ -2348,6 +2348,18 @@ async function createDraftApprovalInTransaction(
         }
         throw new Error('No eligible settlement rows are available for approval.');
       }
+      const directRefundIds = preview.lines
+        .filter((line) => line.lineType === SettlementApprovalLineType.REFUND)
+        .map((line) => line.financeLedgerEntryId);
+      if (directRefundIds.length > 0 && await tx.payoutOffsetClaim.count({
+        where: {
+          vendorId: input.vendorId, status: { in: ['RESERVED', 'FINALIZED'] },
+          OR: [
+            { settlementRefundAdjustment: { refundFinanceLedgerEntryId: { in: directRefundIds } } },
+            { vendorDebtOriginEvent: { financeLedgerEntryId: { in: directRefundIds } } },
+          ],
+        },
+      })) throw new Error('R1_DIRECT_REFUND_CONFLICTS_WITH_PAYOUT_RESERVATION');
       if (input.scheduledCycleKey) {
         const existingScheduledApproval = await tx.settlementApproval.findFirst({
           where: {
@@ -2367,6 +2379,20 @@ async function createDraftApprovalInTransaction(
         }
       }
       let availablePayableMinor = Math.max(preview.summary.netPayableMinor, 0);
+      const adjustmentIds = preview.pendingRefundAdjustments.records.map((record) => record.adjustmentId);
+      const payoutClaims = adjustmentIds.length > 0
+        ? await tx.payoutOffsetClaim.findMany({
+          where: { settlementRefundAdjustmentId: { in: adjustmentIds }, status: { in: ['RESERVED', 'FINALIZED'] } },
+          select: { settlementRefundAdjustmentId: true, reservedAmountMinor: true, status: true },
+        }) : [];
+      if (payoutClaims.some((claim) => claim.status === 'FINALIZED')) {
+        throw new Error('R1_FINALIZED_PAYOUT_ADJUSTMENT_REQUIRES_RECONCILIATION');
+      }
+      const reservedByAdjustment = new Map<string, number>();
+      for (const claim of payoutClaims) {
+        const id = claim.settlementRefundAdjustmentId!;
+        reservedByAdjustment.set(id, (reservedByAdjustment.get(id) ?? 0) + claim.reservedAmountMinor);
+      }
       const appliedAdjustmentPlans: Array<{
         record: PendingRefundAdjustmentApplicationPreview['records'][number];
         applyAmountMinor: number;
@@ -2375,7 +2401,9 @@ async function createDraftApprovalInTransaction(
         if (availablePayableMinor <= 0) {
           break;
         }
-        const applyAmountMinor = Math.min(record.remainingAmountMinor, availablePayableMinor);
+        const unreservedMinor = record.remainingAmountMinor - (reservedByAdjustment.get(record.adjustmentId) ?? 0);
+        if (unreservedMinor < 0) throw new Error('R1_REFUND_ADJUSTMENT_RESERVATION_EXCEEDS_REMAINING');
+        const applyAmountMinor = Math.min(unreservedMinor, availablePayableMinor);
         if (applyAmountMinor <= 0) {
           continue;
         }

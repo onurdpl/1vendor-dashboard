@@ -52,6 +52,10 @@ const prismaMock = vi.hoisted(() => ({
   payoutBatch: {
     create: vi.fn(),
   },
+  payoutOffsetClaim: {
+    count: vi.fn(),
+    findMany: vi.fn(),
+  },
   vendorBalanceEvent: {
     findMany: vi.fn(),
   },
@@ -367,6 +371,10 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementRefundAdjustmentEvent.create.mockReset();
     prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.payoutBatch.create.mockReset();
+    prismaMock.payoutOffsetClaim.count.mockReset();
+    prismaMock.payoutOffsetClaim.count.mockResolvedValue(0);
+    prismaMock.payoutOffsetClaim.findMany.mockReset();
+    prismaMock.payoutOffsetClaim.findMany.mockResolvedValue([]);
     prismaMock.vendorBalanceEvent.findMany.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
     prismaMock.financeIntegrityAlert.findMany.mockReset();

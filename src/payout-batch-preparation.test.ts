@@ -20,6 +20,9 @@ const prismaMock = vi.hoisted(() => ({
   payoutBatchLine: {
     findFirst: vi.fn(),
   },
+  payoutOffsetClaim: {
+    count: vi.fn(),
+  },
   settlementApprovalLine: {
     findMany: vi.fn(),
   },
@@ -385,6 +388,8 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatch.updateMany.mockReset();
     prismaMock.payoutBatchLine.findFirst.mockReset();
     prismaMock.payoutBatchLine.findFirst.mockResolvedValue(null);
+    prismaMock.payoutOffsetClaim.count.mockReset();
+    prismaMock.payoutOffsetClaim.count.mockResolvedValue(0);
     prismaMock.settlementApprovalLine.findMany.mockReset();
     prismaMock.settlementApprovalLine.findMany.mockResolvedValue([]);
     prismaMock.financialCorrectionCredit.findFirst.mockReset();

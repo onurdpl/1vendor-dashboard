@@ -45,8 +45,17 @@ export async function reconcilePayoutOffsetAuthority(input: {
     throw new Error('Vendor and currency are required for payout offset reconciliation.');
   }
 
-  return prisma.$transaction(async (tx) => {
-    const [adjustments, debtEvents, aggregateOffsets, claims] = await Promise.all([
+  return prisma.$transaction((tx) => reconcilePayoutOffsetAuthorityInTransaction(tx, input), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
+}
+
+/** The writer calls this only after taking the vendor lock in a Serializable transaction. */
+export async function reconcilePayoutOffsetAuthorityInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { vendorId: string; currency: string },
+): Promise<PayoutOffsetAuthorityDiagnostics> {
+    const [adjustments, debtEvents, aggregateOffsets, ambiguousDebtChanges, claims] = await Promise.all([
       tx.settlementRefundAdjustment.findMany({
         where: { vendorId: input.vendorId, currencyCode: input.currency },
         select: {
@@ -67,6 +76,11 @@ export async function reconcilePayoutOffsetAuthority(input: {
       tx.vendorBalanceEvent.findMany({
         where: { vendorId: input.vendorId, currency: input.currency, type: VendorBalanceEventType.VENDOR_DEBT_OFFSET },
         select: { id: true, amountMinor: true, payoutBatchId: true },
+      }),
+      tx.vendorBalanceEvent.count({
+        where: { vendorId: input.vendorId, currency: input.currency,
+          type: { in: [VendorBalanceEventType.DEBT_WAIVED, VendorBalanceEventType.MANUAL_ADJUSTMENT,
+            VendorBalanceEventType.PAYABLE_EARNED] } },
       }),
       tx.payoutOffsetClaim.findMany({
         where: { vendorId: input.vendorId, currency: input.currency },
@@ -213,20 +227,23 @@ export async function reconcilePayoutOffsetAuthority(input: {
       } else reasons.push('DEBT_SOURCE_AUTHORITY_AMBIGUOUS');
       if (event.amountMinor >= 0) reasons.push('DEBT_AMOUNT_INVALID');
       if (aggregateOffsets.length > 0) reasons.push('HISTORICAL_DEBT_OFFSET_SOURCE_ALLOCATION_UNKNOWN');
+      if (ambiguousDebtChanges > 0) reasons.push('HISTORICAL_DEBT_BALANCE_CHANGE_SOURCE_ALLOCATION_UNKNOWN');
       const activeReservationMinor = reservedFor('VENDOR_DEBT', event.id);
       if (finalizedFor('VENDOR_DEBT', event.id) > 0) reasons.push('PAYOUT_FINALIZATION_RECONCILIATION_NOT_ENABLED');
       if (activeReservationMinor > -event.amountMinor) reasons.push('RESERVATION_EXCEEDS_SOURCE');
+      const unreservedAmountMinor = reasons.length === 0 ? -event.amountMinor - activeReservationMinor : null;
       sources.push({
         sourceType: 'VENDOR_DEBT', sourceId: event.id,
         refundFinanceLedgerEntryId: event.financeLedgerEntryId,
         vendorId: event.vendorId, currency: event.currency, verifiedAt,
         originalAmountMinor: -event.amountMinor,
-        appliedAmountMinor: null, remainingAmountMinor: null,
-        activeReservationMinor, unreservedAmountMinor: null,
+        appliedAmountMinor: reasons.length === 0 ? 0 : null,
+        remainingAmountMinor: reasons.length === 0 ? -event.amountMinor : null,
+        activeReservationMinor, unreservedAmountMinor,
         status: reasons.includes('REFUND_ADJUSTMENT_AND_DEBT_CONFLICT') ||
           reasons.includes('DIRECT_REFUND_AND_DEBT_CONFLICT') || reasons.includes('RESERVATION_EXCEEDS_SOURCE')
-          ? 'BLOCKED' : 'UNKNOWN',
-        reasons: [...reasons, 'DEBT_SOURCE_REMAINING_NOT_ATTRIBUTED'],
+          ? 'BLOCKED' : reasons.length === 0 ? 'VERIFIED' : 'UNKNOWN',
+        reasons,
       });
     }
 
@@ -235,6 +252,7 @@ export async function reconcilePayoutOffsetAuthority(input: {
       : a.verifiedAt ? -1 : b.verifiedAt ? 1 : a.sourceType.localeCompare(b.sourceType) || a.sourceId.localeCompare(b.sourceId));
     const reasons: string[] = [];
     if (aggregateOffsets.length > 0) reasons.push('AGGREGATE_DEBT_OFFSETS_NOT_SOURCE_ATTRIBUTED');
+    if (ambiguousDebtChanges > 0) reasons.push('DEBT_BALANCE_CHANGES_NOT_SOURCE_ATTRIBUTED');
     if (sources.some((source) => source.status === 'BLOCKED')) reasons.push('SOURCE_CONFLICT_OR_OVERSUBSCRIPTION');
     if (sources.some((source) => source.status === 'UNKNOWN')) reasons.push('SOURCE_AUTHORITY_INCOMPLETE');
     return {
@@ -243,5 +261,4 @@ export async function reconcilePayoutOffsetAuthority(input: {
       status: reasons.includes('SOURCE_CONFLICT_OR_OVERSUBSCRIPTION') ? 'BLOCKED' : reasons.length > 0 ? 'UNKNOWN' : 'VERIFIED',
       sources, claims: claimRows, reasons,
     };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }
