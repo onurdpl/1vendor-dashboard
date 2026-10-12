@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminPaymentPreparationPage } from './AdminPaymentPreparationPage';
 import {
   cancelPayoutBatch,
+  cancelR1ReviewPayout,
+  completeR1CashlessPayout,
+  getAdminPayoutOffsetObligations,
   getPaymentPreparationReadiness,
+  getR1PayoutStatus,
   listPayoutBatches,
   markPayoutBatchPaid,
   markPayoutBatchReview,
@@ -21,7 +25,11 @@ vi.mock('../features/finance/paymentPreparationApi', async (importOriginal) => {
   return {
     ...actual,
     cancelPayoutBatch: vi.fn(),
+    cancelR1ReviewPayout: vi.fn(),
+    completeR1CashlessPayout: vi.fn(),
+    getAdminPayoutOffsetObligations: vi.fn(),
     getPaymentPreparationReadiness: vi.fn(),
+    getR1PayoutStatus: vi.fn(),
     listPayoutBatches: vi.fn(),
     markPayoutBatchPaid: vi.fn(),
     markPayoutBatchReview: vi.fn(),
@@ -35,6 +43,10 @@ const preparePayoutBatchMock = vi.mocked(preparePayoutBatch);
 const markPayoutBatchReviewMock = vi.mocked(markPayoutBatchReview);
 const markPayoutBatchPaidMock = vi.mocked(markPayoutBatchPaid);
 const cancelPayoutBatchMock = vi.mocked(cancelPayoutBatch);
+const getR1PayoutStatusMock = vi.mocked(getR1PayoutStatus);
+const getAdminPayoutOffsetObligationsMock = vi.mocked(getAdminPayoutOffsetObligations);
+const cancelR1ReviewPayoutMock = vi.mocked(cancelR1ReviewPayout);
+const completeR1CashlessPayoutMock = vi.mocked(completeR1CashlessPayout);
 
 function enterBankEftTime() {
   const dialog = screen.getByRole('dialog');
@@ -202,6 +214,12 @@ beforeEach(() => {
   setCurrentVendorId('yalispor');
   listPayoutBatchesMock.mockResolvedValue(payoutBatches);
   getPaymentPreparationReadinessMock.mockResolvedValue(financeDashboard);
+  getR1PayoutStatusMock.mockResolvedValue({ enabled: false });
+  getAdminPayoutOffsetObligationsMock.mockResolvedValue({ vendorId: 'yalispor', currency: 'TRY',
+    status: 'VERIFIED', outstandingRefundAmount: '0.00', outstandingDebtAmount: '0.00',
+    reservedRefundAmount: '0.00', reservedDebtAmount: '0.00', reasons: [], writesPerformed: false });
+  cancelR1ReviewPayoutMock.mockResolvedValue(makeBatch({ status: 'cancelled' }));
+  completeR1CashlessPayoutMock.mockResolvedValue(makeBatch({ status: 'cashless_completed' }));
   preparePayoutBatchMock.mockResolvedValue(makeBatch({ id: 'batch-prepared-raw-66666666', status: 'draft' }));
   markPayoutBatchReviewMock.mockResolvedValue(makeBatch({ id: 'batch-draft-raw-11111111', status: 'review' }));
   markPayoutBatchPaidMock.mockResolvedValue(makeBatch({
@@ -397,10 +415,57 @@ describe('AdminPaymentPreparationPage', () => {
     expect(dialog).toHaveTextContent('This will prepare a payout batch for the selected payment period.');
     await user.click(within(dialog).getByRole('button', { name: 'Prepare Batch' }));
 
-    await waitFor(() => expect(preparePayoutBatchMock).toHaveBeenCalledWith('yalispor'));
+    await waitFor(() => expect(preparePayoutBatchMock).toHaveBeenCalledWith('yalispor', expect.any(String)));
     expect(await screen.findByText('Payment batch prepared.')).toBeInTheDocument();
     await waitFor(() => expect(listPayoutBatchesMock.mock.calls.length).toBeGreaterThan(initialBatchCalls));
     await waitFor(() => expect(getPaymentPreparationReadinessMock.mock.calls.length).toBeGreaterThan(initialReadinessCalls));
+  });
+
+  it('shows exact R1 refund and debt lineage and requires the declared bank EFT amount', async () => {
+    getR1PayoutStatusMock.mockResolvedValue({ enabled: true });
+    listPayoutBatchesMock.mockResolvedValue([makeBatch({ id: 'r1-review', status: 'review',
+      r1OffsetAmount: '200.00', r1RefundOffsetAmount: '200.00', r1DebtOffsetAmount: '0.00',
+      r1ApprovedPayable: '1000.00', refundAmount: '0.00', netAmount: '800.00' })]);
+    const user = userEvent.setup();
+    renderPage();
+    await selectQueueRow(user, (row) => row.textContent?.includes('Payment draft') ?? false);
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(await within(panel).findByText('Verified R1 payment authority')).toBeInTheDocument();
+    expect(within(panel).getByText('Additional exact refund offset')).toBeInTheDocument();
+    expect(within(panel).getByText('Net bank payment')).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Mark Paid' }));
+    enterBankEftTime();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark Paid' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter the exact bank EFT amount');
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('Actual bank EFT amount (TRY)'),
+      { target: { value: '800.00' } });
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark Paid' }));
+    await waitFor(() => expect(markPayoutBatchPaidMock).toHaveBeenCalledWith('r1-review',
+      expect.objectContaining({ eftAmountMinor: 80000 })));
+  });
+
+  it('keeps zero-net R1 completion distinct from bank Mark Paid and requires both confirmations', async () => {
+    getR1PayoutStatusMock.mockResolvedValue({ enabled: true });
+    listPayoutBatchesMock.mockResolvedValue([makeBatch({ id: 'r1-zero', status: 'review',
+      r1OffsetAmount: '440.00', r1RefundOffsetAmount: '440.00', r1DebtOffsetAmount: '0.00',
+      r1ApprovedPayable: '440.00', netAmount: '0.00' })]);
+    const user = userEvent.setup();
+    renderPage();
+    await selectQueueRow(user, (row) => row.textContent?.includes('Payment draft') ?? false);
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(await within(panel).findByRole('button', { name: 'Complete Cashless Offset' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Mark Paid' })).not.toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Complete Cashless Offset' }));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Complete Cashless' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Written reason');
+    await user.type(within(dialog).getByLabelText('Written reason'), 'Verified full offset');
+    await user.click(within(dialog).getByLabelText('I confirm no external EFT was sent.'));
+    await user.click(within(dialog).getByLabelText('I confirm zero-cash offset completion; this is not a bank payment.'));
+    await user.click(within(dialog).getByRole('button', { name: 'Complete Cashless' }));
+    await waitFor(() => expect(completeR1CashlessPayoutMock).toHaveBeenCalledWith(
+      'r1-zero', 'Verified full offset'));
+    expect(markPayoutBatchPaidMock).not.toHaveBeenCalled();
   });
 
   it('keeps a standalone correction credit ready after a historical paid payout', async () => {

@@ -228,6 +228,8 @@ export type PayoutBatchReferenceDto = {
   id: string;
   status: PayoutBatchStatusDto;
   netAmount: string;
+  r1OffsetAmount: string;
+  r1ApprovedPayable: string | null;
   createdAt: string;
   paidAt: string | null;
   paymentReference: string | null;
@@ -370,6 +372,9 @@ export type PayoutBatchDto = {
   debtOffsetAmount: string;
   netAmount: string;
   r1OffsetAmount: string;
+  r1RefundOffsetAmount: string | null;
+  r1DebtOffsetAmount: string | null;
+  r1ApprovedPayable: string | null;
   remainingDebtAmount: string;
   currency: string;
   createdByUserId: string | null;

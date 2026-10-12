@@ -10,7 +10,11 @@ import {
 } from '../components/OperationalPrimitives';
 import {
   cancelPayoutBatch,
+  cancelR1ReviewPayout,
+  completeR1CashlessPayout,
+  getAdminPayoutOffsetObligations,
   getPaymentPreparationReadiness,
+  getR1PayoutStatus,
   listPayoutBatches,
   markPayoutBatchPaid,
   markPayoutBatchReview,
@@ -23,12 +27,12 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatCurrency, formatDateTime, parseSafeDate } from '../services/real/formatting';
 
-type WorkflowTab = 'all' | 'ready_to_prepare' | 'draft' | 'review' | 'approved' | 'paid' | 'cancelled';
+type WorkflowTab = 'all' | 'ready_to_prepare' | 'draft' | 'review' | 'approved' | 'paid' | 'cashless_completed' | 'cancelled';
 type StatusFilter = 'all' | 'ready_to_prepare' | PayoutBatchStatus;
-type QueueStatus = 'Ready' | 'Needs Review' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled';
-type NextAction = 'Prepare Batch' | 'Mark for Review' | 'Mark Paid' | 'No action available';
+type QueueStatus = 'Ready' | 'Needs Review' | 'In Review' | 'Approved' | 'Paid' | 'Cashless Completed' | 'Cancelled';
+type NextAction = 'Prepare Batch' | 'Mark for Review' | 'Mark Paid' | 'Complete Cashless' | 'No action available';
 type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Ready';
-type PaymentAction = 'prepare' | 'mark_review' | 'mark_paid' | 'cancel';
+type PaymentAction = 'prepare' | 'mark_review' | 'mark_paid' | 'cancel' | 'cancel_review' | 'complete_cashless';
 
 type PaymentQueueItem =
   | {
@@ -53,6 +57,7 @@ const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'review', label: 'In Review' },
   { id: 'approved', label: 'Approved' },
   { id: 'paid', label: 'Paid' },
+  { id: 'cashless_completed', label: 'Cashless' },
   { id: 'cancelled', label: 'Cancelled' },
 ];
 
@@ -64,6 +69,7 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'approved', label: 'Approved' },
   { value: 'execution_pending', label: 'In Review' },
   { value: 'paid', label: 'Paid' },
+  { value: 'cashless_completed', label: 'Cashless completed' },
   { value: 'paid_placeholder', label: 'Payment evidence pending' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
@@ -128,6 +134,14 @@ function formatOptionalPaymentAmount(value: string | null | undefined, emptyLabe
 
 function hasAmount(value: string | null | undefined) {
   return Math.abs(getAmountValue(value)) > 0.0001;
+}
+
+function parseEnteredEftMinor(value: string) {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) throw new Error('Enter the exact bank EFT amount with at most two decimal places.');
+  const minor = Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0'));
+  if (!Number.isSafeInteger(minor) || minor <= 0) throw new Error('Bank EFT amount must be positive and exact.');
+  return minor;
 }
 
 function getSafeVendorLabel(vendorId: string, currentVendorId: string, currentVendorName: string) {
@@ -216,6 +230,9 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
   if (item.batch.status === 'paid') {
     return 'Paid';
   }
+  if (item.batch.status === 'cashless_completed') {
+    return 'Cashless Completed';
+  }
   if (item.batch.status === 'paid_placeholder') {
     return 'In Review';
   }
@@ -226,7 +243,7 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
 }
 
 function getStatusTone(status: QueueStatus) {
-  if (status === 'Ready' || status === 'Approved' || status === 'Paid') return 'success' as const;
+  if (status === 'Ready' || status === 'Approved' || status === 'Paid' || status === 'Cashless Completed') return 'success' as const;
   if (status === 'Needs Review') return 'info' as const;
   if (status === 'In Review') return 'attention' as const;
   if (status === 'Cancelled') return 'neutral' as const;
@@ -285,28 +302,32 @@ function getWaitingReason(item: PaymentQueueItem) {
   return null;
 }
 
-function getNextAction(item: PaymentQueueItem): NextAction {
+function getNextAction(item: PaymentQueueItem, r1Enabled: boolean): NextAction {
   if (item.source === 'ready') {
     return 'Prepare Batch';
   }
+  if (hasAmount(item.batch.r1OffsetAmount) && !r1Enabled) return 'No action available';
   if (item.batch.status === 'draft') {
     return 'Mark for Review';
   }
   if (item.batch.status === 'review') {
-    return 'Mark Paid';
+    return hasAmount(item.batch.r1OffsetAmount) && !hasAmount(item.batch.netAmount) ? 'Complete Cashless' : 'Mark Paid';
   }
   return 'No action available';
 }
 
-function getSupportedPaymentActions(item: PaymentQueueItem): PaymentAction[] {
+function getSupportedPaymentActions(item: PaymentQueueItem, r1Enabled: boolean): PaymentAction[] {
   if (item.source === 'ready') {
     return ['prepare'];
   }
+  if (hasAmount(item.batch.r1OffsetAmount) && !r1Enabled) return [];
   if (item.batch.status === 'draft') {
     return ['mark_review', 'cancel'];
   }
   if (item.batch.status === 'review') {
-    return ['mark_paid'];
+    return hasAmount(item.batch.r1OffsetAmount) && !hasAmount(item.batch.netAmount)
+      ? ['complete_cashless', 'cancel_review'] : hasAmount(item.batch.r1OffsetAmount)
+        ? ['mark_paid', 'cancel_review'] : ['mark_paid'];
   }
   return [];
 }
@@ -340,7 +361,7 @@ function matchesStatusFilter(item: PaymentQueueItem, statusFilter: StatusFilter)
   return item.source === 'batch' && item.batch.status === statusFilter;
 }
 
-function buildSearchHaystack(item: PaymentQueueItem, vendorLabel: string) {
+function buildSearchHaystack(item: PaymentQueueItem, vendorLabel: string, r1Enabled: boolean) {
   const payment = getPaymentLabel(item);
   return [
     vendorLabel,
@@ -348,7 +369,7 @@ function buildSearchHaystack(item: PaymentQueueItem, vendorLabel: string) {
     payment.primary,
     payment.secondary,
     getQueueStatus(item),
-    getNextAction(item),
+    getNextAction(item, r1Enabled),
     getIssues(item).join(' '),
     getWaitingReason(item),
     getGrossAmount(item),
@@ -388,6 +409,11 @@ function PaymentActionConfirmationModal({
   eftUtcOffset,
   paymentReference,
   internalNote,
+  actionReason,
+  confirmNoEft,
+  confirmCashless,
+  eftAmount,
+  r1Payment,
   submitting,
   onCancel,
   onConfirm,
@@ -396,6 +422,10 @@ function PaymentActionConfirmationModal({
   onEftUtcOffsetChange,
   onPaymentReferenceChange,
   onInternalNoteChange,
+  onActionReasonChange,
+  onConfirmNoEftChange,
+  onConfirmCashlessChange,
+  onEftAmountChange,
 }: {
   action: PaymentAction;
   eftDate: string;
@@ -403,6 +433,11 @@ function PaymentActionConfirmationModal({
   eftUtcOffset: string;
   paymentReference: string;
   internalNote: string;
+  actionReason: string;
+  confirmNoEft: boolean;
+  confirmCashless: boolean;
+  eftAmount: string;
+  r1Payment: boolean;
   submitting: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -411,6 +446,10 @@ function PaymentActionConfirmationModal({
   onEftUtcOffsetChange: (value: string) => void;
   onPaymentReferenceChange: (value: string) => void;
   onInternalNoteChange: (value: string) => void;
+  onActionReasonChange: (value: string) => void;
+  onConfirmNoEftChange: (value: boolean) => void;
+  onConfirmCashlessChange: (value: boolean) => void;
+  onEftAmountChange: (value: string) => void;
 }) {
   const actionConfig: Record<PaymentAction, { title: string; body: string; confirmLabel: string; pendingLabel: string }> = {
     prepare: {
@@ -437,6 +476,18 @@ function PaymentActionConfirmationModal({
       confirmLabel: 'Cancel Batch',
       pendingLabel: 'Cancelling...',
     },
+    cancel_review: {
+      title: 'Cancel R1 review before EFT?',
+      body: 'Confirm no external bank EFT was sent. The exact reservations will be released for controlled repreparation.',
+      confirmLabel: 'Cancel Review',
+      pendingLabel: 'Cancelling...',
+    },
+    complete_cashless: {
+      title: 'Complete zero-cash offset?',
+      body: 'Confirm the verified obligations fully consume this payment and no EFT was sent. This is not Mark Paid.',
+      confirmLabel: 'Complete Cashless',
+      pendingLabel: 'Completing...',
+    },
   };
   const config = actionConfig[action];
 
@@ -461,6 +512,12 @@ function PaymentActionConfirmationModal({
               <span>Bank record UTC offset (for example +03:00)</span>
               <input value={eftUtcOffset} onChange={(event) => onEftUtcOffsetChange(event.currentTarget.value)} placeholder="+03:00" required />
             </label>
+            {r1Payment ? (
+              <label>
+                <span>Actual bank EFT amount (TRY)</span>
+                <input inputMode="decimal" value={eftAmount} onChange={(event) => onEftAmountChange(event.currentTarget.value)} required />
+              </label>
+            ) : null}
             <label>
               <span>Payment reference optional</span>
               <input
@@ -476,6 +533,20 @@ function PaymentActionConfirmationModal({
                 rows={3}
               />
             </label>
+          </div>
+        ) : null}
+        {action === 'cancel_review' || action === 'complete_cashless' ? (
+          <div className="op-form-grid">
+            <label><span>Written reason</span><textarea value={actionReason}
+              onChange={(event) => onActionReasonChange(event.currentTarget.value)} rows={3} required /></label>
+            <label className="op-checkbox-row"><input type="checkbox" checked={confirmNoEft}
+              onChange={(event) => onConfirmNoEftChange(event.currentTarget.checked)} />
+              <span>I confirm no external EFT was sent.</span></label>
+            {action === 'complete_cashless' ? (
+              <label className="op-checkbox-row"><input type="checkbox" checked={confirmCashless}
+                onChange={(event) => onConfirmCashlessChange(event.currentTarget.checked)} />
+                <span>I confirm zero-cash offset completion; this is not a bank payment.</span></label>
+            ) : null}
           </div>
         ) : null}
         <div className="scheduled-settlements-modal-actions">
@@ -511,6 +582,24 @@ export function AdminPaymentPreparationPage() {
   const [eftTime, setEftTime] = useState('');
   const [eftUtcOffset, setEftUtcOffset] = useState('');
   const [internalNote, setInternalNote] = useState('');
+  const [actionReason, setActionReason] = useState('');
+  const [confirmNoEft, setConfirmNoEft] = useState(false);
+  const [confirmCashless, setConfirmCashless] = useState(false);
+  const [eftAmount, setEftAmount] = useState('');
+  const [preparationRequestId, setPreparationRequestId] = useState<string | null>(null);
+
+  const r1StatusQuery = useQueryResource(
+    ['admin', 'finance', 'r1-payout-status'],
+    ({ signal }) => getR1PayoutStatus(signal),
+    { routeName: 'Payment preparation', endpoint: '/admin/finance/r1-payout-status' },
+  );
+  const r1Enabled = r1StatusQuery.data?.enabled === true;
+  const obligationsQuery = useQueryResource(
+    ['admin', 'finance', 'r1-obligations', vendorFilter],
+    ({ signal }) => getAdminPayoutOffsetObligations(vendorFilter, signal),
+    { enabled: r1Enabled && Boolean(vendorFilter), routeName: 'Payment preparation',
+      endpoint: '/admin/finance/r1-payout-obligations' },
+  );
 
   const batchesQuery = useQueryResource(
     ['admin', 'finance', 'payment-preparation', 'batches', vendorFilter],
@@ -552,12 +641,12 @@ export function AdminPaymentPreparationPage() {
       if (highValueOnly && Math.abs(getAmountValue(getNetPayable(item))) < HIGH_VALUE_AMOUNT) {
         return false;
       }
-      if (normalizedSearch && !buildSearchHaystack(item, vendorLabel).includes(normalizedSearch)) {
+      if (normalizedSearch && !buildSearchHaystack(item, vendorLabel, r1Enabled).includes(normalizedSearch)) {
         return false;
       }
       return true;
     });
-  }, [currentVendorId, currentVendorName, highValueOnly, periodFilter, queueItems, search, statusFilter]);
+  }, [currentVendorId, currentVendorName, highValueOnly, periodFilter, queueItems, r1Enabled, search, statusFilter]);
 
   const workflowCounts = WORKFLOW_TABS.reduce<Record<WorkflowTab, number>>((counts, tab) => {
     counts[tab.id] = advancedFilteredItems.filter((item) => matchesWorkflow(item, tab.id)).length;
@@ -569,13 +658,14 @@ export function AdminPaymentPreparationPage() {
     review: 0,
     approved: 0,
     paid: 0,
+    cashless_completed: 0,
     cancelled: 0,
   });
 
   const visibleItems = advancedFilteredItems.filter((item) => matchesWorkflow(item, workflowTab));
   const selectedItem = visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0] ?? null;
   const selectedWaitingReason = selectedItem ? getWaitingReason(selectedItem) : null;
-  const supportedActions = selectedItem ? getSupportedPaymentActions(selectedItem) : [];
+  const supportedActions = selectedItem ? getSupportedPaymentActions(selectedItem, r1Enabled) : [];
   const loading = batchesQuery.isLoading || readinessQuery.isLoading;
   const blockingError = batchesQuery.isError || readinessQuery.isError;
   const errorDescription =
@@ -585,6 +675,7 @@ export function AdminPaymentPreparationPage() {
     await Promise.all([
       batchesQuery.refetch(),
       readinessQuery.refetch(),
+      ...(r1Enabled && vendorFilter ? [obligationsQuery.refetch()] : []),
     ]);
   }
 
@@ -596,6 +687,11 @@ export function AdminPaymentPreparationPage() {
     setEftTime('');
     setEftUtcOffset('');
     setInternalNote('');
+    setActionReason('');
+    setConfirmNoEft(false);
+    setConfirmCashless(false);
+    setEftAmount('');
+    setPreparationRequestId(action === 'prepare' ? crypto.randomUUID() : null);
     setPendingAction(action);
   }
 
@@ -608,7 +704,8 @@ export function AdminPaymentPreparationPage() {
     setActionSuccess(null);
     try {
       if (pendingAction === 'prepare') {
-        await preparePayoutBatch(selectedItem.vendorId);
+        await preparePayoutBatch(selectedItem.vendorId, preparationRequestId ?? crypto.randomUUID());
+        setPreparationRequestId(null);
         setActionSuccess('Payment batch prepared.');
       } else if (pendingAction === 'mark_review' && selectedItem.source === 'batch') {
         await markPayoutBatchReview(selectedItem.batch.id);
@@ -620,6 +717,7 @@ export function AdminPaymentPreparationPage() {
         const seconds = eftTime.length === 5 ? ':00' : '';
         await markPayoutBatchPaid(selectedItem.batch.id, {
           eftDeclaredAt: `${eftDate}T${eftTime}${seconds}${eftUtcOffset.trim()}`,
+          ...(hasAmount(selectedItem.batch.r1OffsetAmount) ? { eftAmountMinor: parseEnteredEftMinor(eftAmount) } : {}),
           paymentReference: paymentReference.trim() || undefined,
           internalNote: internalNote.trim() || undefined,
         });
@@ -627,6 +725,16 @@ export function AdminPaymentPreparationPage() {
       } else if (pendingAction === 'cancel' && selectedItem.source === 'batch') {
         await cancelPayoutBatch(selectedItem.batch.id);
         setActionSuccess('Payment batch cancelled.');
+      } else if (pendingAction === 'cancel_review' && selectedItem.source === 'batch') {
+        if (!actionReason.trim() || !confirmNoEft) throw new Error('Written reason and no-EFT confirmation are required.');
+        await cancelR1ReviewPayout(selectedItem.batch.id, actionReason.trim());
+        setActionSuccess('R1 review cancelled; reservations released.');
+      } else if (pendingAction === 'complete_cashless' && selectedItem.source === 'batch') {
+        if (!actionReason.trim() || !confirmNoEft || !confirmCashless) {
+          throw new Error('Written reason, no-EFT and cashless confirmations are required.');
+        }
+        await completeR1CashlessPayout(selectedItem.batch.id, actionReason.trim());
+        setActionSuccess('Cashless offset completed. No bank payment recorded.');
       }
       setPendingAction(null);
       await refetchQueue();
@@ -758,7 +866,7 @@ export function AdminPaymentPreparationPage() {
                         <StatusBadge key={issue} tone={issue === 'Ready' ? 'success' : 'warning'}>{issue}</StatusBadge>
                       ))}
                     </span>
-                    <span><strong>{getNextAction(item)}</strong></span>
+                    <span><strong>{getNextAction(item, r1Enabled)}</strong></span>
                     <span>{formatDate(getItemUpdatedAt(item))}</span>
                   </OperationalTableRow>
                 );
@@ -784,7 +892,7 @@ export function AdminPaymentPreparationPage() {
                   ) : null}
 
                   <MetadataGroup title="Next Action">
-                    <MetadataRow label="Action" value={getNextAction(selectedItem)} />
+                    <MetadataRow label="Action" value={getNextAction(selectedItem, r1Enabled)} />
                     {supportedActions.length ? (
                       <div className="scheduled-panel-actions">
                         {supportedActions.includes('prepare') ? (
@@ -817,6 +925,18 @@ export function AdminPaymentPreparationPage() {
                             Mark Paid
                           </button>
                         ) : null}
+                        {supportedActions.includes('complete_cashless') ? (
+                          <button type="button" className="button button-primary"
+                            onClick={() => openAction('complete_cashless')} disabled={actionSubmitting}>
+                            Complete Cashless Offset
+                          </button>
+                        ) : null}
+                        {supportedActions.includes('cancel_review') ? (
+                          <button type="button" className="button button-secondary"
+                            onClick={() => openAction('cancel_review')} disabled={actionSubmitting}>
+                            Cancel Review (No EFT)
+                          </button>
+                        ) : null}
                         {supportedActions.includes('cancel') ? (
                           <button
                             type="button"
@@ -830,6 +950,41 @@ export function AdminPaymentPreparationPage() {
                       </div>
                     ) : null}
                   </MetadataGroup>
+
+                  {selectedItem.source === 'batch' && hasAmount(selectedItem.batch.r1OffsetAmount) ? (
+                    <MetadataGroup title="Verified R1 payment authority">
+                      <MetadataRow label="Approved payable (before R1 offsets)"
+                        value={formatPaymentAmount(selectedItem.batch.r1ApprovedPayable)} />
+                      <MetadataRow label="Refund already in approved settlement"
+                        value={formatPaymentAmount(selectedItem.batch.refundAmount)} />
+                      <MetadataRow label="Additional exact refund offset"
+                        value={selectedItem.batch.r1RefundOffsetAmount === null ? 'Unknown' :
+                          formatPaymentAmount(selectedItem.batch.r1RefundOffsetAmount)} />
+                      <MetadataRow label="Exact Vendor Debt offset"
+                        value={selectedItem.batch.r1DebtOffsetAmount === null ? 'Unknown' :
+                          formatPaymentAmount(selectedItem.batch.r1DebtOffsetAmount)} />
+                      <MetadataRow label="Net bank payment"
+                        value={selectedItem.batch.status === 'cashless_completed' ? 'No EFT — cashless completion' :
+                          formatPaymentAmount(selectedItem.batch.netAmount)} />
+                    </MetadataGroup>
+                  ) : null}
+                  {r1Enabled && selectedItem.vendorId === vendorFilter ? (
+                    <MetadataGroup title="Current outstanding obligations">
+                      <MetadataRow label="Authority" value={obligationsQuery.data?.status ?? 'Unknown'} />
+                      <MetadataRow label="Refund obligations outstanding (including reservations)"
+                        value={obligationsQuery.data?.outstandingRefundAmount ?? 'Unknown'} />
+                      <MetadataRow label="Vendor Debt outstanding (including reservations)"
+                        value={obligationsQuery.data?.outstandingDebtAmount ?? 'Unknown'} />
+                      <MetadataRow label="Reserved refund / debt"
+                        value={obligationsQuery.data?.status === 'VERIFIED'
+                          ? `${obligationsQuery.data.reservedRefundAmount} / ${obligationsQuery.data.reservedDebtAmount}`
+                          : 'Unknown'} />
+                      <MetadataRow label="Remaining available after reserved offsets (refund / debt)"
+                        value={obligationsQuery.data?.status === 'VERIFIED'
+                          ? `${obligationsQuery.data.availableAfterReservationsRefundAmount} / ${obligationsQuery.data.availableAfterReservationsDebtAmount}`
+                          : 'Unknown'} />
+                    </MetadataGroup>
+                  ) : null}
 
                   <MetadataGroup title="Payment Impact">
                     {(selectedItem.source === 'batch' && hasAmount(selectedItem.batch.correctionCreditAmount)) ||
@@ -918,6 +1073,10 @@ export function AdminPaymentPreparationPage() {
                               {selectedItem.batch.paymentReference ? <small>Payment reference {selectedItem.batch.paymentReference}</small> : null}
                             </li>
                           ) : null}
+                          {selectedItem.batch.status === 'cashless_completed' ? (
+                            <li><strong>Cashless offset completed — no EFT</strong>
+                              <span>{formatDate(selectedItem.batch.updatedAt)}</span></li>
+                          ) : null}
                           {selectedItem.batch.status === 'cancelled' ? <li><strong>Cancelled</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li> : null}
                         </>
                       ) : (
@@ -941,6 +1100,11 @@ export function AdminPaymentPreparationPage() {
           eftUtcOffset={eftUtcOffset}
           paymentReference={paymentReference}
           internalNote={internalNote}
+          actionReason={actionReason}
+          confirmNoEft={confirmNoEft}
+          confirmCashless={confirmCashless}
+          eftAmount={eftAmount}
+          r1Payment={selectedItem?.source === 'batch' && hasAmount(selectedItem.batch.r1OffsetAmount)}
           submitting={actionSubmitting}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void handleConfirmAction()}
@@ -949,6 +1113,10 @@ export function AdminPaymentPreparationPage() {
           onEftUtcOffsetChange={setEftUtcOffset}
           onPaymentReferenceChange={setPaymentReference}
           onInternalNoteChange={setInternalNote}
+          onActionReasonChange={setActionReason}
+          onConfirmNoEftChange={setConfirmNoEft}
+          onConfirmCashlessChange={setConfirmCashless}
+          onEftAmountChange={setEftAmount}
         />
       ) : null}
     </section>

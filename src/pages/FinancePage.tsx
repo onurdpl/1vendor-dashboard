@@ -24,6 +24,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import {
   attachShippingCost,
   getFinanceDashboard,
+  getPayoutOffsetObligations,
   getVendorDebtHistory,
   preparePayoutBatch,
 } from '../features/finance/api';
@@ -1651,6 +1652,13 @@ export function FinancePage() {
     ({ signal }) => (currentUser?.role === 'admin' ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     { enabled: authContextReady },
   );
+  const latestR1Batch = finance?.payoutBatchSummary?.latestBatch;
+  const hasR1Payment = latestR1Batch?.r1OffsetAmount && !isZeroCurrencyValue(latestR1Batch.r1OffsetAmount);
+  const { data: payoutOffsetObligations } = useQueryResource(
+    ['finance', 'payout-offset-obligations', currentVendor.vendorId],
+    ({ signal }) => getPayoutOffsetObligations({ signal }),
+    { enabled: authContextReady && Boolean(hasR1Payment) },
+  );
   const { message, tone, showFeedback } = useActionFeedback();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -2478,6 +2486,28 @@ export function FinancePage() {
                         : 'No draft prepared'
                   }
                 />
+                {hasR1Payment && latestR1Batch ? (
+                  <>
+                    <MetadataRow label={isVendorUser ? 'Onaylanmış hak ediş' : 'Approved entitlement'}
+                      value={financeValueOrUnknown(latestR1Batch.r1ApprovedPayable)} />
+                    <MetadataRow label={isVendorUser ? 'Doğrulanmış iade mahsubu' : 'Verified refund offset'}
+                      value={financeValueOrUnknown(latestR1Batch.r1RefundOffsetAmount)} />
+                    <MetadataRow label={isVendorUser ? 'Doğrulanmış borç mahsubu' : 'Verified debt offset'}
+                      value={financeValueOrUnknown(latestR1Batch.r1DebtOffsetAmount)} />
+                    <MetadataRow label={isVendorUser ? 'Banka ile ödenen nakit' : 'Actual cash paid'}
+                      value={latestR1Batch.status === 'cashless_completed' ? '0.00 TRY — EFT yapılmadı' :
+                        latestR1Batch.status === 'paid' ? latestR1Batch.netAmount :
+                          isVendorUser ? 'Henüz ödenmedi' : 'Not paid yet'} />
+                    <MetadataRow label={isVendorUser ? 'Açık iade / borç yükümlülüğü' : 'Outstanding refund / debt obligation'}
+                      value={payoutOffsetObligations?.status === 'VERIFIED'
+                        ? `${payoutOffsetObligations.outstandingRefundAmount} / ${payoutOffsetObligations.outstandingDebtAmount}`
+                        : isVendorUser ? 'Doğrulanamadı' : 'Unknown'} />
+                    <MetadataRow label={isVendorUser ? 'Rezervasyon sonrası kalan iade / borç' : 'Remaining refund / debt after reservations'}
+                      value={payoutOffsetObligations?.status === 'VERIFIED'
+                        ? `${payoutOffsetObligations.availableAfterReservationsRefundAmount} / ${payoutOffsetObligations.availableAfterReservationsDebtAmount}`
+                        : isVendorUser ? 'Doğrulanamadı' : 'Unknown'} />
+                  </>
+                ) : null}
               </div>
               {isAdmin ? (
                 <div className="finance-payout-prep-actions">
@@ -2724,6 +2754,19 @@ export function FinancePage() {
                       value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
                     />
                   )}
+                  {selectedRecord.payoutBatch?.r1OffsetAmount &&
+                    !isZeroCurrencyValue(selectedRecord.payoutBatch.r1OffsetAmount) ? (
+                    <>
+                      <MetadataRow label={isVendorUser ? 'Ödeme dönemi onaylı hak edişi' : 'Batch approved entitlement'}
+                        value={financeValueOrUnknown(selectedRecord.payoutBatch.r1ApprovedPayable)} />
+                      <MetadataRow label={isVendorUser ? 'Ödeme dönemi doğrulanmış mahsup' : 'Batch verified offset'}
+                        value={selectedRecord.payoutBatch.r1OffsetAmount} />
+                      <MetadataRow label={isVendorUser ? 'Ödeme dönemi nakit tutarı' : 'Batch bank cash'}
+                        value={selectedRecord.payoutBatch.status === 'cashless_completed'
+                          ? '0.00 TRY — EFT yapılmadı' : selectedRecord.payoutBatch.status === 'paid'
+                            ? selectedRecord.payoutBatch.netAmount : isVendorUser ? 'Henüz ödenmedi' : 'Not paid yet'} />
+                    </>
+                  ) : null}
                   {selectedPaymentEligibility === 'Not eligible' && !showCanonicalRefundFinancialPreview && !suppressSelectedSaleRefundNegativeEstimate ? (
                     <p className="page-description">This amount is not currently payable.</p>
                   ) : null}

@@ -12,6 +12,7 @@ export {
   getSettlementScheduleDryRun,
   getSettlementReplacementAssessment,
   getVendorDebtHistory,
+  getPayoutOffsetObligations,
   preparePayoutBatch,
   rescanFinanceIntegrityAlert,
   retryEconomicTransfer,

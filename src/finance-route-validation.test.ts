@@ -38,6 +38,13 @@ const applyReviewPayoutCorrectionMock = vi.hoisted(() => vi.fn());
 const cancelPayoutBatchMock = vi.hoisted(() => vi.fn());
 const markPayoutBatchReviewMock = vi.hoisted(() => vi.fn());
 const markPayoutBatchPaidMock = vi.hoisted(() => vi.fn());
+const getPayoutBatchMock = vi.hoisted(() => vi.fn());
+const getPayoutOffsetObligationSummaryMock = vi.hoisted(() => vi.fn());
+const prepareAdminPayoutBatchWithR1Mock = vi.hoisted(() => vi.fn());
+const markR1PayoutBatchReviewMock = vi.hoisted(() => vi.fn());
+const markR1PayoutBatchPaidMock = vi.hoisted(() => vi.fn());
+const cancelR1ReviewPayoutBeforeEftMock = vi.hoisted(() => vi.fn());
+const completeR1CashlessPayoutMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -123,7 +130,8 @@ const FinanceIntegrityAlertLifecycleErrorMock = vi.hoisted(() =>
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: cancelPayoutBatchMock,
-  getPayoutBatch: vi.fn(),
+  getPayoutBatch: getPayoutBatchMock,
+  getPayoutOffsetObligationSummary: getPayoutOffsetObligationSummaryMock,
   getVendorFinanceDashboard: vi.fn(),
   getVendorFinanceSummary: getVendorFinanceSummaryMock,
   getVendorFinancialProfile: getVendorFinancialProfileMock,
@@ -132,6 +140,11 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   listPayoutBatches: vi.fn(),
   markPayoutBatchPaid: markPayoutBatchPaidMock,
   markPayoutBatchReview: markPayoutBatchReviewMock,
+  markR1PayoutBatchPaid: markR1PayoutBatchPaidMock,
+  markR1PayoutBatchReview: markR1PayoutBatchReviewMock,
+  cancelR1ReviewPayoutBeforeEft: cancelR1ReviewPayoutBeforeEftMock,
+  completeR1CashlessPayout: completeR1CashlessPayoutMock,
+  prepareAdminPayoutBatchWithR1: prepareAdminPayoutBatchWithR1Mock,
   PayoutBatchTransitionRevalidationError: class PayoutBatchTransitionRevalidationError extends Error {
     blockers: unknown[];
 
@@ -276,7 +289,7 @@ function createRegisteredPutRoutes() {
   return puts;
 }
 
-function createRegisteredGetRoutes() {
+function createRegisteredGetRoutes(env: Record<string, unknown> = {}) {
   const gets = new Map<string, GetHandler>();
   const app = {
     get: vi.fn((path: string, _options: unknown, handler: GetHandler) => {
@@ -286,11 +299,11 @@ function createRegisteredGetRoutes() {
     put: vi.fn(),
   };
 
-  registerFinanceRoutes(app as never, {} as never);
+  registerFinanceRoutes(app as never, env as never);
   return gets;
 }
 
-function createRegisteredPostRoutes() {
+function createRegisteredPostRoutes(env: Record<string, unknown> = {}) {
   const posts = new Map<string, PostHandler>();
   const app = {
     get: vi.fn(),
@@ -300,7 +313,7 @@ function createRegisteredPostRoutes() {
     put: vi.fn(),
   };
 
-  registerFinanceRoutes(app as never, {} as never);
+  registerFinanceRoutes(app as never, env as never);
   return posts;
 }
 
@@ -825,6 +838,92 @@ describe('finance route validation', () => {
       paidAt: body.paidAt, eftDeclaredAt: body.eftDeclaredAt,
       paymentReference: body.paymentReference, internalNote: null,
     }, 'admin-1');
+  });
+
+  it('keeps R1 writing disabled by default and requires an Admin with a stable preparation identity', async () => {
+    const path = '/admin/payout-batches/prepare';
+    const disabled = createRegisteredPostRoutes();
+    const denied = createReply();
+    await disabled.get('/admin/payout-batches/:id/r1-complete-cashless')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'batch-1' }, body: {
+        reason: 'Reconciled', confirmCashlessCompletion: true, confirmEftNotSent: true,
+      },
+    }, denied);
+    expect(denied.statusCode).toBe(404);
+    expect(completeR1CashlessPayoutMock).not.toHaveBeenCalled();
+
+    const enabled = createRegisteredPostRoutes({ R1_PAYOUT_ADMIN_ENABLED: true });
+    const vendor = createReply();
+    await enabled.get(path)?.({ authUser: { role: 'vendor', id: 'vendor-1' }, body: {
+      vendorId: 'vendor-1', requestId: 'stable-1',
+    } }, vendor);
+    expect(vendor.statusCode).toBe(403);
+    const missing = createReply();
+    await enabled.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, body: {
+      vendorId: 'vendor-1',
+    } }, missing);
+    expect(missing.statusCode).toBe(400);
+    prepareAdminPayoutBatchWithR1Mock.mockResolvedValue({ id: 'r1-batch' });
+    const allowed = createReply();
+    expect(await enabled.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, body: {
+      vendorId: 'vendor-1', requestId: 'stable-1',
+    } }, allowed)).toEqual({ id: 'r1-batch' });
+    expect(prepareAdminPayoutBatchWithR1Mock).toHaveBeenCalledWith({ vendorId: 'vendor-1',
+      requestId: 'stable-1' }, 'admin-1', 'stable-1');
+  });
+
+  it('routes verified R1 REVIEW and payment transitions without changing claimsless handlers', async () => {
+    const posts = createRegisteredPostRoutes({ R1_PAYOUT_ADMIN_ENABLED: true });
+    getPayoutBatchMock.mockResolvedValue({ id: 'r1-batch', r1OffsetAmount: '200.00' });
+    markR1PayoutBatchReviewMock.mockResolvedValue({ id: 'r1-batch', status: 'review' });
+    const review = createReply();
+    await posts.get('/admin/payout-batches/:id/mark-review')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'r1-batch' },
+    }, review);
+    expect(markR1PayoutBatchReviewMock).toHaveBeenCalledWith('r1-batch');
+    expect(markPayoutBatchReviewMock).not.toHaveBeenCalled();
+
+    markR1PayoutBatchPaidMock.mockResolvedValue({ id: 'r1-batch', status: 'paid' });
+    const paid = createReply();
+    await posts.get('/admin/payout-batches/:id/mark-paid')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'r1-batch' }, body: {
+        paidAt: '2026-10-12T12:10:00.000Z', eftDeclaredAt: '2026-10-12T15:00:00+03:00',
+        eftAmountMinor: 80000,
+      },
+    }, paid);
+    expect(markR1PayoutBatchPaidMock).toHaveBeenCalledWith('r1-batch', {
+      paidAt: '2026-10-12T12:10:00.000Z', eftDeclaredAt: '2026-10-12T15:00:00+03:00',
+      paymentReference: null, internalNote: null,
+    }, 'admin-1', 80000);
+    expect(markPayoutBatchPaidMock).not.toHaveBeenCalled();
+
+    getPayoutBatchMock.mockResolvedValueOnce({ id: 'legacy-batch', r1OffsetAmount: '0.00' });
+    markPayoutBatchReviewMock.mockResolvedValue({ id: 'legacy-batch', status: 'review' });
+    await posts.get('/admin/payout-batches/:id/mark-review')?.({
+      authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'legacy-batch' },
+    }, createReply());
+    expect(markPayoutBatchReviewMock).toHaveBeenCalledWith('legacy-batch');
+  });
+
+  it('requires explicit no-EFT and cashless confirmations from Admin only', async () => {
+    const path = '/admin/payout-batches/:id/r1-complete-cashless';
+    const posts = createRegisteredPostRoutes({ R1_PAYOUT_ADMIN_ENABLED: true });
+    const vendor = createReply();
+    await posts.get(path)?.({ authUser: { role: 'vendor', id: 'vendor-1' }, params: { id: 'batch-1' },
+      body: { reason: 'Reconciled', confirmCashlessCompletion: true, confirmEftNotSent: true } }, vendor);
+    expect(vendor.statusCode).toBe(403);
+    const incomplete = createReply();
+    await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'batch-1' },
+      body: { reason: 'Reconciled', confirmCashlessCompletion: true } }, incomplete);
+    expect(incomplete.statusCode).toBe(400);
+    completeR1CashlessPayoutMock.mockResolvedValue({ id: 'batch-1', status: 'cashless_completed' });
+    const allowed = createReply();
+    expect(await posts.get(path)?.({ authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'batch-1' },
+      body: { reason: 'Reconciled', confirmCashlessCompletion: true, confirmEftNotSent: true,
+        actorUserId: 'forged' } }, allowed)).toEqual({ id: 'batch-1', status: 'cashless_completed' });
+    expect(completeR1CashlessPayoutMock).toHaveBeenCalledWith({ payoutBatchId: 'batch-1',
+      actorUserId: 'admin-1', reason: 'Reconciled', confirmCashlessCompletion: true,
+      confirmEftNotSent: true });
   });
 
   it('returns only dashboard finance summary fields', async () => {

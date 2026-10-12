@@ -1067,7 +1067,11 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
       .rejects.toThrow('Cashless completed payout batches cannot be cancelled.');
     await expect(cancelSettlement(draft.id, actorUserId))
       .rejects.toThrow('linked to a cashless completed payout batch');
-    await expect(completeR1Cashless(input)).rejects.toThrow();
+    expect(await completeR1Cashless(input)).toMatchObject({ id: prepared.payoutBatchId,
+      status: 'cashless_completed', netAmount: '0.00', paidAt: null });
+    expect(await db.payoutR1CashlessCompletion.count({ where: { payoutBatchId: prepared.payoutBatchId } })).toBe(1);
+    expect((await db.payoutOffsetClaimEvent.findMany({ where: { payoutOffsetClaimId: claim.id } }))
+      .map((event) => event.eventType).sort()).toEqual(['FINALIZED', 'RESERVED']);
     await expect(prepareR1Payout({ vendorId }, actorUserId, next('duplicate-cashless-source'))).rejects.toThrow();
 
     const nextCapacity = await makeEligibleUnsettledSale(vendorId, 440, 0);
@@ -1465,5 +1469,233 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
     });
     expect(timing.afterEftRefundLedgerIds).toContain(refund.refundLedgerId);
     expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: fixture.batchId } })).status).toBe('REVIEW');
+  });
+
+  it('connects the Admin HTTP payout workflow to exact R1 money and vendor-scoped visibility', async () => {
+    const vendorId = next('http-vendor');
+    const otherVendorId = next('http-other-vendor');
+    await db.vendor.createMany({ data: [
+      { id: vendorId, name: vendorId }, { id: otherVendorId, name: otherVendorId },
+    ] });
+    const original = await makeSale(vendorId, 30000, new Date('2026-01-01T00:00:00.000Z'), 0);
+    const capacity = await makeEligibleUnsettledSale(vendorId, 100000, 0);
+    const draft = await createDraft({ vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [capacity.allocationId], asOfDate: new Date() });
+    await approveSettlement(draft.id, 'r1-http-admin');
+    const refund = await makeRefund(vendorId, original, 20000);
+    const adminId = next('http-admin');
+    const vendorUserId = next('http-vendor-user');
+    const otherUserId = next('http-other-user');
+    const password = next('http-password');
+    const { hashPasswordArgon2id } = await import('../backend/src/modules/auth/password-hashing.js');
+    const passwordHash = await hashPasswordArgon2id(password);
+    await db.user.createMany({ data: [
+      { id: adminId, email: `${adminId}@example.test`, name: 'R1 HTTP Admin', role: 'ADMIN', passwordHash },
+      { id: vendorUserId, email: `${vendorUserId}@example.test`, name: 'R1 Vendor', role: 'VENDOR', passwordHash },
+      { id: otherUserId, email: `${otherUserId}@example.test`, name: 'Other Vendor', role: 'VENDOR', passwordHash },
+    ] });
+    await db.userVendorAccess.createMany({ data: [
+      { userId: vendorUserId, vendorId }, { userId: otherUserId, vendorId: otherVendorId },
+    ] });
+    const oldFlag = process.env.R1_PAYOUT_ADMIN_ENABLED;
+    process.env.R1_PAYOUT_ADMIN_ENABLED = 'true';
+    process.env.SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED = 'false';
+    process.env.SCHEDULED_RECONCILIATION_ENABLED = 'false';
+    process.env.CANONICAL_RECONCILIATION_ENABLED = 'false';
+    process.env.SOPYO_DELIVERY_POLLING_ENABLED = 'false';
+    process.env.SOPYO_ORDER_PUSH_WORKER_ENABLED = 'false';
+    process.env.SHIPPING_EXECUTION_ENABLED = 'false';
+    process.env.KARGONOMI_BASE_URL = 'http://127.0.0.1:1';
+    process.env.KARGONOMI_API_TOKEN = 'disposable-r1-http-test-only';
+    const { createApp } = await import('../backend/src/app.js');
+    const app = createApp();
+    try {
+      const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+      async function login(email: string) {
+        const response = await fetch(`${origin}/auth/login`, { method: 'POST',
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        expect(response.status).toBe(200);
+        return { cookie: response.headers.get('set-cookie')!.split(';', 1)[0]!,
+          csrfToken: (await response.json()).csrfToken as string };
+      }
+      const adminCookie = await login(`${adminId}@example.test`);
+      const vendorCookie = await login(`${vendorUserId}@example.test`);
+      const otherCookie = await login(`${otherUserId}@example.test`);
+      const request = (path: string, session: { cookie: string; csrfToken: string }, body?: unknown) => fetch(`${origin}${path}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { cookie: session.cookie, 'x-csrf-token': session.csrfToken, 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      expect((await (await request('/admin/finance/r1-payout-status', adminCookie)).json()).enabled).toBe(true);
+      expect((await request('/admin/payout-batches/prepare', vendorCookie, { vendorId })).status).toBe(403);
+      expect((await request(`/admin/finance/r1-payout-obligations/${vendorId}`, otherCookie)).status).toBe(403);
+      const ownBefore = await request('/finance/payout-offset-obligations', vendorCookie);
+      expect(ownBefore.status).toBe(200);
+      expect(await ownBefore.json()).toMatchObject({ vendorId, status: 'VERIFIED',
+        outstandingRefundAmount: '200.00' });
+      const idempotencyKey = next('http-request');
+      const prepare = await request('/admin/payout-batches/prepare', adminCookie,
+        { vendorId, requestId: idempotencyKey });
+      expect(prepare.status).toBe(200);
+      const batch = await prepare.json();
+      expect(batch).toMatchObject({ vendorId, status: 'draft', netAmount: '800.00',
+        r1OffsetAmount: '200.00', r1RefundOffsetAmount: '200.00', r1ApprovedPayable: '1000.00' });
+      expect(batch.lines.map((line: { financeLedgerEntryId: string }) => line.financeLedgerEntryId))
+        .toEqual([capacity.saleId]);
+      expect(await (await request(`/admin/finance/r1-payout-obligations/${vendorId}`, adminCookie)).json())
+        .toMatchObject({ outstandingRefundAmount: '200.00', reservedRefundAmount: '200.00',
+          availableAfterReservationsRefundAmount: '0.00' });
+      const retry = await request('/admin/payout-batches/prepare', adminCookie,
+        { vendorId, requestId: idempotencyKey });
+      expect(retry.status).toBe(200);
+      expect((await retry.json()).id).toBe(batch.id);
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: batch.id } })).toBe(1);
+      const reviewResponse = await request(`/admin/payout-batches/${batch.id}/mark-review`, adminCookie, {});
+      expect(reviewResponse.status).toBe(200);
+      expect(await reviewResponse.json()).toMatchObject({ r1RefundOffsetAmount: '200.00',
+        r1ApprovedPayable: '1000.00' });
+      const declared = new Date(Date.now() - 1_000).toISOString().replace('Z', '+00:00');
+      const paidResponse = await request(`/admin/payout-batches/${batch.id}/mark-paid`, adminCookie,
+        { paidAt: new Date().toISOString(), eftDeclaredAt: declared,
+          paymentReference: next('http-bank-reference'), eftAmountMinor: 80000 });
+      expect(paidResponse.status).toBe(200);
+      expect(await paidResponse.json()).toMatchObject({ status: 'paid', netAmount: '800.00',
+        r1RefundOffsetAmount: '200.00', r1ApprovedPayable: '1000.00' });
+      const [persisted, claim, adjustment] = await Promise.all([
+        db.payoutBatch.findUniqueOrThrow({ where: { id: batch.id }, include: { lines: true } }),
+        db.payoutOffsetClaim.findFirstOrThrow({ where: { payoutBatchId: batch.id } }),
+        db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: refund.sourceId } }),
+      ]);
+      expect(persisted).toMatchObject({ status: 'PAID', eftAmountMinor: 80000, r1OffsetTotalMinor: 20000 });
+      expect(persisted.lines.map((line) => line.financeLedgerEntryId)).toEqual([capacity.saleId]);
+      expect(claim.status).toBe('FINALIZED');
+      expect(adjustment).toMatchObject({ appliedAmountMinor: 20000, remainingAmountMinor: 0 });
+      expect((await request('/finance/payout-offset-obligations', otherCookie)).status).toBe(200);
+      expect(await (await request('/finance/payout-offset-obligations', otherCookie)).json())
+        .toMatchObject({ vendorId: otherVendorId, outstandingRefundAmount: '0.00' });
+
+      async function createR1HttpCandidate(baseMinor: number, refundMinor: number) {
+        const candidateVendorId = next('http-r1-vendor');
+        await db.vendor.create({ data: { id: candidateVendorId, name: candidateVendorId } });
+        const historical = await makeSale(candidateVendorId, Math.max(refundMinor, 1000),
+          new Date('2026-01-01T00:00:00.000Z'), 0);
+        const payable = await makeEligibleUnsettledSale(candidateVendorId, baseMinor, 0);
+        const candidateDraft = await createDraft({ vendorId: candidateVendorId,
+          candidateScope: 'selected_allocations', selectedAllocationIds: [payable.allocationId],
+          asOfDate: new Date() });
+        await approveSettlement(candidateDraft.id, adminId);
+        const obligation = await makeRefund(candidateVendorId, historical, refundMinor);
+        const response = await request('/admin/payout-batches/prepare', adminCookie,
+          { vendorId: candidateVendorId, requestId: next('http-request') });
+        expect(response.status).toBe(200);
+        return { vendorId: candidateVendorId, payable, obligation, batch: await response.json() };
+      }
+
+      const zero = await createR1HttpCandidate(440, 880);
+      expect(zero.batch).toMatchObject({ netAmount: '0.00', r1OffsetAmount: '4.40' });
+      expect((await request(`/admin/payout-batches/${zero.batch.id}/mark-review`, adminCookie, {})).status).toBe(200);
+      expect((await request(`/admin/payout-batches/${zero.batch.id}/mark-paid`, adminCookie,
+        { paidAt: new Date().toISOString(), eftAmountMinor: 0 })).status).not.toBe(200);
+      const cashlessBody = { reason: 'Exact zero cash with no EFT', confirmCashlessCompletion: true,
+        confirmEftNotSent: true };
+      const cashlessResponse = await request(`/admin/payout-batches/${zero.batch.id}/r1-complete-cashless`,
+        adminCookie, cashlessBody);
+      expect(cashlessResponse.status).toBe(200);
+      expect(await cashlessResponse.json()).toMatchObject({ status: 'cashless_completed',
+        netAmount: '0.00', paidAt: null, r1RefundOffsetAmount: '4.40' });
+      const cashlessRetry = await request(`/admin/payout-batches/${zero.batch.id}/r1-complete-cashless`,
+        adminCookie, cashlessBody);
+      expect(cashlessRetry.status).toBe(200);
+      expect((await cashlessRetry.json()).id).toBe(zero.batch.id);
+      expect(await db.payoutR1CashlessCompletion.count({ where: { payoutBatchId: zero.batch.id } })).toBe(1);
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: zero.batch.id,
+        status: 'FINALIZED' } })).toBe(1);
+      expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: zero.batch.id } })).paidAt).toBeNull();
+      expect(await (await request(`/admin/finance/r1-payout-obligations/${zero.vendorId}`, adminCookie)).json())
+        .toMatchObject({ outstandingRefundAmount: '4.40', reservedRefundAmount: '0.00',
+          availableAfterReservationsRefundAmount: '4.40' });
+
+      const toCancel = await createR1HttpCandidate(100000, 20000);
+      expect((await request(`/admin/payout-batches/${toCancel.batch.id}/mark-review`, adminCookie, {})).status).toBe(200);
+      expect((await request(`/admin/payout-batches/${toCancel.batch.id}/r1-cancel-review`, adminCookie,
+        { reason: 'No EFT sent' })).status).toBe(400);
+      const cancellation = await request(`/admin/payout-batches/${toCancel.batch.id}/r1-cancel-review`,
+        adminCookie, { reason: 'No EFT sent', confirmEftNotSent: true });
+      expect(cancellation.status).toBe(200);
+      expect(await cancellation.json()).toMatchObject({ status: 'cancelled' });
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: toCancel.batch.id,
+        status: 'RELEASED' } })).toBe(1);
+      expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: toCancel.batch.id } })).paidAt).toBeNull();
+
+      const ordinaryVendorId = next('http-claimsless-vendor');
+      await db.vendor.create({ data: { id: ordinaryVendorId, name: ordinaryVendorId } });
+      const ordinarySale = await makeEligibleUnsettledSale(ordinaryVendorId, 12000, 0);
+      const ordinaryDraft = await createDraft({ vendorId: ordinaryVendorId,
+        candidateScope: 'selected_allocations', selectedAllocationIds: [ordinarySale.allocationId],
+        asOfDate: new Date() });
+      await approveSettlement(ordinaryDraft.id, adminId);
+      const ordinaryResponse = await request('/admin/payout-batches/prepare', adminCookie,
+        { vendorId: ordinaryVendorId, requestId: next('http-ordinary-request') });
+      expect(ordinaryResponse.status).toBe(200);
+      expect(await ordinaryResponse.json()).toMatchObject({ vendorId: ordinaryVendorId,
+        status: 'draft', netAmount: '120.00', r1OffsetAmount: '0.00' });
+      expect(await db.payoutOffsetClaim.count({ where: { vendorId: ordinaryVendorId } })).toBe(0);
+    } finally {
+      await app.close();
+      if (oldFlag === undefined) delete process.env.R1_PAYOUT_ADMIN_ENABLED;
+      else process.env.R1_PAYOUT_ADMIN_ENABLED = oldFlag;
+    }
+  });
+
+  it('keeps real Admin HTTP preparation claimsless and R1 writes closed when the rollout gate is off', async () => {
+    const oldFlag = process.env.R1_PAYOUT_ADMIN_ENABLED;
+    const vendorId = next('http-disabled-vendor');
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    const sale = await makeEligibleUnsettledSale(vendorId, 12000, 0);
+    const draft = await createDraft({ vendorId, candidateScope: 'selected_allocations',
+      selectedAllocationIds: [sale.allocationId], asOfDate: new Date() });
+    const adminId = next('http-disabled-admin');
+    const password = next('http-disabled-password');
+    const { hashPasswordArgon2id } = await import('../backend/src/modules/auth/password-hashing.js');
+    await db.user.create({ data: { id: adminId, email: `${adminId}@example.test`,
+      name: 'R1 disabled Admin', role: 'ADMIN', passwordHash: await hashPasswordArgon2id(password) } });
+    await approveSettlement(draft.id, adminId);
+    process.env.R1_PAYOUT_ADMIN_ENABLED = 'false';
+    process.env.SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED = 'false';
+    process.env.SCHEDULED_RECONCILIATION_ENABLED = 'false';
+    process.env.CANONICAL_RECONCILIATION_ENABLED = 'false';
+    process.env.SOPYO_DELIVERY_POLLING_ENABLED = 'false';
+    process.env.SOPYO_ORDER_PUSH_WORKER_ENABLED = 'false';
+    process.env.SHIPPING_EXECUTION_ENABLED = 'false';
+    process.env.KARGONOMI_BASE_URL = 'http://127.0.0.1:1';
+    process.env.KARGONOMI_API_TOKEN = 'disposable-r1-http-test-only';
+    const { createApp } = await import('../backend/src/app.js');
+    const app = createApp();
+    try {
+      const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+      const login = await fetch(`${origin}/auth/login`, { method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: `${adminId}@example.test`, password }) });
+      expect(login.status).toBe(200);
+      const cookie = login.headers.get('set-cookie')!.split(';', 1)[0]!;
+      const csrfToken = (await login.json()).csrfToken as string;
+      const headers = { cookie, 'x-csrf-token': csrfToken, 'content-type': 'application/json' };
+      expect(await (await fetch(`${origin}/admin/finance/r1-payout-status`, { headers })).json())
+        .toEqual({ enabled: false });
+      const prepared = await fetch(`${origin}/admin/payout-batches/prepare`, { method: 'POST', headers,
+        body: JSON.stringify({ vendorId }) });
+      expect(prepared.status).toBe(200);
+      const batch = await prepared.json();
+      expect(batch).toMatchObject({ vendorId, netAmount: '120.00', r1OffsetAmount: '0.00' });
+      expect(await db.payoutOffsetClaim.count({ where: { vendorId } })).toBe(0);
+      const forbidden = await fetch(`${origin}/admin/payout-batches/${batch.id}/r1-complete-cashless`, {
+        method: 'POST', headers, body: JSON.stringify({ reason: 'Not allowed',
+          confirmCashlessCompletion: true, confirmEftNotSent: true }) });
+      expect(forbidden.status).toBe(404);
+    } finally {
+      await app.close();
+      if (oldFlag === undefined) delete process.env.R1_PAYOUT_ADMIN_ENABLED;
+      else process.env.R1_PAYOUT_ADMIN_ENABLED = oldFlag;
+    }
   });
 });

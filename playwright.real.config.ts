@@ -7,6 +7,7 @@ const allowedSpecs = [
   'financial-correction-zero-net.real.spec.ts',
   'financial-correction-approved-no-payout-deduction.real.spec.ts',
   'settlement-replacement.real.spec.ts',
+  'r1-payout.real.spec.ts',
 ];
 const selectedSpec = process.env.BROWSER_SMOKE_REAL_SPEC ?? allowedSpecs[0];
 if (!allowedSpecs.includes(selectedSpec)) {

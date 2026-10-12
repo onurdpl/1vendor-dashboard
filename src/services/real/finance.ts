@@ -505,7 +505,7 @@ export function retryEconomicTransfer(
 }
 
 export function preparePayoutBatch(vendorId: string): Promise<PayoutBatch> {
-  return apiClient.post<PayoutBatch>('/admin/payout-batches/prepare', { vendorId });
+  return apiClient.post<PayoutBatch>('/admin/payout-batches/prepare', { vendorId, requestId: crypto.randomUUID() });
 }
 
 export function attachShippingCost(input: {

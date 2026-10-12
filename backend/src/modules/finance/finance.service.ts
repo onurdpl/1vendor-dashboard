@@ -65,7 +65,7 @@ import { reserveVerifiedPayoutOffsetsInTransaction } from './payout-offset-reser
 import { assertR1PayoutMonetaryAuthority } from './payout-offset-lifecycle.service.js';
 import { proveR1ClaimCoveredRefunds, proveR1MissedRefundsForSentEft, type R1MissedRefundProof } from './payout-offset-missed-refund.service.js';
 import { finalizeR1PayoutOffsetClaimsInTransaction } from './payout-offset-finalization.service.js';
-import { reconcilePayoutOffsetAuthorityInTransaction } from './payout-offset-authority-diagnostics.service.js';
+import { reconcilePayoutOffsetAuthority, reconcilePayoutOffsetAuthorityInTransaction } from './payout-offset-authority-diagnostics.service.js';
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
   VENDOR_BLOCKED_FINANCE_HOLD_REASON,
@@ -1320,6 +1320,7 @@ function mapPayoutBatch(batch: {
   correctionDeductionAmount: unknown;
   netAmount: unknown;
   r1OffsetTotalMinor?: number;
+  payoutOffsetClaims?: Array<{ sourceType: string; reservedAmountMinor: number; status: string }>;
   currency: string;
   createdByUserId: string | null;
   paidAt?: Date | null;
@@ -1363,6 +1364,11 @@ function mapPayoutBatch(batch: {
     : {};
   const netAmount = toNumber(batch.netAmount);
   const netAmountMinor = toMinorUnits(netAmount);
+  const r1OffsetMinor = batch.r1OffsetTotalMinor ?? 0;
+  const r1RefundOffsetMinor = batch.payoutOffsetClaims?.filter((claim) => claim.sourceType === 'REFUND_ADJUSTMENT')
+    .reduce((sum, claim) => sum + claim.reservedAmountMinor, 0);
+  const r1DebtOffsetMinor = batch.payoutOffsetClaims?.filter((claim) => claim.sourceType === 'VENDOR_DEBT')
+    .reduce((sum, claim) => sum + claim.reservedAmountMinor, 0);
   const payableBeforeDebtOffsetMinor = Number.isFinite(Number(metadata.grossPayableMinor))
     ? Number(metadata.grossPayableMinor)
     : netAmountMinor + debtOffsetMinor;
@@ -1388,7 +1394,10 @@ function mapPayoutBatch(batch: {
     outstandingDebtAmount: toAmountString(outstandingDebtMinor / 100),
     debtOffsetAmount: toAmountString(debtOffsetMinor / 100),
     netAmount: toAmountString(netAmount),
-    r1OffsetAmount: toAmountString((batch.r1OffsetTotalMinor ?? 0) / 100),
+    r1OffsetAmount: toAmountString(r1OffsetMinor / 100),
+    r1RefundOffsetAmount: r1RefundOffsetMinor === undefined ? null : toAmountString(r1RefundOffsetMinor / 100),
+    r1DebtOffsetAmount: r1DebtOffsetMinor === undefined ? null : toAmountString(r1DebtOffsetMinor / 100),
+    r1ApprovedPayable: r1OffsetMinor > 0 ? toAmountString((netAmountMinor + r1OffsetMinor) / 100) : null,
     remainingDebtAmount: toAmountString(remainingDebtMinor / 100),
     currency: batch.currency,
     createdByUserId: batch.createdByUserId,
@@ -1434,6 +1443,7 @@ function mapPayoutBatchReference(line?: {
     id: string;
     status: string;
     netAmount: unknown;
+    r1OffsetTotalMinor: number;
     createdAt: Date;
     paidAt?: Date | null;
     paymentReference?: string | null;
@@ -1447,6 +1457,9 @@ function mapPayoutBatchReference(line?: {
     id: line.payoutBatch.id,
     status: mapPayoutBatchStatus(line.payoutBatch.status),
     netAmount: toAmountString(toNumber(line.payoutBatch.netAmount)),
+    r1OffsetAmount: toAmountString(line.payoutBatch.r1OffsetTotalMinor / 100),
+    r1ApprovedPayable: line.payoutBatch.r1OffsetTotalMinor > 0
+      ? toAmountString(toNumber(line.payoutBatch.netAmount) + line.payoutBatch.r1OffsetTotalMinor / 100) : null,
     createdAt: line.payoutBatch.createdAt.toISOString(),
     paidAt: toIso(line.payoutBatch.paidAt),
     paymentReference: line.payoutBatch.paymentReference ?? null,
@@ -1802,6 +1815,7 @@ export async function getVendorFinanceDashboard(
                 id: true,
                 status: true,
                 netAmount: true,
+                r1OffsetTotalMinor: true,
                 createdAt: true,
                 paidAt: true,
                 paymentReference: true,
@@ -1968,6 +1982,7 @@ export async function getVendorFinanceDashboard(
           },
         },
         vendorBalanceEvents: true,
+        payoutOffsetClaims: true,
         correctionCreditLines: true,
         correctionDeductionLines: true,
         approvedDeductionLines: true,
@@ -2574,6 +2589,7 @@ export async function listPayoutBatches(vendorId?: string): Promise<PayoutBatchD
         },
       },
       vendorBalanceEvents: true,
+      payoutOffsetClaims: true,
       correctionCreditLines: true,
       correctionDeductionLines: true,
       approvedDeductionLines: true,
@@ -2590,6 +2606,7 @@ export async function getPayoutBatch(batchId: string): Promise<PayoutBatchDto | 
     },
     include: {
       vendorBalanceEvents: true,
+      payoutOffsetClaims: true,
       correctionCreditLines: true,
       correctionDeductionLines: true,
       approvedDeductionLines: true,
@@ -2602,6 +2619,44 @@ export async function getPayoutBatch(batchId: string): Promise<PayoutBatchDto | 
   });
 
   return batch ? mapPayoutBatch(batch) : null;
+}
+
+/** Read-only, vendor-scoped projection. Unknown source authority is never rendered as zero. */
+export async function getPayoutOffsetObligationSummary(vendorId: string) {
+  const [adjustments, debtOrigins] = await Promise.all([
+    prisma.settlementRefundAdjustment.findMany({ where: { vendorId }, select: { currencyCode: true } }),
+    prisma.vendorBalanceEvent.findMany({ where: { vendorId, type: 'VENDOR_DEBT_CREATED' },
+      select: { currency: true } }),
+  ]);
+  const currencies = new Set([
+    ...adjustments.map((row) => row.currencyCode), ...debtOrigins.map((row) => row.currency),
+  ]);
+  if (currencies.size > 1 || (currencies.size === 1 && !currencies.has('TRY'))) {
+    return {
+      vendorId, currency: 'TRY', status: 'UNKNOWN' as const,
+      outstandingRefundAmount: null, outstandingDebtAmount: null,
+      reservedRefundAmount: null, reservedDebtAmount: null,
+      availableAfterReservationsRefundAmount: null, availableAfterReservationsDebtAmount: null,
+      reasons: ['R1_PAYOUT_CURRENCY_SCOPE_UNKNOWN'], writesPerformed: false as const,
+    };
+  }
+  const evidence = await reconcilePayoutOffsetAuthority({ vendorId, currency: 'TRY' });
+  const verified = evidence.status === 'VERIFIED';
+  const sum = (sourceType: 'REFUND_ADJUSTMENT' | 'VENDOR_DEBT',
+    field: 'remainingAmountMinor' | 'activeReservationMinor' | 'unreservedAmountMinor') =>
+    evidence.sources.filter((source) => source.sourceType === sourceType)
+      .reduce((total, source) => total + (source[field] ?? 0), 0);
+  return {
+    vendorId, currency: 'TRY', status: evidence.status,
+    outstandingRefundAmount: verified ? toAmountString(sum('REFUND_ADJUSTMENT', 'remainingAmountMinor') / 100) : null,
+    outstandingDebtAmount: verified ? toAmountString(sum('VENDOR_DEBT', 'remainingAmountMinor') / 100) : null,
+    reservedRefundAmount: verified ? toAmountString(sum('REFUND_ADJUSTMENT', 'activeReservationMinor') / 100) : null,
+    reservedDebtAmount: verified ? toAmountString(sum('VENDOR_DEBT', 'activeReservationMinor') / 100) : null,
+    availableAfterReservationsRefundAmount: verified ? toAmountString(sum('REFUND_ADJUSTMENT', 'unreservedAmountMinor') / 100) : null,
+    availableAfterReservationsDebtAmount: verified ? toAmountString(sum('VENDOR_DEBT', 'unreservedAmountMinor') / 100) : null,
+    reasons: evidence.reasons,
+    writesPerformed: false as const,
+  };
 }
 
 export async function preparePayoutBatch(
@@ -2622,7 +2677,13 @@ export async function prepareR1PayoutBatch(input: PreparePayoutBatchDto, actorId
   if (!input.vendorId?.trim() || !actorId?.trim() || !requestId?.trim()) {
     throw new Error('R1_PAYOUT_PREPARATION_IDENTITY_REQUIRED');
   }
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction((tx) => prepareR1PayoutBatchInTransaction(tx, input, actorId, requestId),
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+async function prepareR1PayoutBatchInTransaction(
+  tx: Prisma.TransactionClient, input: PreparePayoutBatchDto, actorId: string, requestId: string,
+) {
     const prepared = await preparePayoutBatchInTransaction(tx, input, actorId, true);
     const reservation = await reserveVerifiedPayoutOffsetsInTransaction(tx, {
       vendorId: input.vendorId, currency: prepared.currency, payoutBatchId: prepared.id,
@@ -2640,6 +2701,67 @@ export async function prepareR1PayoutBatch(input: PreparePayoutBatchDto, actorId
     await assertR1PayoutMonetaryAuthority(tx, prepared.id, { requireCurrentOwnRefundCoverage: true });
     return { payoutBatchId: prepared.id, currency: prepared.currency, approvedBaseMinor: baseMinor,
       offsetMinor, netCashMinor, claims: reservation.claims };
+}
+
+/** Default-disabled Admin entry point. The vendor lock covers route selection and preparation. */
+export async function prepareAdminPayoutBatchWithR1(
+  input: PreparePayoutBatchDto, actorId: string, requestId: string,
+): Promise<PayoutBatchDto> {
+  if (!input.vendorId?.trim() || !actorId?.trim() || !requestId?.trim() || requestId.includes(':')) {
+    throw new Error('R1_PAYOUT_PREPARATION_IDENTITY_REQUIRED');
+  }
+  return prisma.$transaction(async (tx) => {
+    const vendor = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
+    `);
+    if (vendor.length !== 1) throw new Error('R1_VENDOR_NOT_FOUND');
+    const priorClaims = await tx.payoutOffsetClaim.findMany({
+      where: { idempotencyKey: { startsWith: `r1:${requestId}:` } },
+      select: { payoutBatchId: true, vendorId: true, reservedBy: true },
+    });
+    if (priorClaims.length) {
+      const priorBatchId = priorClaims[0]!.payoutBatchId;
+      if (priorClaims.some((claim) => claim.payoutBatchId !== priorBatchId ||
+          claim.vendorId !== input.vendorId || claim.reservedBy !== actorId)) {
+        throw new Error('R1_RESERVATION_IDEMPOTENCY_CONFLICT');
+      }
+      const priorBatch = await tx.payoutBatch.findUnique({ where: { id: priorBatchId }, include: {
+        lines: true, correctionCreditLines: true, correctionDeductionLines: true,
+        approvedDeductionLines: true, vendorBalanceEvents: true, payoutOffsetClaims: true,
+      } });
+      if (!priorBatch || priorBatch.vendorId !== input.vendorId) {
+        throw new Error('R1_RESERVATION_IDEMPOTENCY_CONFLICT');
+      }
+      return mapPayoutBatch(priorBatch);
+    }
+    const [adjustments, debtOrigins] = await Promise.all([
+      tx.settlementRefundAdjustment.findMany({ where: { vendorId: input.vendorId },
+        select: { currencyCode: true } }),
+      tx.vendorBalanceEvent.findMany({ where: { vendorId: input.vendorId, type: 'VENDOR_DEBT_CREATED' },
+        select: { currency: true } }),
+    ]);
+    const currencies = new Set([
+      ...adjustments.map((row) => row.currencyCode), ...debtOrigins.map((row) => row.currency),
+    ]);
+    if (currencies.size > 1 || (currencies.size === 1 && !currencies.has('TRY'))) {
+      throw new Error('R1_PAYOUT_CURRENCY_SCOPE_UNKNOWN');
+    }
+    const authority = await reconcilePayoutOffsetAuthorityInTransaction(tx, {
+      vendorId: input.vendorId, currency: 'TRY',
+    });
+    if (authority.status !== 'VERIFIED') {
+      throw new Error(`R1_PAYOUT_SOURCE_AUTHORITY_NOT_VERIFIED:${authority.reasons.join(',')}`);
+    }
+    if (!authority.sources.some((source) => (source.unreservedAmountMinor ?? 0) > 0)) {
+      return preparePayoutBatchInTransaction(tx, input, actorId, false);
+    }
+    const prepared = await prepareR1PayoutBatchInTransaction(tx, input, actorId, requestId);
+    const batch = await tx.payoutBatch.findUnique({ where: { id: prepared.payoutBatchId }, include: {
+      lines: true, correctionCreditLines: true, correctionDeductionLines: true,
+      approvedDeductionLines: true, vendorBalanceEvents: true, payoutOffsetClaims: true,
+    } });
+    if (!batch) throw new Error('R1_PAYOUT_BATCH_NOT_FOUND');
+    return mapPayoutBatch(batch);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -4046,7 +4168,7 @@ export async function cancelR1ReviewPayoutBeforeEft(input: {
     await releaseCancelledPayoutSources(tx, input.payoutBatchId, cancelledAt);
     const batch = await tx.payoutBatch.findUnique({ where: { id: input.payoutBatchId }, include: {
       lines: true, correctionCreditLines: true, correctionDeductionLines: true,
-      approvedDeductionLines: true, vendorBalanceEvents: true,
+      approvedDeductionLines: true, vendorBalanceEvents: true, payoutOffsetClaims: true,
     } });
     if (!batch) throw new Error('R1_REVIEW_PAYOUT_NOT_FOUND');
     return mapPayoutBatch(batch);
@@ -4269,7 +4391,7 @@ export async function markR1PayoutBatchReview(batchId: string): Promise<PayoutBa
     if (changed.count !== 1) throw new Error('R1_PAYOUT_REVIEW_STATE_CHANGED');
     const batch = await tx.payoutBatch.findUnique({ where: { id: batchId },
       include: { lines: true, correctionCreditLines: true, correctionDeductionLines: true,
-        approvedDeductionLines: true, vendorBalanceEvents: true } });
+        approvedDeductionLines: true, vendorBalanceEvents: true, payoutOffsetClaims: true } });
     if (!batch) throw new Error('Payout batch not found.');
     return mapPayoutBatch(batch);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -4303,6 +4425,24 @@ export async function completeR1CashlessPayout(input: {
     const actor = await tx.user.findUnique({ where: { id: input.actorUserId },
       select: { role: true, status: true } });
     if (actor?.role !== 'ADMIN' || actor.status !== 'active') throw new Error('R1_ACTIVE_ADMIN_REQUIRED');
+    const priorCompletion = await tx.payoutR1CashlessCompletion.findUnique({
+      where: { payoutBatchId: input.payoutBatchId },
+    });
+    if (priorCompletion) {
+      const completed = await tx.payoutBatch.findUnique({ where: { id: input.payoutBatchId }, include: {
+        lines: true, correctionCreditLines: true, correctionDeductionLines: true,
+        approvedDeductionLines: true, vendorBalanceEvents: true, payoutOffsetClaims: true,
+      } });
+      if (!completed || completed.status !== 'CASHLESS_COMPLETED' || completed.netAmount.mul(100).toNumber() !== 0 ||
+          completed.paidAt || completed.eftExecutedAt || priorCompletion.actorUserId !== input.actorUserId ||
+          priorCompletion.reason !== reason || completed.payoutOffsetClaims.length === 0 ||
+          completed.payoutOffsetClaims.some((claim) => claim.status !== 'FINALIZED') ||
+          completed.payoutOffsetClaims.reduce((sum, claim) => sum + claim.reservedAmountMinor, 0) !==
+            priorCompletion.finalizedOffsetMinor) {
+        throw new Error('R1_CASHLESS_IDEMPOTENCY_CONFLICT');
+      }
+      return mapPayoutBatch(completed);
+    }
     const authority = await assertR1PayoutMonetaryAuthority(tx, input.payoutBatchId,
       { requireCurrentOwnRefundCoverage: true });
     const batch = authority.batch;
@@ -4354,7 +4494,7 @@ export async function completeR1CashlessPayout(input: {
     }
     const completed = await tx.payoutBatch.findUnique({ where: { id: input.payoutBatchId }, include: {
       lines: true, correctionCreditLines: true, correctionDeductionLines: true,
-      approvedDeductionLines: true, vendorBalanceEvents: true,
+      approvedDeductionLines: true, vendorBalanceEvents: true, payoutOffsetClaims: true,
     } });
     if (!completed) throw new Error('R1_CASHLESS_PAYOUT_NOT_FOUND');
     return mapPayoutBatch(completed);
@@ -4418,6 +4558,7 @@ async function markPayoutBatchPaidInTransaction(
         correctionCreditLines: true,
         correctionDeductionLines: true,
         approvedDeductionLines: true,
+        payoutOffsetClaims: true,
         lines: {
           orderBy: {
             createdAt: 'asc',
@@ -4627,6 +4768,7 @@ async function markPayoutBatchPaidInTransaction(
         correctionCreditLines: true,
         correctionDeductionLines: true,
         approvedDeductionLines: true,
+        payoutOffsetClaims: true,
         lines: {
           orderBy: {
             createdAt: 'asc',

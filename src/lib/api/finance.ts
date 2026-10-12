@@ -1,4 +1,5 @@
 import { runtimeServices } from '../../services/runtime-services';
+import { apiClient } from '../api-client';
 import type {
   SettlementScheduleAutoDraftJobResponse,
   SettlementScheduleAutoDraftJobStatusResponse,
@@ -24,6 +25,16 @@ export function getAdminVendorFinancialProfile(vendorId: string, options: { sign
 
 export function getVendorDebtHistory(options: { vendorId?: string | null; signal?: AbortSignal } = {}): Promise<VendorDebtHistory> {
   return runtimeServices.finance.vendorDebtHistory(options.vendorId ?? undefined, { signal: options.signal });
+}
+
+export function getPayoutOffsetObligations(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<{
+    vendorId: string; currency: string; status: 'VERIFIED' | 'BLOCKED' | 'UNKNOWN';
+    outstandingRefundAmount: string | null; outstandingDebtAmount: string | null;
+    reservedRefundAmount: string | null; reservedDebtAmount: string | null;
+    availableAfterReservationsRefundAmount: string | null;
+    availableAfterReservationsDebtAmount: string | null;
+  }>('/finance/payout-offset-obligations', { signal: options.signal });
 }
 
 export function getReturnFinanceRecords(options: {

@@ -17,6 +17,7 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import {
   cancelPayoutBatch,
   getPayoutBatch,
+  getPayoutOffsetObligationSummary,
   getAdminVendorFinancialProfile,
   getVendorFinanceDashboard,
   getVendorFinanceSummary,
@@ -25,8 +26,13 @@ import {
   listPayoutBatches,
   markPayoutBatchPaid,
   markPayoutBatchReview,
+  markR1PayoutBatchPaid,
+  markR1PayoutBatchReview,
+  completeR1CashlessPayout,
+  cancelR1ReviewPayoutBeforeEft,
   PayoutBatchTransitionRevalidationError,
   preparePayoutBatch,
+  prepareAdminPayoutBatchWithR1,
   upsertShipmentShippingCost,
   upsertVendorFinancialProfile,
 } from './finance.service.js';
@@ -442,6 +448,16 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   );
 
   app.get(
+    '/finance/payout-offset-obligations',
+    { preHandler: [authMiddleware.authenticateRequest, requireVendorAccess] },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      return getPayoutOffsetObligationSummary(vendorId);
+    },
+  );
+
+  app.get(
     '/finance',
     {
       preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
@@ -816,6 +832,25 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   );
 
   app.get(
+    '/admin/finance/r1-payout-status',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      return { enabled: env.R1_PAYOUT_ADMIN_ENABLED === true };
+    },
+  );
+
+  app.get(
+    '/admin/finance/r1-payout-obligations/:vendorId',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      const { vendorId } = request.params as { vendorId: string };
+      return getPayoutOffsetObligationSummary(vendorId);
+    },
+  );
+
+  app.get(
     '/admin/payout-batches',
     {
       preHandler: [authMiddleware.authenticateRequest],
@@ -843,6 +878,12 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       try {
+        if (env.R1_PAYOUT_ADMIN_ENABLED === true) {
+          const requestId = readOptionalBodyString(request.body, 'requestId');
+          if (!requestId) return reply.code(400).send({ message: 'Stable requestId is required for R1 payout preparation.' });
+          return await prepareAdminPayoutBatchWithR1((request.body ?? {}) as PreparePayoutBatchDto,
+            request.authUser.id, requestId);
+        }
         return await preparePayoutBatch((request.body ?? {}) as PreparePayoutBatchDto, request.authUser.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Payout batch could not be prepared.';
@@ -906,7 +947,9 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { id } = request.params as { id: string };
       try {
-        return await markPayoutBatchReview(id);
+        const batch = env.R1_PAYOUT_ADMIN_ENABLED === true ? await getPayoutBatch(id) : null;
+        return batch && Number(batch.r1OffsetAmount) > 0
+          ? await markR1PayoutBatchReview(id) : await markPayoutBatchReview(id);
       } catch (error) {
         if (error instanceof Error && error.message === 'R1_PAYOUT_RESERVED_CLAIMS_BLOCK_TRANSITION') {
           return reply.code(409).send({ code: error.message, message: error.message });
@@ -940,6 +983,14 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         internalNote: readOptionalBodyString(request.body, 'internalNote'),
       };
       try {
+        const batch = env.R1_PAYOUT_ADMIN_ENABLED === true ? await getPayoutBatch(id) : null;
+        if (batch && Number(batch.r1OffsetAmount) > 0) {
+          const eftAmountMinor = isRecord(request.body) ? request.body.eftAmountMinor : null;
+          if (typeof eftAmountMinor !== 'number' || !Number.isSafeInteger(eftAmountMinor)) {
+            return reply.code(400).send({ message: 'Exact bank EFT amount in minor units is required.' });
+          }
+          return await markR1PayoutBatchPaid(id, input, request.authUser.id, eftAmountMinor);
+        }
         return await markPayoutBatchPaid(id, input, request.authUser.id);
       } catch (error) {
         if (error instanceof Error && [
@@ -957,6 +1008,52 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         }
         const message = error instanceof Error ? error.message : 'Payout batch could not be marked paid.';
         return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/payout-batches/:id/r1-cancel-review',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      if (env.R1_PAYOUT_ADMIN_ENABLED !== true) return reply.code(404).send({ message: 'R1 payment workflow is disabled.' });
+      const { id } = request.params as { id: string };
+      const reason = readOptionalBodyString(request.body, 'reason');
+      const confirmed = readOptionalBodyBoolean(request.body, 'confirmEftNotSent');
+      if (!reason || confirmed !== true) return reply.code(400).send({ message: 'Written reason and no-EFT confirmation are required.' });
+      try {
+        return await cancelR1ReviewPayoutBeforeEft({ payoutBatchId: id, actorUserId: request.authUser.id,
+          reason, confirmEftNotSent: true });
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('R1_')) {
+          return reply.code(409).send({ code: error.message, message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post(
+    '/admin/payout-batches/:id/r1-complete-cashless',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      if (env.R1_PAYOUT_ADMIN_ENABLED !== true) return reply.code(404).send({ message: 'R1 payment workflow is disabled.' });
+      const { id } = request.params as { id: string };
+      const reason = readOptionalBodyString(request.body, 'reason');
+      if (!reason || readOptionalBodyBoolean(request.body, 'confirmCashlessCompletion') !== true ||
+          readOptionalBodyBoolean(request.body, 'confirmEftNotSent') !== true) {
+        return reply.code(400).send({ message: 'Written reason, cashless confirmation and no-EFT confirmation are required.' });
+      }
+      try {
+        return await completeR1CashlessPayout({ payoutBatchId: id, actorUserId: request.authUser.id,
+          reason, confirmCashlessCompletion: true, confirmEftNotSent: true });
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('R1_')) {
+          return reply.code(409).send({ code: error.message, message: error.message });
+        }
+        throw error;
       }
     },
   );

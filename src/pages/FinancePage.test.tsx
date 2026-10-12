@@ -9,6 +9,7 @@ import { setCurrentUser, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const getVendorDebtHistoryMock = vi.fn();
+const getPayoutOffsetObligationsMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
@@ -19,6 +20,7 @@ vi.mock('../features/finance/api', async () => {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
     getVendorDebtHistory: (...args: unknown[]) => getVendorDebtHistoryMock(...args),
+    getPayoutOffsetObligations: (...args: unknown[]) => getPayoutOffsetObligationsMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
   };
 });
@@ -470,6 +472,12 @@ describe('FinancePage control center', () => {
     getFinanceDashboardMock.mockReset();
     getVendorDebtHistoryMock.mockReset();
     getVendorDebtHistoryMock.mockResolvedValue(emptyVendorDebtHistory);
+    getPayoutOffsetObligationsMock.mockReset();
+    getPayoutOffsetObligationsMock.mockResolvedValue({ vendorId: 'demo-vendor-a', currency: 'TRY',
+      status: 'VERIFIED', outstandingRefundAmount: '0.00', outstandingDebtAmount: '0.00',
+      reservedRefundAmount: '0.00', reservedDebtAmount: '0.00',
+      availableAfterReservationsRefundAmount: '0.00', availableAfterReservationsDebtAmount: '0.00',
+      reasons: [], writesPerformed: false });
     preparePayoutBatchMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
@@ -623,6 +631,29 @@ describe('FinancePage control center', () => {
     expect(screen.queryByLabelText('Draft status')).not.toBeInTheDocument();
     expect(screen.queryByText('No draft')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Finance workflow summary').querySelectorAll('.finance-compact-card')).toHaveLength(4);
+  });
+
+  it('shows a vendor cashless R1 offset as entitlement without claiming a bank payment', async () => {
+    setVendorFinanceUser();
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      payoutBatchSummary: { ...financeDashboard.payoutBatchSummary!, latestBatch: {
+        ...financeDashboard.payoutBatchSummary!.latestBatch!, status: 'cashless_completed',
+        r1ApprovedPayable: '440.00', r1OffsetAmount: '440.00',
+        r1RefundOffsetAmount: '440.00', r1DebtOffsetAmount: '0.00', netAmount: '0.00',
+      } },
+    });
+    getPayoutOffsetObligationsMock.mockResolvedValue({ vendorId: 'demo-vendor-a', currency: 'TRY',
+      status: 'VERIFIED', outstandingRefundAmount: '440.00', outstandingDebtAmount: '0.00',
+      reservedRefundAmount: '0.00', reservedDebtAmount: '0.00',
+      availableAfterReservationsRefundAmount: '440.00', availableAfterReservationsDebtAmount: '0.00',
+      reasons: [], writesPerformed: false });
+    renderFinancePage();
+    expect(await screen.findByText('Onaylanmış hak ediş')).toBeInTheDocument();
+    expect(screen.getByText('0.00 TRY — EFT yapılmadı')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Rezervasyon sonrası kalan iade / borç').parentElement)
+      .toHaveTextContent('440.00 / 0.00'));
+    expect(getPayoutOffsetObligationsMock).toHaveBeenCalled();
   });
 
   it('hides secondary zero-value summary noise', async () => {
