@@ -293,6 +293,7 @@ describe('Settlement Review queue cleanup', () => {
     expect(screen.getByText('ADMIN FINANCE')).toBeInTheDocument();
     expect(within(queue).queryByRole('heading', { name: 'Settlement Review Queue' })).not.toBeInTheDocument();
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    await within(queue).findByRole('columnheader', { name: 'Vendor' });
 
     const workflowTabs = queue.querySelector('.settlement-review-tabs') as HTMLElement;
     expect(workflowTabs).toBeTruthy();
