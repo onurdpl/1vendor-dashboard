@@ -472,7 +472,7 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
     const queue = screen.getByLabelText('Settlement review queue');
     expect(within(queue).queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
-    expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).toBeInTheDocument();
+    expect(await within(queue).findByRole('button', { name: 'Cancel Settlement' })).toBeInTheDocument();
 
     await user.click(getDraftSettlementRow(queue));
 
