@@ -1691,7 +1691,128 @@ suite('R1 Phase 2 guarded payout offset reservations (isolated PostgreSQL)', () 
       const forbidden = await fetch(`${origin}/admin/payout-batches/${batch.id}/r1-complete-cashless`, {
         method: 'POST', headers, body: JSON.stringify({ reason: 'Not allowed',
           confirmCashlessCompletion: true, confirmEftNotSent: true }) });
-      expect(forbidden.status).toBe(404);
+      expect(forbidden.status).toBe(409);
+      expect((await forbidden.json()).code).toBe('R1_PAYOUT_MONETARY_BATCH_INVALID');
+    } finally {
+      await app.close();
+      if (oldFlag === undefined) delete process.env.R1_PAYOUT_ADMIN_ENABLED;
+      else process.env.R1_PAYOUT_ADMIN_ENABLED = oldFlag;
+    }
+  });
+
+  it('recovers existing R1 batches through real Admin HTTP while the rollout gate is off', async () => {
+    const oldFlag = process.env.R1_PAYOUT_ADMIN_ENABLED;
+    const positive = await r1MonetaryFixture();
+    const zero = await r1MonetaryFixture(440, 880);
+    const toCancel = await r1MonetaryFixture();
+    const draft = await r1MonetaryFixture();
+    const draftToCancel = await r1MonetaryFixture();
+    const contradictory = await r1MonetaryFixture();
+    await db.payoutBatch.update({ where: { id: contradictory.prepared.payoutBatchId },
+      data: { r1OffsetTotalMinor: 20001 } });
+    for (const item of [positive, zero, toCancel]) {
+      await markR1Review(item.prepared.payoutBatchId);
+    }
+    const adminId = next('recovery-admin');
+    const vendorUserId = next('recovery-vendor');
+    const password = next('recovery-password');
+    const { hashPasswordArgon2id } = await import('../backend/src/modules/auth/password-hashing.js');
+    const passwordHash = await hashPasswordArgon2id(password);
+    await db.user.createMany({ data: [
+      { id: adminId, email: `${adminId}@example.test`, name: 'R1 recovery Admin', role: 'ADMIN', passwordHash },
+      { id: vendorUserId, email: `${vendorUserId}@example.test`, name: 'R1 recovery Vendor', role: 'VENDOR', passwordHash },
+    ] });
+    process.env.R1_PAYOUT_ADMIN_ENABLED = 'false';
+    process.env.SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED = 'false';
+    process.env.SCHEDULED_RECONCILIATION_ENABLED = 'false';
+    process.env.CANONICAL_RECONCILIATION_ENABLED = 'false';
+    process.env.SOPYO_DELIVERY_POLLING_ENABLED = 'false';
+    process.env.SOPYO_ORDER_PUSH_WORKER_ENABLED = 'false';
+    process.env.SHIPPING_EXECUTION_ENABLED = 'false';
+    process.env.KARGONOMI_BASE_URL = 'http://127.0.0.1:1';
+    process.env.KARGONOMI_API_TOKEN = 'disposable-r1-recovery-test-only';
+    const { createApp } = await import('../backend/src/app.js');
+    const app = createApp();
+    try {
+      const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+      async function login(email: string) {
+        const response = await fetch(`${origin}/auth/login`, { method: 'POST',
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        expect(response.status).toBe(200);
+        return { cookie: response.headers.get('set-cookie')!.split(';', 1)[0]!,
+          csrfToken: (await response.json()).csrfToken as string };
+      }
+      const admin = await login(`${adminId}@example.test`);
+      const vendor = await login(`${vendorUserId}@example.test`);
+      const post = (path: string, session: typeof admin, body: unknown) => fetch(`${origin}${path}`, {
+        method: 'POST', headers: { cookie: session.cookie, 'x-csrf-token': session.csrfToken,
+          'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      expect(await (await fetch(`${origin}/admin/finance/r1-payout-status`, {
+        headers: { cookie: admin.cookie },
+      })).json()).toEqual({ enabled: false });
+      expect((await post(`/admin/payout-batches/${positive.prepared.payoutBatchId}/mark-paid`, vendor, {})).status).toBe(403);
+      expect((await post(`/admin/payout-batches/${toCancel.prepared.payoutBatchId}/r1-cancel-review`, vendor,
+        { reason: 'No EFT sent', confirmEftNotSent: true })).status).toBe(403);
+      expect((await post(`/admin/payout-batches/${zero.prepared.payoutBatchId}/r1-complete-cashless`, vendor,
+        { reason: 'Exact zero cash', confirmCashlessCompletion: true, confirmEftNotSent: true })).status).toBe(403);
+      expect((await post(`/admin/payout-batches/${positive.prepared.payoutBatchId}/mark-paid`, admin,
+        { paidAt: new Date().toISOString(), eftAmountMinor: 79999 })).status).not.toBe(200);
+      expect((await post(`/admin/payout-batches/${toCancel.prepared.payoutBatchId}/r1-cancel-review`, admin,
+        { reason: 'No EFT sent' })).status).toBe(400);
+      expect((await post(`/admin/payout-batches/${zero.prepared.payoutBatchId}/r1-complete-cashless`, admin,
+        { reason: 'Exact zero cash', confirmCashlessCompletion: true })).status).toBe(400);
+      const invalidAuthority = await post(`/admin/payout-batches/${contradictory.prepared.payoutBatchId}/mark-review`,
+        admin, {});
+      expect(invalidAuthority.status).not.toBe(200);
+      expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: contradictory.prepared.payoutBatchId } }))
+        .status).toBe('DRAFT');
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: contradictory.prepared.payoutBatchId,
+        status: 'RESERVED' } })).toBe(1);
+
+      const reviewed = await post(`/admin/payout-batches/${draft.prepared.payoutBatchId}/mark-review`, admin, {});
+      expect(reviewed.status).toBe(200);
+      expect(await reviewed.json()).toMatchObject({ status: 'review', r1OffsetAmount: '200.00' });
+      const draftCancellation = await post(`/admin/payout-batches/${draftToCancel.prepared.payoutBatchId}/cancel`, admin, {});
+      expect(draftCancellation.status).toBe(200);
+      expect(await draftCancellation.json()).toMatchObject({ status: 'cancelled' });
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: draftToCancel.prepared.payoutBatchId,
+        status: 'RELEASED' } })).toBe(1);
+      const cancelled = await post(`/admin/payout-batches/${toCancel.prepared.payoutBatchId}/r1-cancel-review`, admin,
+        { reason: 'No bank EFT sent', confirmEftNotSent: true });
+      expect(cancelled.status).toBe(200);
+      expect(await cancelled.json()).toMatchObject({ status: 'cancelled' });
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: toCancel.prepared.payoutBatchId,
+        status: 'RELEASED' } })).toBe(1);
+      expect(await db.payoutR1ReviewCancellationAttestation.count({ where: {
+        payoutBatchId: toCancel.prepared.payoutBatchId, actorUserId: adminId,
+      } })).toBe(1);
+
+      const completed = await post(`/admin/payout-batches/${zero.prepared.payoutBatchId}/r1-complete-cashless`, admin,
+        { reason: 'Exact zero cash', confirmCashlessCompletion: true, confirmEftNotSent: true });
+      expect(completed.status).toBe(200);
+      expect(await completed.json()).toMatchObject({ status: 'cashless_completed', netAmount: '0.00' });
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: zero.prepared.payoutBatchId,
+        status: 'FINALIZED' } })).toBe(1);
+      expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: zero.prepared.payoutBatchId } })).eftExecutedAt).toBeNull();
+
+      const paid = await post(`/admin/payout-batches/${positive.prepared.payoutBatchId}/mark-paid`, admin, {
+        paidAt: new Date().toISOString(), eftDeclaredAt: new Date(Date.now() - 1000).toISOString(),
+        eftAmountMinor: 80000, paymentReference: next('recovery-bank-reference'),
+      });
+      expect(paid.status).toBe(200);
+      expect(await paid.json()).toMatchObject({ status: 'paid', netAmount: '800.00' });
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: positive.prepared.payoutBatchId,
+        status: 'FINALIZED' } })).toBe(1);
+      expect((await db.payoutBatch.findUniqueOrThrow({ where: { id: positive.prepared.payoutBatchId } }))
+        .eftAmountMinor).toBe(80000);
+      expect((await post(`/admin/payout-batches/${positive.prepared.payoutBatchId}/mark-paid`, admin, {
+        paidAt: new Date().toISOString(), eftDeclaredAt: new Date().toISOString(), eftAmountMinor: 80000,
+      })).status).not.toBe(200);
+      expect(await db.payoutOffsetClaim.count({ where: { payoutBatchId: positive.prepared.payoutBatchId,
+        status: 'FINALIZED' } })).toBe(1);
+      expect((await post(`/admin/payout-batches/${zero.prepared.payoutBatchId}/r1-cancel-review`, admin,
+        { reason: 'Too late', confirmEftNotSent: true })).status).toBe(409);
     } finally {
       await app.close();
       if (oldFlag === undefined) delete process.env.R1_PAYOUT_ADMIN_ENABLED;

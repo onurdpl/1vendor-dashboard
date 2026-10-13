@@ -840,17 +840,20 @@ describe('finance route validation', () => {
     }, 'admin-1');
   });
 
-  it('keeps R1 writing disabled by default and requires an Admin with a stable preparation identity', async () => {
+  it('keeps new R1 preparation disabled by default and fails closed on invalid recovery authority', async () => {
     const path = '/admin/payout-batches/prepare';
     const disabled = createRegisteredPostRoutes();
     const denied = createReply();
+    completeR1CashlessPayoutMock.mockRejectedValueOnce(new Error('R1_PAYOUT_MONETARY_BATCH_INVALID'));
     await disabled.get('/admin/payout-batches/:id/r1-complete-cashless')?.({
       authUser: { role: 'admin', id: 'admin-1' }, params: { id: 'batch-1' }, body: {
         reason: 'Reconciled', confirmCashlessCompletion: true, confirmEftNotSent: true,
       },
     }, denied);
-    expect(denied.statusCode).toBe(404);
-    expect(completeR1CashlessPayoutMock).not.toHaveBeenCalled();
+    expect(denied.statusCode).toBe(409);
+    expect(completeR1CashlessPayoutMock).toHaveBeenCalledWith({ payoutBatchId: 'batch-1',
+      actorUserId: 'admin-1', reason: 'Reconciled', confirmCashlessCompletion: true,
+      confirmEftNotSent: true });
 
     const enabled = createRegisteredPostRoutes({ R1_PAYOUT_ADMIN_ENABLED: true });
     const vendor = createReply();
@@ -873,7 +876,7 @@ describe('finance route validation', () => {
   });
 
   it('routes verified R1 REVIEW and payment transitions without changing claimsless handlers', async () => {
-    const posts = createRegisteredPostRoutes({ R1_PAYOUT_ADMIN_ENABLED: true });
+    const posts = createRegisteredPostRoutes();
     getPayoutBatchMock.mockResolvedValue({ id: 'r1-batch', r1OffsetAmount: '200.00' });
     markR1PayoutBatchReviewMock.mockResolvedValue({ id: 'r1-batch', status: 'review' });
     const review = createReply();

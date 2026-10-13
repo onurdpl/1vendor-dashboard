@@ -947,7 +947,9 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { id } = request.params as { id: string };
       try {
-        const batch = env.R1_PAYOUT_ADMIN_ENABLED === true ? await getPayoutBatch(id) : null;
+        // The flag controls new preparation, not recovery of an existing R1 batch.
+        // The R1 service revalidates its persisted monetary and claim authority.
+        const batch = await getPayoutBatch(id);
         return batch && Number(batch.r1OffsetAmount) > 0
           ? await markR1PayoutBatchReview(id) : await markPayoutBatchReview(id);
       } catch (error) {
@@ -983,7 +985,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         internalNote: readOptionalBodyString(request.body, 'internalNote'),
       };
       try {
-        const batch = env.R1_PAYOUT_ADMIN_ENABLED === true ? await getPayoutBatch(id) : null;
+        const batch = await getPayoutBatch(id);
         if (batch && Number(batch.r1OffsetAmount) > 0) {
           const eftAmountMinor = isRecord(request.body) ? request.body.eftAmountMinor : null;
           if (typeof eftAmountMinor !== 'number' || !Number.isSafeInteger(eftAmountMinor)) {
@@ -1017,7 +1019,6 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
     { preHandler: [authMiddleware.authenticateRequest] },
     async (request, reply) => {
       if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
-      if (env.R1_PAYOUT_ADMIN_ENABLED !== true) return reply.code(404).send({ message: 'R1 payment workflow is disabled.' });
       const { id } = request.params as { id: string };
       const reason = readOptionalBodyString(request.body, 'reason');
       const confirmed = readOptionalBodyBoolean(request.body, 'confirmEftNotSent');
@@ -1039,7 +1040,6 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
     { preHandler: [authMiddleware.authenticateRequest] },
     async (request, reply) => {
       if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
-      if (env.R1_PAYOUT_ADMIN_ENABLED !== true) return reply.code(404).send({ message: 'R1 payment workflow is disabled.' });
       const { id } = request.params as { id: string };
       const reason = readOptionalBodyString(request.body, 'reason');
       if (!reason || readOptionalBodyBoolean(request.body, 'confirmCashlessCompletion') !== true ||

@@ -422,7 +422,6 @@ describe('AdminPaymentPreparationPage', () => {
   });
 
   it('shows exact R1 refund and debt lineage and requires the declared bank EFT amount', async () => {
-    getR1PayoutStatusMock.mockResolvedValue({ enabled: true });
     listPayoutBatchesMock.mockResolvedValue([makeBatch({ id: 'r1-review', status: 'review',
       r1OffsetAmount: '200.00', r1RefundOffsetAmount: '200.00', r1DebtOffsetAmount: '0.00',
       r1ApprovedPayable: '1000.00', refundAmount: '0.00', netAmount: '800.00' })]);
@@ -445,7 +444,6 @@ describe('AdminPaymentPreparationPage', () => {
   });
 
   it('keeps zero-net R1 completion distinct from bank Mark Paid and requires both confirmations', async () => {
-    getR1PayoutStatusMock.mockResolvedValue({ enabled: true });
     listPayoutBatchesMock.mockResolvedValue([makeBatch({ id: 'r1-zero', status: 'review',
       r1OffsetAmount: '440.00', r1RefundOffsetAmount: '440.00', r1DebtOffsetAmount: '0.00',
       r1ApprovedPayable: '440.00', netAmount: '0.00' })]);
@@ -466,6 +464,34 @@ describe('AdminPaymentPreparationPage', () => {
     await waitFor(() => expect(completeR1CashlessPayoutMock).toHaveBeenCalledWith(
       'r1-zero', 'Verified full offset'));
     expect(markPayoutBatchPaidMock).not.toHaveBeenCalled();
+  });
+
+  it('offers existing R1 DRAFT and REVIEW recovery actions while new R1 preparation is disabled', async () => {
+    listPayoutBatchesMock.mockResolvedValue([
+      makeBatch({ id: 'r1-draft-off', status: 'draft', r1OffsetAmount: '200.00',
+        r1ApprovedPayable: '1000.00', netAmount: '800.00' }),
+      makeBatch({ id: 'r1-review-off', status: 'review', r1OffsetAmount: '200.00',
+        r1ApprovedPayable: '1000.00', netAmount: '800.00' }),
+    ]);
+    const user = userEvent.setup();
+    renderPage();
+    const draft = await selectQueueRow(user, (row) => row.textContent?.includes('Mark for Review') ?? false);
+    expect(within(draft).getByText('Mark for Review')).toBeInTheDocument();
+    let panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getByRole('button', { name: 'Mark for Review' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Cancel Batch' })).toBeInTheDocument();
+
+    await selectQueueRow(user, (row) => row.textContent?.includes('Mark Paid') ?? false);
+    panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getByRole('button', { name: 'Mark Paid' })).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Cancel Review (No EFT)' }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Written reason'), 'No bank EFT sent');
+    await user.click(within(dialog).getByLabelText('I confirm no external EFT was sent.'));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel Review' }));
+    await waitFor(() => expect(cancelR1ReviewPayoutMock).toHaveBeenCalledWith('r1-review-off', 'No bank EFT sent'));
+    expect(getR1PayoutStatusMock).toHaveBeenCalled();
+    expect(preparePayoutBatchMock).not.toHaveBeenCalled();
   });
 
   it('keeps a standalone correction credit ready after a historical paid payout', async () => {

@@ -302,11 +302,10 @@ function getWaitingReason(item: PaymentQueueItem) {
   return null;
 }
 
-function getNextAction(item: PaymentQueueItem, r1Enabled: boolean): NextAction {
+function getNextAction(item: PaymentQueueItem): NextAction {
   if (item.source === 'ready') {
     return 'Prepare Batch';
   }
-  if (hasAmount(item.batch.r1OffsetAmount) && !r1Enabled) return 'No action available';
   if (item.batch.status === 'draft') {
     return 'Mark for Review';
   }
@@ -316,11 +315,10 @@ function getNextAction(item: PaymentQueueItem, r1Enabled: boolean): NextAction {
   return 'No action available';
 }
 
-function getSupportedPaymentActions(item: PaymentQueueItem, r1Enabled: boolean): PaymentAction[] {
+function getSupportedPaymentActions(item: PaymentQueueItem): PaymentAction[] {
   if (item.source === 'ready') {
     return ['prepare'];
   }
-  if (hasAmount(item.batch.r1OffsetAmount) && !r1Enabled) return [];
   if (item.batch.status === 'draft') {
     return ['mark_review', 'cancel'];
   }
@@ -361,7 +359,7 @@ function matchesStatusFilter(item: PaymentQueueItem, statusFilter: StatusFilter)
   return item.source === 'batch' && item.batch.status === statusFilter;
 }
 
-function buildSearchHaystack(item: PaymentQueueItem, vendorLabel: string, r1Enabled: boolean) {
+function buildSearchHaystack(item: PaymentQueueItem, vendorLabel: string) {
   const payment = getPaymentLabel(item);
   return [
     vendorLabel,
@@ -369,7 +367,7 @@ function buildSearchHaystack(item: PaymentQueueItem, vendorLabel: string, r1Enab
     payment.primary,
     payment.secondary,
     getQueueStatus(item),
-    getNextAction(item, r1Enabled),
+    getNextAction(item),
     getIssues(item).join(' '),
     getWaitingReason(item),
     getGrossAmount(item),
@@ -641,12 +639,12 @@ export function AdminPaymentPreparationPage() {
       if (highValueOnly && Math.abs(getAmountValue(getNetPayable(item))) < HIGH_VALUE_AMOUNT) {
         return false;
       }
-      if (normalizedSearch && !buildSearchHaystack(item, vendorLabel, r1Enabled).includes(normalizedSearch)) {
+      if (normalizedSearch && !buildSearchHaystack(item, vendorLabel).includes(normalizedSearch)) {
         return false;
       }
       return true;
     });
-  }, [currentVendorId, currentVendorName, highValueOnly, periodFilter, queueItems, r1Enabled, search, statusFilter]);
+  }, [currentVendorId, currentVendorName, highValueOnly, periodFilter, queueItems, search, statusFilter]);
 
   const workflowCounts = WORKFLOW_TABS.reduce<Record<WorkflowTab, number>>((counts, tab) => {
     counts[tab.id] = advancedFilteredItems.filter((item) => matchesWorkflow(item, tab.id)).length;
@@ -665,7 +663,7 @@ export function AdminPaymentPreparationPage() {
   const visibleItems = advancedFilteredItems.filter((item) => matchesWorkflow(item, workflowTab));
   const selectedItem = visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0] ?? null;
   const selectedWaitingReason = selectedItem ? getWaitingReason(selectedItem) : null;
-  const supportedActions = selectedItem ? getSupportedPaymentActions(selectedItem, r1Enabled) : [];
+  const supportedActions = selectedItem ? getSupportedPaymentActions(selectedItem) : [];
   const loading = batchesQuery.isLoading || readinessQuery.isLoading;
   const blockingError = batchesQuery.isError || readinessQuery.isError;
   const errorDescription =
@@ -866,7 +864,7 @@ export function AdminPaymentPreparationPage() {
                         <StatusBadge key={issue} tone={issue === 'Ready' ? 'success' : 'warning'}>{issue}</StatusBadge>
                       ))}
                     </span>
-                    <span><strong>{getNextAction(item, r1Enabled)}</strong></span>
+                    <span><strong>{getNextAction(item)}</strong></span>
                     <span>{formatDate(getItemUpdatedAt(item))}</span>
                   </OperationalTableRow>
                 );
@@ -892,7 +890,7 @@ export function AdminPaymentPreparationPage() {
                   ) : null}
 
                   <MetadataGroup title="Next Action">
-                    <MetadataRow label="Action" value={getNextAction(selectedItem, r1Enabled)} />
+                    <MetadataRow label="Action" value={getNextAction(selectedItem)} />
                     {supportedActions.length ? (
                       <div className="scheduled-panel-actions">
                         {supportedActions.includes('prepare') ? (

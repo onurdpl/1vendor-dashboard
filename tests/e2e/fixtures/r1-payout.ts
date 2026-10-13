@@ -140,6 +140,15 @@ try {
     ({ userId: admin.id, vendorId })), skipDuplicates: true });
   await upsertSeedUser(db, { email: 'vendor@demo.com', name: 'R1 Browser Vendor',
     role: 'VENDOR', vendorIds: [positive.vendorId] });
+  if (process.env.BROWSER_SMOKE_R1_RECOVERY === '1') {
+    const { prepareR1PayoutBatch, markR1PayoutBatchReview } =
+      await import('../../../backend/src/modules/finance/finance.service.js');
+    for (const candidate of [positive, cashless, cancellation]) {
+      const prepared = await prepareR1PayoutBatch({ vendorId: candidate.vendorId }, admin.id,
+        `r1-browser-recovery-${candidate.vendorId}`);
+      await markR1PayoutBatchReview(prepared.payoutBatchId);
+    }
+  }
   console.log(JSON.stringify({ positive, cashless, cancellation }));
 } finally {
   await db.$disconnect();

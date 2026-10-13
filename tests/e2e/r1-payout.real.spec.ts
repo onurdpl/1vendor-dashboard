@@ -25,11 +25,15 @@ async function clickAction(page: import('@playwright/test').Page, name: string, 
 test('Admin prepares and pays 1000 with exact 200 R1 refund and vendor sees real cash', async ({ page }) => {
   await loginAdmin(page);
   await selectVendor(page, 'r1-browser-positive');
-  await (await clickAction(page, 'Prepare Batch')).click();
+  if (process.env.BROWSER_SMOKE_R1_RECOVERY !== '1') {
+    await (await clickAction(page, 'Prepare Batch')).click();
+  }
   const detail = page.getByLabel('Payment preparation detail panel');
   await expect(detail.getByText('Verified R1 payment authority')).toBeVisible();
   await expect(detail.getByText('Net bank payment').locator('..')).toContainText('800');
-  await (await clickAction(page, 'Mark for Review')).click();
+  if (process.env.BROWSER_SMOKE_R1_RECOVERY !== '1') {
+    await (await clickAction(page, 'Mark for Review')).click();
+  }
   const markPaid = await clickAction(page, 'Mark Paid');
   const now = new Date(Date.now() - 1000);
   await page.getByRole('dialog').getByLabel('Bank EFT execution date').fill(now.toISOString().slice(0, 10));
@@ -53,13 +57,19 @@ test('Admin prepares and pays 1000 with exact 200 R1 refund and vendor sees real
   await expect(page.getByText('Onaylanmış hak ediş')).toBeVisible();
   await expect(page.getByText('Banka ile ödenen nakit').locator('..')).toContainText('800');
   await expect(page.getByText('R1 Browser cashless')).toHaveCount(0);
+  if (process.env.BROWSER_SMOKE_R1_RECOVERY === '1') {
+    await page.goto('/admin/finance/payment-preparation');
+    await expect(page.getByLabel('Payment preparation queue')).toHaveCount(0);
+  }
 });
 
 test('Admin completes a zero-cash offset with no fake EFT or Mark Paid', async ({ page }) => {
   await loginAdmin(page);
   await selectVendor(page, 'r1-browser-cashless');
-  await (await clickAction(page, 'Prepare Batch')).click();
-  await (await clickAction(page, 'Mark for Review')).click();
+  if (process.env.BROWSER_SMOKE_R1_RECOVERY !== '1') {
+    await (await clickAction(page, 'Prepare Batch')).click();
+    await (await clickAction(page, 'Mark for Review')).click();
+  }
   const detail = page.getByLabel('Payment preparation detail panel');
   await expect(detail.getByRole('button', { name: 'Mark Paid' })).toHaveCount(0);
   const complete = await clickAction(page, 'Complete Cashless Offset', 'Complete Cashless');
@@ -76,8 +86,10 @@ test('Admin completes a zero-cash offset with no fake EFT or Mark Paid', async (
 test('Admin can cancel R1 REVIEW only with written no-EFT confirmation', async ({ page }) => {
   await loginAdmin(page);
   await selectVendor(page, 'r1-browser-cancel');
-  await (await clickAction(page, 'Prepare Batch')).click();
-  await (await clickAction(page, 'Mark for Review')).click();
+  if (process.env.BROWSER_SMOKE_R1_RECOVERY !== '1') {
+    await (await clickAction(page, 'Prepare Batch')).click();
+    await (await clickAction(page, 'Mark for Review')).click();
+  }
   const cancel = await clickAction(page, 'Cancel Review (No EFT)', 'Cancel Review');
   await cancel.click();
   await expect(page.getByRole('alert')).toContainText('Written reason');
