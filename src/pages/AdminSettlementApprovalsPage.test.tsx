@@ -10,6 +10,7 @@ import {
   cancelSettlementApproval,
   getDatabaseHealth,
   getSettlementApproval,
+  getSettlementApprovalReadiness,
   listSettlementApprovals,
   previewSettlementApproval,
   type SettlementApproval,
@@ -29,6 +30,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     executeSettlementLogoCommissionInvoiceCreate: vi.fn(),
     getDatabaseHealth: vi.fn(),
     getSettlementApproval: vi.fn(),
+    getSettlementApprovalReadiness: vi.fn(),
     getSettlementApprovalAudit: vi.fn(),
     getSettlementCommissionInvoiceDiagnostics: vi.fn(),
     getSettlementCommissionInvoiceRecords: vi.fn(),
@@ -43,6 +45,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
 
 const getDatabaseHealthMock = vi.mocked(getDatabaseHealth);
 const getSettlementApprovalMock = vi.mocked(getSettlementApproval);
+const getSettlementApprovalReadinessMock = vi.mocked(getSettlementApprovalReadiness);
 const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
 const approveSettlementApprovalMock = vi.mocked(approveSettlementApproval);
@@ -263,6 +266,15 @@ describe('Settlement Review queue cleanup', () => {
     getSettlementApprovalMock.mockImplementation(async (id: string) =>
       id === selectedDraftRefundApproval.id ? selectedDraftRefundApproval : selectedRecentApproval,
     );
+    getSettlementApprovalReadinessMock.mockResolvedValue({
+      ok: true, writesPerformed: false, settlementApprovalId: 'approval-1', vendorId: 'yalispor',
+      currency: 'TRY', status: 'DRAFT', classification: 'BLOCKED', adminReviewRequired: true,
+      sourceValidation: { evaluated: true, ok: false, reasons: [
+        { settlementApprovalLineId: 'line-1', financeLedgerEntryId: 'fle-sale-1',
+          code: 'refund_arrived_after_draft', reason: 'Refund arrived after draft creation' },
+      ] },
+      blockers: ['Refund arrived after draft creation'], missingEvidence: [],
+    });
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
     previewSettlementApprovalMock.mockRejectedValue(new Error('Preview should not run on the queue page.'));
   });
@@ -471,6 +483,21 @@ describe('Settlement Review queue cleanup', () => {
     expect(within(queue).queryByText('Return to Review')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Mark Paid')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Apply Refund')).not.toBeInTheDocument();
+  });
+
+  it('shows the selected DRAFT readiness diagnostic without approving it', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await within(queue).findByRole('columnheader', { name: 'Vendor' });
+    await user.click(getDraftSettlementRow(queue));
+
+    await waitFor(() => expect(getSettlementApprovalReadinessMock).toHaveBeenCalledWith('approval-1'));
+    const readiness = within(queue).getByLabelText('Settlement approval readiness');
+    expect(await within(readiness).findByText('BLOCKED')).toBeInTheDocument();
+    expect(within(readiness).getByText('Refund arrived after draft creation')).toBeInTheDocument();
+    expect(within(readiness).getByText(/Admin review required/)).toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
   it('confirms and executes approve settlement with list and detail refetch', async () => {

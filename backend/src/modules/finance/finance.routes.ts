@@ -70,6 +70,7 @@ import {
 import { getFinanceEventBackfillPlan } from './finance-event-backfill-planner.service.js';
 import { getFinanceEventRelinkPlan, relinkExistingFinanceEvents } from './finance-event-relink.service.js';
 import {
+  assessSettlementApprovalReadiness,
   approveSettlementApproval,
   cancelSettlementApproval,
   createDraftApproval,
@@ -1334,6 +1335,24 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(404).send({ message: 'Settlement approval not found.' });
       }
       return approval;
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-approvals/:id/readiness',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+      const { id } = request.params as { id: string };
+      try {
+        const assessment = await assessSettlementApprovalReadiness(id);
+        if (!assessment) return reply.code(404).send({ message: 'Settlement approval not found.' });
+        return assessment;
+      } catch {
+        return reply.code(503).send({ message: 'Settlement approval readiness could not be verified.' });
+      }
     },
   );
 

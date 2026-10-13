@@ -104,6 +104,7 @@ jobs:
           fin_bug_001_validation FIN_BUG_001_TEST_DATABASE_ISOLATED src/fin-bug-001-settlement-delay-parity.postgres.test.ts
           fin_bug_002_validation FIN_BUG_002_TEST_DATABASE_ISOLATED src/fin-bug-002-cancelled-cycle.postgres.test.ts
           fin_bug_005_validation FIN_BUG_005_TEST_DATABASE_ISOLATED src/fin-bug-005-settlement-preview-isolation.postgres.test.ts
+          settlement_approval_readiness_validation SETTLEMENT_APPROVAL_READINESS_TEST_DATABASE_ISOLATED src/settlement-approval-readiness.postgres.test.ts
           r1_phase1_validation R1_PHASE1_TEST_DATABASE_ISOLATED src/r1-payout-offset-authority.postgres.test.ts
           r1_phase2_validation R1_PHASE2_TEST_DATABASE_ISOLATED src/r1-payout-offset-reservation.postgres.test.ts
           settlement_utc_boundary_validation SETTLEMENT_UTC_BOUNDARY_TEST_DATABASE_ISOLATED src/settlement-schedule-utc-boundary.postgres.test.ts

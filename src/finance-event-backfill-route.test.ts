@@ -4,6 +4,7 @@ const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
 const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
 const approveSettlementApprovalMock = vi.hoisted(() => vi.fn());
+const assessSettlementApprovalReadinessMock = vi.hoisted(() => vi.fn());
 const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
 const previewSettlementLogoCommissionInvoiceMock = vi.hoisted(() => vi.fn());
 const findSettlementCommissionInvoiceRecordsMock = vi.hoisted(() => vi.fn());
@@ -32,6 +33,7 @@ vi.mock('../backend/src/modules/finance/finance-event-relink.service.js', () => 
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => ({
+  assessSettlementApprovalReadiness: assessSettlementApprovalReadinessMock,
   approveSettlementApproval: approveSettlementApprovalMock,
   cancelSettlementApproval: vi.fn(),
   createDraftApproval: vi.fn(),
@@ -101,6 +103,7 @@ describe('finance event backfill route', () => {
     getFinanceEventRelinkPlanMock.mockReset();
     relinkExistingFinanceEventsMock.mockReset();
     approveSettlementApprovalMock.mockReset();
+    assessSettlementApprovalReadinessMock.mockReset();
     getSettlementApprovalAuditMock.mockReset();
     previewSettlementLogoCommissionInvoiceMock.mockReset();
     findSettlementCommissionInvoiceRecordsMock.mockReset();
@@ -519,6 +522,34 @@ describe('finance event backfill route', () => {
       },
     });
     expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1', 'admin-user');
+  });
+
+  it('exposes approval readiness only to Admin without starting approval', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(), post: vi.fn(),
+    };
+    const reply = { code: vi.fn((status: number) => ({ send: (body: unknown) => ({ status, body }) })) };
+    const assessment = {
+      ok: true, writesPerformed: false, settlementApprovalId: 'approval-1', vendorId: 'vendor-a',
+      currency: 'TRY', status: 'DRAFT', classification: 'BLOCKED', adminReviewRequired: true,
+      sourceValidation: { evaluated: true, ok: false, reasons: [] }, blockers: ['Refund arrived after draft creation'],
+      missingEvidence: [],
+    };
+    assessSettlementApprovalReadinessMock.mockResolvedValue(assessment);
+    registerFinanceRoutes(app as never, {} as never);
+    const handler = gets.get('/admin/finance/settlement-approvals/:id/readiness');
+
+    expect(await handler?.({ authUser: { role: 'vendor' }, params: { id: 'approval-1' } }, reply)).toEqual({
+      status: 403, body: { message: 'Admin access required.' },
+    });
+    expect(assessSettlementApprovalReadinessMock).not.toHaveBeenCalled();
+    expect(await handler?.({ authUser: { role: 'admin' }, params: { id: 'approval-1' } }, reply)).toEqual(assessment);
+    expect(assessSettlementApprovalReadinessMock).toHaveBeenCalledExactlyOnceWith('approval-1');
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
   it('returns settlement commission invoice records without writes', async () => {

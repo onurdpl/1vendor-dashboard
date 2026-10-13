@@ -176,6 +176,30 @@ export type SettlementApproval = {
   correctionDeductionLines?: Array<{ id: string; deductionId: string; amountMinor: number; status: string }>;
 };
 
+export type SettlementApprovalReadiness = {
+  ok: true;
+  writesPerformed: false;
+  settlementApprovalId: string;
+  vendorId: string;
+  currency: string;
+  status: 'DRAFT' | 'APPROVED' | 'CANCELLED';
+  classification: 'VERIFIED_BY_EXISTING_CHECKS' | 'BLOCKED' | 'UNKNOWN';
+  sourceValidation: {
+    evaluated: boolean;
+    ok: boolean;
+    reasons: Array<{
+      settlementApprovalLineId: string;
+      financeLedgerEntryId: string;
+      code: string;
+      reason: string;
+      details?: Record<string, unknown>;
+    }>;
+  };
+  blockers: string[];
+  missingEvidence: string[];
+  adminReviewRequired: true;
+};
+
 export type SettlementApprovalSummary = {
   id: string;
   createdAt: string;
@@ -617,6 +641,10 @@ export function listSettlementApprovals(vendorId: string) {
 
 export function getSettlementApproval(id: string) {
   return apiClient.get<SettlementApproval>(`/admin/finance/settlement-approvals/${encodeURIComponent(id)}`);
+}
+
+export function getSettlementApprovalReadiness(id: string) {
+  return apiClient.get<SettlementApprovalReadiness>(`/admin/finance/settlement-approvals/${encodeURIComponent(id)}/readiness`);
 }
 
 export function approveSettlementApproval(id: string) {

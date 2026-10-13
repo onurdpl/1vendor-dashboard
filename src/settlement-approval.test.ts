@@ -69,6 +69,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const {
+  assessSettlementApprovalReadiness,
   approveSettlementApproval,
   cancelSettlementApproval,
   createDraftApproval,
@@ -2261,6 +2262,143 @@ describe('settlement approval foundation', () => {
     );
     expect(approval.status).toBe('approved');
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('assesses a clean draft with the same current source checks without approving it', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true, activeApprovalId: 'approval-1' }),
+    );
+
+    const assessment = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(assessment).toMatchObject({
+      writesPerformed: false,
+      settlementApprovalId: 'approval-1', vendorId: 'vendor-a', currency: 'TRY', status: 'DRAFT',
+      classification: 'VERIFIED_BY_EXISTING_CHECKS',
+      sourceValidation: { evaluated: true, ok: true, reasons: [] },
+      blockers: [], missingEvidence: [], adminReviewRequired: true,
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks a stale refund-aware draft and preserves its source identity', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true,
+        activeApprovalId: 'approval-1', refundRecords: [{ id: 'refund-new', sourceShopifyRefundId: 'refund-new', amount: 100 }] }),
+    );
+
+    const assessment = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(assessment).toMatchObject({
+      classification: 'BLOCKED',
+      sourceValidation: { evaluated: true, ok: false, reasons: [
+        expect.objectContaining({ code: 'refund_arrived_after_draft', financeLedgerEntryId: 'sale-1' }),
+      ] },
+      adminReviewRequired: true,
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('does not label replacement authority as verified by line checks', async () => {
+    const replacement = buildApproval({ id: 'approval-1', status: 'DRAFT' });
+    prismaMock.settlementApproval.findUnique.mockResolvedValue({
+      ...replacement, replacesSettlementApprovalId: 'cancelled-original',
+    });
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true, activeApprovalId: 'approval-1' }),
+    );
+
+    const assessment = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(assessment).toMatchObject({
+      classification: 'UNKNOWN', sourceValidation: { evaluated: true, ok: true }, adminReviewRequired: true,
+    });
+    expect(assessment?.blockers).toEqual([expect.stringContaining('Controlled replacement')]);
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('does not label Financial Correction authority as verified by ordinary line checks', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue({
+      ...buildApproval({ id: 'approval-1', status: 'DRAFT' }), correctionCreditMinor: 1000,
+      correctionCreditLines: [{ id: 'credit-line-1' }],
+    });
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true, activeApprovalId: 'approval-1' }),
+    );
+
+    const result = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(result?.classification).toBe('UNKNOWN');
+    expect(result?.blockers).toEqual([expect.stringContaining('Financial Correction')]);
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('reports missing ledger authority without borrowing another source', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(null);
+
+    const result = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(result).toMatchObject({
+      classification: 'BLOCKED', sourceValidation: { ok: false, reasons: [
+        expect.objectContaining({ code: 'ledger_missing', financeLedgerEntryId: 'sale-1' }),
+      ] }, missingEvidence: ['Ledger row no longer exists'],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks a new return hold before any settlement mutation', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true,
+        activeApprovalId: 'approval-1', returnRecords: [{ id: 'return-new', status: 'approved', returnLifecycleStatus: 'approved' }] }),
+    );
+
+    const result = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(result?.classification).toBe('BLOCKED');
+    expect(result?.sourceValidation.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'approved_return_hold_active' }),
+    ]));
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks a pending customer cancellation and cross-vendor ledger source', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue({
+      ...buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true,
+        activeApprovalId: 'approval-1', customerCancellationRequestStatus: 'PENDING' }),
+      vendorId: 'vendor-b',
+    });
+
+    const result = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(result?.classification).toBe('BLOCKED');
+    expect(result?.sourceValidation.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'customer_cancellation_pending' }),
+      expect.objectContaining({ code: 'vendor_mismatch' }),
+    ]));
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks a changed monetary source while retaining the frozen DRAFT amount', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1100, activeApproval: true, activeApprovalId: 'approval-1' }),
+    );
+
+    const result = await assessSettlementApprovalReadiness('approval-1');
+
+    expect(result?.classification).toBe('BLOCKED');
+    expect(result?.sourceValidation.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'settlement_amount_changed', details: expect.objectContaining({
+        frozen: expect.objectContaining({ amountMinor: 100000 }),
+      }) }),
+    ]));
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
   });
 
   it('keeps draft status when the ledger row has been voided', async () => {

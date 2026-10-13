@@ -17,6 +17,7 @@ import {
   executeSettlementLogoCommissionInvoiceCreate,
   getDatabaseHealth,
   getSettlementApproval,
+  getSettlementApprovalReadiness,
   getSettlementApprovalAudit,
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
@@ -28,6 +29,7 @@ import {
   previewSettlementLogoCommissionInvoice,
   type DatabaseHealthResponse,
   type SettlementApproval,
+  type SettlementApprovalReadiness,
   type SettlementApprovalAudit,
   type SettlementApprovalLine,
   type SettlementApprovalStatus,
@@ -1390,6 +1392,25 @@ function SettlementReviewQueue({
     ].some((value) => value.toLowerCase().includes(searchTerm));
   });
   const selectedQueueApproval = filteredApprovals.find((item) => item.id === activeApprovalId) ?? filteredApprovals[0] ?? null;
+  const [approvalReadiness, setApprovalReadiness] = useState<SettlementApprovalReadiness | null>(null);
+  const [approvalReadinessError, setApprovalReadinessError] = useState<string | null>(null);
+  const [approvalReadinessLoading, setApprovalReadinessLoading] = useState(false);
+  useEffect(() => {
+    const id = selectedQueueApproval?.status === 'draft' ? selectedQueueApproval.id : null;
+    setApprovalReadiness(null);
+    setApprovalReadinessError(null);
+    if (!id) {
+      setApprovalReadinessLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setApprovalReadinessLoading(true);
+    void getSettlementApprovalReadiness(id)
+      .then((result) => { if (!cancelled) setApprovalReadiness(result); })
+      .catch((error) => { if (!cancelled) setApprovalReadinessError(getErrorMessage(error)); })
+      .finally(() => { if (!cancelled) setApprovalReadinessLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedQueueApproval?.id, selectedQueueApproval?.status]);
   const selectedQueueDetail = selectedQueueApproval ? getApprovalDetailForSummary(selectedQueueApproval, selectedApprovalDetail) : null;
   const selectedQueueIssues = selectedQueueApproval
     ? getSettlementDetailIssues(selectedQueueApproval, selectedQueueDetail)
@@ -1537,6 +1558,26 @@ function SettlementReviewQueue({
                   <section className="op-panel-section">
                     <h4>Current Blocker</h4>
                     <p className="page-description">{selectedWaitingReason}</p>
+                  </section>
+                ) : null}
+                {selectedQueueApproval.status === 'draft' ? (
+                  <section className="op-panel-section" aria-label="Settlement approval readiness">
+                    <h4>Approval readiness</h4>
+                    {approvalReadinessLoading ? <p>Checking current approval evidence…</p> : null}
+                    {approvalReadinessError ? <p>Readiness unavailable: {approvalReadinessError}</p> : null}
+                    {approvalReadiness?.settlementApprovalId === selectedQueueApproval.id ? (
+                      <>
+                        <p><strong>{approvalReadiness.classification}</strong> · Admin review required</p>
+                        <p>This is a read-only snapshot; manual approval revalidates current authority.</p>
+                        <p>Existing source checks: {approvalReadiness.sourceValidation.ok ? 'passed' : 'blocked'}</p>
+                        {approvalReadiness.blockers.length ? (
+                          <ul>{approvalReadiness.blockers.map((blocker, index) => <li key={`${index}-${blocker}`}>{blocker}</li>)}</ul>
+                        ) : null}
+                        {approvalReadiness.missingEvidence.length ? (
+                          <p>Missing evidence: {approvalReadiness.missingEvidence.join('; ')}</p>
+                        ) : null}
+                      </>
+                    ) : null}
                   </section>
                 ) : null}
                 <MetadataGroup title="Next Action">

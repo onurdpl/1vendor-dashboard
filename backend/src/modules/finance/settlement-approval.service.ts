@@ -1410,6 +1410,96 @@ export async function validateSettlementApprovalBeforeApprove(
   };
 }
 
+export type SettlementApprovalReadinessDto = {
+  ok: true;
+  writesPerformed: false;
+  settlementApprovalId: string;
+  vendorId: string;
+  currency: string;
+  status: SettlementApprovalStatus;
+  classification: 'VERIFIED_BY_EXISTING_CHECKS' | 'BLOCKED' | 'UNKNOWN';
+  sourceValidation: {
+    evaluated: boolean;
+    ok: boolean;
+    reasons: SettlementApprovalRevalidationReason[];
+  };
+  blockers: string[];
+  missingEvidence: string[];
+  adminReviewRequired: true;
+};
+
+const MISSING_APPROVAL_EVIDENCE_CODES = new Set([
+  'ledger_missing',
+  'refund_adjustment_missing',
+  'refund_adjustment_application_missing',
+]);
+
+/** A diagnostic snapshot only. Manual approval still revalidates inside its write transaction. */
+export async function assessSettlementApprovalReadiness(
+  id: string,
+): Promise<SettlementApprovalReadinessDto | null> {
+  return prisma.$transaction(async (tx) => {
+    const approval = await tx.settlementApproval.findUnique({
+      where: { id },
+      include: { lines: true, correctionCreditLines: true, correctionDeductionLines: true },
+    });
+    if (!approval) return null;
+
+    const base = {
+      ok: true as const,
+      writesPerformed: false as const,
+      settlementApprovalId: approval.id,
+      vendorId: approval.vendorId,
+      currency: approval.currency,
+      status: approval.status,
+      adminReviewRequired: true as const,
+    };
+    if (approval.status !== SettlementApprovalStatus.DRAFT) {
+      return {
+        ...base,
+        classification: 'BLOCKED' as const,
+        sourceValidation: { evaluated: false, ok: false, reasons: [] },
+        blockers: ['Only DRAFT settlement approvals can be approved.'],
+        missingEvidence: [],
+      };
+    }
+
+    const sourceValidation = await validateSettlementApprovalBeforeApprove(tx, approval);
+    const missingEvidence = sourceValidation.reasons
+      .filter((reason) => MISSING_APPROVAL_EVIDENCE_CODES.has(reason.code) ||
+        (reason.code === 'settlement_delay_not_satisfied' && reason.details?.blockerReason === MISSING_DELIVERY_DATE_REASON))
+      .map((reason) => reason.reason);
+    if (!sourceValidation.ok) {
+      return {
+        ...base,
+        classification: 'BLOCKED' as const,
+        sourceValidation: { evaluated: true, ...sourceValidation },
+        blockers: sourceValidation.reasons.map((reason) => reason.reason),
+        missingEvidence,
+      };
+    }
+
+    // These additional branches have write-time authority checks beyond ordinary
+    // ledger-line revalidation. A partial read must never be presented as approval-ready.
+    const unverifiedAuthority = [
+      ...(approval.replacesSettlementApprovalId
+        ? ['Controlled replacement and late-refund authority are not verified by this assessment.'] : []),
+      ...(approval.correctionCreditLines.length || approval.correctionDeductionLines.length ||
+        approval.correctionCreditMinor || approval.correctionDeductionMinor
+        ? ['Financial Correction source authority is not verified by this assessment.'] : []),
+      ...(approval.lines.length === 0
+        ? ['No ordinary settlement lines are available for this readiness check.'] : []),
+    ];
+    return {
+      ...base,
+      classification: unverifiedAuthority.length ? 'UNKNOWN' as const : 'VERIFIED_BY_EXISTING_CHECKS' as const,
+      sourceValidation: { evaluated: true, ...sourceValidation },
+      blockers: unverifiedAuthority,
+      missingEvidence,
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+}
+
 function sortedNumbers(values: Set<number>) {
   return Array.from(values).sort((a, b) => a - b);
 }
