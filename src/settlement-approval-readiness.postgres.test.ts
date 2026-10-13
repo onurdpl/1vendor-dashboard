@@ -7,6 +7,7 @@ const describeWithPostgres = databaseUrl ? describe : describe.skip;
 describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () => {
   let db: PrismaClient;
   let assessment: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['assessSettlementApprovalReadiness'];
+  let candidateAssessment: typeof import('../backend/src/modules/finance/settlement-auto-approval-candidate.service.js')['assessAutomaticApprovalCandidate'];
   let approvalId: string;
   let allocationId: string;
   let saleId: string;
@@ -22,11 +23,14 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     }
     process.env.DATABASE_URL = databaseUrl;
     const [{ createDraftApproval, assessSettlementApprovalReadiness },
+      { assessAutomaticApprovalCandidate },
       { recordVerifiedDeliveredObservation }] = await Promise.all([
       import('../backend/src/modules/finance/settlement-approval.service.js'),
+      import('../backend/src/modules/finance/settlement-auto-approval-candidate.service.js'),
       import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'),
     ]);
     assessment = assessSettlementApprovalReadiness;
+    candidateAssessment = assessAutomaticApprovalCandidate;
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
 
@@ -126,5 +130,101 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     ]));
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
     expect(await db.payoutBatch.count({ where: { vendorId: result!.vendorId } })).toBe(0);
+    expect(await candidateAssessment({ settlementApprovalId: approvalId, vendorId: result!.vendorId })).toMatchObject({
+      classification: 'BLOCKED', approvalAuthorized: false,
+      reasonCodes: expect.arrayContaining(['refund_arrived_after_draft']),
+    });
+  });
+
+  it('classifies an ordinary verified SALE as evidence-only without financial writes or approval authority', async () => {
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const beforeCounts = await Promise.all([
+      db.financeLedgerEntry.count({ where: { vendorId: before.vendorId } }),
+      db.settlementRefundAdjustment.count({ where: { vendorId: before.vendorId } }),
+      db.payoutBatch.count({ where: { vendorId: before.vendorId } }),
+      db.vendorBalanceEvent.count({ where: { vendorId: before.vendorId } }),
+      db.settlementCommissionInvoice.count({ where: { vendorId: before.vendorId } }),
+    ]);
+
+    const result = await candidateAssessment({ settlementApprovalId: approvalId, vendorId: before.vendorId });
+
+    expect(result).toMatchObject({
+      settlementApprovalId: approvalId, vendorId: before.vendorId,
+      classification: 'ELIGIBLE_EVIDENCE_ONLY', writesPerformed: false, approvalAuthorized: false,
+      requiresWriteTimeRevalidation: true, readinessClassification: 'VERIFIED_BY_EXISTING_CHECKS',
+      adminReviewRequiredByExistingReadiness: true,
+      vendorProfile: { active: true, autoSettlementApproveEnabled: false },
+      reasonCodes: ['ORDINARY_SALE_SOURCE_CHECKS_VERIFIED'], blockers: [], unresolvedAuthority: [],
+    });
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } })).toEqual(before);
+    expect(await Promise.all([
+      db.financeLedgerEntry.count({ where: { vendorId: before.vendorId } }),
+      db.settlementRefundAdjustment.count({ where: { vendorId: before.vendorId } }),
+      db.payoutBatch.count({ where: { vendorId: before.vendorId } }),
+      db.vendorBalanceEvent.count({ where: { vendorId: before.vendorId } }),
+      db.settlementCommissionInvoice.count({ where: { vendorId: before.vendorId } }),
+    ])).toEqual(beforeCounts);
+  });
+
+  it('does not reveal another vendor settlement through candidate assessment', async () => {
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, select: { vendorId: true } });
+    expect(await candidateAssessment({ settlementApprovalId: approvalId, vendorId: `${row.vendorId}-other` })).toBeNull();
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+  });
+
+  it('keeps an open integrity alert blocked in both readiness and candidate evidence', async () => {
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, select: { vendorId: true } });
+    await db.financeIntegrityAlert.create({ data: {
+      dedupeKey: `candidate-alert-${allocationId}`, severity: 'warning', category: 'multiple_active_sale_ledgers',
+      vendorAllocationId: allocationId, reason: 'Synthetic test integrity hold', status: 'open',
+    } });
+
+    const result = await candidateAssessment({ settlementApprovalId: approvalId, vendorId: row.vendorId });
+    expect(result).toMatchObject({
+      classification: 'BLOCKED', approvalAuthorized: false,
+      reasonCodes: expect.arrayContaining(['finance_integrity_alert_open']),
+    });
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+  });
+
+  it('returns UNKNOWN for correction and controlled replacement authority', async () => {
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, select: { vendorId: true } });
+    await db.settlementApproval.update({ where: { id: approvalId }, data: { correctionCreditMinor: 100 } });
+    const correction = await candidateAssessment({ settlementApprovalId: approvalId, vendorId: row.vendorId });
+    expect(correction).toMatchObject({
+      classification: 'UNKNOWN', approvalAuthorized: false,
+      reasonCodes: expect.arrayContaining(['CORRECTION_AUTHORITY_UNVERIFIED']),
+      adminReviewRequiredByExistingReadiness: true,
+    });
+
+    const original = await db.settlementApproval.create({ data: {
+      vendorId: row.vendorId, status: 'CANCELLED', currency: 'TRY', grossSalesMinor: 0,
+      refundTotalMinor: 0, commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 0,
+      sourceSnapshotJson: {},
+    } });
+    await db.settlementApproval.update({ where: { id: approvalId }, data: {
+      correctionCreditMinor: 0, replacesSettlementApprovalId: original.id,
+      replacementRequestId: `${approvalId}-request`, replacementRequestedBy: 'readiness-test-admin',
+      replacementReason: 'Synthetic read-only candidate classification test', replacementRequestedAt: new Date(),
+    } });
+    const replacement = await candidateAssessment({ settlementApprovalId: approvalId, vendorId: row.vendorId });
+    expect(replacement).toMatchObject({
+      classification: 'UNKNOWN', approvalAuthorized: false,
+      reasonCodes: expect.arrayContaining(['REPLACEMENT_AUTHORITY_UNVERIFIED']),
+      adminReviewRequiredByExistingReadiness: true,
+    });
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+    expect(await db.settlementRefundAdjustment.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('never treats a non-DRAFT settlement as an automatic candidate', async () => {
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, select: { vendorId: true } });
+    const { approveSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    await approveSettlementApproval(approvalId, 'readiness-test-admin');
+
+    expect(await candidateAssessment({ settlementApprovalId: approvalId, vendorId: row.vendorId })).toMatchObject({
+      classification: 'BLOCKED', approvalAuthorized: false, reasonCodes: ['NOT_DRAFT'],
+      readinessClassification: 'BLOCKED', adminReviewRequiredByExistingReadiness: true,
+    });
   });
 });

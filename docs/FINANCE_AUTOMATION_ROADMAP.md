@@ -72,6 +72,8 @@ The phase ordering is a dependency proposal, not permission to begin a phase. Pr
 
 ## Phase 4 — Settlement validation and approval boundary
 
+**FIN-AUTO-001 — approved automation objective (Step 4A boundary).** Normal financial operations should progress without routine Admin approval from Settlement DRAFT through canonical financial validation, APPROVED settlement, Logo commission invoice, payout DRAFT and pre-payment validation. Exceptions with unresolved blockers, conflicting evidence, insufficient authority or unverified conditions remain for Admin Finance Review; the existing manual approval path remains available. EFT execution and Mark Paid remain manual. Every existing finance guard and frozen authority check remains mandatory: this objective does not permit approving `UNKNOWN` or bypassing write-time revalidation. Step 4A adds read-only candidate evidence only. It does **not** authorize an automatic approval worker, Logo or payout execution, and no production automatic approval is enabled. The exact automatic subtype scope, system actor and activation controls still require a separate decision and validation.
+
 - **Objective and order:** Separate automatic DRAFT from any future automatic APPROVED/FROZEN transition. Approval must revalidate source authority and record who/what approved it.
 - **Register:** FIN-BUG-001/003; FIN-DESIGN-003/006/008; FIN-UI-002/003/010; FIN-TEST-002/005/006/008, plus applicable hold/alert findings.
 - **Approved/current boundary:** Approved settlement is frozen financial history; local approval revalidation is authoritative. A DRAFT or shadow READY label is not approval. Existing manual Admin approval remains until a narrower automation policy is approved.
