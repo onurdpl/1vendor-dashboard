@@ -86,7 +86,7 @@ Rules:
 - one non-cancelled scheduled settlement approval is allowed per vendor per run date
 - an existing scheduled `DRAFT` approval returns `DRAFT_EXISTS`
 - an existing scheduled `APPROVED` approval returns `SETTLEMENT_EXISTS`
-- `CANCELLED` scheduled approvals do not block recreation for the same run date
+- `CANCELLED` scheduled approvals retain the cycle key; ordinary creation is blocked and a controlled Admin replacement is separate
 - late-arriving eligible rows after a scheduled cycle was approved are not merged into the old settlement
 - late-arriving eligible rows must wait for the next scheduled cycle
 
@@ -97,6 +97,14 @@ The job creates draft settlement approvals only. It does not approve settlements
 Deployment scheduler note:
 
 Render or another scheduler can call the manual trigger endpoint once per day after the environment gates are intentionally enabled. Until then, operators can run the trigger from the Scheduled Settlement Workspace.
+
+## Automatic read-only schedule (opt-in)
+
+The backend also has a passive in-process scheduler. It is **disabled by default**. It installs a timer only when `SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED=true` **and** `SETTLEMENT_AUTO_DRAFT_SCHEDULER_UTC_TIME` is explicitly set to a valid `HH:mm` UTC time. Missing or invalid time fails startup rather than choosing a production run time. Render is not enabled by this code change.
+
+At that UTC time each day, it evaluates the **previous completed UTC day** as `runDate` (and its UTC `periodEnd`). It does not run immediately on startup or catch up missed days. This is an advisory preview, not scheduled DRAFT creation. The scheduler forces `SETTLEMENT_AUTO_DRAFT_JOB_ENABLED=true`, `SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN=true`, and `confirmScheduledSettlementAutoDraftJob=false` for its own invocation, regardless of the manual job's write-related environment flags. The existing dry-run eligibility and blocker classification are reused; no `SettlementScheduleJobRun`, settlement DRAFT, or new financial authority is written.
+
+Each completion is logged with the evaluated run date, vendor/due/ready counts, blocked vendor IDs and blocker reasons, and outcome. No customer details are logged. An in-process guard skips overlapping executions; shutdown clears the timer. This is not a distributed lease or durable missed-day recovery mechanism. The manual Admin job and its separate write gates are unchanged.
 
 ## Examples
 

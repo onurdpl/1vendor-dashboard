@@ -41,8 +41,12 @@ describe('backend env shipping provider gates', () => {
     });
     expect(loadEnv().SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED).toBe(false);
 
-    resetEnv({ SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED: 'true' });
+    resetEnv({
+      SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED: 'true',
+      SETTLEMENT_AUTO_DRAFT_SCHEDULER_UTC_TIME: '01:30',
+    });
     expect(loadEnv().SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED).toBe(true);
+    expect(loadEnv().SETTLEMENT_AUTO_DRAFT_SCHEDULER_UTC_TIME).toBe('01:30');
   });
 
   it.each([
