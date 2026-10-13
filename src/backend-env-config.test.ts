@@ -49,6 +49,23 @@ describe('backend env shipping provider gates', () => {
     expect(loadEnv().SETTLEMENT_AUTO_DRAFT_SCHEDULER_UTC_TIME).toBe('01:30');
   });
 
+  it('keeps the automatic DRAFT writer disabled independently of passive and manual job gates', () => {
+    resetEnv({
+      SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED: undefined,
+      SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED: 'true',
+      SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: 'true',
+      SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: 'false',
+    });
+    expect(loadEnv().SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED).toBe(false);
+
+    resetEnv({
+      SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED: 'true',
+      SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_UTC_TIME: '02:15',
+    });
+    expect(loadEnv().SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED).toBe(true);
+    expect(loadEnv().SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_UTC_TIME).toBe('02:15');
+  });
+
   it.each([
     ['Lidio', ['LIDIO_ENABLED', 'LIDIO_BASE_URL', 'LIDIO_MERCHANT_CODE', 'LIDIO_AUTHORIZATION_SCHEME',
       'LIDIO_AUTHORIZATION_TOKEN', 'LIDIO_MERCHANT_KEY', 'LIDIO_API_PASSWORD', 'LIDIO_SUBSELLER_PROFILE_ID']],

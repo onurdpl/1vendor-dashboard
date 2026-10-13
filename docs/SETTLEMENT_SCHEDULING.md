@@ -106,6 +106,14 @@ At that UTC time each day, it evaluates the **previous completed UTC day** as `r
 
 Each completion is logged with the evaluated run date, vendor/due/ready counts, blocked vendor IDs and blocker reasons, and outcome. No customer details are logged. An in-process guard skips overlapping executions; shutdown clears the timer. This is not a distributed lease or durable missed-day recovery mechanism. The manual Admin job and its separate write gates are unchanged.
 
+## Automatic DRAFT schedule (separate opt-in)
+
+The DRAFT writer is a separate in-process timer. It remains disabled unless `SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED=true`, an explicit valid `SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_UTC_TIME=HH:mm` is provided, and the existing job gates are also deliberately set to `SETTLEMENT_AUTO_DRAFT_JOB_ENABLED=true` and `SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN=false`. No UTC time or write gate is enabled by default. Missing or incompatible configuration fails startup when the writer is enabled. The passive read-only scheduler remains independent and read-only.
+
+At the configured UTC time it invokes the existing scheduled job for the previous completed UTC day, passing the job's explicit confirmation and recording `system:settlement_auto_draft_scheduler` as the trigger, not an Admin identity. It does not run on startup or catch up missed days. The existing job and per-vendor cycle constraints prevent duplicate DRAFTs; an existing COMPLETED, FAILED, or PROCESSING JobRun for the same date is returned, never automatically resumed. Blocked vendors do not prevent other eligible vendors from being evaluated under the existing job rules.
+
+The writer logs the persisted JobRun status, creation counts, blocked vendor IDs and reasons. An uncertain reporting failure is logged as UNKNOWN for operator review, with no automatic same-date retry. In-process overlap is skipped and shutdown clears the timer; multi-worker coordination relies on existing durable JobRun and cycle uniqueness. This does not auto-approve settlements, invoke Logo, prepare payouts, execute EFT, or mark payments paid. It is not enabled in Render by this implementation.
+
 ## Examples
 
 21 days delay with weekly Wednesday settlement:
