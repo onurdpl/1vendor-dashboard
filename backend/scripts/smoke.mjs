@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,6 +56,74 @@ const prisma = backendEnv.DATABASE_URL
       },
     })
   : null;
+
+async function seedDisposableSmokeDatabase() {
+  if (!prisma) return;
+
+  const explicitUrl = process.env.DATABASE_URL;
+  if (process.env.BACKEND_SMOKE_DISPOSABLE_DB !== '1' || !explicitUrl || explicitUrl !== backendEnv.DATABASE_URL) {
+    throw new Error('DB-backed smoke requires BACKEND_SMOKE_DISPOSABLE_DB=1 and an explicit DATABASE_URL.');
+  }
+
+  const target = new URL(explicitUrl);
+  const databaseName = decodeURIComponent(target.pathname.slice(1));
+  if (!['postgresql:', 'postgres:'].includes(target.protocol) ||
+      !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(target.hostname) ||
+      !target.port || !target.username ||
+      !/^vendor_dashboard_smoke_[a-z0-9_]+$/.test(databaseName) ||
+      target.searchParams.get('schema') !== 'public' ||
+      [...target.searchParams.keys()].length !== 1 || target.hash) {
+    throw new Error('DB-backed smoke requires an explicit local, disposable vendor_dashboard_smoke_* database URL.');
+  }
+
+  try {
+    const [identity] = await prisma.$queryRaw`
+      SELECT current_database() AS "databaseName", current_user AS "userName",
+        pg_get_userbyid(datdba) AS "ownerName",
+        current_setting('server_version_num')::integer AS "serverVersion",
+        inet_server_addr()::text AS "serverAddress", inet_server_port() AS "serverPort"
+      FROM pg_database WHERE datname = current_database()
+    `;
+    const [migrationCount, vendorCount, userCount, orderCount, webhookCount, ledgerCount] = await Promise.all([
+      prisma.$queryRaw`SELECT count(*)::integer AS count FROM "_prisma_migrations"`,
+      prisma.vendor.count(), prisma.user.count(), prisma.shopifyOrder.count(),
+      prisma.webhookEvent.count(), prisma.financeLedgerEntry.count(),
+    ]);
+    if (identity?.databaseName !== databaseName || identity.userName !== identity.ownerName ||
+        identity.serverVersion < 160000 || identity.serverVersion >= 170000 ||
+        !['127.0.0.1/32', '::1/128'].includes(identity.serverAddress) ||
+        identity.serverPort !== Number(target.port) || migrationCount[0]?.count < 1 ||
+        [vendorCount, userCount, orderCount, webhookCount, ledgerCount].some((count) => count !== 0)) {
+      throw new Error('DB-backed smoke refused: database identity, bootstrap, ownership or empty-fixture checks failed.');
+    }
+
+    const seed = spawnSync('npm', ['run', 'db:seed'], {
+      cwd: process.cwd(),
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        DATABASE_URL: explicitUrl,
+        NODE_ENV: 'test',
+      },
+      encoding: 'utf8',
+    });
+    if (seed.error || seed.status !== 0) {
+      throw new Error(`Disposable smoke fixture seed failed (exit ${seed.status ?? 'unknown'}).`);
+    }
+    const requiredVendors = await prisma.vendor.findMany({
+      where: { id: { in: ['yalispor', 'sporjinal', 'unknown-vendor'] } },
+      select: { id: true },
+    });
+    const seededIds = new Set(requiredVendors.map((vendor) => vendor.id));
+    if (!seededIds.has('yalispor') || !seededIds.has('sporjinal') || seededIds.has('unknown-vendor')) {
+      throw new Error('Disposable smoke vendor fixtures are incomplete or invalidate the unknown-vendor negative case.');
+    }
+    console.log('Disposable smoke fixtures ready: yalispor and sporjinal; unknown-vendor remains absent.');
+  } catch (error) {
+    await prisma.$disconnect();
+    throw error;
+  }
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -139,6 +207,7 @@ async function loginSession(email, password) {
 }
 
 async function runSmoke() {
+  await seedDisposableSmokeDatabase();
   const runId = Date.now().toString();
   const smokeOrderId = String(9000000000 + Number(runId.slice(-6)));
   const cancellationOrderId = String(9100000000 + Number(runId.slice(-6)));
@@ -821,7 +890,8 @@ async function runSmoke() {
     if (
       noWebhookIdFirstJson?.duplicate !== false ||
       noWebhookIdFirstJson?.action !== 'received_needs_attention' ||
-      noWebhookIdFirstJson?.processingStatus !== 'needs_attention'
+      noWebhookIdFirstJson?.processingStatus !== 'needs_attention' ||
+      noWebhookIdFirstJson?.failureCode !== 'unknown_vendor'
     ) {
       throw new Error(
         `/webhooks/shopify/orders-create first payload-hash fallback invalid: ${JSON.stringify(noWebhookIdFirstJson)}`,
