@@ -16,6 +16,7 @@ import {
   type SettlementApproval,
   type SettlementApprovalLine,
   type SettlementApprovalListResponse,
+  type SettlementApprovalReadiness,
 } from '../features/finance/settlementApprovalsApi';
 
 vi.mock('../features/finance/settlementApprovalsApi', async () => {
@@ -51,6 +52,16 @@ const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
 const approveSettlementApprovalMock = vi.mocked(approveSettlementApproval);
 const cancelSettlementApprovalMock = vi.mocked(cancelSettlementApproval);
 const rawSettlementApprovalId = '11111111-1111-1111-1111-111111111111';
+
+const blockedReadiness: SettlementApprovalReadiness = {
+  ok: true, writesPerformed: false, settlementApprovalId: 'approval-1', vendorId: 'yalispor',
+  currency: 'TRY', status: 'DRAFT', classification: 'BLOCKED', adminReviewRequired: true,
+  sourceValidation: { evaluated: true, ok: false, reasons: [
+    { settlementApprovalLineId: 'line-1', financeLedgerEntryId: 'fle-sale-1',
+      code: 'refund_arrived_after_draft', reason: 'Refund arrived after draft creation' },
+  ] },
+  blockers: ['Refund arrived after draft creation'], missingEvidence: [],
+};
 
 const settlementLine: SettlementApprovalLine = {
   id: 'line-1',
@@ -266,15 +277,7 @@ describe('Settlement Review queue cleanup', () => {
     getSettlementApprovalMock.mockImplementation(async (id: string) =>
       id === selectedDraftRefundApproval.id ? selectedDraftRefundApproval : selectedRecentApproval,
     );
-    getSettlementApprovalReadinessMock.mockResolvedValue({
-      ok: true, writesPerformed: false, settlementApprovalId: 'approval-1', vendorId: 'yalispor',
-      currency: 'TRY', status: 'DRAFT', classification: 'BLOCKED', adminReviewRequired: true,
-      sourceValidation: { evaluated: true, ok: false, reasons: [
-        { settlementApprovalLineId: 'line-1', financeLedgerEntryId: 'fle-sale-1',
-          code: 'refund_arrived_after_draft', reason: 'Refund arrived after draft creation' },
-      ] },
-      blockers: ['Refund arrived after draft creation'], missingEvidence: [],
-    });
+    getSettlementApprovalReadinessMock.mockResolvedValue(blockedReadiness);
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
     previewSettlementApprovalMock.mockRejectedValue(new Error('Preview should not run on the queue page.'));
   });
@@ -309,9 +312,10 @@ describe('Settlement Review queue cleanup', () => {
 
     const workflowTabs = queue.querySelector('.settlement-review-tabs') as HTMLElement;
     expect(workflowTabs).toBeTruthy();
-    ['All', 'Needs Review', 'Ready', 'Refund', 'Hold', 'Approved', 'Paid'].forEach((label) => {
+    ['All', 'Summary flags', 'No summary flags', 'Refund', 'Hold', 'Approved', 'Paid'].forEach((label) => {
       expect(within(workflowTabs).getByText(label)).toBeInTheDocument();
     });
+    expect(within(queue).getByText(/Queue groups and badges use summary data, not verified financial readiness/)).toBeInTheDocument();
     ['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated'].forEach((column) => {
       expect(within(queue).getByRole('columnheader', { name: column })).toBeInTheDocument();
     });
@@ -421,8 +425,8 @@ describe('Settlement Review queue cleanup', () => {
     const queue = screen.getByLabelText('Settlement review queue');
     const tabs = within(queue).getByLabelText('Settlement review workflow tabs');
     expect(within(tabs).getByRole('button', { name: /All2/i })).toBeInTheDocument();
-    expect(within(tabs).getByRole('button', { name: /Needs Review0/i })).toBeInTheDocument();
-    expect(within(tabs).getByRole('button', { name: /Ready1/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Summary flags0/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
     expect(within(tabs).getByRole('button', { name: /Refund0/i })).toBeInTheDocument();
     expect(within(tabs).getByRole('button', { name: /Paid0/i })).toBeInTheDocument();
 
@@ -431,11 +435,11 @@ describe('Settlement Review queue cleanup', () => {
     const approvedRow = rows.find((row) => within(row).queryByText('Gross TRY 2,200.00')) as HTMLElement | undefined;
     expect(draftRow).toBeTruthy();
     expect(approvedRow).toBeTruthy();
-    expect(within(draftRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
-    expect(within(draftRow as HTMLElement).getByText('Approve')).toBeInTheDocument();
+    expect(within(draftRow as HTMLElement).getByText('No summary flags')).toBeInTheDocument();
+    expect(within(draftRow as HTMLElement).getByText('Review for approval')).toBeInTheDocument();
     expect(within(draftRow as HTMLElement).queryByText('Refund')).not.toBeInTheDocument();
     expect(within(draftRow as HTMLElement).queryByText('Shipping')).not.toBeInTheDocument();
-    expect(within(approvedRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
+    expect(within(approvedRow as HTMLElement).getByText('No summary flags')).toBeInTheDocument();
     expect(within(approvedRow as HTMLElement).getByText('View')).toBeInTheDocument();
 
     await user.click(draftRow as HTMLElement);
@@ -445,17 +449,17 @@ describe('Settlement Review queue cleanup', () => {
     const updatedDraftRow = updatedRows.find((row) => within(row).queryByText('Gross TRY 7,598.00')) as HTMLElement | undefined;
     const updatedApprovedRow = updatedRows.find((row) => within(row).queryByText('Gross TRY 2,200.00')) as HTMLElement | undefined;
     expect(updatedDraftRow).toHaveClass('op-row-selected');
-    expect(within(updatedDraftRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
-    expect(within(updatedDraftRow as HTMLElement).getByText('Approve')).toBeInTheDocument();
+    expect(within(updatedDraftRow as HTMLElement).getByText('No summary flags')).toBeInTheDocument();
+    expect(within(updatedDraftRow as HTMLElement).getByText('Review for approval')).toBeInTheDocument();
     expect(within(updatedDraftRow as HTMLElement).queryByText('Refund')).not.toBeInTheDocument();
     expect(within(updatedDraftRow as HTMLElement).queryByText('Shipping')).not.toBeInTheDocument();
-    expect(within(updatedApprovedRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
+    expect(within(updatedApprovedRow as HTMLElement).getByText('No summary flags')).toBeInTheDocument();
     expect(within(updatedApprovedRow as HTMLElement).getByText('View')).toBeInTheDocument();
 
     const updatedTabs = within(queue).getByLabelText('Settlement review workflow tabs');
     expect(within(updatedTabs).getByRole('button', { name: /All2/i })).toBeInTheDocument();
-    expect(within(updatedTabs).getByRole('button', { name: /Needs Review0/i })).toBeInTheDocument();
-    expect(within(updatedTabs).getByRole('button', { name: /Ready1/i })).toBeInTheDocument();
+    expect(within(updatedTabs).getByRole('button', { name: /Summary flags0/i })).toBeInTheDocument();
+    expect(within(updatedTabs).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
     expect(within(updatedTabs).getByRole('button', { name: /Refund0/i })).toBeInTheDocument();
     expect(within(updatedTabs).getByRole('button', { name: /Paid0/i })).toBeInTheDocument();
 
@@ -497,6 +501,81 @@ describe('Settlement Review queue cleanup', () => {
     expect(await within(readiness).findByText('BLOCKED')).toBeInTheDocument();
     expect(within(readiness).getByText('Refund arrived after draft creation')).toBeInTheDocument();
     expect(within(readiness).getByText(/Admin review required/)).toBeInTheDocument();
+    expect(within(queue).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
+    expect(within(getDraftSettlementRow(queue)).getByText('No summary flags')).toBeInTheDocument();
+    expect(within(getDraftSettlementRow(queue)).getByText('Review for approval')).toBeInTheDocument();
+    expect(getSettlementApprovalReadinessMock).toHaveBeenCalledTimes(1);
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('shows UNKNOWN as an unverified selected DRAFT while keeping summary groups unchanged', async () => {
+    getSettlementApprovalReadinessMock.mockResolvedValue({
+      ...blockedReadiness,
+      classification: 'UNKNOWN',
+      sourceValidation: { evaluated: true, ok: true, reasons: [] },
+      blockers: ['Correction authority requires Admin review'],
+    });
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await within(queue).findByRole('columnheader', { name: 'Vendor' });
+    await user.click(getDraftSettlementRow(queue));
+
+    const readiness = within(queue).getByLabelText('Settlement approval readiness');
+    expect(await within(readiness).findByText('UNKNOWN')).toBeInTheDocument();
+    expect(within(readiness).getByText('Correction authority requires Admin review')).toBeInTheDocument();
+    expect(within(queue).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('does not imply verified readiness while the selected DRAFT check is loading or fails', async () => {
+    getSettlementApprovalReadinessMock.mockReturnValue(new Promise<SettlementApprovalReadiness>(() => undefined));
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await within(queue).findByRole('columnheader', { name: 'Vendor' });
+    await user.click(getDraftSettlementRow(queue));
+
+    const readiness = within(queue).getByLabelText('Settlement approval readiness');
+    expect(await within(readiness).findByText('Checking current approval evidence…')).toBeInTheDocument();
+    expect(within(readiness).queryByText('VERIFIED_BY_EXISTING_CHECKS')).not.toBeInTheDocument();
+    expect(within(queue).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('shows readiness errors without presenting the summary candidate as financially verified', async () => {
+    getSettlementApprovalReadinessMock.mockRejectedValue(new Error('Readiness check unavailable'));
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await within(queue).findByRole('columnheader', { name: 'Vendor' });
+    await user.click(getDraftSettlementRow(queue));
+
+    const readiness = within(queue).getByLabelText('Settlement approval readiness');
+    expect(await within(readiness).findByText('Readiness unavailable: Readiness check unavailable')).toBeInTheDocument();
+    expect(within(readiness).queryByText('VERIFIED_BY_EXISTING_CHECKS')).not.toBeInTheDocument();
+    expect(within(queue).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('labels a verified selected DRAFT as a backend check, not automatic approval authority', async () => {
+    getSettlementApprovalReadinessMock.mockResolvedValue({
+      ...blockedReadiness,
+      classification: 'VERIFIED_BY_EXISTING_CHECKS',
+      sourceValidation: { evaluated: true, ok: true, reasons: [] },
+      blockers: [],
+    });
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await within(queue).findByRole('columnheader', { name: 'Vendor' });
+    await user.click(getDraftSettlementRow(queue));
+
+    const readiness = within(queue).getByLabelText('Settlement approval readiness');
+    expect(await within(readiness).findByText('VERIFIED_BY_EXISTING_CHECKS')).toBeInTheDocument();
+    expect(within(readiness).getByText(/Admin review required/)).toBeInTheDocument();
+    expect(within(readiness).getByText(/manual approval revalidates current authority/)).toBeInTheDocument();
+    expect(within(getDraftSettlementRow(queue)).getByText('Review for approval')).toBeInTheDocument();
     expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
   });
 

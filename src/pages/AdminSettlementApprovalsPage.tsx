@@ -77,8 +77,8 @@ type SettlementReviewWorkflowTab =
   | 'vendor_hold'
   | 'approved'
   | 'paid';
-type SettlementReviewNextAction = 'Approve' | 'Investigate' | 'View';
-type SettlementReviewPanelAction = 'Approve' | 'Investigate' | 'View';
+type SettlementReviewNextAction = 'Review for approval' | 'Investigate' | 'View';
+type SettlementReviewPanelAction = 'Review for approval' | 'Investigate' | 'View';
 type SettlementReviewIssue = 'Refund' | 'Debt' | 'Shipping' | 'Support' | 'Hold' | 'Ready';
 type SettlementStatusFilter = 'all' | SettlementApprovalStatus;
 type SettlementQueueAction = 'approve' | 'cancel';
@@ -113,8 +113,8 @@ const ACTIVE_LOGO_COMMISSION_INVOICE_BLOCKER = /active LOGO_ISBASI commission in
 const HIGH_VALUE_SETTLEMENT_MINOR = 100000;
 const SETTLEMENT_REVIEW_WORKFLOW_TABS: SettlementReviewWorkflowConfig[] = [
   { id: 'all', label: 'All' },
-  { id: 'needs_review', label: 'Needs Review' },
-  { id: 'ready_for_approval', label: 'Ready' },
+  { id: 'needs_review', label: 'Summary flags' },
+  { id: 'ready_for_approval', label: 'No summary flags' },
   { id: 'refund_review', label: 'Refund' },
   { id: 'vendor_hold', label: 'Hold' },
   { id: 'approved', label: 'Approved' },
@@ -546,7 +546,7 @@ function getSettlementReviewNextAction(summary: SettlementApprovalSummary): Sett
     return 'View';
   }
   if (isReadyForSettlementApproval(summary)) {
-    return 'Approve';
+    return 'Review for approval';
   }
   if (hasSettlementIssue(summary, 'Refund') || hasSettlementIssue(summary, 'Shipping')) {
     return 'Investigate';
@@ -562,7 +562,7 @@ function getSettlementReviewPanelAction(summary: SettlementApprovalSummary, deta
     return 'View';
   }
   if (summary.status === 'draft' && getSettlementDetailIssues(summary, detail).every((issue) => issue === 'Ready')) {
-    return 'Approve';
+    return 'Review for approval';
   }
   return 'Investigate';
 }
@@ -586,7 +586,7 @@ function getSettlementWaitingReason(summary: SettlementApprovalSummary, detail: 
 
 function getSettlementReviewIssueTone(issue: SettlementReviewIssue) {
   if (issue === 'Ready') {
-    return 'success';
+    return 'neutral';
   }
   if (issue === 'Hold' || issue === 'Support') {
     return 'warning';
@@ -1427,7 +1427,7 @@ function SettlementReviewQueue({
   const canApproveSelectedSettlement = Boolean(
     selectedQueueApproval &&
     selectedQueueApproval.status === 'draft' &&
-    getSettlementReviewNextAction(selectedQueueApproval) === 'Approve',
+    isReadyForSettlementApproval(selectedQueueApproval),
   );
   const canCancelSelectedSettlement = Boolean(
     selectedQueueApproval &&
@@ -1461,6 +1461,7 @@ function SettlementReviewQueue({
           </button>
         ))}
       </div>
+      <p className="page-description">Queue groups and badges use summary data, not verified financial readiness. Select a DRAFT for the current backend check; approval revalidates at confirmation.</p>
       <div className="op-toolbar settlement-review-filters" aria-label="Settlement review filters">
         <label className="op-search-input">
           <span>Search</span>
@@ -1532,7 +1533,7 @@ function SettlementReviewQueue({
                   </span>
                   <span className="settlement-review-issue-list">
                     {itemIssues.map((issue) => (
-                      <StatusBadge key={issue} tone={getSettlementReviewIssueTone(issue)}>{issue}</StatusBadge>
+                      <StatusBadge key={issue} tone={getSettlementReviewIssueTone(issue)}>{issue === 'Ready' ? 'No summary flags' : issue}</StatusBadge>
                     ))}
                   </span>
                   <span><strong>{getSettlementReviewNextAction(item)}</strong></span>
@@ -1565,6 +1566,10 @@ function SettlementReviewQueue({
                     <h4>Approval readiness</h4>
                     {approvalReadinessLoading ? <p>Checking current approval evidence…</p> : null}
                     {approvalReadinessError ? <p>Readiness unavailable: {approvalReadinessError}</p> : null}
+                    {!approvalReadinessLoading && !approvalReadinessError &&
+                      approvalReadiness?.settlementApprovalId !== selectedQueueApproval.id ? (
+                        <p>Financial readiness not verified.</p>
+                      ) : null}
                     {approvalReadiness?.settlementApprovalId === selectedQueueApproval.id ? (
                       <>
                         <p><strong>{approvalReadiness.classification}</strong> · Admin review required</p>

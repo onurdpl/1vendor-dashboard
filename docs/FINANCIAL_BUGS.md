@@ -788,6 +788,18 @@ These entries identify missing or unresolved contracts. They are **not** authori
 - **Minimum future repair boundary:** Report authoritative persisted run status and vendor outcome instead of collapsing every run-date collision into successful already-processed behavior. Do not choose retry or takeover semantics here.
 - **Validation required before CLOSED:** Real PostgreSQL duplicate-run tests for COMPLETED, FAILED, and PROCESSING; approved stale-run recovery behavior; API/UI status verification.
 
+### FIN-UI-016 — Canonical Settlement Readiness Queue — deferred enhancement evaluation
+
+- **Domain:** Admin Settlement Approvals queue.
+- **Classification:** MISSING_UI_EVIDENCE.
+- **Status:** OPEN — proposed enhancement deferred for future evaluation; not a confirmed financial-authority failure or release blocker.
+- **Current limitation:** Queue workflow groups use settlement summary fields. Canonical backend approval readiness is fetched only for a selected DRAFT, so the full queue cannot claim authoritative per-row financial readiness. Step 4A UI-01 clarifies the summary-based labels without changing queue membership or approval authority.
+- **Potential improvement (Option 2, not approved):** Evaluate a vendor-scoped queue classification based on the existing canonical readiness service. Potential areas are the backend settlement list service, Admin Finance API, frontend API client, Settlement Approvals UI, and focused PostgreSQL/UI tests. Do not implement uncontrolled per-row reads or infer approval authorization from a read-only result.
+- **Related limitation:** The current list returns the latest 20 settlement records per vendor. Determine from actual FIN-AUTO-001 and Step 4B Finance Review needs whether older unresolved DRAFTs require server-side filtering or pagination; pagination is not assumed to be part of Option 2.
+- **Current decision:** Summary-label clarification (Option 1) is approved. Option 2 implementation is not approved; reassess necessity and impact later without an assumed date.
+- **Evidence / relevant code locations:** Step 4A UI-01 audit; `src/pages/AdminSettlementApprovalsPage.tsx` (`getSettlementReviewIssues`, selected-DRAFT readiness effect); `backend/src/modules/finance/settlement-approval.service.ts` (`listSettlementApprovalsForVendor`, `assessSettlementApprovalReadiness`).
+- **Validation required before CLOSED:** Decide whether an authoritative queue is operationally needed; if approved, verify vendor isolation, bounded loading, accurate BLOCKED/UNKNOWN display and Admin action separation with PostgreSQL and UI tests.
+
 ## Test-quality gaps
 
 Each entry describes absent or insufficiently proven coverage at this baseline, not a new business requirement.
