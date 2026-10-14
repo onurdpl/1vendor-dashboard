@@ -407,6 +407,39 @@ describeWithPostgres('before-settlement financial correction credit with isolate
     expect((await previewApproval(ids.vendor)).correctionCredits).toHaveLength(1);
   });
 
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+    'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor',
+  ] as const)('rejects a one-minor-unit %s mismatch for a credit-only DRAFT', async (field) => {
+    await setHundredTryCreditFixture();
+    const credit = await applyBeforeSettlementFinancialCorrectionCredit(await inputFor(), db as never);
+    await db.financeLedgerEntry.updateMany({ where: { id: { in: [ids.sale, ids.refundLedger] } },
+      data: { payoutStatus: 'PAID', settlementStatus: 'SETTLED' } });
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    settlementIds.push(draft.id);
+    expect(draft.lines).toHaveLength(0);
+    expect(draft.correctionCreditLines.map((line) => line.creditId)).toEqual([credit.creditId]);
+    const before = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: draft.id }, include: { lines: true, correctionCreditLines: true },
+    });
+    await db.settlementApproval.update({ where: { id: draft.id }, data: { [field]: before[field] + 1 } });
+
+    const error = field === 'correctionCreditMinor'
+      ? 'Financial Correction Credit settlement amount is inconsistent.'
+      : field === 'correctionDeductionMinor'
+        ? 'Financial Correction deduction settlement amount is inconsistent.'
+        : `Settlement approval monetary totals are inconsistent: ${field}.`;
+    await expect(approveSettlementApproval(draft.id, ids.admin)).rejects.toThrow(error);
+    const after = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: draft.id }, include: { lines: true, correctionCreditLines: true },
+    });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(after.correctionCreditLines).toEqual(before.correctionCreditLines);
+    expect(await db.payoutBatch.count({ where: { vendorId: ids.vendor } })).toBe(0);
+  });
+
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])('does not silently omit a committed credit in draft/Apply race %i', async () => {
     await setHundredTryCreditFixture();
     const input = await inputFor();

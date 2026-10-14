@@ -17,7 +17,8 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
   beforeEach(async () => {
     const target = new URL(databaseUrl!);
     if (process.env.SETTLEMENT_APPROVAL_READINESS_TEST_DATABASE_ISOLATED !== '1' ||
-        target.hostname !== '127.0.0.1' || !['5432', '5433'].includes(target.port) ||
+        target.hostname !== '127.0.0.1' ||
+        !['5432', '5433', process.env.SETTLEMENT_APPROVAL_READINESS_TEST_PORT].includes(target.port) ||
         target.pathname !== '/settlement_approval_readiness_validation') {
       throw new Error('Settlement approval readiness test requires its isolated local PostgreSQL database.');
     }
@@ -226,5 +227,26 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       classification: 'BLOCKED', approvalAuthorized: false, reasonCodes: ['NOT_DRAFT'],
       readinessClassification: 'BLOCKED', adminReviewRequiredByExistingReadiness: true,
     });
+  });
+
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor', 'netPayableMinor',
+  ] as const)('rejects a one-minor-unit %s header mismatch before approving an ordinary SALE', async (field) => {
+    const { approveSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const before = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: approvalId }, include: { lines: true },
+    });
+    await db.settlementApproval.update({ where: { id: approvalId }, data: { [field]: before[field] + 1 } });
+
+    await expect(approveSettlementApproval(approvalId, 'monetary-reconciliation-test'))
+      .rejects.toThrow(`Settlement approval monetary totals are inconsistent: ${field}.`);
+    const after = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: approvalId }, include: { lines: true },
+    });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(await db.payoutBatch.count({ where: { vendorId: before.vendorId } })).toBe(0);
+    expect(await db.settlementRefundAdjustment.count({ where: { vendorId: before.vendorId } })).toBe(0);
   });
 });

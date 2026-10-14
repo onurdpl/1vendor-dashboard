@@ -653,6 +653,163 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       ]));
   });
 
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor', 'netPayableMinor',
+  ] as const)('rejects a %s mismatch before a late-refund replacement creates adjustments', async (field) => {
+    const f = await cancelledFixture();
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'monetary-bridge', '10.00');
+    const request = await replacementRequest(f, 'monetary-bridge');
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
+    expect(created.outcome).toBe('CREATED');
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: {
+      id: created.replacementSettlementApprovalId }, include: { lines: true },
+    });
+    expect(before.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
+    expect((before.sourceSnapshotJson as { lateRefundLedgerIds: string[] }).lateRefundLedgerIds)
+      .toEqual([evidence.refundFinanceLedgerEntryId]);
+    await db.settlementApproval.update({ where: { id: before.id }, data: { [field]: before[field] + 1 } });
+
+    await expect(approval.approveSettlementApproval(before.id, `${f.vendorId}-approver`))
+      .rejects.toThrow(`Settlement approval monetary totals are inconsistent: ${field}.`);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: before.id },
+      include: { lines: true } });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } }))
+      .toMatchObject({ status: 'CANCELLED' });
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(0);
+  });
+
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor', 'netPayableMinor',
+  ] as const)('rejects a %s mismatch without reapplying an exact refund adjustment', async (field) => {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const scheduled = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey,
+      vendorId: f.vendorId, confirmAutoSettlementDrafts: true });
+    expect(scheduled.summary.created).toBe(1);
+    const originalId = scheduled.createdDrafts[0].settlementApprovalId;
+    await approval.approveSettlementApproval(originalId, `${f.vendorId}-approver`);
+    const evidence = await ingestAcceptedTestRefund({ ...f, originalId }, 'monetary-adjustment', '10.00');
+    const adjustment = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } });
+    expect(adjustment).toMatchObject({ status: 'PENDING', remainingAmountMinor: 880 });
+    const saleId = await addEligiblePostCutoffSale(f, '100.00');
+    const draft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true } });
+    expect(before.lines.map((line) => [line.financeLedgerEntryId, line.lineType]))
+      .toEqual(expect.arrayContaining([
+        [saleId, 'SALE'], [evidence.refundFinanceLedgerEntryId, 'REFUND_ADJUSTMENT'],
+      ]));
+    expect(before.refundTotalMinor).toBe(0);
+    expect(before.netPayableMinor).toBe(7920);
+    const applicationBefore = await db.settlementRefundAdjustmentApplication.findMany({ where: {
+      settlementRefundAdjustmentId: adjustment.id,
+    } });
+    const adjustmentBefore = await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } });
+    await db.settlementApproval.update({ where: { id: draft.id }, data: { [field]: before[field] + 1 } });
+
+    await expect(approval.approveSettlementApproval(draft.id, `${f.vendorId}-approver`))
+      .rejects.toThrow(`Settlement approval monetary totals are inconsistent: ${field}.`);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true } });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } }))
+      .toEqual(adjustmentBefore);
+    expect(await db.settlementRefundAdjustmentApplication.findMany({ where: {
+      settlementRefundAdjustmentId: adjustment.id,
+    } })).toEqual(applicationBefore);
+  });
+
+  async function ordinaryZeroNetDraft() {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const evidence = await ingestAcceptedTestRefund({ ...f, originalId: '' }, 'zero-net', '200.00', '200.00');
+    const draft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    expect(new Set(draft.lines.map((line) => line.financeLedgerEntryId)))
+      .toEqual(new Set([f.ledgerId, evidence.refundFinanceLedgerEntryId]));
+    expect(draft.netPayableMinor).toBe(0);
+    return { f, evidence, draft };
+  }
+
+  it('approves an ordinary zero-net SALE and exact REFUND', async () => {
+    const { draft } = await ordinaryZeroNetDraft();
+    expect((await approval.approveSettlementApproval(draft.id, 'zero-net-test-admin')).status).toBe('approved');
+  });
+
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor', 'netPayableMinor',
+  ] as const)('rejects a %s mismatch for ordinary zero-net SALE and REFUND', async (field) => {
+    const { f, draft } = await ordinaryZeroNetDraft();
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true } });
+    await db.settlementApproval.update({ where: { id: draft.id }, data: { [field]: before[field] + 1 } });
+    await expect(approval.approveSettlementApproval(draft.id, 'zero-net-test-admin'))
+      .rejects.toThrow(`Settlement approval monetary totals are inconsistent: ${field}.`);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true } });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+    expect(await db.settlementRefundAdjustment.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
+  async function negativeNetDraft() {
+    const f = await fixture();
+    afterRunDate(f.runDate);
+    const evidence = await ingestAcceptedTestRefund({ ...f, originalId: '' }, 'negative-net', '10.00');
+    // Model an earlier SALE and a later accepted REFUND without changing delivery or accepted evidence clocks.
+    const refundLedger = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: evidence.refundFinanceLedgerEntryId }, select: { createdAt: true },
+    });
+    const periodStart = new Date(Date.UTC(refundLedger.createdAt.getUTCFullYear(),
+      refundLedger.createdAt.getUTCMonth(), refundLedger.createdAt.getUTCDate()));
+    await db.financeLedgerEntry.update({ where: { id: f.ledgerId },
+      data: { createdAt: new Date(periodStart.getTime() - dayMs) } });
+    const periodEnd = new Date(refundLedger.createdAt.getTime() + 1_000);
+    const draft = await approval.createDraftApproval({ vendorId: f.vendorId,
+      candidateScope: 'date_range', periodStart, periodEnd, asOfDate: periodEnd });
+    expect(draft.lines.map((line) => [line.financeLedgerEntryId, line.lineType]))
+      .toEqual([[evidence.refundFinanceLedgerEntryId, 'REFUND']]);
+    // A 10.00 TRY gross refund reverses 8.80 TRY of frozen vendor payable.
+    expect(draft.refundTotalMinor).toBe(1000);
+    expect(draft.netPayableMinor).toBe(-880);
+    return { f, evidence, draft };
+  }
+
+  it('approves a negative-net REFUND DRAFT without executing a payment', async () => {
+    const { f, draft } = await negativeNetDraft();
+    expect((await approval.approveSettlementApproval(draft.id, 'negative-net-test-admin')).status).toBe('approved');
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor', 'netPayableMinor',
+  ] as const)('rejects a %s mismatch for a negative-net REFUND DRAFT', async (field) => {
+    const { f, draft } = await negativeNetDraft();
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true } });
+    await db.settlementApproval.update({ where: { id: draft.id }, data: { [field]: before[field] + 1 } });
+    await expect(approval.approveSettlementApproval(draft.id, 'negative-net-test-admin'))
+      .rejects.toThrow(`Settlement approval monetary totals are inconsistent: ${field}.`);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true } });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+    expect(await db.settlementRefundAdjustment.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
   it('R-1: an approved SALE with a pending accepted-refund adjustment has no standalone payout', async () => {
     const f = await fixture();
     afterRunDate(f.runDate);

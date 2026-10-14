@@ -23,6 +23,15 @@ Later Sopyo Delivered commits `1c94e9c5877170f095ebc08d061b7cf7512c353a` and `8c
 
 ## Confirmed functional defects
 
+### FIN-AUTO-001-P1 — Settlement APPROVED header monetary totals lacked full frozen-line reconciliation
+
+- **Domain:** Canonical Settlement DRAFT → APPROVED monetary authority.
+- **Classification:** CONFIRMED_BUG; **Status:** FIXED_NOT_VERIFIED pending complete local regression and separate release evidence. Automatic approval remains unimplemented.
+- **Evidence:** Step 4B Audit 03 reproduced acceptance of deliberately inconsistent ordinary SALE and SALE+REFUND headers in isolated PostgreSQL. Audit 04 independently mutated 42 legitimate subtype DRAFTs by one minor unit: 34 approvals accepted; eight were rejected by existing correction-specific guards. The accepted cases included REFUND_ADJUSTMENT, correction credit, zero/negative net and controlled replacement compositions. Neither audit established production corruption or monetary loss.
+- **Repair boundary:** `approveSettlementApproval()` now compares all seven persisted monetary header fields with frozen ordinary, correction-credit and correction-deduction lines inside its existing Serializable transaction before APPROVED and approval side effects. DRAFT creation and approval reuse the same line-summary semantics. Direct REFUND contributes to `refundTotalMinor`; REFUND_ADJUSTMENT contributes only its payable impact. Existing source, correction, replacement, hold and alert guards remain in place. No historical header is rewritten.
+- **Regression evidence:** Focused isolated PostgreSQL one-minor-unit mutation cases cover ordinary SALE, credit-only, deduction-bearing, SALE+REFUND_ADJUSTMENT and late-refund controlled replacement DRAFTs. Package 1B additionally covers valid and independently mutated ordinary/correction-backed zero-net, negative-net direct REFUND, and mixed SALE/REFUND/credit/deduction DRAFTs. All seven header fields are independently exercised for both correction-backed zero net and mixed correction; five ordinary header fields are exercised for ordinary zero net and negative net. On fresh isolated PostgreSQL 16.15, the four focused suites passed **137/137** and eleven adjacent finance suites passed **117/117**, with no unexpected skips. The settlement approval unit suite passed **88/88**; the standard suite passed **3,790** with **483 conditional PostgreSQL skips**. Backend typecheck/build and frontend build passed. This is local validation, not release or production verification.
+- **Remaining unknowns:** Production incidence and any historical approved-header inconsistency are UNKNOWN. This package does not perform a production data audit, repair historical APPROVED/PAID records, or authorize unattended approval. Unsupported adjustment-only DRAFTs remain outside the testable approval matrix under current creation rules.
+
 ### FIN-BUG-001 — SALE refund impact bypasses settlement delay
 
 - **Domain:** Settlement eligibility.

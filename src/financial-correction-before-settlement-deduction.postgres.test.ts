@@ -98,6 +98,25 @@ describeWithPostgres('before-settlement financial correction deduction with isol
     } });
   }
 
+  async function setOneHundredFiftyTryDeductionFixture() {
+    await setHundredTryDeductionFixture();
+    const accepted = normalized('50.00', '200.00');
+    const incoming = normalized('200.00', '200.00');
+    await db.refundEvidenceSnapshot.update({ where: { id: ids.snapshot }, data: {
+      refundTotalAmount: '200.00', normalizedTransactionsJson: accepted.normalizedTransactionsJson,
+      normalizedRefundLinesJson: accepted.normalizedRefundLinesJson,
+      normalizedOwnershipJson: accepted.normalizedOwnershipJson,
+      normalizedEvidenceJson: accepted.normalizedEvidenceJson, evidenceHash: accepted.evidenceHash,
+    } });
+    await db.refundTerminalConflictEvidence.update({ where: { id: ids.incoming }, data: {
+      refundTotalAmount: '200.00', normalizedEvidenceJson: incoming.normalizedEvidenceJson,
+      evidenceHash: incoming.evidenceHash,
+    } });
+    await db.refundTerminalEvidenceReview.update({ where: { id: ids.review }, data: {
+      storedEvidenceHash: accepted.evidenceHash, incomingEvidenceHash: incoming.evidenceHash,
+    } });
+  }
+
   async function recordTestKargonomiDelivery(allocationId: string) {
     const executionId = `${allocationId}-execution`;
     const sourceReference = `${allocationId}-shipment`;
@@ -534,6 +553,125 @@ describeWithPostgres('before-settlement financial correction deduction with isol
     expect(redraft.correctionDeductionLines).toHaveLength(1);
     expect(redraft.correctionDeductionLines[0]?.deductionId).toBe(applied.deductionId);
     expect(await db.financialCorrectionDeductionSettlementLine.count({ where: { deductionId: applied.deductionId, status: 'ACTIVE' } })).toBe(1);
+  });
+
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+    'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor',
+  ] as const)('rejects a one-minor-unit %s mismatch with a correction deduction', async (field) => {
+    await setHundredTryDeductionFixture();
+    const deduction = await applyBeforeSettlementFinancialCorrectionDeduction(await inputFor(), db as never);
+    await addPayableSale('850.00');
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    settlementIds.push(draft.id);
+    expect(draft.correctionDeductionLines.map((line) => line.deductionId)).toEqual([deduction.deductionId]);
+    expect(new Set(draft.lines.map((line) => line.financeLedgerEntryId)))
+      .toEqual(new Set([ids.sale, ids.refundLedger, ids.futureSale]));
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true, correctionDeductionLines: true } });
+    await db.settlementApproval.update({ where: { id: draft.id }, data: { [field]: before[field] + 1 } });
+
+    const error = field === 'correctionCreditMinor'
+      ? 'Financial Correction Credit settlement amount is inconsistent.'
+      : field === 'netPayableMinor' || field === 'correctionDeductionMinor'
+        ? 'Financial Correction deduction settlement amount is inconsistent.'
+        : `Settlement approval monetary totals are inconsistent: ${field}.`;
+    await expect(approveSettlementApproval(draft.id, ids.admin)).rejects.toThrow(error);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true, correctionDeductionLines: true } });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(after.correctionDeductionLines).toEqual(before.correctionDeductionLines);
+    expect(await db.payoutBatch.count({ where: { vendorId: ids.vendor } })).toBe(0);
+  });
+
+  it('approves a valid correction-backed zero-net settlement', async () => {
+    await setOneHundredFiftyTryDeductionFixture();
+    const deduction = await applyBeforeSettlementFinancialCorrectionDeduction(await inputFor(), db as never);
+    expect(deduction.grossDeductionMinor).toBe(15000);
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    settlementIds.push(draft.id);
+    expect(draft.netPayableMinor).toBe(0);
+    expect(new Set(draft.lines.map((line) => line.financeLedgerEntryId)))
+      .toEqual(new Set([ids.sale, ids.refundLedger]));
+    expect(draft.correctionDeductionLines.map((line) => line.deductionId)).toEqual([deduction.deductionId]);
+    expect((await approveSettlementApproval(draft.id, ids.admin)).status).toBe('approved');
+  });
+
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+    'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor',
+  ] as const)('rejects a one-minor-unit %s mismatch for correction-backed zero net', async (field) => {
+    await setOneHundredFiftyTryDeductionFixture();
+    const deduction = await applyBeforeSettlementFinancialCorrectionDeduction(await inputFor(), db as never);
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    settlementIds.push(draft.id);
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true, correctionDeductionLines: true } });
+    expect(before.netPayableMinor).toBe(0);
+    expect(before.correctionDeductionLines.map((line) => line.deductionId)).toEqual([deduction.deductionId]);
+    await db.settlementApproval.update({ where: { id: draft.id }, data: { [field]: before[field] + 1 } });
+    await expect(approveSettlementApproval(draft.id, ids.admin)).rejects.toThrow();
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true, correctionDeductionLines: true } });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(after.correctionDeductionLines).toEqual(before.correctionDeductionLines);
+    expect(await db.financialCorrectionDeductionSettlementLine.count({ where: {
+      settlementApprovalId: draft.id, status: 'ACTIVE', deductionId: deduction.deductionId,
+    } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: ids.vendor } })).toBe(0);
+    expect(await db.vendorBalanceEvent.count({ where: { vendorId: ids.vendor } })).toBe(0);
+  });
+
+  it('approves a valid mixed SALE/REFUND/credit/deduction settlement', async () => {
+    await setTwoHundredTryDeductionFixture();
+    const deduction = await applyBeforeSettlementFinancialCorrectionDeduction(await inputFor(), db as never);
+    const credit = await addIndependentHundredTryCredit();
+    await addPayableSale('700.00');
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    settlementIds.push(draft.id);
+    expect(new Set(draft.lines.map((line) => line.financeLedgerEntryId)))
+      .toEqual(new Set([ids.sale, ids.refundLedger, ids.creditSale, ids.creditRefundLedger, ids.futureSale]));
+    expect(draft.correctionCreditLines.map((line) => line.creditId)).toEqual([credit.creditId]);
+    expect(draft.correctionDeductionLines.map((line) => line.deductionId)).toEqual([deduction.deductionId]);
+    expect(draft.netPayableMinor).toBe(90000);
+    expect((await approveSettlementApproval(draft.id, ids.admin)).status).toBe('approved');
+  });
+
+  it.each([
+    'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+    'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor',
+  ] as const)('rejects a one-minor-unit %s mismatch for mixed correction sources', async (field) => {
+    await setTwoHundredTryDeductionFixture();
+    const deduction = await applyBeforeSettlementFinancialCorrectionDeduction(await inputFor(), db as never);
+    const credit = await addIndependentHundredTryCredit();
+    await addPayableSale('700.00');
+    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    settlementIds.push(draft.id);
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true, correctionCreditLines: true, correctionDeductionLines: true } });
+    expect(before.correctionCreditLines.map((line) => line.creditId)).toEqual([credit.creditId]);
+    expect(before.correctionDeductionLines.map((line) => line.deductionId)).toEqual([deduction.deductionId]);
+    await db.settlementApproval.update({ where: { id: draft.id }, data: { [field]: before[field] + 1 } });
+    await expect(approveSettlementApproval(draft.id, ids.admin)).rejects.toThrow();
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id },
+      include: { lines: true, correctionCreditLines: true, correctionDeductionLines: true } });
+    expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
+    expect(after[field]).toBe(before[field] + 1);
+    expect(after.lines).toEqual(before.lines);
+    expect(after.correctionCreditLines).toEqual(before.correctionCreditLines);
+    expect(after.correctionDeductionLines).toEqual(before.correctionDeductionLines);
+    expect(await db.financialCorrectionCreditSettlementLine.count({ where: {
+      settlementApprovalId: draft.id, status: 'ACTIVE', creditId: credit.creditId,
+    } })).toBe(1);
+    expect(await db.financialCorrectionDeductionSettlementLine.count({ where: {
+      settlementApprovalId: draft.id, status: 'ACTIVE', deductionId: deduction.deductionId,
+    } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: ids.vendor } })).toBe(0);
+    expect(await db.vendorBalanceEvent.count({ where: { vendorId: ids.vendor } })).toBe(0);
   });
 
   it('fails closed when payable cannot absorb the whole deduction', async () => {

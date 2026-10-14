@@ -2243,7 +2243,12 @@ describe('settlement approval foundation', () => {
   });
 
   it('approves only draft approvals without invoice or payout execution', async () => {
-    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    // This approval contains one SALE line and no REFUND line; its header must match that source.
+    prismaMock.settlementApproval.findUnique.mockResolvedValue({
+      ...buildApproval({ id: 'approval-1', status: 'DRAFT' }),
+      refundTotalMinor: 0,
+      netPayableMinor: 88000,
+    });
     prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
       buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true, activeApprovalId: 'approval-1' }),
     );

@@ -808,7 +808,10 @@ function buildRefundAdjustmentLine(
   };
 }
 
-function summarizeLines(lines: SettlementApprovalLineDraft[]): SettlementApprovalTotalsDto {
+type SettlementMonetaryLine = Pick<SettlementApprovalLineDraft,
+  'lineType' | 'amountMinor' | 'commissionMinor' | 'commissionVatMinor' | 'payableImpactMinor'>;
+
+function summarizeLines(lines: readonly SettlementMonetaryLine[]): SettlementApprovalTotalsDto {
   return lines.reduce(
     (summary, line) => ({
       ...summary,
@@ -835,6 +838,22 @@ function summarizeLines(lines: SettlementApprovalLineDraft[]): SettlementApprova
       currency: 'TRY' as const,
     },
   );
+}
+
+function summarizeSettlementTotals(
+  lines: readonly SettlementMonetaryLine[],
+  creditLines: readonly { amountMinor: number }[],
+  deductionLines: readonly { amountMinor: number }[],
+): SettlementApprovalTotalsDto {
+  const lineTotals = summarizeLines(lines);
+  const correctionCreditMinor = creditLines.reduce((sum, line) => sum + line.amountMinor, 0);
+  const correctionDeductionMinor = deductionLines.reduce((sum, line) => sum + line.amountMinor, 0);
+  return {
+    ...lineTotals,
+    correctionCreditMinor,
+    correctionDeductionMinor,
+    netPayableMinor: lineTotals.netPayableMinor + correctionCreditMinor - correctionDeductionMinor,
+  };
 }
 
 function buildRevalidationReason(
@@ -2523,16 +2542,13 @@ async function createDraftApprovalInTransaction(
         buildRefundAdjustmentLine(plan.record, plan.applyAmountMinor),
       );
       const settlementLines = [...preview.lines, ...adjustmentLines];
-      const lineTotals = summarizeLines(settlementLines);
-      const correctionCreditMinor = preview.correctionCredits.reduce((sum, credit) => sum + credit.amountMinor, 0);
-      const correctionDeductionMinor = preview.correctionDeductions.reduce((sum, deduction) => sum + deduction.amountMinor, 0);
-      if (correctionDeductionMinor > 0 && lineTotals.netPayableMinor + correctionCreditMinor < correctionDeductionMinor) {
+      const settlementTotals = summarizeSettlementTotals(
+        settlementLines, preview.correctionCredits, preview.correctionDeductions,
+      );
+      const { correctionCreditMinor, correctionDeductionMinor } = settlementTotals;
+      if (correctionDeductionMinor > 0 && settlementTotals.netPayableMinor < 0) {
         throw new Error('INSUFFICIENT_PAYABLE_FOR_FULL_DEDUCTION');
       }
-      const settlementTotals = {
-        ...lineTotals, correctionCreditMinor, correctionDeductionMinor,
-        netPayableMinor: lineTotals.netPayableMinor + correctionCreditMinor - correctionDeductionMinor,
-      };
 
       const activeLineCount = await tx.settlementApprovalLine.count({
         where: {
@@ -2830,6 +2846,19 @@ export async function approveSettlementApproval(
       }
       for (const line of existing.correctionDeductionLines) {
         await assertActiveFinancialCorrectionDeductionSettlement(tx, line.id, existing.id, existing.vendorId);
+      }
+
+      const expectedTotals = summarizeSettlementTotals(
+        existing.lines, existing.correctionCreditLines, existing.correctionDeductionLines,
+      );
+      const monetaryFields = [
+        'grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+        'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor',
+      ] as const;
+      for (const field of monetaryFields) {
+        if (existing[field] !== expectedTotals[field]) {
+          throw new Error(`Settlement approval monetary totals are inconsistent: ${field}.`);
+        }
       }
 
       const approved = await tx.settlementApproval.update({
