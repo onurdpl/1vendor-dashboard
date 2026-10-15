@@ -45,6 +45,8 @@ const markR1PayoutBatchReviewMock = vi.hoisted(() => vi.fn());
 const markR1PayoutBatchPaidMock = vi.hoisted(() => vi.fn());
 const cancelR1ReviewPayoutBeforeEftMock = vi.hoisted(() => vi.fn());
 const completeR1CashlessPayoutMock = vi.hoisted(() => vi.fn());
+const listAutoApprovalAttemptsForAdminMock = vi.hoisted(() => vi.fn());
+const listAutoApprovalAttemptEventsForAdminMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -217,6 +219,11 @@ vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
   createAuthService: vi.fn(() => ({})),
 }));
+vi.mock('../backend/src/modules/finance/settlement-auto-approval-review.service.js', () => ({
+  listAutoApprovalAttemptsForAdmin: listAutoApprovalAttemptsForAdminMock,
+  listAutoApprovalAttemptEventsForAdmin: listAutoApprovalAttemptEventsForAdminMock,
+  AutoApprovalReviewQueryError: class AutoApprovalReviewQueryError extends Error {},
+}));
 
 vi.mock('../backend/src/modules/auth/auth.middleware.js', () => ({
   createAuthMiddleware: vi.fn(() => ({
@@ -338,6 +345,36 @@ async function updateFinancialProfile(body: unknown) {
 }
 
 describe('finance route validation', () => {
+  it('keeps automatic approval evidence Admin-only and delegates only read-only filters', async () => {
+    const routes = createRegisteredGetRoutes();
+    const list = routes.get('/admin/finance/settlement-auto-approval-attempts');
+    const events = routes.get('/admin/finance/settlement-auto-approval-attempts/:id/events');
+    expect(list).toBeDefined();
+    expect(events).toBeDefined();
+    const denied = createReply();
+    await list?.({ query: { vendorId: 'vendor-1' } }, denied);
+    expect(denied.statusCode).toBe(403);
+    await list?.({ authUser: { role: 'vendor' }, query: { vendorId: 'vendor-1' } }, denied);
+    expect(denied.statusCode).toBe(403);
+    expect(listAutoApprovalAttemptsForAdminMock).not.toHaveBeenCalled();
+    listAutoApprovalAttemptsForAdminMock.mockResolvedValueOnce({ ok: true, writesPerformed: false,
+      attempts: [], nextCursor: null });
+    const allowed = createReply();
+    expect(await list?.({ authUser: { role: 'admin' }, query: {
+      vendorId: 'vendor-1', outcome: 'UNKNOWN', cursor: 'attempt-1', limit: '20',
+    } }, allowed)).toMatchObject({ writesPerformed: false, attempts: [] });
+    expect(listAutoApprovalAttemptsForAdminMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'vendor-1', outcome: 'UNKNOWN', cursor: 'attempt-1', limit: 20,
+    }));
+    listAutoApprovalAttemptEventsForAdminMock.mockResolvedValueOnce({ ok: true, writesPerformed: false,
+      events: [], nextCursor: null });
+    expect(await events?.({ authUser: { role: 'admin' }, params: { id: 'attempt-1' } }, createReply()))
+      .toMatchObject({ writesPerformed: false, events: [] });
+    expect(listAutoApprovalAttemptEventsForAdminMock).toHaveBeenCalledWith('attempt-1', undefined, undefined);
+    const eventDenied = createReply();
+    await events?.({ authUser: { role: 'vendor' }, params: { id: 'attempt-1' } }, eventDenied);
+    expect(eventDenied.statusCode).toBe(403);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     markPayoutBatchReviewMock.mockReset();

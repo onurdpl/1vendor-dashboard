@@ -10,6 +10,7 @@ import {
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { useAppReadiness } from '../lib/appReadiness';
+import { SettlementAutoApprovalHistory } from './SettlementAutoApprovalHistory';
 import {
   approveSettlementApproval,
   cancelSettlementApproval,
@@ -2989,6 +2990,8 @@ export function AdminSettlementApprovalsPage() {
         onOpenApproval={(id) => void handleOpenRecentApproval(id)}
         onRequestSettlementAction={handleRequestSettlementAction}
       />
+
+      <SettlementAutoApprovalHistory vendorId={vendorId} />
 
       {settlementActionConfirmation ? (
         <SettlementActionConfirmationDialog

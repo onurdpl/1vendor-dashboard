@@ -520,4 +520,77 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     expect(await db.payoutBatch.count({ where: { vendorId: before.vendorId } })).toBe(0);
     expect(await db.settlementRefundAdjustment.count({ where: { vendorId: before.vendorId } })).toBe(0);
   });
+
+  it('pages beyond 20 immutable attempts with exact vendor, outcome and settlement filters without writes', async () => {
+    const { listAutoApprovalAttemptsForAdmin, listAutoApprovalAttemptEventsForAdmin } =
+      await import('../backend/src/modules/finance/settlement-auto-approval-review.service.js');
+    const approval = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const sameInstant = new Date('2026-10-15T10:00:00.000Z');
+    for (let index = 0; index < 27; index++) {
+      const id = `${approvalId}-review-${String(index).padStart(2, '0')}`;
+      const outcome = index % 3 === 0 ? 'UNKNOWN' : index % 3 === 1 ? 'BLOCKED' : 'TECHNICAL_FAILURE';
+      await db.settlementAutoApprovalAttempt.create({ data: {
+        id, settlementApprovalId: approvalId, vendorId: approval.vendorId,
+        outcome, reasonCode: `REASON_${index}`,
+        completedAt: outcome === 'UNKNOWN' ? null : sameInstant,
+        createdAt: sameInstant,
+        events: { create: [
+          { outcome: 'STARTED', reasonCode: 'ATTEMPT_CREATED', createdAt: sameInstant },
+          { outcome, reasonCode: `REASON_${index}`, createdAt: new Date(sameInstant.getTime() + 1) },
+        ] },
+      } });
+    }
+    const before = await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } });
+    const first = await listAutoApprovalAttemptsForAdmin({ vendorId: approval.vendorId, limit: 20 });
+    const second = await listAutoApprovalAttemptsForAdmin({ vendorId: approval.vendorId, limit: 20,
+      cursor: first.nextCursor! });
+    expect(first.attempts).toHaveLength(20);
+    expect(second.attempts).toHaveLength(7);
+    expect(second.nextCursor).toBeNull();
+    expect(new Set([...first.attempts, ...second.attempts].map((row) => row.id)).size).toBe(27);
+    expect([...first.attempts, ...second.attempts].every((row) =>
+      row.vendorId === approval.vendorId && row.settlementApprovalId === approvalId &&
+      row.currentSettlementStatus === 'DRAFT' && row.eventCount === 2)).toBe(true);
+    const blocked = await listAutoApprovalAttemptsForAdmin({ settlementApprovalId: approvalId,
+      outcome: 'BLOCKED', reasonCode: 'REASON_' });
+    expect(blocked.attempts).toHaveLength(9);
+    expect(blocked.attempts.every((row) => row.outcome === 'BLOCKED')).toBe(true);
+    expect((await listAutoApprovalAttemptsForAdmin({ vendorId: 'another-vendor' })).attempts).toEqual([]);
+    await expect(listAutoApprovalAttemptsForAdmin({ cursor: 'missing' })).rejects.toThrow('cursor');
+    await expect(listAutoApprovalAttemptsForAdmin({ outcome: 'SUCCESS' })).rejects.toThrow('outcome');
+    const history = await listAutoApprovalAttemptEventsForAdmin(first.attempts[0]!.id, undefined, 1);
+    expect(history?.events).toHaveLength(1);
+    expect(history?.events[0]?.outcome).toBe('STARTED');
+    expect(history?.nextCursor).toBeTruthy();
+    const more = await listAutoApprovalAttemptEventsForAdmin(first.attempts[0]!.id, history?.nextCursor!, 1);
+    expect(more?.events).toHaveLength(1);
+    expect(more?.events[0]?.reasonCode).toMatch(/^REASON_/);
+    expect(more?.nextCursor).toBeNull();
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(before);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+    expect(await db.payoutBatch.count({ where: { vendorId: approval.vendorId } })).toBe(0);
+    expect(await db.settlementRefundAdjustment.count({ where: { vendorId: approval.vendorId } })).toBe(0);
+    expect(await db.financialCorrectionAuthority.count({ where: { vendorId: approval.vendorId } })).toBe(0);
+  });
+
+  it('reads exact successful attempt evidence separately from a later cancelled settlement state', async () => {
+    const { approveSettlementDraftInternally } = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const { cancelSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const { listAutoApprovalAttemptsForAdmin, listAutoApprovalAttemptEventsForAdmin } =
+      await import('../backend/src/modules/finance/settlement-auto-approval-review.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const attemptId = `${approvalId}-review-approved`;
+    await approveSettlementDraftInternally({ settlementApprovalId: approvalId,
+      expectedVendorId: row.vendorId, attemptId });
+    await cancelSettlementApproval(approvalId, 'review-test-admin');
+    const page = await listAutoApprovalAttemptsForAdmin({ settlementApprovalId: approvalId,
+      vendorId: row.vendorId, outcome: 'APPROVED' });
+    expect(page.attempts).toHaveLength(1);
+    expect(page.attempts[0]).toMatchObject({ id: attemptId, outcome: 'APPROVED',
+      exactSuccessfulAttempt: true, currentSettlementStatus: 'CANCELLED' });
+    const events = await listAutoApprovalAttemptEventsForAdmin(attemptId);
+    expect(events?.events.map((event) => event.outcome)).toEqual(['STARTED', 'APPROVED']);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).approvedBy)
+      .toBe('system:settlement_auto_approval');
+  });
 });
