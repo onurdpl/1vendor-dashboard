@@ -4,7 +4,7 @@ import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
-describeWithPostgres('scheduled job evidence with isolated PostgreSQL 16', () => {
+describeWithPostgres('scheduled job evidence with isolated PostgreSQL 16 or 18', () => {
   let db: PrismaClient;
   let getStatus: typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js')['getSettlementScheduleAutoDraftJobStatus'];
   let runJob: typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js')['runSettlementScheduleAutoDraftJob'];
@@ -29,8 +29,7 @@ describeWithPostgres('scheduled job evidence with isolated PostgreSQL 16', () =>
     const [{ version, name }] = await db.$queryRaw<Array<{ version: string; name: string }>>`
       SELECT current_setting('server_version_num') AS version, current_database() AS name
     `;
-    expect(Number(version)).toBeGreaterThanOrEqual(160000);
-    expect(Number(version)).toBeLessThan(170000);
+    expect([16, 18]).toContain(Math.floor(Number(version) / 10000));
     expect(name).toBe('settlement_job_2c_validation');
     const latest = await db.settlementApproval.aggregate({ _max: { scheduledRunDate: true } });
     firstRunDate = new Date((latest._max.scheduledRunDate?.getTime() ?? Date.UTC(2026, 11, 31)) + 24 * 60 * 60 * 1000);

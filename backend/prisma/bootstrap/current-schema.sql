@@ -431,6 +431,17 @@ CREATE TYPE public."SettlementCommissionInvoiceStatus" AS ENUM (
 
 
 --
+-- Name: SettlementDraftCreationOrigin; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementDraftCreationOrigin" AS ENUM (
+    'AUTONOMOUS_SCHEDULER',
+    'ADMIN_SCHEDULED',
+    'ADMIN_MANUAL'
+);
+
+
+--
 -- Name: SettlementFrequencyType; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -957,6 +968,22 @@ CREATE FUNCTION public."protectR1MissedRefundReconciliation"() RETURNS trigger
     AS $$
 BEGIN
   RAISE EXCEPTION 'R1 missed refund reconciliation is immutable';
+END;
+$$;
+
+
+--
+-- Name: protectSettlementDraftCreationOrigin(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public."protectSettlementDraftCreationOrigin"() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW."creationOrigin" IS DISTINCT FROM OLD."creationOrigin" THEN
+    RAISE EXCEPTION 'Settlement DRAFT creation origin is immutable';
+  END IF;
+  RETURN NEW;
 END;
 $$;
 
@@ -2239,6 +2266,8 @@ CREATE TABLE public."SettlementApproval" (
     "replacementRequestedBy" text,
     "replacementReason" text,
     "replacementRequestedAt" timestamp(3) without time zone,
+    "creationOrigin" public."SettlementDraftCreationOrigin",
+    CONSTRAINT "SettlementApproval_autonomous_origin_schedule_check" CHECK ((("creationOrigin" IS DISTINCT FROM 'AUTONOMOUS_SCHEDULER'::public."SettlementDraftCreationOrigin") OR (("scheduledRunDate" IS NOT NULL) AND ("scheduledPeriodEnd" IS NOT NULL) AND ("scheduledCycleKey" IS NOT NULL) AND ("periodEnd" IS NOT NULL)))),
     CONSTRAINT "SettlementApproval_replacement_audit_check" CHECK (((("replacesSettlementApprovalId" IS NULL) AND ("replacementRequestId" IS NULL) AND ("replacementRequestedBy" IS NULL) AND ("replacementReason" IS NULL) AND ("replacementRequestedAt" IS NULL)) OR (("replacesSettlementApprovalId" IS NOT NULL) AND ("replacementRequestId" IS NOT NULL) AND ("replacementRequestedBy" IS NOT NULL) AND (btrim("replacementRequestedBy") <> ''::text) AND ("replacementReason" IS NOT NULL) AND (btrim("replacementReason") <> ''::text) AND ("replacementRequestedAt" IS NOT NULL))))
 );
 
@@ -5895,6 +5924,13 @@ CREATE TRIGGER "PayoutR1MissedRefundReconciliation_immutable" BEFORE DELETE OR U
 --
 
 CREATE TRIGGER "PayoutR1ReviewCancellationAttestation_immutable" BEFORE DELETE OR UPDATE ON public."PayoutR1ReviewCancellationAttestation" FOR EACH ROW EXECUTE FUNCTION public."protectR1MissedRefundReconciliation"();
+
+
+--
+-- Name: SettlementApproval SettlementApproval_creationOrigin_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER "SettlementApproval_creationOrigin_immutable" BEFORE UPDATE ON public."SettlementApproval" FOR EACH ROW EXECUTE FUNCTION public."protectSettlementDraftCreationOrigin"();
 
 
 --

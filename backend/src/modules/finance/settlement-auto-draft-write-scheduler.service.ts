@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
-import { runSettlementScheduleAutoDraftJob } from './settlement-schedule-job.service.js';
+import { runAutonomousSettlementScheduleAutoDraftJob } from './settlement-schedule-job.service.js';
 
 type SchedulerEnv = Pick<AppEnv,
   | 'SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED'
@@ -9,7 +9,7 @@ type SchedulerEnv = Pick<AppEnv,
   | 'SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN'
 >;
 
-type RunJob = typeof runSettlementScheduleAutoDraftJob;
+type RunJob = typeof runAutonomousSettlementScheduleAutoDraftJob;
 export type SettlementAutoDraftWriteScheduler = {
   runWriteTick(runDate: string | Date): Promise<Awaited<ReturnType<RunJob>> | null>;
 };
@@ -53,7 +53,7 @@ export function registerSettlementAutoDraftWriteScheduler(
     throw new Error('Automatic DRAFT scheduling requires SETTLEMENT_AUTO_DRAFT_JOB_ENABLED=true and SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN=false.');
   }
 
-  const runJob = dependencies.runJob ?? runSettlementScheduleAutoDraftJob;
+  const runJob = dependencies.runJob ?? runAutonomousSettlementScheduleAutoDraftJob;
   let closed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const scheduler: SettlementAutoDraftWriteScheduler = {

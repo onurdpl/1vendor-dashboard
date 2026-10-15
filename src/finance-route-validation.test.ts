@@ -165,11 +165,13 @@ vi.mock('../backend/src/modules/finance/vendor-balance.service.js', () => ({
 vi.mock('../backend/src/modules/finance/settlement-schedule.service.js', () => ({
   getSettlementScheduleDryRun: getSettlementScheduleDryRunMock,
   createSettlementScheduleDrafts: createSettlementScheduleDraftsMock,
+  createAdminSettlementScheduleDrafts: createSettlementScheduleDraftsMock,
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-schedule-job.service.js', () => ({
   getSettlementScheduleAutoDraftJobStatus: getSettlementScheduleAutoDraftJobStatusMock,
   runSettlementScheduleAutoDraftJob: runSettlementScheduleAutoDraftJobMock,
+  runAdminSettlementScheduleAutoDraftJob: runSettlementScheduleAutoDraftJobMock,
   SettlementJobReportingPersistenceError: class SettlementJobReportingPersistenceError extends Error {
     readonly confirmedWritesPerformed = true;
     readonly confirmedCreatedDraftCount = 1;

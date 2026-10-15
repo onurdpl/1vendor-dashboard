@@ -2,6 +2,7 @@ import {
   Prisma,
   SettlementApprovalLineType,
   SettlementApprovalStatus,
+  SettlementDraftCreationOrigin,
   SettlementCommissionInvoiceStatus,
   SettlementRefundAdjustmentApplicationStatus,
   SettlementRefundAdjustmentEventType,
@@ -2417,8 +2418,31 @@ export async function previewApproval(
 export async function createDraftApproval(
   input: SettlementApprovalInput,
 ): Promise<SettlementApprovalDto> {
+  return createDraftApprovalWithOrigin(input, null);
+}
+
+/** Only the authenticated Admin creation route calls this entry point. */
+export async function createAdminManualDraftApproval(
+  input: SettlementApprovalInput,
+): Promise<SettlementApprovalDto> {
+  return createDraftApprovalWithOrigin(input, SettlementDraftCreationOrigin.ADMIN_MANUAL);
+}
+
+/** Internal scheduled-service entry points. Neither accepts an origin string from a caller. */
+export async function createAutonomousScheduledDraftApproval(input: SettlementApprovalInput): Promise<SettlementApprovalDto> {
+  return createDraftApprovalWithOrigin(input, SettlementDraftCreationOrigin.AUTONOMOUS_SCHEDULER);
+}
+
+export async function createAdminScheduledDraftApproval(input: SettlementApprovalInput): Promise<SettlementApprovalDto> {
+  return createDraftApprovalWithOrigin(input, SettlementDraftCreationOrigin.ADMIN_SCHEDULED);
+}
+
+async function createDraftApprovalWithOrigin(
+  input: SettlementApprovalInput,
+  origin: SettlementDraftCreationOrigin | null,
+): Promise<SettlementApprovalDto> {
   assertScheduledDraftMetadata(input);
-  return prisma.$transaction((tx) => createDraftApprovalInTransaction(input, tx), {
+  return prisma.$transaction((tx) => createDraftApprovalInTransaction(input, tx, undefined, origin), {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
 }
@@ -2445,6 +2469,7 @@ async function createDraftApprovalInTransaction(
   input: SettlementApprovalInput,
   tx: SettlementApprovalTransaction,
   replacementAudit?: SettlementReplacementAudit,
+  creationOrigin: SettlementDraftCreationOrigin | null = null,
 ): Promise<SettlementApprovalDto> {
       // Serialize draft snapshots with before-settlement credit authorization for this vendor.
       // Normal drafts lock first; the replacement writer already locked this same vendor first.
@@ -2592,6 +2617,7 @@ async function createDraftApprovalInTransaction(
           replacementReason: replacementAudit?.reason ?? null,
           replacementRequestedAt: replacementAudit?.requestedAt ?? null,
           status: SettlementApprovalStatus.DRAFT,
+          creationOrigin,
           currency: 'TRY',
           grossSalesMinor: settlementTotals.grossSalesMinor,
           refundTotalMinor: settlementTotals.refundTotalMinor,

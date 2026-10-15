@@ -11,22 +11,33 @@ const backend = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const prismaDirectory = path.join(backend, 'prisma');
 const migrationsDirectory = path.join(prismaDirectory, 'migrations');
 const bootstrapDirectory = path.join(prismaDirectory, 'bootstrap');
-const manifestPath = path.join(bootstrapDirectory, 'baseline-manifest.json');
-const snapshotPath = path.join(bootstrapDirectory, 'current-schema.sql');
+const postgresMajor = Number(process.env.BOOTSTRAP_POSTGRES_MAJOR || '16');
+if (![16, 18].includes(postgresMajor)) {
+  throw new Error('Baseline refresh/check supports only PostgreSQL 16 or 18.');
+}
+const manifestPath = path.join(bootstrapDirectory, postgresMajor === 16 ? 'baseline-manifest.json' : 'baseline-manifest.pg18.json');
+const snapshotPath = path.join(bootstrapDirectory, postgresMajor === 16 ? 'current-schema.sql' : 'current-schema.pg18.sql');
+const seedManifestPath = path.join(bootstrapDirectory, 'baseline-manifest.json');
+const seedSnapshotPath = path.join(bootstrapDirectory, 'current-schema.sql');
 const schemaPath = path.join(prismaDirectory, 'schema.prisma');
 const prismaCli = path.join(backend, 'node_modules', 'prisma', 'build', 'index.js');
-const pgDump = path.join(process.env.PG16_BIN || '/usr/bin', 'pg_dump');
+const pgDump = path.join(
+  postgresMajor === 16 ? (process.env.PG16_BIN || '/usr/bin') : (process.env.PG18_BIN || '/usr/lib/postgresql/18/bin'),
+  'pg_dump',
+);
 const mode = process.argv[2];
 const connection = process.env.BOOTSTRAP_REFRESH_DATABASE_URL;
 
 if (!['--refresh', '--check'].includes(mode) || !connection) {
-  console.error('Usage: BOOTSTRAP_REFRESH_DATABASE_URL=<local PostgreSQL 16 URL> node scripts/refresh-fresh-database-baseline.mjs --refresh|--check');
+  console.error('Usage: BOOTSTRAP_REFRESH_DATABASE_URL=<local PostgreSQL 16/18 URL> BOOTSTRAP_POSTGRES_MAJOR=16|18 node scripts/refresh-fresh-database-baseline.mjs --refresh|--check');
   process.exit(1);
 }
 
 const adminUrl = new URL(connection);
-if (!['127.0.0.1', 'localhost'].includes(adminUrl.hostname) || adminUrl.protocol !== 'postgresql:') {
-  throw new Error('Baseline refresh/check requires an explicitly local PostgreSQL URL.');
+if (!['127.0.0.1', 'localhost'].includes(adminUrl.hostname) || adminUrl.protocol !== 'postgresql:' ||
+    !adminUrl.port || !adminUrl.username || adminUrl.pathname !== '/postgres' ||
+    adminUrl.searchParams.get('schema') !== 'public') {
+  throw new Error('Baseline refresh/check requires an explicit local PostgreSQL admin URL for the postgres database.');
 }
 const prismaVersion = JSON.parse(await readFile(path.join(backend, 'node_modules', 'prisma', 'package.json'), 'utf8')).version;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -100,17 +111,29 @@ async function dropDatabases() {
   }
 }
 
-async function verifyPostgres16(url) {
+async function verifyPostgresVersion(url) {
   const db = client(url);
   try {
-    const [row] = await db.$queryRawUnsafe('SHOW server_version_num');
-    const version = Number(row.server_version_num);
-    if (version < 160000 || version >= 170000) throw new Error(`PostgreSQL 16 required; server reports ${version}.`);
+    const [row] = await db.$queryRawUnsafe(`
+      SELECT current_setting('server_version_num') AS version,
+        current_database() AS "databaseName", current_user AS "connectedUser",
+        pg_get_userbyid(datdba) AS "databaseOwner", host(inet_server_addr()) AS "serverAddress",
+        inet_server_port() AS "serverPort"
+      FROM pg_database WHERE datname = current_database()
+    `);
+    const version = Number(row.version);
+    if (Math.floor(version / 10000) !== postgresMajor) throw new Error(`PostgreSQL ${postgresMajor} required; server reports ${version}.`);
+    if (row.databaseName !== new URL(url).pathname.slice(1) || row.connectedUser !== row.databaseOwner ||
+        !['127.0.0.1', '::1'].includes(row.serverAddress) || row.serverPort !== Number(adminUrl.port)) {
+      throw new Error('Baseline refresh/check database identity, ownership, or loopback server does not match the local URL.');
+    }
   } finally {
     await db.$disconnect();
   }
   const dumpVersion = command(pgDump, ['--version'], 'pg_dump version').trim();
-  if (!/\b16\./.test(dumpVersion)) throw new Error(`PostgreSQL 16 pg_dump required; found ${dumpVersion}.`);
+  if (!new RegExp(`\\b${postgresMajor}\\.`).test(dumpVersion)) {
+    throw new Error(`PostgreSQL ${postgresMajor} pg_dump required; found ${dumpVersion}.`);
+  }
 }
 
 async function assertMigrationBookkeeping(url, names) {
@@ -175,10 +198,10 @@ async function historicalIndex(url) {
   }
 }
 
-async function canonicalSource(manifest, allNames) {
+async function canonicalSource(manifest, sourceSnapshotPath, allNames) {
   const database = await createDatabase();
-  await verifyPostgres16(database.url);
-  prisma(['db', 'execute', '--file', snapshotPath], database.url, 'Existing baseline snapshot');
+  await verifyPostgresVersion(database.url);
+  prisma(['db', 'execute', '--file', sourceSnapshotPath], database.url, 'Existing baseline snapshot');
   for (const name of manifest.baselineMigrations) {
     prisma(['migrate', 'resolve', '--applied', name], database.url, `Baseline registration ${name}`);
   }
@@ -193,7 +216,7 @@ async function canonicalSource(manifest, allNames) {
 
 async function restoreAndCompare(source, allNames) {
   const target = await createDatabase();
-  await verifyPostgres16(target.url);
+  await verifyPostgresVersion(target.url);
   const candidatePath = path.join(temporaryDirectory, 'candidate.sql');
   await writeFile(candidatePath, source.sql);
   prisma(['db', 'execute', '--file', candidatePath], target.url, 'Candidate snapshot restore');
@@ -209,26 +232,34 @@ async function restoreAndCompare(source, allNames) {
 }
 
 try {
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const seedFromPostgres16 = postgresMajor === 18 && mode === '--refresh';
+  const sourceManifestPath = seedFromPostgres16 ? seedManifestPath : manifestPath;
+  const sourceSnapshotPath = seedFromPostgres16 ? seedSnapshotPath : snapshotPath;
+  const manifest = JSON.parse(await readFile(sourceManifestPath, 'utf8'));
   const allNames = await migrations();
   if (![1, 2].includes(manifest.formatVersion) || manifest.provider !== 'postgresql' ||
+      ((mode === '--check' || seedFromPostgres16) && manifest.generatedBy?.prismaVersion !== prismaVersion) ||
       JSON.stringify(allNames.filter((name) => name <= manifest.migrationCutoff)) !== JSON.stringify(manifest.baselineMigrations) ||
-      hash(await readFile(snapshotPath)) !== manifest.snapshot?.sha256 ||
+      manifest.generatedBy?.postgresMajor !== (seedFromPostgres16 ? 16 : postgresMajor) ||
+      manifest.schema?.path !== '../schema.prisma' ||
+      manifest.snapshot?.path !== path.basename(sourceSnapshotPath) ||
+      ((mode === '--check' || seedFromPostgres16) && hash(await readFile(schemaPath)) !== manifest.schema?.sha256) ||
+      hash(await readFile(sourceSnapshotPath)) !== manifest.snapshot?.sha256 ||
       await migrationHash(manifest.baselineMigrations) !== manifest.baselineMigrationFilesSha256) {
     throw new Error('Existing baseline artifact or migration manifest is inconsistent.');
   }
-  const source = await canonicalSource(manifest, allNames);
+  const source = await canonicalSource(manifest, sourceSnapshotPath, allNames);
   await restoreAndCompare(source, allNames);
   const next = {
     formatVersion: 2,
     provider: 'postgresql',
     generatedBy: {
       prismaVersion,
-      postgresMajor: 16,
-      command: 'npm run backend:db:bootstrap:refresh (PostgreSQL 16 pg_dump --schema-only)',
+      postgresMajor,
+      command: `npm run backend:db:bootstrap:refresh (PostgreSQL ${postgresMajor} pg_dump --schema-only)`,
     },
     schema: { path: '../schema.prisma', sha256: hash(await readFile(schemaPath)) },
-    snapshot: { path: 'current-schema.sql', sha256: hash(source.sql) },
+    snapshot: { path: path.basename(snapshotPath), sha256: hash(source.sql) },
     catalog: { sha256: source.catalogSha256 },
     migrationCutoff: allNames.at(-1),
     baselineMigrationFilesSha256: await migrationHash(allNames),
@@ -236,16 +267,16 @@ try {
   };
   const manifestContents = `${JSON.stringify(next, null, 2)}\n`;
   if (mode === '--refresh') {
-    const repeat = await canonicalSource(manifest, allNames);
+    const repeat = await canonicalSource(manifest, sourceSnapshotPath, allNames);
     if (repeat.sql !== source.sql || repeat.catalogSha256 !== source.catalogSha256) {
-      throw new Error('Independent PostgreSQL 16 regeneration was not byte-stable.');
+      throw new Error(`Independent PostgreSQL ${postgresMajor} regeneration was not byte-stable.`);
     }
     await writeFile(snapshotPath, source.sql);
     await writeFile(manifestPath, manifestContents);
     console.log(`Baseline refreshed through ${next.migrationCutoff}; snapshot ${next.snapshot.sha256}; catalog ${next.catalog.sha256}.`);
   } else {
     if (source.sql !== await readFile(snapshotPath, 'utf8') || manifestContents !== await readFile(manifestPath, 'utf8')) {
-      throw new Error('Tracked baseline differs from the independently generated PostgreSQL 16 baseline.');
+      throw new Error(`Tracked baseline differs from the independently generated PostgreSQL ${postgresMajor} baseline.`);
     }
     console.log(`Baseline verified through ${next.migrationCutoff}; catalog ${next.catalog.sha256}.`);
   }

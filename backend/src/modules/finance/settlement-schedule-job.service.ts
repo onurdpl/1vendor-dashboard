@@ -3,6 +3,8 @@ import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import {
   createSettlementScheduleDrafts,
+  createAdminSettlementScheduleDrafts,
+  createAutonomousSettlementScheduleDrafts,
   buildScheduledSettlementCycleKey,
   getSettlementScheduleDryRun,
   toSettlementRunDate,
@@ -449,6 +451,27 @@ export async function getSettlementScheduleAutoDraftJobStatus(
 export async function runSettlementScheduleAutoDraftJob(
   input: JobInput,
 ): Promise<SettlementScheduleAutoDraftJobResponse> {
+  return runSettlementScheduleAutoDraftJobWithOrigin(input, 'UNKNOWN');
+}
+
+/** Only the authenticated Admin job route calls this entry point. */
+export async function runAdminSettlementScheduleAutoDraftJob(
+  input: JobInput,
+): Promise<SettlementScheduleAutoDraftJobResponse> {
+  return runSettlementScheduleAutoDraftJobWithOrigin(input, 'ADMIN');
+}
+
+/** Only the autonomous scheduler's internal tick calls this entry point. */
+export async function runAutonomousSettlementScheduleAutoDraftJob(
+  input: JobInput,
+): Promise<SettlementScheduleAutoDraftJobResponse> {
+  return runSettlementScheduleAutoDraftJobWithOrigin(input, 'AUTONOMOUS');
+}
+
+async function runSettlementScheduleAutoDraftJobWithOrigin(
+  input: JobInput,
+  trustedOrigin: 'UNKNOWN' | 'ADMIN' | 'AUTONOMOUS',
+): Promise<SettlementScheduleAutoDraftJobResponse> {
   const runDate = toSettlementRunDate(input.runDate);
   const runDateKey = toSettlementRunDateKey(runDate);
   const enabled = input.env.SETTLEMENT_AUTO_DRAFT_JOB_ENABLED;
@@ -544,7 +567,9 @@ export async function runSettlementScheduleAutoDraftJob(
 
   let createResult: SettlementScheduleCreateDraftsResponseDto | null = null;
   try {
-    createResult = await createSettlementScheduleDrafts({
+    const create = trustedOrigin === 'AUTONOMOUS' ? createAutonomousSettlementScheduleDrafts
+      : trustedOrigin === 'ADMIN' ? createAdminSettlementScheduleDrafts : createSettlementScheduleDrafts;
+    createResult = await create({
       runDate,
       confirmAutoSettlementDrafts: true,
       createdBy: input.triggeredBy ?? null,

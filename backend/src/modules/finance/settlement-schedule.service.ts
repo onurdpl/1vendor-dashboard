@@ -2,6 +2,8 @@ import { SettlementApprovalStatus } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import {
   createDraftApproval,
+  createAutonomousScheduledDraftApproval,
+  createAdminScheduledDraftApproval,
   previewApproval,
   type SettlementApprovalDto,
   type SettlementApprovalPreviewDto,
@@ -467,6 +469,27 @@ export async function getSettlementScheduleDryRun(
 export async function createSettlementScheduleDrafts(
   input: SettlementScheduleCreateDraftsInput = {},
 ): Promise<SettlementScheduleCreateDraftsResponseDto> {
+  return createSettlementScheduleDraftsWithCreator(input, createDraftApproval);
+}
+
+/** Authenticated Admin route only; not inferred from createdBy or request body. */
+export async function createAdminSettlementScheduleDrafts(
+  input: SettlementScheduleCreateDraftsInput = {},
+): Promise<SettlementScheduleCreateDraftsResponseDto> {
+  return createSettlementScheduleDraftsWithCreator(input, createAdminScheduledDraftApproval);
+}
+
+/** Called only by the internal autonomous job entry point. */
+export async function createAutonomousSettlementScheduleDrafts(
+  input: SettlementScheduleCreateDraftsInput = {},
+): Promise<SettlementScheduleCreateDraftsResponseDto> {
+  return createSettlementScheduleDraftsWithCreator(input, createAutonomousScheduledDraftApproval);
+}
+
+async function createSettlementScheduleDraftsWithCreator(
+  input: SettlementScheduleCreateDraftsInput,
+  createDraft: typeof createDraftApproval,
+): Promise<SettlementScheduleCreateDraftsResponseDto> {
   if (input.confirmAutoSettlementDrafts !== true) {
     throw new Error('confirmAutoSettlementDrafts must be true to create scheduled settlement drafts.');
   }
@@ -490,7 +513,7 @@ export async function createSettlementScheduleDrafts(
     }
 
     try {
-      const approval = await createDraftApproval({
+      const approval = await createDraft({
         vendorId: vendor.vendorId,
         periodEnd: new Date(dryRun.periodEnd),
         asOfDate: new Date(dryRun.periodEnd),

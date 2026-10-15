@@ -73,7 +73,7 @@ import {
   assessSettlementApprovalReadiness,
   approveSettlementApproval,
   cancelSettlementApproval,
-  createDraftApproval,
+  createAdminManualDraftApproval,
   getSettlementApproval,
   getSettlementApprovalAudit,
   listSettlementApprovalsForVendor,
@@ -102,12 +102,12 @@ import {
   listSettlementRefundAdjustments,
 } from './settlement-refund-adjustment.service.js';
 import {
-  createSettlementScheduleDrafts,
+  createAdminSettlementScheduleDrafts,
   getSettlementScheduleDryRun,
 } from './settlement-schedule.service.js';
 import {
   getSettlementScheduleAutoDraftJobStatus,
-  runSettlementScheduleAutoDraftJob,
+  runAdminSettlementScheduleAutoDraftJob,
   SettlementJobReportingPersistenceError,
 } from './settlement-schedule-job.service.js';
 import { assessCancelledScheduledSettlementReplacement } from './settlement-replacement-assessment.service.js';
@@ -1169,7 +1169,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           });
         }
 
-        return await createSettlementScheduleDrafts({
+        return await createAdminSettlementScheduleDrafts({
           runDate: readOptionalBodyString(request.body, 'runDate'),
           vendorId: readOptionalBodyString(request.body, 'vendorId'),
           limit: readOptionalBodyNumber(request.body, 'limit'),
@@ -1208,7 +1208,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       try {
-        return await runSettlementScheduleAutoDraftJob({
+        return await runAdminSettlementScheduleAutoDraftJob({
           env,
           runDate: isRecord(request.body) ? readOptionalBodyString(request.body, 'runDate') : null,
           confirmScheduledSettlementAutoDraftJob:
@@ -1279,7 +1279,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         if (!vendorId) {
           return reply.code(400).send({ message: 'vendorId is required.' });
         }
-        return await createDraftApproval({
+        return await createAdminManualDraftApproval({
           vendorId,
           periodStart: readOptionalBodyDate(request.body, 'periodStart'),
           periodEnd: readOptionalBodyDate(request.body, 'periodEnd'),

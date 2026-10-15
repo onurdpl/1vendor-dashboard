@@ -11,7 +11,7 @@ const backendDirectory = path.resolve(scriptDirectory, '..');
 const prismaDirectory = path.join(backendDirectory, 'prisma');
 const migrationsDirectory = path.join(prismaDirectory, 'migrations');
 const bootstrapDirectory = path.join(prismaDirectory, 'bootstrap');
-const manifestPath = path.join(bootstrapDirectory, 'baseline-manifest.json');
+const supportedPostgresMajors = new Set([16, 18]);
 const prismaCliPath = path.join(backendDirectory, 'node_modules', 'prisma', 'build', 'index.js');
 const prismaPackagePath = path.join(backendDirectory, 'node_modules', 'prisma', 'package.json');
 const bootstrapLockKeys = [1397117523, 1178878287];
@@ -19,6 +19,15 @@ const bootstrapLockKeys = [1397117523, 1178878287];
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) {
   console.error('Fresh database bootstrap refused: DATABASE_URL is required.');
+  process.exit(1);
+}
+const targetUrl = new URL(databaseUrl);
+const targetDatabase = decodeURIComponent(targetUrl.pathname.slice(1));
+if (targetUrl.protocol !== 'postgresql:' || !['127.0.0.1', 'localhost'].includes(targetUrl.hostname) ||
+    !targetUrl.port || !targetUrl.username || !targetDatabase ||
+    ['postgres', 'template0', 'template1'].includes(targetDatabase) ||
+    targetUrl.searchParams.get('schema') !== 'public') {
+  console.error('Fresh database bootstrap refused: use an explicit local, dedicated PostgreSQL database URL with schema=public.');
   process.exit(1);
 }
 
@@ -78,13 +87,21 @@ async function hashMigrationFiles(migrationNames) {
   return hash.digest('hex');
 }
 
-async function validateBaseline() {
+async function validateBaseline(postgresMajor) {
+  const manifestPath = path.join(
+    bootstrapDirectory,
+    postgresMajor === 16 ? 'baseline-manifest.json' : 'baseline-manifest.pg18.json',
+  );
   const manifest = await readJson(manifestPath, 'Baseline manifest');
   if (manifest.formatVersion !== 2 || manifest.provider !== 'postgresql') {
     throw new Error('Baseline manifest format or provider is unsupported.');
   }
-  if (manifest.generatedBy?.postgresMajor !== 16) {
-    throw new Error('Baseline requires PostgreSQL 16 provenance.');
+  if (manifest.generatedBy?.postgresMajor !== postgresMajor) {
+    throw new Error(`Baseline requires PostgreSQL ${postgresMajor} provenance.`);
+  }
+  if (manifest.schema?.path !== '../schema.prisma' ||
+      manifest.snapshot?.path !== (postgresMajor === 16 ? 'current-schema.sql' : 'current-schema.pg18.sql')) {
+    throw new Error(`PostgreSQL ${postgresMajor} baseline points to an unexpected schema or snapshot.`);
   }
   if (!Array.isArray(manifest.baselineMigrations) || manifest.baselineMigrations.length === 0) {
     throw new Error('Baseline manifest must list at least one migration.');
@@ -213,7 +230,6 @@ let lockAcquired = false;
 let mutationStarted = false;
 
 try {
-  const baseline = await validateBaseline();
   prisma = new PrismaClient({
     datasources: {
       db: {
@@ -224,8 +240,21 @@ try {
   await prisma.$connect();
   const [serverVersion] = await prisma.$queryRawUnsafe('SHOW server_version_num');
   const postgresVersion = Number(serverVersion?.server_version_num);
-  if (postgresVersion < 160000 || postgresVersion >= 170000) {
-    throw new Error(`Fresh database bootstrap requires PostgreSQL 16; found ${postgresVersion}.`);
+  const postgresMajor = Math.floor(postgresVersion / 10000);
+  if (!supportedPostgresMajors.has(postgresMajor)) {
+    throw new Error(`Fresh database bootstrap supports only PostgreSQL 16 or 18; found ${postgresVersion}.`);
+  }
+  const baseline = await validateBaseline(postgresMajor);
+  const [identity] = await prisma.$queryRawUnsafe(`
+    SELECT current_database() AS "databaseName", current_user AS "connectedUser",
+      pg_get_userbyid(datdba) AS "databaseOwner", host(inet_server_addr()) AS "serverAddress",
+      inet_server_port() AS "serverPort"
+    FROM pg_database WHERE datname = current_database()
+  `);
+  if (identity?.databaseName !== targetDatabase || identity?.connectedUser !== identity?.databaseOwner ||
+      !['127.0.0.1', '::1'].includes(identity?.serverAddress) ||
+      identity?.serverPort !== Number(targetUrl.port)) {
+    throw new Error('Fresh database bootstrap refused: database identity, ownership, or loopback server does not match the target URL.');
   }
   const [lockResult] = await prisma.$queryRawUnsafe(
     `SELECT pg_try_advisory_lock(${bootstrapLockKeys[0]}, ${bootstrapLockKeys[1]}) AS "acquired"`,

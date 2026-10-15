@@ -37,8 +37,7 @@ suite('scheduled settlement job with two independent PostgreSQL workers', () => 
       version: string; name: string; owner: string; port: number;
     }>>`SELECT current_setting('server_version_num') AS version, current_database() AS name,
       current_user AS owner, inet_server_port() AS port`;
-    expect(Number(version)).toBeGreaterThanOrEqual(160000);
-    expect(Number(version)).toBeLessThan(170000);
+    expect([16, 18]).toContain(Math.floor(Number(version) / 10000));
     expect(name).toBe(databaseName);
     expect(owner).toBe(target.username);
     expect(port).toBe(Number(target.port));

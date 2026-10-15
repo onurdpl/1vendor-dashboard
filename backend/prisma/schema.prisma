@@ -127,6 +127,12 @@ enum SettlementApprovalStatus {
   CANCELLED
 }
 
+enum SettlementDraftCreationOrigin {
+  AUTONOMOUS_SCHEDULER
+  ADMIN_SCHEDULED
+  ADMIN_MANUAL
+}
+
 enum SettlementApprovalLineType {
   SALE
   REFUND
@@ -1945,6 +1951,7 @@ model SettlementApproval {
   periodStart                  DateTime?
   periodEnd                    DateTime?
   status                       SettlementApprovalStatus                @default(DRAFT)
+  creationOrigin               SettlementDraftCreationOrigin?
   currency                     String                                  @default("TRY")
   grossSalesMinor              Int
   refundTotalMinor             Int

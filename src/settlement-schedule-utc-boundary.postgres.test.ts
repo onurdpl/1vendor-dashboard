@@ -6,7 +6,7 @@ const suite = databaseUrl ? describe : describe.skip;
 const databaseName = 'settlement_utc_boundary_validation';
 const millisecondsPerDay = 86_400_000;
 
-suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
+suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
   let db: PrismaClient;
   let schedule: typeof import('../backend/src/modules/finance/settlement-schedule.service.js');
   let job: typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js');
@@ -29,8 +29,7 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
     const [identity] = await db.$queryRaw<Array<{ version: string; name: string; owner: string; port: number }>>`
       SELECT current_setting('server_version_num') AS version, current_database() AS name,
         current_user AS owner, inet_server_port() AS port`;
-    expect(Number(identity.version)).toBeGreaterThanOrEqual(160000);
-    expect(Number(identity.version)).toBeLessThan(170000);
+    expect([16, 18]).toContain(Math.floor(Number(identity.version) / 10000));
     expect(identity.name).toBe(databaseName);
     expect(identity.owner).toBe(target.username);
     expect(identity.port).toBe(Number(target.port));
@@ -228,6 +227,191 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('persists autonomous origin with the exact DRAFT even when JobRun evidence is incomplete', async () => {
+    const f = await fixture(['ready']);
+    const vendorId = f.candidates[0].vendorId;
+    const existingRunCount = await db.settlementScheduleJobRun.count({ where: { runDate: f.runDate } });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + 1));
+    const created = await schedule.createAutonomousSettlementScheduleDrafts({
+      runDate: f.runDateKey, vendorId, confirmAutoSettlementDrafts: true,
+      createdBy: 'forged-admin-id',
+    });
+    expect(created.summary.created).toBe(1);
+    const row = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: created.createdDrafts[0].settlementApprovalId }, include: { lines: true },
+    });
+    expect(row).toMatchObject({
+      vendorId, status: 'DRAFT', creationOrigin: 'AUTONOMOUS_SCHEDULER',
+      scheduledCycleKey: `scheduled-settlement:${vendorId}:${f.runDateKey}`,
+      grossSalesMinor: 20_000, netPayableMinor: 17_600,
+    });
+    expect(row.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.candidates[0].ledgerId]);
+    await expect(db.$executeRaw`
+      UPDATE "SettlementApproval" SET "creationOrigin" = NULL WHERE "id" = ${row.id}
+    `).rejects.toThrow(/creation origin is immutable/);
+    await expect(db.$executeRaw`
+      UPDATE "SettlementApproval" SET "creationOrigin" = 'ADMIN_SCHEDULED'::"SettlementDraftCreationOrigin"
+      WHERE "id" = ${row.id}
+    `).rejects.toThrow(/creation origin is immutable/);
+    expect(await db.settlementScheduleJobRun.count({ where: { runDate: f.runDate } })).toBe(existingRunCount);
+    const replay = await schedule.createAutonomousSettlementScheduleDrafts({
+      runDate: f.runDateKey, vendorId, confirmAutoSettlementDrafts: true,
+    });
+    expect(replay.summary.created).toBe(0);
+    const afterReplay = await db.settlementApproval.findUniqueOrThrow({ where: { id: row.id }, include: { lines: true } });
+    expect(afterReplay.creationOrigin).toBe('AUTONOMOUS_SCHEDULER');
+    expect(afterReplay.sourceSnapshotJson).toEqual(row.sourceSnapshotJson);
+    expect(afterReplay.lines).toEqual(row.lines);
+    expect(await db.settlementCommissionInvoice.count({ where: { settlementApprovalId: row.id } })).toBe(0);
+    expect(await db.payoutBatch.count({ where: { vendorId } })).toBe(0);
+  });
+
+  it('separates Admin scheduled, verified Admin manual, and unverified service origins', async () => {
+    const scheduled = await fixture(['ready']);
+    const manual = await fixture(['ready']);
+    const unverified = await fixture(['ready']);
+    const adminVendorId = scheduled.candidates[0].vendorId;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(scheduled.periodEnd.getTime() + 1));
+    const admin = await schedule.createAdminSettlementScheduleDrafts({
+      runDate: scheduled.runDateKey, vendorId: adminVendorId, confirmAutoSettlementDrafts: true,
+      createdBy: 'system:settlement_auto_draft_scheduler',
+    });
+    expect(admin.summary.created).toBe(1);
+    const adminRow = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: admin.createdDrafts[0].settlementApprovalId },
+    });
+    expect(adminRow.creationOrigin).toBe('ADMIN_SCHEDULED');
+    await expect(db.$executeRaw`
+      UPDATE "SettlementApproval" SET "creationOrigin" = 'AUTONOMOUS_SCHEDULER'::"SettlementDraftCreationOrigin"
+      WHERE "id" = ${adminRow.id}
+    `).rejects.toThrow(/creation origin is immutable/);
+
+    const manualVendorId = manual.candidates[0].vendorId;
+    const verified = await approval.createAdminManualDraftApproval({ vendorId: manualVendorId });
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: verified.id } })).creationOrigin)
+      .toBe('ADMIN_MANUAL');
+
+    const unknown = await approval.createDraftApproval({ vendorId: unverified.candidates[0].vendorId });
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: unknown.id } })).creationOrigin)
+      .toBeNull();
+  });
+
+  it('does not trust forged job actor strings and keeps autonomous origin immutable in PostgreSQL', async () => {
+    const f = await fixture(['ready']);
+    const vendorId = f.candidates[0].vendorId;
+    const latestJob = await db.settlementScheduleJobRun.aggregate({ _max: { runDate: true } });
+    const uniqueRunDate = new Date(Math.max(f.runDate.getTime() + 140 * millisecondsPerDay,
+      (latestJob._max.runDate?.getTime() ?? 0) + 7 * millisecondsPerDay));
+    uniqueRunDate.setUTCDate(uniqueRunDate.getUTCDate() + ((3 - uniqueRunDate.getUTCDay() + 7) % 7));
+    const uniqueRunDateKey = uniqueRunDate.toISOString().slice(0, 10);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(uniqueRunDate.getTime() + millisecondsPerDay));
+    const forged = await job.runSettlementScheduleAutoDraftJob({
+      env: { SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true, SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false },
+      runDate: uniqueRunDateKey, confirmScheduledSettlementAutoDraftJob: true,
+      triggeredBy: 'system:settlement_auto_draft_scheduler',
+    });
+    expect(forged.summary.createdDrafts).toBe(1);
+    const id = forged.vendors.find((item) => item.vendorId === vendorId)?.createdSettlementApprovalId;
+    expect(id).toBeTruthy();
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: id! } })).creationOrigin).toBeNull();
+    await expect(db.$executeRaw`
+      UPDATE "SettlementApproval" SET "creationOrigin" = 'AUTONOMOUS_SCHEDULER'::"SettlementDraftCreationOrigin"
+      WHERE "id" = ${id!}
+    `).rejects.toThrow(/creation origin is immutable/);
+    await db.settlementApproval.update({ where: { id: id! }, data: { notes: 'status-update-control' } });
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: id! } })).creationOrigin).toBeNull();
+  });
+
+  it('keeps Admin-triggered job provenance distinct even with a forged scheduler-looking actor', async () => {
+    const f = await fixture(['ready']);
+    const vendorId = f.candidates[0].vendorId;
+    const latestJob = await db.settlementScheduleJobRun.aggregate({ _max: { runDate: true } });
+    const runDate = new Date(Math.max(f.runDate.getTime() + 210 * millisecondsPerDay,
+      (latestJob._max.runDate?.getTime() ?? 0) + 7 * millisecondsPerDay));
+    runDate.setUTCDate(runDate.getUTCDate() + ((3 - runDate.getUTCDay() + 7) % 7));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(runDate.getTime() + millisecondsPerDay));
+    const result = await job.runAdminSettlementScheduleAutoDraftJob({
+      env: { SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true, SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false },
+      runDate: runDate.toISOString().slice(0, 10), confirmScheduledSettlementAutoDraftJob: true,
+      triggeredBy: 'system:settlement_auto_draft_scheduler',
+    });
+    expect(result.summary.createdDrafts).toBe(1);
+    const id = result.vendors.find((item) => item.vendorId === vendorId)?.createdSettlementApprovalId;
+    expect(id).toBeTruthy();
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: id! } })).toMatchObject({
+      vendorId, status: 'DRAFT', creationOrigin: 'ADMIN_SCHEDULED',
+    });
+  });
+
+  it('runs the trusted scheduler path and retains provenance across manual approval', async () => {
+    const f = await fixture(['ready']);
+    const vendorId = f.candidates[0].vendorId;
+    const latestJob = await db.settlementScheduleJobRun.aggregate({ _max: { runDate: true } });
+    const runDate = new Date(Math.max(f.runDate.getTime() + 280 * millisecondsPerDay,
+      (latestJob._max.runDate?.getTime() ?? 0) + 7 * millisecondsPerDay));
+    runDate.setUTCDate(runDate.getUTCDate() + ((3 - runDate.getUTCDay() + 7) % 7));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(runDate.getTime() + millisecondsPerDay));
+    let onClose: ((instance: unknown, done: () => void) => void) | undefined;
+    const app = { addHook: (_name: string, hook: typeof onClose) => { onClose = hook; } } as never;
+    const { registerSettlementAutoDraftWriteScheduler } = await import(
+      '../backend/src/modules/finance/settlement-auto-draft-write-scheduler.service.js');
+    const scheduler = registerSettlementAutoDraftWriteScheduler(app, {
+      SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED: true,
+      SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_UTC_TIME: '01:00',
+      SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true,
+      SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false,
+    });
+    expect(scheduler).not.toBeNull();
+    try {
+      const result = await scheduler!.runWriteTick(runDate.toISOString().slice(0, 10));
+      expect(result?.summary.createdDrafts).toBe(1);
+      const id = result?.vendors.find((item) => item.vendorId === vendorId)?.createdSettlementApprovalId;
+      expect(id).toBeTruthy();
+      const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: id! }, include: { lines: true } });
+      expect(before).toMatchObject({ status: 'DRAFT', creationOrigin: 'AUTONOMOUS_SCHEDULER', vendorId });
+      expect(before.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.candidates[0].ledgerId]);
+      expect(await db.payoutBatch.count({ where: { vendorId } })).toBe(0);
+      expect(await db.settlementCommissionInvoice.count({ where: { settlementApprovalId: id! } })).toBe(0);
+      const approved = await approval.approveSettlementApproval(id!, 'test-admin');
+      expect(approved.status).toBe('approved');
+      expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: id! } })).toMatchObject({
+        status: 'APPROVED', creationOrigin: 'AUTONOMOUS_SCHEDULER', approvedBy: 'test-admin',
+        grossSalesMinor: before.grossSalesMinor, netPayableMinor: before.netPayableMinor,
+      });
+    } finally {
+      onClose?.(app, () => undefined);
+    }
+  });
+
+  it('rolls back creation origin together with an uncommitted DRAFT', async () => {
+    const f = await fixture(['ready']);
+    const vendorId = f.candidates[0].vendorId;
+    const id = `${vendorId}-rolled-back-approval`;
+    await expect(db.$transaction(async (tx) => {
+      await tx.settlementApproval.create({ data: {
+        id, vendorId, status: 'DRAFT', creationOrigin: 'AUTONOMOUS_SCHEDULER',
+        scheduledRunDate: f.runDate, scheduledPeriodEnd: f.periodEnd,
+        scheduledCycleKey: `scheduled-settlement:${vendorId}:${f.runDateKey}`,
+        periodEnd: f.periodEnd, currency: 'TRY', grossSalesMinor: 0, refundTotalMinor: 0,
+        commissionMinor: 0, commissionVatMinor: 0, netPayableMinor: 0, sourceSnapshotJson: {},
+      } });
+      throw new Error('test rollback');
+    })).rejects.toThrow('test rollback');
+    expect(await db.settlementApproval.count({ where: { id } })).toBe(0);
+    await expect(db.settlementApproval.create({ data: {
+      id: `${id}-missing-schedule`, vendorId, status: 'DRAFT',
+      creationOrigin: 'AUTONOMOUS_SCHEDULER', currency: 'TRY', grossSalesMinor: 0,
+      refundTotalMinor: 0, commissionMinor: 0, commissionVatMinor: 0,
+      netPayableMinor: 0, sourceSnapshotJson: {},
+    } })).rejects.toThrow();
+    expect(await db.settlementApproval.count({ where: { id: `${id}-missing-schedule` } })).toBe(0);
   });
 
   it('characterizes exact UTC midnight and later execution with a controlled application clock', async () => {
