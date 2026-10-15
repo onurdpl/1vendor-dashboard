@@ -2775,6 +2775,30 @@ export async function approveSettlementApproval(
   id: string,
   approvedBy: string | null,
 ): Promise<SettlementApprovalDto> {
+  return executeCanonicalSettlementApproval({ id, approvedBy });
+}
+
+/** Internal system entry point. The actor cannot be supplied by its caller. */
+export async function approveSettlementApprovalAsTrustedSystem(input: {
+  settlementApprovalId: string;
+  expectedVendorId: string;
+}): Promise<SettlementApprovalDto> {
+  if (!input.settlementApprovalId?.trim() || !input.expectedVendorId?.trim()) {
+    throw new Error('System settlement approval requires an exact settlement and vendor identity.');
+  }
+  return executeCanonicalSettlementApproval({
+    id: input.settlementApprovalId,
+    expectedVendorId: input.expectedVendorId,
+    approvedBy: 'system:settlement_auto_approval',
+  });
+}
+
+async function executeCanonicalSettlementApproval(input: {
+  id: string;
+  approvedBy: string | null;
+  expectedVendorId?: string;
+}): Promise<SettlementApprovalDto> {
+  const { id, approvedBy, expectedVendorId } = input;
   const replacementLocator = await prisma.settlementApproval.findUnique({
     where: { id }, select: { vendorId: true, replacesSettlementApprovalId: true },
   });
@@ -2797,6 +2821,9 @@ export async function approveSettlementApproval(
       });
       if (!existing) {
         throw new Error('Settlement approval could not be found.');
+      }
+      if (expectedVendorId !== undefined && existing.vendorId !== expectedVendorId) {
+        throw new Error('System settlement approval vendor identity does not match.');
       }
       if (existing.status !== SettlementApprovalStatus.DRAFT) {
         throw new Error('Only draft settlement approvals can be approved.');

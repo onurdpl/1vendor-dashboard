@@ -586,7 +586,7 @@ describeWithPostgres('before-settlement financial correction deduction with isol
     expect(await db.payoutBatch.count({ where: { vendorId: ids.vendor } })).toBe(0);
   });
 
-  it('approves a valid correction-backed zero-net settlement', async () => {
+  it.each(['admin', 'system'] as const)('approves a valid correction-backed zero-net settlement via %s', async (actor) => {
     await setOneHundredFiftyTryDeductionFixture();
     const deduction = await applyBeforeSettlementFinancialCorrectionDeduction(await inputFor(), db as never);
     expect(deduction.grossDeductionMinor).toBe(15000);
@@ -596,7 +596,15 @@ describeWithPostgres('before-settlement financial correction deduction with isol
     expect(new Set(draft.lines.map((line) => line.financeLedgerEntryId)))
       .toEqual(new Set([ids.sale, ids.refundLedger]));
     expect(draft.correctionDeductionLines.map((line) => line.deductionId)).toEqual([deduction.deductionId]);
-    expect((await approveSettlementApproval(draft.id, ids.admin)).status).toBe('approved');
+    const result = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: draft.id, expectedVendorId: ids.vendor })
+      : await approveSettlementApproval(draft.id, ids.admin);
+    expect(result.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : ids.admin,
+      netPayableMinor: 0, correctionDeductionMinor: 15000,
+    });
   });
 
   it.each([
@@ -626,7 +634,8 @@ describeWithPostgres('before-settlement financial correction deduction with isol
     expect(await db.vendorBalanceEvent.count({ where: { vendorId: ids.vendor } })).toBe(0);
   });
 
-  it('approves a valid mixed SALE/REFUND/credit/deduction settlement', async () => {
+  it.each(['admin', 'system'] as const)(
+    'approves a valid mixed SALE/REFUND/credit/deduction settlement via %s', async (actor) => {
     await setTwoHundredTryDeductionFixture();
     const deduction = await applyBeforeSettlementFinancialCorrectionDeduction(await inputFor(), db as never);
     const credit = await addIndependentHundredTryCredit();
@@ -638,7 +647,15 @@ describeWithPostgres('before-settlement financial correction deduction with isol
     expect(draft.correctionCreditLines.map((line) => line.creditId)).toEqual([credit.creditId]);
     expect(draft.correctionDeductionLines.map((line) => line.deductionId)).toEqual([deduction.deductionId]);
     expect(draft.netPayableMinor).toBe(90000);
-    expect((await approveSettlementApproval(draft.id, ids.admin)).status).toBe('approved');
+    const result = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: draft.id, expectedVendorId: ids.vendor })
+      : await approveSettlementApproval(draft.id, ids.admin);
+    expect(result.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : ids.admin,
+      netPayableMinor: 90000, correctionCreditMinor: 10000, correctionDeductionMinor: 20000,
+    });
   });
 
   it.each([

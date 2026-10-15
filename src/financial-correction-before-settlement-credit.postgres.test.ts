@@ -376,7 +376,8 @@ describeWithPostgres('before-settlement financial correction credit with isolate
     }
   });
 
-  it('settles a standalone gross credit and offsets existing debt only at payout', async () => {
+  it.each(['admin', 'system'] as const)(
+    'settles a standalone gross credit through %s approval and offsets debt only at payout', async (actor) => {
     await setHundredTryCreditFixture();
     const applied = await applyBeforeSettlementFinancialCorrectionCredit(await inputFor(), db as never);
     // The original sale/refund are no longer settlement candidates; the correction remains independent.
@@ -390,7 +391,17 @@ describeWithPostgres('before-settlement financial correction credit with isolate
     expect(draft.lines).toHaveLength(0);
     expect(draft.correctionCreditLines).toHaveLength(1);
     expect(draft.correctionCreditLines[0]?.creditId).toBe(applied.creditId);
-    await approveSettlementApproval(draft.id, ids.admin);
+    if (actor === 'system') {
+      const { approveSettlementDraftInternally } = await import(
+        '../backend/src/modules/finance/settlement-auto-approval.service.js');
+      await approveSettlementDraftInternally({ settlementApprovalId: draft.id, expectedVendorId: ids.vendor });
+    } else {
+      await approveSettlementApproval(draft.id, ids.admin);
+    }
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      status: 'APPROVED', approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : ids.admin,
+      correctionCreditMinor: 10000,
+    });
     await db.vendorBalanceEvent.create({ data: {
       vendorId: ids.vendor, type: 'VENDOR_DEBT_CREATED', amountMinor: -6000, currency: 'TRY',
       sourceType: 'phase2e1_test_existing_debt', sourceId: runId, idempotencyKey: `${runId}-debt`,

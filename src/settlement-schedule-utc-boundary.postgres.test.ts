@@ -269,7 +269,7 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
     expect(await db.payoutBatch.count({ where: { vendorId } })).toBe(0);
   });
 
-  it('separates Admin scheduled, verified Admin manual, and unverified service origins', async () => {
+  it('separates and internally approves Admin scheduled, Admin manual, and historical NULL origins', async () => {
     const scheduled = await fixture(['ready']);
     const manual = await fixture(['ready']);
     const unverified = await fixture(['ready']);
@@ -298,6 +298,19 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
     const unknown = await approval.createDraftApproval({ vendorId: unverified.candidates[0].vendorId });
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: unknown.id } })).creationOrigin)
       .toBeNull();
+
+    const { approveSettlementDraftInternally } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    for (const [id, vendorId, origin] of [
+      [adminRow.id, adminVendorId, 'ADMIN_SCHEDULED'],
+      [verified.id, manualVendorId, 'ADMIN_MANUAL'],
+      [unknown.id, unverified.candidates[0].vendorId, null],
+    ] as const) {
+      await approveSettlementDraftInternally({ settlementApprovalId: id, expectedVendorId: vendorId });
+      expect(await db.settlementApproval.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        status: 'APPROVED', approvedBy: 'system:settlement_auto_approval', creationOrigin: origin,
+      });
+    }
   });
 
   it('does not trust forged job actor strings and keeps autonomous origin immutable in PostgreSQL', async () => {
@@ -349,7 +362,7 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
     });
   });
 
-  it('runs the trusted scheduler path and retains provenance across manual approval', async () => {
+  it('runs the trusted scheduler path and retains provenance across internal approval', async () => {
     const f = await fixture(['ready']);
     const vendorId = f.candidates[0].vendorId;
     const latestJob = await db.settlementScheduleJobRun.aggregate({ _max: { runDate: true } });
@@ -379,10 +392,12 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
       expect(before.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.candidates[0].ledgerId]);
       expect(await db.payoutBatch.count({ where: { vendorId } })).toBe(0);
       expect(await db.settlementCommissionInvoice.count({ where: { settlementApprovalId: id! } })).toBe(0);
-      const approved = await approval.approveSettlementApproval(id!, 'test-admin');
+      const { approveSettlementDraftInternally } = await import(
+        '../backend/src/modules/finance/settlement-auto-approval.service.js');
+      const approved = await approveSettlementDraftInternally({ settlementApprovalId: id!, expectedVendorId: vendorId });
       expect(approved.status).toBe('approved');
       expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: id! } })).toMatchObject({
-        status: 'APPROVED', creationOrigin: 'AUTONOMOUS_SCHEDULER', approvedBy: 'test-admin',
+        status: 'APPROVED', creationOrigin: 'AUTONOMOUS_SCHEDULER', approvedBy: 'system:settlement_auto_approval',
         grossSalesMinor: before.grossSalesMinor, netPayableMinor: before.netPayableMinor,
       });
     } finally {

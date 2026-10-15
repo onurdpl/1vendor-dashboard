@@ -7,7 +7,7 @@ const databaseName = 'fin_bug_002_validation';
 const dayMs = 86_400_000;
 const jobEnv = { SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true, SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false };
 
-suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', () => {
+suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16 or 18)', () => {
   let db: PrismaClient;
   let schedule: typeof import('../backend/src/modules/finance/settlement-schedule.service.js');
   let job: typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js');
@@ -37,8 +37,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const [identity] = await db.$queryRaw<Array<{ version: string; name: string; owner: string; port: number }>>`
       SELECT current_setting('server_version_num') AS version, current_database() AS name,
         current_user AS owner, inet_server_port() AS port`;
-    expect(Number(identity.version)).toBeGreaterThanOrEqual(160000);
-    expect(Number(identity.version)).toBeLessThan(170000);
+    expect([16, 18]).toContain(Math.floor(Number(identity.version) / 10000));
     expect(identity.name).toBe(databaseName);
     expect(identity.owner).toBe(target.username);
     expect(identity.port).toBe(Number(target.port));
@@ -572,7 +571,8 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId, status: 'PAID' } })).toBe(0);
   });
 
-  it('2D: a frozen replacement carries two late refunds into distinct later adjustments', async () => {
+  it.each(['admin', 'system'] as const)(
+    '2D: a frozen replacement approved via %s carries two late refunds into distinct later adjustments', async (actor) => {
     const f = await cancelledFixture();
     vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
     const first = await ingestAcceptedTestRefund(f, 'bridge-one', '10.00');
@@ -595,8 +595,14 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } }))
       .toMatchObject({ status: 'CANCELLED' });
 
-    const approved = await approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`);
+    const approved = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: replacementRow.id, expectedVendorId: f.vendorId })
+      : await approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`);
     expect(approved.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: replacementRow.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : `${f.vendorId}-approver`,
+    });
     await expect(approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`))
       .rejects.toThrow('Only draft settlement approvals can be approved.');
     for (const [evidence, amount] of [[first, 880], [second, 1320]] as const) {
@@ -740,9 +746,17 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     return { f, evidence, draft };
   }
 
-  it('approves an ordinary zero-net SALE and exact REFUND', async () => {
-    const { draft } = await ordinaryZeroNetDraft();
-    expect((await approval.approveSettlementApproval(draft.id, 'zero-net-test-admin')).status).toBe('approved');
+  it.each(['admin', 'system'] as const)('approves an ordinary zero-net SALE and exact REFUND via %s', async (actor) => {
+    const { f, draft } = await ordinaryZeroNetDraft();
+    const approved = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: draft.id, expectedVendorId: f.vendorId })
+      : await approval.approveSettlementApproval(draft.id, 'zero-net-test-admin');
+    expect(approved.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : 'zero-net-test-admin',
+      netPayableMinor: 0,
+    });
   });
 
   it.each([
@@ -786,9 +800,18 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     return { f, evidence, draft };
   }
 
-  it('approves a negative-net REFUND DRAFT without executing a payment', async () => {
+  it.each(['admin', 'system'] as const)(
+    'approves a negative-net REFUND DRAFT via %s without executing a payment', async (actor) => {
     const { f, draft } = await negativeNetDraft();
-    expect((await approval.approveSettlementApproval(draft.id, 'negative-net-test-admin')).status).toBe('approved');
+    const approved = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: draft.id, expectedVendorId: f.vendorId })
+      : await approval.approveSettlementApproval(draft.id, 'negative-net-test-admin');
+    expect(approved.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : 'negative-net-test-admin',
+      netPayableMinor: -880,
+    });
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
@@ -1862,7 +1885,8 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: originalId } })).toBe(0);
   });
 
-  it('rolls back cancellation audit when approval wins a Serializable race', async () => {
+  it.each(['admin', 'system'] as const)(
+    'rolls back cancellation audit when %s approval wins a Serializable race', async (actor) => {
     const f = await fixture();
     afterRunDate(f.runDate);
     const created = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
@@ -1874,7 +1898,10 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       const attempt = approval.cancelSettlementApproval(id, `${f.vendorId}-canceller`);
       const settled = Promise.allSettled([attempt]);
       await waitForCancellationLockWaits(1);
-      const approved = await approval.approveSettlementApproval(id, `${f.vendorId}-approver`);
+      const approved = actor === 'system'
+        ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+          .approveSettlementDraftInternally({ settlementApprovalId: id, expectedVendorId: f.vendorId })
+        : await approval.approveSettlementApproval(id, `${f.vendorId}-approver`);
       expect(approved.status).toBe('approved');
       await held.release();
       outcome = (await settled)[0];
@@ -1888,7 +1915,9 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       code: 'P2010', meta: { code: '40001' },
     });
     expect(persisted).toMatchObject({ status: 'APPROVED', cancelledFromStatus: null,
-      cancelledBy: null, cancelledAt: null, approvedBy: `${f.vendorId}-approver`, scheduledCycleKey: f.cycleKey });
+      cancelledBy: null, cancelledAt: null,
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : `${f.vendorId}-approver`,
+      scheduledCycleKey: f.cycleKey });
     expect(persisted.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
     expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
