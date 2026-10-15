@@ -177,6 +177,37 @@ function runPrisma(arguments_, label) {
   }
 }
 
+function isVerifiedLocalPostgresServer(serverAddress, postgresMajor) {
+  if (['127.0.0.1', '::1'].includes(serverAddress)) return true;
+
+  // A published localhost port reaches a Docker service at its container address.
+  // Match that address to a running, healthy local PostgreSQL container and its
+  // exact published port; a private server address alone is never sufficient.
+  const containers = spawnSync('docker', ['ps', '--quiet', '--filter', `publish=${targetUrl.port}`], {
+    encoding: 'utf8', timeout: 5000,
+  });
+  if (containers.status !== 0 || !containers.stdout) return false;
+  for (const id of containers.stdout.trim().split('\n')) {
+    const inspected = spawnSync('docker', ['inspect', '--format', '{{json .}}', id], {
+      encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024,
+    });
+    if (inspected.status !== 0) continue;
+    try {
+      const container = JSON.parse(inspected.stdout);
+      const addresses = Object.values(container.NetworkSettings?.Networks ?? {})
+        .flatMap((network) => [network.IPAddress, network.GlobalIPv6Address]);
+      const bindings = container.NetworkSettings?.Ports?.[`${targetUrl.port}/tcp`] ?? [];
+      if (container.Config?.Image === `postgres:${postgresMajor}-alpine` &&
+          container.State?.Running === true && container.State?.Health?.Status === 'healthy' &&
+          addresses.includes(serverAddress) &&
+          bindings.some((binding) => binding.HostPort === targetUrl.port)) return true;
+    } catch {
+      // An uninspectable container cannot establish local database authority.
+    }
+  }
+  return false;
+}
+
 async function inspectUserObjects(prisma) {
   return prisma.$queryRawUnsafe(`
     WITH user_namespaces AS (
@@ -252,7 +283,8 @@ try {
     FROM pg_database WHERE datname = current_database()
   `);
   if (identity?.databaseName !== targetDatabase || identity?.connectedUser !== identity?.databaseOwner ||
-      !['127.0.0.1', '::1'].includes(identity?.serverAddress) ||
+      identity?.connectedUser !== decodeURIComponent(targetUrl.username) ||
+      !isVerifiedLocalPostgresServer(identity?.serverAddress, postgresMajor) ||
       identity?.serverPort !== Number(targetUrl.port)) {
     throw new Error('Fresh database bootstrap refused: database identity, ownership, or loopback server does not match the target URL.');
   }

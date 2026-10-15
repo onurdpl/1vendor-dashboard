@@ -68,6 +68,37 @@ function command(executable, args, label, environment = {}) {
   return result.stdout;
 }
 
+function isVerifiedLocalPostgresServer(serverAddress) {
+  if (['127.0.0.1', '::1'].includes(serverAddress)) return true;
+
+  // A published localhost port reaches a Docker service at its container address.
+  // Match that address to a running, healthy local PostgreSQL container and its
+  // exact published port; a private server address alone is never sufficient.
+  const containers = spawnSync('docker', ['ps', '--quiet', '--filter', `publish=${adminUrl.port}`], {
+    encoding: 'utf8', timeout: 5000,
+  });
+  if (containers.status !== 0 || !containers.stdout) return false;
+  for (const id of containers.stdout.trim().split('\n')) {
+    const inspected = spawnSync('docker', ['inspect', '--format', '{{json .}}', id], {
+      encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024,
+    });
+    if (inspected.status !== 0) continue;
+    try {
+      const container = JSON.parse(inspected.stdout);
+      const addresses = Object.values(container.NetworkSettings?.Networks ?? {})
+        .flatMap((network) => [network.IPAddress, network.GlobalIPv6Address]);
+      const bindings = container.NetworkSettings?.Ports?.[`${adminUrl.port}/tcp`] ?? [];
+      if (container.Config?.Image === `postgres:${postgresMajor}-alpine` &&
+          container.State?.Running === true && container.State?.Health?.Status === 'healthy' &&
+          addresses.includes(serverAddress) &&
+          bindings.some((binding) => binding.HostPort === adminUrl.port)) return true;
+    } catch {
+      // An uninspectable container cannot establish local database authority.
+    }
+  }
+  return false;
+}
+
 function prisma(args, url, label) {
   return command(process.execPath, [prismaCli, ...args, '--schema', schemaPath], label, { DATABASE_URL: url });
 }
@@ -124,7 +155,8 @@ async function verifyPostgresVersion(url) {
     const version = Number(row.version);
     if (Math.floor(version / 10000) !== postgresMajor) throw new Error(`PostgreSQL ${postgresMajor} required; server reports ${version}.`);
     if (row.databaseName !== new URL(url).pathname.slice(1) || row.connectedUser !== row.databaseOwner ||
-        !['127.0.0.1', '::1'].includes(row.serverAddress) || row.serverPort !== Number(adminUrl.port)) {
+        row.connectedUser !== decodeURIComponent(adminUrl.username) ||
+        !isVerifiedLocalPostgresServer(row.serverAddress) || row.serverPort !== Number(adminUrl.port)) {
       throw new Error('Baseline refresh/check database identity, ownership, or loopback server does not match the local URL.');
     }
   } finally {
