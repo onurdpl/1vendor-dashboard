@@ -239,6 +239,14 @@ describeWithPostgres('before-settlement financial correction deduction with isol
 
   afterEach(async () => {
     if (!db) return;
+    if (await db.settlementAutoApprovalAttempt.count({ where: { vendorId: ids.vendor } })) {
+      // The durable approval attempt and its events retain their protected parents
+      // until this dedicated disposable suite database is removed.
+      await db.$disconnect();
+      settlementIds.length = 0;
+      payoutIds.length = 0;
+      return;
+    }
     // A failed assertion must not leave an untracked draft in this isolated fixture.
     const allOwnedSettlements = await db.settlementApproval.findMany({ where: { vendorId: ids.vendor }, select: { id: true } });
     for (const approval of allOwnedSettlements) {

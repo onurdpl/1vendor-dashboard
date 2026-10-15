@@ -603,6 +603,18 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16 or 
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: replacementRow.id } })).toMatchObject({
       approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : `${f.vendorId}-approver`,
     });
+    if (actor === 'system') {
+      const attempt = await db.settlementAutoApprovalAttempt.findFirstOrThrow({
+        where: { settlementApprovalId: replacementRow.id },
+      });
+      expect(attempt).toMatchObject({ vendorId: f.vendorId, outcome: 'APPROVED' });
+      expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: replacementRow.id } }))
+        .successfulAutoApprovalAttemptId).toBe(attempt.id);
+      expect(await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .reconcileAutomaticApprovalAttempt({ attemptId: attempt.id,
+          settlementApprovalId: replacementRow.id, expectedVendorId: f.vendorId }))
+        .toMatchObject({ classification: 'VERIFIED_COMPLETED', reasonCode: 'EXACT_ATTEMPT_APPROVED' });
+    }
     await expect(approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`))
       .rejects.toThrow('Only draft settlement approvals can be approved.');
     for (const [evidence, amount] of [[first, 880], [second, 1320]] as const) {
@@ -982,7 +994,8 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16 or 
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
-  it('2D: adjustment write failure rolls back replacement approval and can be retried', async () => {
+  it.each(['admin', 'system'] as const)(
+    '2D: adjustment write failure rolls back %s replacement approval and can be retried', async (actor) => {
     const f = await cancelledFixture();
     vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
     const evidence = await ingestAcceptedTestRefund(f, 'approval-rollback', '10.00');
@@ -993,9 +1006,14 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16 or 
     await db.$executeRawUnsafe(`CREATE TRIGGER fin_bug_002_adjustment_failure
       BEFORE INSERT ON "SettlementRefundAdjustment" FOR EACH ROW
       EXECUTE FUNCTION fin_bug_002_adjustment_failure()`);
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const failedAttemptId = `${created.replacementSettlementApprovalId}-failed-attempt`;
     try {
-      await expect(approval.approveSettlementApproval(created.replacementSettlementApprovalId,
-        `${f.vendorId}-approver`)).rejects.toThrow('TEST_ADJUSTMENT_WRITE_FAILURE');
+      const operation = actor === 'system' ? internal.approveSettlementDraftInternally({
+        settlementApprovalId: created.replacementSettlementApprovalId,
+        expectedVendorId: f.vendorId, attemptId: failedAttemptId,
+      }) : approval.approveSettlementApproval(created.replacementSettlementApprovalId, `${f.vendorId}-approver`);
+      await expect(operation).rejects.toThrow('TEST_ADJUSTMENT_WRITE_FAILURE');
     } finally {
       await db.$executeRawUnsafe('DROP TRIGGER fin_bug_002_adjustment_failure ON "SettlementRefundAdjustment"');
       await db.$executeRawUnsafe('DROP FUNCTION fin_bug_002_adjustment_failure()');
@@ -1006,7 +1024,19 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16 or 
     expect(await db.settlementRefundAdjustment.count({ where: {
       refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
     } })).toBe(0);
-    await approval.approveSettlementApproval(created.replacementSettlementApprovalId, `${f.vendorId}-approver`);
+    if (actor === 'system') {
+      expect(await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: failedAttemptId } }))
+        .toMatchObject({ outcome: 'TECHNICAL_FAILURE' });
+      expect(await db.settlementAutoApprovalAttemptEvent.count({ where: {
+        attemptId: failedAttemptId, outcome: 'APPROVED',
+      } })).toBe(0);
+      await internal.approveSettlementDraftInternally({
+        settlementApprovalId: created.replacementSettlementApprovalId, expectedVendorId: f.vendorId,
+        attemptId: `${created.replacementSettlementApprovalId}-retry-attempt`,
+      });
+    } else {
+      await approval.approveSettlementApproval(created.replacementSettlementApprovalId, `${f.vendorId}-approver`);
+    }
     expect(await db.settlementApproval.findUniqueOrThrow({ where: {
       id: created.replacementSettlementApprovalId,
     } })).toMatchObject({ status: 'APPROVED' });

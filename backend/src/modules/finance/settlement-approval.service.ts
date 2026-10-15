@@ -2782,14 +2782,16 @@ export async function approveSettlementApproval(
 export async function approveSettlementApprovalAsTrustedSystem(input: {
   settlementApprovalId: string;
   expectedVendorId: string;
+  attemptId: string;
 }): Promise<SettlementApprovalDto> {
-  if (!input.settlementApprovalId?.trim() || !input.expectedVendorId?.trim()) {
-    throw new Error('System settlement approval requires an exact settlement and vendor identity.');
+  if (!input.settlementApprovalId?.trim() || !input.expectedVendorId?.trim() || !input.attemptId?.trim()) {
+    throw new Error('System settlement approval requires exact settlement, vendor and attempt identities.');
   }
   return executeCanonicalSettlementApproval({
     id: input.settlementApprovalId,
     expectedVendorId: input.expectedVendorId,
     approvedBy: 'system:settlement_auto_approval',
+    systemAttemptId: input.attemptId,
   });
 }
 
@@ -2797,8 +2799,9 @@ async function executeCanonicalSettlementApproval(input: {
   id: string;
   approvedBy: string | null;
   expectedVendorId?: string;
+  systemAttemptId?: string;
 }): Promise<SettlementApprovalDto> {
-  const { id, approvedBy, expectedVendorId } = input;
+  const { id, approvedBy, expectedVendorId, systemAttemptId } = input;
   const replacementLocator = await prisma.settlementApproval.findUnique({
     where: { id }, select: { vendorId: true, replacesSettlementApprovalId: true },
   });
@@ -2824,6 +2827,13 @@ async function executeCanonicalSettlementApproval(input: {
       }
       if (expectedVendorId !== undefined && existing.vendorId !== expectedVendorId) {
         throw new Error('System settlement approval vendor identity does not match.');
+      }
+      if (systemAttemptId) {
+        const attempt = await tx.settlementAutoApprovalAttempt.findUnique({ where: { id: systemAttemptId } });
+        if (!attempt || attempt.settlementApprovalId !== id || attempt.vendorId !== existing.vendorId ||
+            attempt.actorId !== 'system:settlement_auto_approval' || attempt.outcome !== 'STARTED') {
+          throw new Error('System settlement approval attempt identity or state does not match.');
+        }
       }
       if (existing.status !== SettlementApprovalStatus.DRAFT) {
         throw new Error('Only draft settlement approvals can be approved.');
@@ -2922,6 +2932,7 @@ async function executeCanonicalSettlementApproval(input: {
           status: SettlementApprovalStatus.APPROVED,
           approvedBy,
           approvedAt: new Date(),
+          ...(systemAttemptId ? { successfulAutoApprovalAttemptId: systemAttemptId } : {}),
         },
         include: {
           lines: true,
@@ -2942,6 +2953,16 @@ async function executeCanonicalSettlementApproval(input: {
             adjustment.remainingAmountMinor !== adjustment.originalAmountMinor) {
           throw new Error('Replacement approval could not establish each late-refund obligation.');
         }
+      }
+
+      if (systemAttemptId) {
+        await tx.settlementAutoApprovalAttempt.update({
+          where: { id: systemAttemptId },
+          data: { outcome: 'APPROVED', completedAt: new Date() },
+        });
+        await tx.settlementAutoApprovalAttemptEvent.create({
+          data: { attemptId: systemAttemptId, outcome: 'APPROVED', reasonCode: 'CANONICAL_APPROVAL_COMMITTED' },
+        });
       }
 
       return mapApproval(approved, true);

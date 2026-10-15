@@ -153,6 +153,14 @@ describeWithPostgres('before-settlement financial correction credit with isolate
 
   afterEach(async () => {
     if (!db) return;
+    if (await db.settlementAutoApprovalAttempt.count({ where: { vendorId: ids.vendor } })) {
+      // The durable approval attempt and its events retain their protected parents
+      // until this dedicated disposable suite database is removed.
+      await db.$disconnect();
+      settlementIds.length = 0;
+      payoutIds.length = 0;
+      return;
+    }
     const allOwnedSettlements = await db.settlementApproval.findMany({ where: { vendorId: ids.vendor }, select: { id: true } });
     for (const approval of allOwnedSettlements) {
       if (!settlementIds.includes(approval.id) && approval.id !== ids.historicalSettlement) settlementIds.push(approval.id);

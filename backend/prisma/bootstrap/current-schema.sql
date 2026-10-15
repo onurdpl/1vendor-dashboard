@@ -409,6 +409,19 @@ CREATE TYPE public."SettlementApprovalStatus" AS ENUM (
 
 
 --
+-- Name: SettlementAutoApprovalAttemptOutcome; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SettlementAutoApprovalAttemptOutcome" AS ENUM (
+    'STARTED',
+    'APPROVED',
+    'BLOCKED',
+    'TECHNICAL_FAILURE',
+    'UNKNOWN'
+);
+
+
+--
 -- Name: SettlementCommissionInvoiceProvider; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -997,6 +1010,73 @@ CREATE FUNCTION public.reject_sopyo_shopify_plan_rewrite() RETURNS trigger
     AS $$
 BEGIN
   RAISE EXCEPTION 'Sopyo Shopify execution plan is immutable';
+END;
+$$;
+
+
+--
+-- Name: settlement_auto_approval_attempt_event_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.settlement_auto_approval_attempt_event_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'Automatic approval attempt events are immutable';
+END;
+$$;
+
+
+--
+-- Name: settlement_auto_approval_attempt_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.settlement_auto_approval_attempt_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE linked RECORD;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Automatic approval attempt history cannot be deleted';
+  END IF;
+  IF TG_OP = 'UPDATE' AND (NEW."id", NEW."settlementApprovalId", NEW."vendorId", NEW."actorId", NEW."createdAt")
+      IS DISTINCT FROM (OLD."id", OLD."settlementApprovalId", OLD."vendorId", OLD."actorId", OLD."createdAt") THEN
+    RAISE EXCEPTION 'Automatic approval attempt identity is immutable';
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD."outcome" = 'APPROVED' AND NEW."outcome" <> 'APPROVED' THEN
+    RAISE EXCEPTION 'Successful automatic approval evidence is immutable';
+  END IF;
+  IF NEW."outcome" = 'APPROVED' THEN
+    SELECT "status", "approvedBy", "approvedAt", "successfulAutoApprovalAttemptId"
+      INTO linked FROM "SettlementApproval" WHERE "id" = NEW."settlementApprovalId";
+    IF linked."status" <> 'APPROVED' OR linked."approvedBy" <> 'system:settlement_auto_approval'
+       OR linked."approvedAt" IS NULL OR linked."successfulAutoApprovalAttemptId" IS DISTINCT FROM NEW."id" THEN
+      RAISE EXCEPTION 'Successful attempt requires its exact committed system approval';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: settlement_auto_approval_link_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.settlement_auto_approval_link_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF OLD."successfulAutoApprovalAttemptId" IS NOT NULL AND
+     NEW."successfulAutoApprovalAttemptId" IS DISTINCT FROM OLD."successfulAutoApprovalAttemptId" THEN
+    RAISE EXCEPTION 'Successful automatic approval link is immutable';
+  END IF;
+  IF NEW."successfulAutoApprovalAttemptId" IS NOT NULL AND
+     (NEW."approvedBy" IS DISTINCT FROM 'system:settlement_auto_approval' OR NEW."approvedAt" IS NULL OR
+      NEW."status" NOT IN ('APPROVED', 'CANCELLED')) THEN
+    RAISE EXCEPTION 'Automatic approval link requires system approval authority';
+  END IF;
+  RETURN NEW;
 END;
 $$;
 
@@ -2267,6 +2347,7 @@ CREATE TABLE public."SettlementApproval" (
     "replacementReason" text,
     "replacementRequestedAt" timestamp(3) without time zone,
     "creationOrigin" public."SettlementDraftCreationOrigin",
+    "successfulAutoApprovalAttemptId" text,
     CONSTRAINT "SettlementApproval_autonomous_origin_schedule_check" CHECK ((("creationOrigin" IS DISTINCT FROM 'AUTONOMOUS_SCHEDULER'::public."SettlementDraftCreationOrigin") OR (("scheduledRunDate" IS NOT NULL) AND ("scheduledPeriodEnd" IS NOT NULL) AND ("scheduledCycleKey" IS NOT NULL) AND ("periodEnd" IS NOT NULL)))),
     CONSTRAINT "SettlementApproval_replacement_audit_check" CHECK (((("replacesSettlementApprovalId" IS NULL) AND ("replacementRequestId" IS NULL) AND ("replacementRequestedBy" IS NULL) AND ("replacementReason" IS NULL) AND ("replacementRequestedAt" IS NULL)) OR (("replacesSettlementApprovalId" IS NOT NULL) AND ("replacementRequestId" IS NOT NULL) AND ("replacementRequestedBy" IS NOT NULL) AND (btrim("replacementRequestedBy") <> ''::text) AND ("replacementReason" IS NOT NULL) AND (btrim("replacementReason") <> ''::text) AND ("replacementRequestedAt" IS NOT NULL))))
 );
@@ -2288,6 +2369,39 @@ CREATE TABLE public."SettlementApprovalLine" (
     "commissionVatMinor" integer NOT NULL,
     "payableImpactMinor" integer NOT NULL,
     "sourceSnapshotJson" jsonb NOT NULL
+);
+
+
+--
+-- Name: SettlementAutoApprovalAttempt; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementAutoApprovalAttempt" (
+    id text NOT NULL,
+    "settlementApprovalId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "actorId" text DEFAULT 'system:settlement_auto_approval'::text NOT NULL,
+    outcome public."SettlementAutoApprovalAttemptOutcome" DEFAULT 'STARTED'::public."SettlementAutoApprovalAttemptOutcome" NOT NULL,
+    "reasonCode" text,
+    "reasonDetail" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "completedAt" timestamp(3) without time zone,
+    CONSTRAINT "SettlementAutoApprovalAttempt_actor_check" CHECK (("actorId" = 'system:settlement_auto_approval'::text)),
+    CONSTRAINT "SettlementAutoApprovalAttempt_completion_check" CHECK ((((outcome = ANY (ARRAY['STARTED'::public."SettlementAutoApprovalAttemptOutcome", 'UNKNOWN'::public."SettlementAutoApprovalAttemptOutcome"])) AND ("completedAt" IS NULL)) OR ((outcome = ANY (ARRAY['APPROVED'::public."SettlementAutoApprovalAttemptOutcome", 'BLOCKED'::public."SettlementAutoApprovalAttemptOutcome", 'TECHNICAL_FAILURE'::public."SettlementAutoApprovalAttemptOutcome"])) AND ("completedAt" IS NOT NULL))))
+);
+
+
+--
+-- Name: SettlementAutoApprovalAttemptEvent; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementAutoApprovalAttemptEvent" (
+    id text NOT NULL,
+    "attemptId" text NOT NULL,
+    outcome public."SettlementAutoApprovalAttemptOutcome" NOT NULL,
+    "reasonCode" text,
+    "reasonDetail" text,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 
@@ -3480,6 +3594,22 @@ ALTER TABLE ONLY public."SettlementApprovalLine"
 
 ALTER TABLE ONLY public."SettlementApproval"
     ADD CONSTRAINT "SettlementApproval_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementAutoApprovalAttemptEvent SettlementAutoApprovalAttemptEvent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementAutoApprovalAttemptEvent"
+    ADD CONSTRAINT "SettlementAutoApprovalAttemptEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementAutoApprovalAttempt SettlementAutoApprovalAttempt_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementAutoApprovalAttempt"
+    ADD CONSTRAINT "SettlementAutoApprovalAttempt_pkey" PRIMARY KEY (id);
 
 
 --
@@ -5003,6 +5133,20 @@ CREATE UNIQUE INDEX "SettlementApproval_scheduledCycleKey_key" ON public."Settle
 
 
 --
+-- Name: SettlementApproval_successfulAutoApprovalAttemptId_id_vendorId_; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementApproval_successfulAutoApprovalAttemptId_id_vendorId_" ON public."SettlementApproval" USING btree ("successfulAutoApprovalAttemptId", id, "vendorId");
+
+
+--
+-- Name: SettlementApproval_successfulAutoApprovalAttemptId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementApproval_successfulAutoApprovalAttemptId_key" ON public."SettlementApproval" USING btree ("successfulAutoApprovalAttemptId");
+
+
+--
 -- Name: SettlementApproval_vendorId_scheduledCycleKey_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5014,6 +5158,41 @@ CREATE INDEX "SettlementApproval_vendorId_scheduledCycleKey_idx" ON public."Sett
 --
 
 CREATE INDEX "SettlementApproval_vendorId_status_idx" ON public."SettlementApproval" USING btree ("vendorId", status);
+
+
+--
+-- Name: SettlementAutoApprovalAttemptEvent_attemptId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementAutoApprovalAttemptEvent_attemptId_createdAt_idx" ON public."SettlementAutoApprovalAttemptEvent" USING btree ("attemptId", "createdAt");
+
+
+--
+-- Name: SettlementAutoApprovalAttempt_id_settlementApprovalId_vendorId_; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementAutoApprovalAttempt_id_settlementApprovalId_vendorId_" ON public."SettlementAutoApprovalAttempt" USING btree (id, "settlementApprovalId", "vendorId");
+
+
+--
+-- Name: SettlementAutoApprovalAttempt_one_success_per_settlement_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementAutoApprovalAttempt_one_success_per_settlement_key" ON public."SettlementAutoApprovalAttempt" USING btree ("settlementApprovalId") WHERE (outcome = 'APPROVED'::public."SettlementAutoApprovalAttemptOutcome");
+
+
+--
+-- Name: SettlementAutoApprovalAttempt_settlementApprovalId_createdAt_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementAutoApprovalAttempt_settlementApprovalId_createdAt_id" ON public."SettlementAutoApprovalAttempt" USING btree ("settlementApprovalId", "createdAt");
+
+
+--
+-- Name: SettlementAutoApprovalAttempt_vendorId_outcome_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementAutoApprovalAttempt_vendorId_outcome_createdAt_idx" ON public."SettlementAutoApprovalAttempt" USING btree ("vendorId", outcome, "createdAt");
 
 
 --
@@ -5959,6 +6138,27 @@ CREATE TRIGGER "SopyoShopifyExecutionPlan_no_rewrite" BEFORE UPDATE ON public."S
 --
 
 CREATE TRIGGER "VendorBalanceEvent_correction_direction_guard" BEFORE INSERT OR UPDATE ON public."VendorBalanceEvent" FOR EACH ROW EXECUTE FUNCTION public."checkFinancialCorrectionDebtDirection"();
+
+
+--
+-- Name: SettlementAutoApprovalAttemptEvent settlement_auto_approval_attempt_event_immutable_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER settlement_auto_approval_attempt_event_immutable_trigger BEFORE DELETE OR UPDATE ON public."SettlementAutoApprovalAttemptEvent" FOR EACH ROW EXECUTE FUNCTION public.settlement_auto_approval_attempt_event_immutable();
+
+
+--
+-- Name: SettlementAutoApprovalAttempt settlement_auto_approval_attempt_guard_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER settlement_auto_approval_attempt_guard_trigger BEFORE INSERT OR DELETE OR UPDATE ON public."SettlementAutoApprovalAttempt" FOR EACH ROW EXECUTE FUNCTION public.settlement_auto_approval_attempt_guard();
+
+
+--
+-- Name: SettlementApproval settlement_auto_approval_link_guard_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER settlement_auto_approval_link_guard_trigger BEFORE UPDATE ON public."SettlementApproval" FOR EACH ROW EXECUTE FUNCTION public.settlement_auto_approval_link_guard();
 
 
 --
@@ -7050,11 +7250,35 @@ ALTER TABLE ONLY public."SettlementApproval"
 
 
 --
+-- Name: SettlementApproval SettlementApproval_successfulAutoApprovalAttemptId_id_vendorId_; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementApproval"
+    ADD CONSTRAINT "SettlementApproval_successfulAutoApprovalAttemptId_id_vendorId_" FOREIGN KEY ("successfulAutoApprovalAttemptId", id, "vendorId") REFERENCES public."SettlementAutoApprovalAttempt"(id, "settlementApprovalId", "vendorId") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
 -- Name: SettlementApproval SettlementApproval_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."SettlementApproval"
     ADD CONSTRAINT "SettlementApproval_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: SettlementAutoApprovalAttemptEvent SettlementAutoApprovalAttemptEvent_attemptId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementAutoApprovalAttemptEvent"
+    ADD CONSTRAINT "SettlementAutoApprovalAttemptEvent_attemptId_fkey" FOREIGN KEY ("attemptId") REFERENCES public."SettlementAutoApprovalAttempt"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: SettlementAutoApprovalAttempt SettlementAutoApprovalAttempt_settlementApprovalId_vendorId_fke; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementAutoApprovalAttempt"
+    ADD CONSTRAINT "SettlementAutoApprovalAttempt_settlementApprovalId_vendorId_fke" FOREIGN KEY ("settlementApprovalId", "vendorId") REFERENCES public."SettlementApproval"(id, "vendorId") ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

@@ -249,12 +249,153 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       expect(after[field]).toBe(before[field]);
     }
     expect(after.lines.map((line) => line.financeLedgerEntryId)).toEqual([saleId]);
+    const attempt = await db.settlementAutoApprovalAttempt.findFirstOrThrow({
+      where: { settlementApprovalId: approvalId }, include: { events: true },
+    });
+    expect(attempt).toMatchObject({ vendorId: before.vendorId, actorId: 'system:settlement_auto_approval',
+      outcome: 'APPROVED', completedAt: expect.any(Date) });
+    expect(after.successfulAutoApprovalAttemptId).toBe(attempt.id);
+    expect(attempt.events.map((event) => event.outcome)).toEqual(['STARTED', 'APPROVED']);
     expect(await db.payoutBatch.count({ where: { vendorId: before.vendorId } })).toBe(0);
     expect(await db.settlementCommissionInvoice.count({ where: { settlementApprovalId: approvalId } })).toBe(0);
     await expect(approveSettlementDraftInternally({ settlementApprovalId: approvalId, expectedVendorId: before.vendorId }))
       .rejects.toThrow('Only draft settlement approvals can be approved.');
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).approvedAt)
       .toEqual(after.approvedAt);
+  });
+
+  it('replays the exact successful attempt without a second financial write', async () => {
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-attempt` };
+    const first = await approveSettlementDraftInternally(input);
+    const second = await approveSettlementDraftInternally(input);
+    expect(second.id).toBe(first.id);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).approvedAt?.toISOString())
+      .toBe(first.approvedAt);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: input.attemptId } })).toBe(2);
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+      classification: 'VERIFIED_COMPLETED', reasonCode: 'EXACT_ATTEMPT_APPROVED',
+      attemptOutcome: 'APPROVED', settlementStatus: 'APPROVED',
+    });
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('keeps a pre-commit STARTED attempt uncertain and refuses blind replay', async () => {
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-interrupted` };
+    await db.settlementAutoApprovalAttempt.create({ data: {
+      id: input.attemptId, settlementApprovalId: approvalId, vendorId: row.vendorId,
+    } });
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+      classification: 'UNKNOWN', reasonCode: 'STARTED_OR_COMMIT_OUTCOME_UNCONFIRMED',
+    });
+    await expect(approveSettlementDraftInternally(input)).rejects.toThrow('already exists: UNKNOWN');
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+  });
+
+  it('fails closed on forged success, changed ownership and immutable attempt events', async () => {
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const attemptId = `${approvalId}-guard`;
+    await db.settlementAutoApprovalAttempt.create({ data: {
+      id: attemptId, settlementApprovalId: approvalId, vendorId: row.vendorId,
+    } });
+    await expect(db.settlementAutoApprovalAttempt.update({ where: { id: attemptId }, data: {
+      outcome: 'APPROVED', completedAt: new Date(),
+    } })).rejects.toThrow();
+    await expect(db.settlementAutoApprovalAttempt.update({ where: { id: attemptId }, data: {
+      vendorId: `${row.vendorId}-other`,
+    } })).rejects.toThrow();
+    await expect(db.settlementAutoApprovalAttempt.create({ data: {
+      id: `${attemptId}-wrong-vendor`, settlementApprovalId: approvalId,
+      vendorId: `${row.vendorId}-other`,
+    } })).rejects.toThrow();
+    await expect(db.settlementAutoApprovalAttempt.create({ data: {
+      id: `${attemptId}-forged-actor`, settlementApprovalId: approvalId,
+      vendorId: row.vendorId, actorId: 'forged-admin',
+    } })).rejects.toThrow();
+    const event = await db.settlementAutoApprovalAttemptEvent.create({ data: {
+      attemptId, outcome: 'STARTED', reasonCode: 'GUARD_TEST',
+    } });
+    await expect(db.settlementAutoApprovalAttemptEvent.delete({ where: { id: event.id } })).rejects.toThrow();
+    expect((await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: attemptId } })).outcome)
+      .toBe('STARTED');
+  });
+
+  it('records a canonical validation blocker without false success or financial side effects', async () => {
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'VENDOR_BLOCKED' } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-blocked` };
+    await expect(approveSettlementDraftInternally(input)).rejects.toMatchObject({
+      name: 'SettlementApprovalRevalidationError',
+    });
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+      classification: 'BLOCKED', attemptOutcome: 'BLOCKED', settlementStatus: 'DRAFT',
+    });
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).approvedBy).toBeNull();
+    expect(await db.settlementRefundAdjustment.count({ where: { vendorId: row.vendorId } })).toBe(0);
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('rolls back a monetary-inconsistent approval while retaining only blocked attempt evidence', async () => {
+    const { approveSettlementDraftInternally } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    await db.settlementApproval.update({ where: { id: approvalId },
+      data: { grossSalesMinor: row.grossSalesMinor + 1 } });
+    await expect(approveSettlementDraftInternally({ settlementApprovalId: approvalId,
+      expectedVendorId: row.vendorId, attemptId: `${approvalId}-invalid-money` }))
+      .rejects.toThrow('Settlement approval monetary totals are inconsistent');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toMatchObject({ status: 'DRAFT', approvedBy: null, successfulAutoApprovalAttemptId: null });
+    expect(await db.settlementAutoApprovalAttempt.findFirstOrThrow({ where: { settlementApprovalId: approvalId } }))
+      .toMatchObject({ outcome: 'BLOCKED' });
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: {
+      attempt: { settlementApprovalId: approvalId }, outcome: 'APPROVED',
+    } })).toBe(0);
+  });
+
+  it('keeps a completed attempt historically true after an authorized settlement cancellation', async () => {
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const { cancelSettlementApproval } = await import(
+      '../backend/src/modules/finance/settlement-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-historical` };
+    await approveSettlementDraftInternally(input);
+    await cancelSettlementApproval(approvalId, 'test-admin');
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+      classification: 'VERIFIED_COMPLETED', reasonCode: 'APPROVED_THEN_CANCELLED',
+      settlementStatus: 'CANCELLED', attemptOutcome: 'APPROVED',
+    });
+    await expect(approveSettlementDraftInternally(input)).rejects.toThrow('already exists');
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+  });
+
+  it('prevents concurrent callers sharing one attempt ID from duplicating approval evidence', async () => {
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-shared` };
+    const results = await Promise.allSettled([
+      approveSettlementDraftInternally(input), approveSettlementDraftInternally(input),
+    ]);
+    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({ classification: 'VERIFIED_COMPLETED' });
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: input.attemptId,
+      outcome: 'APPROVED' } })).toBe(1);
   });
 
   it('rejects a wrong expected vendor before any approval write', async () => {
@@ -297,6 +438,9 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       .toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval' });
     expect(await db.settlementApproval.count({ where: { vendorId: row.vendorId } })).toBe(1);
     expect(await db.settlementRefundAdjustment.count({ where: { vendorId: row.vendorId } })).toBe(0);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId,
+      outcome: 'APPROVED' } })).toBe(1);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(2);
   });
 
   it('allows only one winner when Admin and system approval race', async () => {
@@ -313,6 +457,10 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     expect(persisted.approvedBy).toBe(results[0].status === 'fulfilled' ? 'racing-admin' :
       'system:settlement_auto_approval');
     expect(await db.settlementApproval.count({ where: { vendorId: row.vendorId } })).toBe(1);
+    const attempts = await db.settlementAutoApprovalAttempt.findMany({ where: { settlementApprovalId: approvalId } });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.outcome).toBe(persisted.approvedBy === 'system:settlement_auto_approval' ?
+      'APPROVED' : 'BLOCKED');
   });
 
   it('does not reopen a cancelled DRAFT through the system adapter', async () => {
@@ -325,6 +473,8 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     })).rejects.toThrow('Only draft settlement approvals can be approved.');
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
       .toMatchObject({ status: 'CANCELLED', cancelledBy: 'cancelling-admin', approvedBy: null });
+    expect(await db.settlementAutoApprovalAttempt.findFirstOrThrow({ where: { settlementApprovalId: approvalId } }))
+      .toMatchObject({ outcome: 'BLOCKED', reasonCode: 'SETTLEMENT_CANCELLED' });
   });
 
   it('keeps approval and cancellation mutually exclusive under concurrent requests', async () => {
