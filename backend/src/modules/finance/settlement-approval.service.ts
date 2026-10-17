@@ -1098,6 +1098,7 @@ function validateApprovalLineAgainstCurrentLedger(
       'vendor_blocked_finance_hold_active',
       VENDOR_BLOCKED_FINANCE_HOLD_REASON,
       {
+        vendorAllocationId: row.vendorAllocation?.id ?? null,
         allocationStatus: row.vendorAllocation?.allocationStatus ?? null,
       },
     ));
@@ -2462,7 +2463,7 @@ export async function createReplacementDraftApprovalInTransaction(
       !audit.reason.trim() || Number.isNaN(audit.requestedAt.getTime())) {
     throw new Error('Replacement draft requires complete audit evidence.');
   }
-  return createDraftApprovalInTransaction(input, tx, audit);
+  return createDraftApprovalInTransaction(input, tx, audit, SettlementDraftCreationOrigin.CONTROLLED_REPLACEMENT);
 }
 
 async function createDraftApprovalInTransaction(
@@ -2834,6 +2835,24 @@ async function executeCanonicalSettlementApproval(input: {
             attempt.actorId !== 'system:settlement_auto_approval' || attempt.outcome !== 'STARTED') {
           throw new Error('System settlement approval attempt identity or state does not match.');
         }
+        if (existing.creationOrigin !== SettlementDraftCreationOrigin.AUTONOMOUS_SCHEDULER &&
+            existing.creationOrigin !== SettlementDraftCreationOrigin.ADMIN_SCHEDULED &&
+            existing.creationOrigin !== SettlementDraftCreationOrigin.ADMIN_MANUAL &&
+            existing.creationOrigin !== SettlementDraftCreationOrigin.CONTROLLED_REPLACEMENT) {
+          throw new Error('System settlement approval requires an approved DRAFT creation origin.');
+        }
+        if (existing.creationOrigin === SettlementDraftCreationOrigin.CONTROLLED_REPLACEMENT &&
+            (!existing.replacesSettlementApprovalId || !existing.replacementRequestId ||
+              !existing.replacementRequestedBy || !existing.replacementReason?.trim() ||
+              !existing.replacementRequestedAt || existing.scheduledRunDate ||
+              existing.scheduledPeriodEnd || existing.scheduledCycleKey || existing.periodStart || !existing.periodEnd ||
+              !Array.isArray((existing.sourceSnapshotJson as Record<string, unknown> | null)?.lateRefundLedgerIds))) {
+          throw new Error('System controlled replacement provenance is incomplete.');
+        }
+        if (existing.replacesSettlementApprovalId &&
+            existing.creationOrigin !== SettlementDraftCreationOrigin.CONTROLLED_REPLACEMENT) {
+          throw new Error('System replacement approval requires controlled replacement origin.');
+        }
       }
       if (existing.status !== SettlementApprovalStatus.DRAFT) {
         throw new Error('Only draft settlement approvals can be approved.');
@@ -2847,7 +2866,8 @@ async function executeCanonicalSettlementApproval(input: {
       if (existing.replacesSettlementApprovalId) {
         const original = await tx.settlementApproval.findUnique({
           where: { id: existing.replacesSettlementApprovalId },
-          select: { vendorId: true, status: true, scheduledPeriodEnd: true,
+          select: { vendorId: true, status: true, cancelledFromStatus: true,
+            scheduledRunDate: true, scheduledCycleKey: true, scheduledPeriodEnd: true,
             lines: { select: { financeLedgerEntryId: true, lineType: true, amountMinor: true,
               commissionMinor: true, commissionVatMinor: true, payableImpactMinor: true } } },
         });
@@ -2856,6 +2876,12 @@ async function executeCanonicalSettlementApproval(input: {
             existing.periodEnd?.getTime() !== original.scheduledPeriodEnd.getTime()) {
           throw new Error('Replacement frozen cutoff or original authority changed before approval.');
         }
+        if (systemAttemptId && existing.creationOrigin === SettlementDraftCreationOrigin.CONTROLLED_REPLACEMENT &&
+            (original.cancelledFromStatus !== SettlementApprovalStatus.DRAFT ||
+              !original.scheduledRunDate || !original.scheduledCycleKey)) {
+          throw new Error('System controlled replacement original scheduled provenance is incomplete.');
+        }
+        const frozenCutoff = original.scheduledPeriodEnd;
         const sourceKey = (line: { financeLedgerEntryId: string; lineType: SettlementApprovalLineType;
           amountMinor: number; commissionMinor: number; commissionVatMinor: number; payableImpactMinor: number }) =>
           JSON.stringify([line.financeLedgerEntryId, line.lineType, line.amountMinor, line.commissionMinor,
@@ -2873,9 +2899,24 @@ async function executeCanonicalSettlementApproval(input: {
           throw new Error('Replacement SALE authority is incomplete.');
         }
         const checked = await verifyReplacementLateRefundBridges(tx, {
-          vendorId: existing.vendorId, cutoff: original.scheduledPeriodEnd, saleLedgerIds: saleIds,
+          vendorId: existing.vendorId, cutoff: frozenCutoff, saleLedgerIds: saleIds,
           allocationIds: [...new Set(saleLedgers.map((row) => row.vendorAllocationId as string))],
         });
+        // A Serializable transaction can retain the snapshot taken while waiting
+        // for the Vendor row lock. Re-run the same authority check in a fresh
+        // transaction after the lock is held; a mismatch must fail closed.
+        const fresh = await prisma.$transaction((freshTx) => verifyReplacementLateRefundBridges(freshTx, {
+          vendorId: existing.vendorId, cutoff: frozenCutoff, saleLedgerIds: saleIds,
+          allocationIds: [...new Set(saleLedgers.map((row) => row.vendorAllocationId as string))],
+        }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        const bridgeKeys = (result: typeof checked) => result.bridges
+          .map((bridge) => JSON.stringify([bridge.refundFinanceLedgerEntryId, bridge.refundRecordId,
+            bridge.historicalSaleFinanceLedgerEntryId])).sort();
+        if (JSON.stringify(bridgeKeys(checked)) !== JSON.stringify(bridgeKeys(fresh)) ||
+            JSON.stringify([...checked.unverifiedRefundLedgerIds].sort()) !==
+              JSON.stringify([...fresh.unverifiedRefundLedgerIds].sort())) {
+          throw new Error('Replacement late-refund authority changed before approval.');
+        }
         const frozenIds = (existing.sourceSnapshotJson as Record<string, unknown> | null)?.lateRefundLedgerIds;
         const frozenSorted = Array.isArray(frozenIds) && frozenIds.every((value) => typeof value === 'string')
           ? [...frozenIds].sort() : [];

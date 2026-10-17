@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -14,16 +14,136 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
   let orderId: string;
   let sequence = 0;
 
+  async function holdApprovalUpdate(id: string) {
+    let acquired!: (pid: number) => void;
+    let release!: () => void;
+    const ready = new Promise<number>((resolve) => { acquired = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const blocker = db.$transaction(async (tx) => {
+      const [{ pid }] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid()::integer AS "pid"`;
+      // Unlike FOR UPDATE, NO KEY UPDATE does not stop the attempt FK's KEY SHARE read.
+      await tx.$queryRaw`SELECT "id" FROM "SettlementApproval" WHERE "id" = ${id} FOR NO KEY UPDATE`;
+      acquired(pid);
+      await released;
+    }, { timeout: 20_000 });
+    const pid = await ready;
+    let done = false;
+    return {
+      pid,
+      release: async () => { if (!done) { done = true; release(); } await blocker; },
+    };
+  }
+
+  async function waitForApprovalLockWait(holderPid: number, count: number) {
+    const deadline = performance.now() + 2_000;
+    let observed = 0;
+    while (performance.now() < deadline) {
+      const [{ waiting }] = await db.$queryRaw<Array<{ waiting: bigint }>>`
+        SELECT count(*)::bigint AS "waiting" FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query LIKE '%"SettlementApproval"%'
+      `;
+      observed = Number(waiting);
+      if (observed >= count) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    const [{ directlyBlocked }] = await db.$queryRaw<Array<{ directlyBlocked: bigint }>>`
+      SELECT count(*)::bigint AS "directlyBlocked" FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock'
+        AND ${holderPid} = ANY(pg_blocking_pids(pid))
+    `;
+    expect(Number(directlyBlocked)).toBeGreaterThanOrEqual(1);
+    expect(observed).toBeGreaterThanOrEqual(count);
+  }
+
+  async function holdUncommittedAttempt(id: string, vendorId: string, attemptId: string) {
+    let acquired!: (pid: number) => void;
+    let release!: () => void;
+    const ready = new Promise<number>((resolve) => { acquired = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const blocker = db.$transaction(async (tx) => {
+      const [{ pid }] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid()::integer AS "pid"`;
+      await tx.settlementAutoApprovalAttempt.create({ data: {
+        id: attemptId, settlementApprovalId: id, vendorId,
+      } });
+      acquired(pid);
+      await released;
+      throw new Error('ROLL_BACK_TEST_ATTEMPT');
+    }, { timeout: 20_000 }).catch((error: unknown) => {
+      if (!(error instanceof Error) || error.message !== 'ROLL_BACK_TEST_ATTEMPT') throw error;
+    });
+    const pid = await ready;
+    let done = false;
+    return { pid, release: async () => { if (!done) { done = true; release(); } await blocker; } };
+  }
+
+  async function waitForAttemptInsertWait(holderPid: number, count: number) {
+    const deadline = performance.now() + 2_000;
+    let observed = 0;
+    while (performance.now() < deadline) {
+      const [{ waiting }] = await db.$queryRaw<Array<{ waiting: bigint }>>`
+        SELECT count(*)::bigint AS "waiting" FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query LIKE '%"SettlementAutoApprovalAttempt"%'
+      `;
+      observed = Number(waiting);
+      if (observed >= count) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    const [{ directlyBlocked }] = await db.$queryRaw<Array<{ directlyBlocked: bigint }>>`
+      SELECT count(*)::bigint AS "directlyBlocked" FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock'
+        AND ${holderPid} = ANY(pg_blocking_pids(pid))
+    `;
+    expect(Number(directlyBlocked)).toBeGreaterThanOrEqual(1);
+    expect(observed).toBeGreaterThanOrEqual(count);
+  }
+
   beforeEach(async () => {
     const target = new URL(databaseUrl!);
-    if (process.env.SETTLEMENT_APPROVAL_READINESS_TEST_DATABASE_ISOLATED !== '1' ||
+    const package4Target = target.protocol === 'postgresql:' && target.hostname === '127.0.0.1' &&
+      target.username === 'onur' && target.searchParams.get('schema') === 'public' &&
+      process.env.FIN_AUTO_P4_TEST_DATABASE_ISOLATED === '1' &&
+      (target.port === '5433' && target.pathname === '/fin_auto_p4_pg16_8f2ab319' ||
+        target.port === '5432' && target.pathname === '/fin_auto_p4_pg18_143fa61d' ||
+        target.port === '5433' && target.pathname === '/fin_auto_f03f04_pg16_8be49807045e528f' ||
+        target.port === '5432' && target.pathname === '/fin_auto_f03f04_pg18_cec3364d531b5fae' ||
+        target.port === '5433' && target.pathname === '/fin_auto_f06_pg16_7d31e84c1a64' ||
+        target.port === '5432' && target.pathname === '/fin_auto_f06_pg18_4f88ae2b0c39');
+    if (!package4Target && (process.env.SETTLEMENT_APPROVAL_READINESS_TEST_DATABASE_ISOLATED !== '1' ||
         target.hostname !== '127.0.0.1' ||
         !['5432', '5433', process.env.SETTLEMENT_APPROVAL_READINESS_TEST_PORT].includes(target.port) ||
-        target.pathname !== '/settlement_approval_readiness_validation') {
+        target.pathname !== '/settlement_approval_readiness_validation')) {
       throw new Error('Settlement approval readiness test requires its isolated local PostgreSQL database.');
     }
     process.env.DATABASE_URL = databaseUrl;
-    const [{ createDraftApproval, assessSettlementApprovalReadiness },
+    db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    await db.$connect();
+    if (package4Target) {
+      const [identity] = await db.$queryRaw<Array<{ databaseName: string; port: number;
+          version: string; systemId: bigint; owner: string }>>`
+          SELECT current_database() AS "databaseName", inet_server_port() AS "port",
+            current_setting('server_version_num') AS "version",
+            (SELECT system_identifier FROM pg_control_system()) AS "systemId",
+            (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()) AS "owner"`;
+      if (identity?.databaseName !== target.pathname.slice(1) || identity.port !== Number(target.port) ||
+          Math.floor(Number(identity.version) / 10000) !== (target.port === '5433' ? 16 : 18) ||
+          String(identity.systemId) !== (target.port === '5433' ? '7689856229225255193' : '7637676237569338936') ||
+          identity.owner !== target.username) {
+        throw new Error('Package 4 PostgreSQL target identity does not match the approved local cluster.');
+      }
+      const { prisma: canonicalPrisma } = await import('../backend/src/db/prisma.js');
+      const [writeTarget] = await canonicalPrisma.$queryRaw<Array<{ databaseName: string; port: number;
+          systemId: bigint; owner: string }>>`
+          SELECT current_database() AS "databaseName", inet_server_port() AS "port",
+            (SELECT system_identifier FROM pg_control_system()) AS "systemId",
+            (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()) AS "owner"`;
+      if (writeTarget?.databaseName !== identity.databaseName || writeTarget.port !== identity.port ||
+          String(writeTarget.systemId) !== String(identity.systemId) || writeTarget.owner !== identity.owner) {
+        throw new Error('Canonical finance Prisma write target differs from the approved Package 4 database.');
+      }
+    }
+    const [{ createAdminManualDraftApproval, assessSettlementApprovalReadiness },
       { assessAutomaticApprovalCandidate },
       { recordVerifiedDeliveredObservation }] = await Promise.all([
       import('../backend/src/modules/finance/settlement-approval.service.js'),
@@ -32,8 +152,6 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     ]);
     assessment = assessSettlementApprovalReadiness;
     candidateAssessment = assessAutomaticApprovalCandidate;
-    db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
-    await db.$connect();
 
     const prefix = `approval-readiness-${process.pid}-${Date.now()}-${++sequence}`;
     const vendorId = `${prefix}-vendor`;
@@ -74,7 +192,7 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       commissionPercentSnapshot: '10.00', commissionVatPercentSnapshot: '20.00',
       settlementDelayDaysSnapshot: 0,
     } });
-    const draft = await createDraftApproval({ vendorId, candidateScope: 'vendor_wide' });
+    const draft = await createAdminManualDraftApproval({ vendorId, candidateScope: 'vendor_wide' });
     approvalId = draft.id;
     expect(draft.status).toBe('draft');
     expect(draft.lines.map((line) => line.financeLedgerEntryId)).toEqual([saleId]);
@@ -264,6 +382,239 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       .toEqual(after.approvedAt);
   });
 
+  it('runs the local worker once for an Admin manual DRAFT and does not duplicate finance on replay', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    expect(await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).toMatchObject({
+      candidatesChecked: 1, outcomes: [{ settlementApprovalId: approvalId, classification: 'VERIFIED_COMPLETED' }],
+    });
+    const approved = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    expect(approved).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval' });
+    expect(await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).toMatchObject({
+      candidatesChecked: 0, outcomes: [],
+    });
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+    expect(await db.settlementCommissionInvoice.count({ where: { settlementApprovalId: approvalId } })).toBe(0);
+  });
+
+  it('runs a vendor-scoped approval sweep without reapproving a settled DRAFT', async () => {
+    const { runAutomaticSettlementApprovalSweep } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-scheduler.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    expect(await runAutomaticSettlementApprovalSweep({ vendorIds: [row.vendorId] })).toMatchObject({
+      reconciliations: [], vendors: [{ vendorId: row.vendorId, outcomes: [
+        { settlementApprovalId: approvalId, classification: 'VERIFIED_COMPLETED' },
+      ] }],
+    });
+    expect(await runAutomaticSettlementApprovalSweep({ vendorIds: [row.vendorId] })).toMatchObject({
+      reconciliations: [], vendors: [],
+    });
+    expect(await db.settlementAutoApprovalAttempt.count({ where: {
+      settlementApprovalId: approvalId, outcome: 'APPROVED',
+    } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+    expect(await db.settlementCommissionInvoice.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('reconciles an unresolved attempt on an already Admin-approved settlement before DRAFT discovery', async () => {
+    const { runAutomaticSettlementApprovalSweep } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-scheduler.service.js');
+    const { approveSettlementApproval } = await import(
+      '../backend/src/modules/finance/settlement-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const attemptId = `${approvalId}-sweep-interrupted`;
+    await db.settlementAutoApprovalAttempt.create({ data: {
+      id: attemptId, settlementApprovalId: approvalId, vendorId: row.vendorId,
+      events: { create: { outcome: 'STARTED', reasonCode: 'ATTEMPT_CREATED' } },
+    } });
+    await approveSettlementApproval(approvalId, 'admin-sweep-test');
+    expect(await runAutomaticSettlementApprovalSweep({ vendorIds: [row.vendorId] })).toMatchObject({
+      reconciliations: [{ attemptId, settlementApprovalId: approvalId,
+        classification: 'BLOCKED', reasonCode: 'APPROVED_BY_OTHER_ACTOR' }],
+      vendors: [],
+    });
+    expect(await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: attemptId } }))
+      .toMatchObject({ outcome: 'BLOCKED' });
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toMatchObject({ status: 'APPROVED', approvedBy: 'admin-sweep-test' });
+  });
+
+  it('keeps one approved financial effect under two concurrent local worker calls', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId },
+      include: { lines: true } });
+    const results = await Promise.all([
+      runAutomaticSettlementApprovalWorker({ vendorId: before.vendorId }),
+      runAutomaticSettlementApprovalWorker({ vendorId: before.vendorId }),
+    ]);
+    expect(results.every((result) => result.vendorId === before.vendorId)).toBe(true);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId },
+      include: { lines: true } });
+    expect(after).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval' });
+    expect(after.lines).toEqual(before.lines);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: {
+      settlementApprovalId: approvalId, outcome: 'APPROVED',
+    } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: before.vendorId } })).toBe(0);
+  });
+
+  it('does not retry a persisted STARTED worker attempt with uncertain commit outcome', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const attemptId = `${approvalId}-worker-started`;
+    await db.settlementAutoApprovalAttempt.create({ data: {
+      id: attemptId, settlementApprovalId: approvalId, vendorId: row.vendorId,
+      events: { create: { outcome: 'STARTED', reasonCode: 'ATTEMPT_CREATED' } },
+    } });
+    for (let count = 0; count < 2; count++) {
+      expect(await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).toMatchObject({
+        candidatesChecked: 1, outcomes: [{ settlementApprovalId: approvalId, attemptId,
+          classification: 'UNKNOWN', reasonCode: 'STARTED_OR_COMMIT_OUTCOME_UNCONFIRMED' }],
+      });
+    }
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toMatchObject({ status: 'DRAFT', approvedBy: null });
+  });
+
+  it('reports a canonical financial blocker and leaves the DRAFT and payout untouched', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'VENDOR_BLOCKED' } });
+    expect(await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).toMatchObject({
+      candidatesChecked: 1, outcomes: [{ settlementApprovalId: approvalId, classification: 'BLOCKED' }],
+    });
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toMatchObject({ status: 'DRAFT', approvedBy: null });
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('recovers an exact resolved vendor-blocked hold without replaying unchanged evidence', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId },
+      include: { lines: true } });
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'VENDOR_BLOCKED' } });
+    const first = await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId });
+    expect(first.outcomes).toMatchObject([{ classification: 'BLOCKED', settlementApprovalId: approvalId }]);
+    const blockedId = first.outcomes[0]!.attemptId!;
+    const blocked = await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: blockedId } });
+    expect(blocked).toMatchObject({ outcome: 'BLOCKED', reasonCode: expect.stringContaining(
+      'vendor_blocked_finance_hold_active'), reasonDetail: expect.stringContaining('VENDOR_BLOCKED_ALLOCATION_V1') });
+    expect(JSON.parse(blocked.reasonDetail!)).toMatchObject({ lines: [{
+      lineId: row.lines[0]!.id, ledgerId: saleId, allocationId,
+    }] });
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: {
+      attemptId: blockedId, outcome: 'BLOCKED', reasonDetail: blocked.reasonDetail,
+    } })).toBe(1);
+    for (let tick = 0; tick < 2; tick++) {
+      expect((await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).outcomes)
+        .toMatchObject([{ attemptId: blockedId, classification: 'BLOCKED' }]);
+    }
+    await db.vendor.update({ where: { id: row.vendorId }, data: { name: 'Unrelated Vendor Display Change' } });
+    expect((await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).outcomes)
+      .toMatchObject([{ attemptId: blockedId, classification: 'BLOCKED' }]);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'ACTIVE' } });
+    const recovered = await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId });
+    expect(recovered.outcomes).toMatchObject([{ classification: 'VERIFIED_COMPLETED' }]);
+    const recoveryId = recovered.outcomes[0]!.attemptId!;
+    expect(recoveryId).not.toBe(blockedId);
+    expect((await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: blockedId } })))
+      .toEqual(blocked);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).toMatchObject({
+      status: 'APPROVED', approvedBy: 'system:settlement_auto_approval',
+      successfulAutoApprovalAttemptId: recoveryId,
+    });
+    expect((await db.settlementApprovalLine.findMany({ where: { settlementApprovalId: approvalId } })))
+      .toEqual(row.lines);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: {
+      settlementApprovalId: approvalId, outcome: 'APPROVED',
+    } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('does not retry a BLOCKED attempt without exact persisted recovery evidence', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const attemptId = `${approvalId}-legacy-blocked`;
+    await db.settlementAutoApprovalAttempt.create({ data: {
+      id: attemptId, settlementApprovalId: approvalId, vendorId: row.vendorId,
+      outcome: 'BLOCKED', reasonCode: 'vendor_blocked_finance_hold_active', completedAt: new Date(),
+      events: { create: { outcome: 'BLOCKED', reasonCode: 'vendor_blocked_finance_hold_active' } },
+    } });
+    expect((await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).outcomes)
+      .toMatchObject([{ attemptId, classification: 'BLOCKED' }]);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toMatchObject({ status: 'DRAFT', approvedBy: null });
+  });
+
+  it('keeps a resolved vendor hold blocked when a new refund makes the frozen SALE unverifiable', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'VENDOR_BLOCKED' } });
+    const first = await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId });
+    const blockedId = first.outcomes[0]!.attemptId!;
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'ACTIVE' } });
+    await db.refundRecord.create({ data: {
+      id: `${orderId}-recovery-refund`, vendorAllocationId: allocationId,
+      sourceShopifyOrderId: `gid://shopify/Order/${orderId}`,
+      sourceShopifyOrderNumber: `#${orderId}`,
+      sourceShopifyRefundId: `gid://shopify/Refund/${orderId}`,
+      amount: '10.00', status: 'pending',
+    } });
+    expect((await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId })).outcomes)
+      .toMatchObject([{ attemptId: blockedId, classification: 'BLOCKED' }]);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toMatchObject({ status: 'DRAFT', approvedBy: null });
+  });
+
+  it('permits only one financial approval under concurrent resolved-hold worker calls', async () => {
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'VENDOR_BLOCKED' } });
+    const blocked = await runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId });
+    const blockedId = blocked.outcomes[0]!.attemptId!;
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'ACTIVE' } });
+    await Promise.all([
+      runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId }),
+      runAutomaticSettlementApprovalWorker({ vendorId: row.vendorId }),
+    ]);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    expect(after).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval' });
+    expect(await db.settlementAutoApprovalAttempt.count({ where: {
+      settlementApprovalId: approvalId, outcome: 'APPROVED',
+    } })).toBe(1);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(2);
+    expect((await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: blockedId } })).outcome)
+      .toBe('BLOCKED');
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('characterizes an inactive profile after DRAFT creation without treating it as vendor consent', async () => {
+    const { approveSettlementDraftInternally } = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const draft = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    expect(draft.creationOrigin).toBe('ADMIN_MANUAL');
+    await db.vendorFinancialProfile.update({ where: { vendorId: draft.vendorId }, data: { active: false } });
+    const approved = await approveSettlementDraftInternally({ settlementApprovalId: approvalId,
+      expectedVendorId: draft.vendorId });
+    expect(approved.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).toMatchObject({
+      status: 'APPROVED', approvedBy: 'system:settlement_auto_approval',
+    });
+  });
+
   it('replays the exact successful attempt without a second financial write', async () => {
     const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
       '../backend/src/modules/finance/settlement-auto-approval.service.js');
@@ -284,6 +635,114 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
   });
 
+  it('reconciles a committed approval when its application-level transaction response is lost', async () => {
+    const { prisma } = await import('../backend/src/db/prisma.js');
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: before.vendorId,
+      attemptId: `${approvalId}-lost-application-response` };
+    const originalTransaction = prisma.$transaction.bind(prisma);
+    let injected = 0;
+    let committedStateObserved = false;
+    const transactionSpy = vi.spyOn(prisma, '$transaction').mockImplementation((async (...args: unknown[]) => {
+      // Preserve the real PostgreSQL transaction. Drop only its resolved result before the service sees it.
+      const result = await Reflect.apply(originalTransaction, prisma, args);
+      const options = args[1] as { isolationLevel?: string } | undefined;
+      if (options?.isolationLevel === 'Serializable' && injected === 0) {
+        injected++;
+        const independentlyPersisted = await db.settlementApproval.findUniqueOrThrow({
+          where: { id: approvalId }, select: { status: true, successfulAutoApprovalAttemptId: true },
+        });
+        committedStateObserved = independentlyPersisted.status === 'APPROVED' &&
+          independentlyPersisted.successfulAutoApprovalAttemptId === input.attemptId;
+        throw new Error('TEST_APPLICATION_TRANSACTION_RESPONSE_LOST');
+      }
+      return result;
+    }) as typeof prisma.$transaction);
+    try {
+      expect(await approveSettlementDraftInternally(input)).toMatchObject({ status: 'approved', id: approvalId });
+    } finally {
+      transactionSpy.mockRestore();
+    }
+    expect(injected).toBe(1);
+    expect(committedStateObserved).toBe(true);
+    const approved = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    expect(approved).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval',
+      successfulAutoApprovalAttemptId: input.attemptId });
+    expect(approved.lines).toEqual(before.lines);
+    for (const field of ['grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+      'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor'] as const) {
+      expect(approved[field]).toBe(before[field]);
+    }
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+      classification: 'VERIFIED_COMPLETED', attemptOutcome: 'APPROVED', settlementStatus: 'APPROVED',
+    });
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+      classification: 'VERIFIED_COMPLETED', attemptOutcome: 'APPROVED', settlementStatus: 'APPROVED',
+    });
+    expect((await approveSettlementDraftInternally(input)).id).toBe(approvalId);
+    expect(await db.settlementApproval.count({ where: { vendorId: before.vendorId, status: 'APPROVED' } })).toBe(1);
+    expect(await db.settlementApprovalLine.count({ where: { settlementApprovalId: approvalId,
+      financeLedgerEntryId: saleId } })).toBe(1);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect((await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: input.attemptId } })).outcome)
+      .toBe('APPROVED');
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: input.attemptId } })).toBe(2);
+    expect(await db.financeLedgerEntry.count({ where: { id: saleId, vendorId: before.vendorId } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: before.vendorId } })).toBe(0);
+    expect(await db.settlementCommissionInvoice.count({ where: { vendorId: before.vendorId } })).toBe(0);
+  });
+
+  it('does not report success or retry when the canonical transaction rolls back before commit', async () => {
+    const { prisma } = await import('../backend/src/db/prisma.js');
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const before = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: before.vendorId,
+      attemptId: `${approvalId}-pre-commit-rollback` };
+    const originalTransaction = prisma.$transaction.bind(prisma);
+    let injected = 0;
+    const transactionSpy = vi.spyOn(prisma, '$transaction').mockImplementation(((...args: unknown[]) => {
+      const options = args[1] as { isolationLevel?: string } | undefined;
+      if (options?.isolationLevel === 'Serializable' && injected === 0) {
+        injected++;
+        const callback = args[0] as (tx: unknown) => Promise<unknown>;
+        return Reflect.apply(originalTransaction, prisma, [async (tx: unknown) => {
+          await callback(tx);
+          throw new Error('TEST_AMBIGUOUS_FAILURE_BEFORE_COMMIT');
+        }, options]);
+      }
+      return Reflect.apply(originalTransaction, prisma, args);
+    }) as typeof prisma.$transaction);
+    try {
+      await expect(approveSettlementDraftInternally(input))
+        .rejects.toThrow('TEST_AMBIGUOUS_FAILURE_BEFORE_COMMIT');
+    } finally {
+      transactionSpy.mockRestore();
+    }
+    expect(injected).toBe(1);
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    expect(after).toEqual(before);
+    for (let count = 0; count < 2; count++) {
+      expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+        classification: 'UNKNOWN', reasonCode: 'STARTED_OR_COMMIT_OUTCOME_UNCONFIRMED',
+        attemptOutcome: 'UNKNOWN', settlementStatus: 'DRAFT',
+      });
+    }
+    await expect(approveSettlementDraftInternally(input)).rejects.toThrow('already exists: UNKNOWN');
+    expect(await db.settlementApproval.count({ where: { vendorId: before.vendorId, status: 'APPROVED' } })).toBe(0);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect((await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: input.attemptId } })).outcome)
+      .toBe('UNKNOWN');
+    expect((await db.settlementAutoApprovalAttemptEvent.findMany({
+      where: { attemptId: input.attemptId },
+    })).map((event) => event.outcome).sort()).toEqual(['STARTED', 'UNKNOWN']);
+    expect(await db.financeLedgerEntry.count({ where: { id: saleId, vendorId: before.vendorId } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: before.vendorId } })).toBe(0);
+    expect(await db.settlementCommissionInvoice.count({ where: { vendorId: before.vendorId } })).toBe(0);
+  });
+
   it('keeps a pre-commit STARTED attempt uncertain and refuses blind replay', async () => {
     const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
       '../backend/src/modules/finance/settlement-auto-approval.service.js');
@@ -292,12 +751,97 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       attemptId: `${approvalId}-interrupted` };
     await db.settlementAutoApprovalAttempt.create({ data: {
       id: input.attemptId, settlementApprovalId: approvalId, vendorId: row.vendorId,
+      events: { create: { outcome: 'STARTED', reasonCode: 'ATTEMPT_CREATED' } },
     } });
-    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
-      classification: 'UNKNOWN', reasonCode: 'STARTED_OR_COMMIT_OUTCOME_UNCONFIRMED',
-    });
+    for (let count = 0; count < 2; count++) {
+      expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+        classification: 'UNKNOWN', reasonCode: 'STARTED_OR_COMMIT_OUTCOME_UNCONFIRMED',
+        attemptOutcome: 'STARTED', settlementStatus: 'DRAFT',
+      });
+    }
     await expect(approveSettlementDraftInternally(input)).rejects.toThrow('already exists: UNKNOWN');
-    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toMatchObject({ status: 'DRAFT', approvedBy: null, successfulAutoApprovalAttemptId: null });
+    expect((await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: input.attemptId } })).outcome)
+      .toBe('STARTED');
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: input.attemptId } })).toBe(1);
+    expect(await db.settlementApproval.count({ where: { vendorId: row.vendorId, status: 'APPROVED' } })).toBe(0);
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('reconciles a STARTED attempt after Admin approval without claiming system success', async () => {
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const { approveSettlementApproval } = await import(
+      '../backend/src/modules/finance/settlement-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-admin-before-reconcile` };
+    await db.settlementAutoApprovalAttempt.create({ data: {
+      id: input.attemptId, settlementApprovalId: approvalId, vendorId: row.vendorId,
+      events: { create: { outcome: 'STARTED', reasonCode: 'ATTEMPT_CREATED' } },
+    } });
+
+    await approveSettlementApproval(approvalId, 'real-test-admin');
+    expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({
+      classification: 'BLOCKED', reasonCode: 'APPROVED_BY_OTHER_ACTOR',
+      attemptOutcome: 'BLOCKED', settlementStatus: 'APPROVED',
+    });
+    await expect(approveSettlementDraftInternally(input)).rejects.toThrow('already exists: BLOCKED');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).toMatchObject({
+      status: 'APPROVED', approvedBy: 'real-test-admin', successfulAutoApprovalAttemptId: null,
+    });
+    expect((await db.settlementAutoApprovalAttemptEvent.findMany({
+      where: { attemptId: input.attemptId },
+    })).map((event) => event.outcome).sort()).toEqual(['BLOCKED', 'STARTED']);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+  });
+
+  it('requires a new attempt after authoritative resolution of a blocked DRAFT', async () => {
+    const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const blocked = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-blocked-before-resolution` };
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'VENDOR_BLOCKED' } });
+    await expect(approveSettlementDraftInternally(blocked)).rejects.toMatchObject({
+      name: 'SettlementApprovalRevalidationError',
+    });
+    expect(await reconcileAutomaticApprovalAttempt(blocked)).toMatchObject({
+      classification: 'BLOCKED', attemptOutcome: 'BLOCKED', settlementStatus: 'DRAFT',
+    });
+
+    await db.vendorAllocation.update({ where: { id: allocationId }, data: { allocationStatus: 'ACTIVE' } });
+    await expect(approveSettlementDraftInternally(blocked)).rejects.toThrow('already exists: BLOCKED');
+    const fresh = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
+      attemptId: `${approvalId}-after-resolution` };
+    await approveSettlementDraftInternally(fresh);
+    expect(await reconcileAutomaticApprovalAttempt(fresh)).toMatchObject({
+      classification: 'VERIFIED_COMPLETED', attemptOutcome: 'APPROVED', settlementStatus: 'APPROVED',
+    });
+    expect(await reconcileAutomaticApprovalAttempt(blocked)).toMatchObject({
+      classification: 'BLOCKED', attemptOutcome: 'BLOCKED', settlementStatus: 'APPROVED',
+    });
+    const after = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    expect(after).toMatchObject({
+      status: 'APPROVED', approvedBy: 'system:settlement_auto_approval',
+      successfulAutoApprovalAttemptId: fresh.attemptId,
+    });
+    expect(after.lines).toEqual(row.lines);
+    for (const field of ['grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+      'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor'] as const) {
+      expect(after[field]).toBe(row[field]);
+    }
+    expect(after.lines.map((line) => line.financeLedgerEntryId)).toEqual([saleId]);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(2);
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: blocked.attemptId,
+      outcome: 'APPROVED' } })).toBe(0);
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: fresh.attemptId,
+      outcome: 'APPROVED' } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+    expect(await db.settlementRefundAdjustment.count({ where: { vendorId: row.vendorId } })).toBe(0);
+    expect(await db.financialCorrectionAuthority.count({ where: { vendorId: row.vendorId } })).toBe(0);
   });
 
   it('fails closed on forged success, changed ownership and immutable attempt events', async () => {
@@ -382,15 +926,26 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
   });
 
-  it('prevents concurrent callers sharing one attempt ID from duplicating approval evidence', async () => {
+  it('prevents two calls blocked on the same uncommitted attempt identity from duplicating approval', async () => {
     const { approveSettlementDraftInternally, reconcileAutomaticApprovalAttempt } = await import(
       '../backend/src/modules/finance/settlement-auto-approval.service.js');
     const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
     const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId,
       attemptId: `${approvalId}-shared` };
-    const results = await Promise.allSettled([
-      approveSettlementDraftInternally(input), approveSettlementDraftInternally(input),
-    ]);
+    const lock = await holdUncommittedAttempt(approvalId, row.vendorId, input.attemptId);
+    let results!: PromiseSettledResult<Awaited<ReturnType<typeof approveSettlementDraftInternally>>>[];
+    try {
+      const first = approveSettlementDraftInternally(input);
+      void first.catch(() => undefined);
+      await waitForAttemptInsertWait(lock.pid, 1);
+      const second = approveSettlementDraftInternally(input);
+      void second.catch(() => undefined);
+      await waitForAttemptInsertWait(lock.pid, 2);
+      await lock.release();
+      results = await Promise.allSettled([first, second]);
+    } finally {
+      await lock.release();
+    }
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
     expect(await reconcileAutomaticApprovalAttempt(input)).toMatchObject({ classification: 'VERIFIED_COMPLETED' });
     expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(1);
@@ -425,42 +980,87 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       .toMatchObject({ status: 'APPROVED', approvedBy: 'real-test-admin' });
   });
 
-  it('allows only one system approval under concurrent attempts', async () => {
+  it.each([0, 1] as const)('allows only one system approval after observed overlapping updates, ordering %i', async (first) => {
     const { approveSettlementDraftInternally } = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
-    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
-    const input = { settlementApprovalId: approvalId, expectedVendorId: row.vendorId };
-    const results = await Promise.allSettled([
-      approveSettlementDraftInternally(input), approveSettlementDraftInternally(input),
-    ]);
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const attempts = [0, 1].map((index) => ({ settlementApprovalId: approvalId,
+      expectedVendorId: row.vendorId, attemptId: `${approvalId}-system-${index}` }));
+    const lock = await holdApprovalUpdate(approvalId);
+    let results!: PromiseSettledResult<Awaited<ReturnType<typeof approveSettlementDraftInternally>>>[];
+    try {
+      const operations = [0, 1].map(() => Promise.resolve(null) as Promise<Awaited<ReturnType<typeof approveSettlementDraftInternally>>>);
+      operations[first] = approveSettlementDraftInternally(attempts[first]);
+      void operations[first].catch(() => undefined);
+      await waitForApprovalLockWait(lock.pid, 1);
+      operations[1 - first] = approveSettlementDraftInternally(attempts[1 - first]);
+      void operations[1 - first].catch(() => undefined);
+      await waitForApprovalLockWait(lock.pid, 2);
+      await lock.release();
+      results = await Promise.allSettled(operations);
+    } finally {
+      await lock.release();
+    }
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
-    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } }))
-      .toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval' });
+    const approved = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    expect(approved).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval',
+      successfulAutoApprovalAttemptId: attempts[first].attemptId });
+    expect(approved.lines).toEqual(row.lines);
+    for (const field of ['grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+      'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor'] as const) {
+      expect(approved[field]).toBe(row[field]);
+    }
     expect(await db.settlementApproval.count({ where: { vendorId: row.vendorId } })).toBe(1);
     expect(await db.settlementRefundAdjustment.count({ where: { vendorId: row.vendorId } })).toBe(0);
     expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId,
       outcome: 'APPROVED' } })).toBe(1);
     expect(await db.settlementAutoApprovalAttempt.count({ where: { settlementApprovalId: approvalId } })).toBe(2);
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: attempts[first].attemptId,
+      outcome: 'APPROVED' } })).toBe(1);
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId: attempts[1 - first].attemptId,
+      outcome: 'APPROVED' } })).toBe(0);
   });
 
-  it('allows only one winner when Admin and system approval race', async () => {
+  it.each(['system', 'admin'] as const)('keeps one exact actor when %s reaches the approval update first', async (firstActor) => {
     const { approveSettlementDraftInternally } = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
     const { approveSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js');
-    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
-    const results = await Promise.allSettled([
-      approveSettlementApproval(approvalId, 'racing-admin'),
-      approveSettlementDraftInternally({ settlementApprovalId: approvalId, expectedVendorId: row.vendorId }),
-    ]);
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const attemptId = `${approvalId}-actor-race`;
+    const run = (actor: 'admin' | 'system') => actor === 'admin'
+      ? approveSettlementApproval(approvalId, 'racing-admin')
+      : approveSettlementDraftInternally({ settlementApprovalId: approvalId,
+        expectedVendorId: row.vendorId, attemptId });
+    const secondActor = firstActor === 'admin' ? 'system' : 'admin';
+    const lock = await holdApprovalUpdate(approvalId);
+    let results!: PromiseSettledResult<Awaited<ReturnType<typeof run>>>[];
+    try {
+      const firstOperation = run(firstActor);
+      void firstOperation.catch(() => undefined);
+      await waitForApprovalLockWait(lock.pid, 1);
+      const secondOperation = run(secondActor);
+      void secondOperation.catch(() => undefined);
+      await waitForApprovalLockWait(lock.pid, 2);
+      await lock.release();
+      results = await Promise.allSettled([firstOperation, secondOperation]);
+    } finally {
+      await lock.release();
+    }
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    const persisted = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
-    expect(persisted.status).toBe('APPROVED');
-    expect(persisted.approvedBy).toBe(results[0].status === 'fulfilled' ? 'racing-admin' :
-      'system:settlement_auto_approval');
+    const persisted = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    expect(persisted).toMatchObject({ status: 'APPROVED',
+      approvedBy: firstActor === 'admin' ? 'racing-admin' : 'system:settlement_auto_approval',
+      successfulAutoApprovalAttemptId: firstActor === 'system' ? attemptId : null });
+    expect(persisted.lines).toEqual(row.lines);
+    for (const field of ['grossSalesMinor', 'refundTotalMinor', 'commissionMinor', 'commissionVatMinor',
+      'netPayableMinor', 'correctionCreditMinor', 'correctionDeductionMinor'] as const) {
+      expect(persisted[field]).toBe(row[field]);
+    }
     expect(await db.settlementApproval.count({ where: { vendorId: row.vendorId } })).toBe(1);
     const attempts = await db.settlementAutoApprovalAttempt.findMany({ where: { settlementApprovalId: approvalId } });
     expect(attempts).toHaveLength(1);
-    expect(attempts[0]?.outcome).toBe(persisted.approvedBy === 'system:settlement_auto_approval' ?
-      'APPROVED' : 'BLOCKED');
+    expect(attempts[0]?.outcome).toBe(firstActor === 'system' ? 'APPROVED' : 'BLOCKED');
+    expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId, outcome: 'APPROVED' } }))
+      .toBe(firstActor === 'system' ? 1 : 0);
   });
 
   it('does not reopen a cancelled DRAFT through the system adapter', async () => {
@@ -477,27 +1077,46 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       .toMatchObject({ outcome: 'BLOCKED', reasonCode: 'SETTLEMENT_CANCELLED' });
   });
 
-  it('keeps approval and cancellation mutually exclusive under concurrent requests', async () => {
+  it.each(['approval', 'cancellation'] as const)(
+    'keeps approval and cancellation history consistent when %s reaches the locked row first', async (first) => {
     const { approveSettlementDraftInternally } = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
     const { cancelSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js');
-    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
-    const results = await Promise.allSettled([
-      approveSettlementDraftInternally({ settlementApprovalId: approvalId, expectedVendorId: row.vendorId }),
-      cancelSettlementApproval(approvalId, 'racing-canceller'),
-    ]);
-    const persisted = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
-    if (results[0].status === 'fulfilled' && results[1].status === 'fulfilled') {
-      // Existing policy permits cancellation of APPROVED settlements with no payout or invoice.
-      expect(persisted).toMatchObject({ status: 'CANCELLED', cancelledFromStatus: 'APPROVED',
-        approvedBy: 'system:settlement_auto_approval' });
-    } else if (results[0].status === 'fulfilled') {
-      expect(persisted).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval' });
+    const row = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const attemptId = `${approvalId}-cancel-race`;
+    const runApproval = () => approveSettlementDraftInternally({ settlementApprovalId: approvalId,
+      expectedVendorId: row.vendorId, attemptId });
+    const runCancellation = () => cancelSettlementApproval(approvalId, 'racing-canceller');
+    const lock = await holdApprovalUpdate(approvalId);
+    let firstResult!: PromiseSettledResult<unknown>;
+    let secondResult!: PromiseSettledResult<unknown>;
+    try {
+      const firstOperation = first === 'approval' ? runApproval() : runCancellation();
+      void firstOperation.catch(() => undefined);
+      await waitForApprovalLockWait(lock.pid, 1);
+      const secondOperation = first === 'approval' ? runCancellation() : runApproval();
+      void secondOperation.catch(() => undefined);
+      await waitForApprovalLockWait(lock.pid, 2);
+      await lock.release();
+      [firstResult, secondResult] = await Promise.allSettled([firstOperation, secondOperation]);
+    } finally {
+      await lock.release();
+    }
+    expect(firstResult.status).toBe('fulfilled');
+    expect(secondResult.status).toBe('rejected');
+    const persisted = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    expect(persisted.lines).toEqual(row.lines);
+    if (first === 'approval') {
+      expect(persisted).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval',
+        successfulAutoApprovalAttemptId: attemptId, cancelledBy: null });
+      expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId, outcome: 'APPROVED' } })).toBe(1);
     } else {
-      expect(results[1].status).toBe('fulfilled');
-      expect(persisted).toMatchObject({ status: 'CANCELLED', approvedBy: null });
+      expect(persisted).toMatchObject({ status: 'CANCELLED', cancelledFromStatus: 'DRAFT',
+        approvedBy: null, successfulAutoApprovalAttemptId: null, cancelledBy: 'racing-canceller' });
+      expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId, outcome: 'APPROVED' } })).toBe(0);
     }
     expect(await db.settlementApproval.count({ where: { vendorId: row.vendorId } })).toBe(1);
     expect(await db.payoutBatch.count({ where: { vendorId: row.vendorId } })).toBe(0);
+    expect(await db.settlementCommissionInvoice.count({ where: { vendorId: row.vendorId } })).toBe(0);
   });
 
   it.each([
@@ -573,6 +1192,247 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     expect(await db.financialCorrectionAuthority.count({ where: { vendorId: approval.vendorId } })).toBe(0);
   });
 
+  it('persists bounded, concurrent operational error evidence independently from finance attempts', async () => {
+    const { recordAutoApprovalOperationalError, operationalErrorIdentity } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-operational-error.service.js');
+    const { listAutoApprovalOperationalErrorsForAdmin } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-review.service.js');
+    const approval = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const before = {
+      settlement: await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } }),
+      ledgers: await db.financeLedgerEntry.findMany({ where: { vendorId: approval.vendorId } }),
+      attempts: await db.settlementAutoApprovalAttempt.count({ where: { vendorId: approval.vendorId } }),
+      payouts: await db.payoutBatch.count({ where: { vendorId: approval.vendorId } }),
+    };
+    const input = { phase: 'WORKER_PRE_ATTEMPT' as const, category: 'DATABASE_READ_FAILED' as const,
+      error: new Error('secret-password=never-store'), vendorId: approval.vendorId,
+      settlementApprovalId: approvalId };
+    await Promise.all(Array.from({ length: 12 }, () => recordAutoApprovalOperationalError(input)));
+    const key = operationalErrorIdentity(input).deduplicationKey;
+    const rows = await db.settlementAutoApprovalOperationalError.findMany({ where: { deduplicationKey: key } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ phase: 'WORKER_PRE_ATTEMPT', category: 'DATABASE_READ_FAILED',
+      errorCode: 'UNCLASSIFIED', vendorId: approval.vendorId, settlementApprovalId: approvalId,
+      attemptId: null, occurrenceCount: 12 });
+    expect(rows[0]!.lastOccurredAt.getTime()).toBeGreaterThanOrEqual(rows[0]!.firstOccurredAt.getTime());
+    expect(JSON.stringify(rows[0])).not.toContain('secret-password');
+    await recordAutoApprovalOperationalError({ ...input, vendorId: `${approval.vendorId}-other` });
+    await recordAutoApprovalOperationalError({ ...input, category: 'WORKER_FAILED' });
+    await recordAutoApprovalOperationalError({ ...input, error: new TypeError('private type detail') });
+    expect(await db.settlementAutoApprovalOperationalError.count({ where: { vendorId: approval.vendorId } })).toBe(3);
+    const first = await listAutoApprovalOperationalErrorsForAdmin({ vendorId: approval.vendorId, limit: 1 });
+    const second = await listAutoApprovalOperationalErrorsForAdmin({ vendorId: approval.vendorId,
+      cursor: first.nextCursor!, limit: 1 });
+    const third = await listAutoApprovalOperationalErrorsForAdmin({ vendorId: approval.vendorId,
+      cursor: second.nextCursor!, limit: 1 });
+    expect(first.operationalErrors).toHaveLength(1);
+    expect(second.operationalErrors).toHaveLength(1);
+    expect(third.operationalErrors).toHaveLength(1);
+    expect(third.nextCursor).toBeNull();
+    expect(new Set([...first.operationalErrors, ...second.operationalErrors,
+      ...third.operationalErrors].map((row) => row.id)).size).toBe(3);
+    expect((await listAutoApprovalOperationalErrorsForAdmin({ vendorId: 'unrelated-vendor' })).operationalErrors)
+      .toEqual([]);
+    await expect(listAutoApprovalOperationalErrorsForAdmin({ cursor: 'missing' })).rejects.toThrow('cursor');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } }))
+      .toEqual(before.settlement);
+    expect(await db.financeLedgerEntry.findMany({ where: { vendorId: approval.vendorId } })).toEqual(before.ledgers);
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { vendorId: approval.vendorId } }))
+      .toBe(before.attempts);
+    expect(await db.payoutBatch.count({ where: { vendorId: approval.vendorId } })).toBe(before.payouts);
+  });
+
+  it('records a real scheduler discovery exception and preserves the original failure', async () => {
+    const { prisma: canonicalPrisma } = await import('../backend/src/db/prisma.js');
+    const { runAutomaticSettlementApprovalSweep } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-scheduler.service.js');
+    const originalFailure = new Error('private discovery detail');
+    const previous = await db.settlementAutoApprovalOperationalError.findFirst({
+      where: { phase: 'VENDOR_DISCOVERY', category: 'DATABASE_READ_FAILED' },
+    });
+    const spy = vi.spyOn(canonicalPrisma.settlementApproval, 'findMany').mockRejectedValueOnce(originalFailure);
+    try {
+      await expect(runAutomaticSettlementApprovalSweep({ vendorIds: [
+        (await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).vendorId,
+      ] })).rejects.toBe(originalFailure);
+    } finally { spy.mockRestore(); }
+    const rows = await db.settlementAutoApprovalOperationalError.findMany({
+      where: { phase: 'VENDOR_DISCOVERY', category: 'DATABASE_READ_FAILED' },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ vendorId: null, attemptId: null,
+      occurrenceCount: (previous?.occurrenceCount ?? 0) + 1 });
+    expect(JSON.stringify(rows)).not.toContain('private discovery detail');
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+  });
+
+  it('records worker pre-attempt lookup failures without creating a financial attempt', async () => {
+    const { prisma: canonicalPrisma } = await import('../backend/src/db/prisma.js');
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    const vendorId = (await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).vendorId;
+    const before = await db.settlementAutoApprovalAttempt.count({ where: { vendorId } });
+    const failure = new Error('private worker detail');
+    const spy = vi.spyOn(canonicalPrisma.settlementApproval, 'findMany').mockRejectedValueOnce(failure);
+    try { await expect(runAutomaticSettlementApprovalWorker({ vendorId })).rejects.toBe(failure); }
+    finally { spy.mockRestore(); }
+    const rows = await db.settlementAutoApprovalOperationalError.findMany({
+      where: { phase: 'WORKER_PRE_ATTEMPT', vendorId },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ category: 'DATABASE_READ_FAILED', settlementApprovalId: null,
+      attemptId: null, occurrenceCount: 1 });
+    expect(JSON.stringify(rows)).not.toContain('private worker detail');
+    expect(await db.settlementAutoApprovalAttempt.count({ where: { vendorId } })).toBe(before);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+  });
+
+  it('does not turn a failed operational evidence write into a successful sweep', async () => {
+    const { prisma: canonicalPrisma } = await import('../backend/src/db/prisma.js');
+    const { runAutomaticSettlementApprovalSweep } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-scheduler.service.js');
+    const before = await db.settlementAutoApprovalOperationalError.count({
+      where: { phase: 'INITIAL_ATTEMPT_LOOKUP' },
+    });
+    const failure = new Error('private database failure');
+    const lookup = vi.spyOn(canonicalPrisma.settlementAutoApprovalAttempt, 'findMany').mockRejectedValueOnce(failure);
+    const evidence = vi.spyOn(canonicalPrisma, '$executeRaw').mockRejectedValueOnce(new Error('storage unavailable'));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(runAutomaticSettlementApprovalSweep()).rejects.toBe(failure);
+      expect(warning).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+        phase: 'INITIAL_ATTEMPT_LOOKUP', category: 'DATABASE_READ_FAILED',
+      }));
+      expect(JSON.stringify(warning.mock.calls)).not.toContain('private database failure');
+    } finally { lookup.mockRestore(); evidence.mockRestore(); warning.mockRestore(); }
+    expect(await db.settlementAutoApprovalOperationalError.count({
+      where: { phase: 'INITIAL_ATTEMPT_LOOKUP' },
+    })).toBe(before);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+  });
+
+  it('persists initial attempt lookup failure without claiming a scheduler success', async () => {
+    const { prisma: canonicalPrisma } = await import('../backend/src/db/prisma.js');
+    const { runAutomaticSettlementApprovalSweep } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-scheduler.service.js');
+    const failure = new Error('private lookup detail');
+    const before = await db.settlementAutoApprovalOperationalError.findFirst({
+      where: { phase: 'INITIAL_ATTEMPT_LOOKUP', category: 'DATABASE_READ_FAILED' },
+    });
+    const spy = vi.spyOn(canonicalPrisma.settlementAutoApprovalAttempt, 'findMany').mockRejectedValueOnce(failure);
+    try { await expect(runAutomaticSettlementApprovalSweep()).rejects.toBe(failure); }
+    finally { spy.mockRestore(); }
+    const rows = await db.settlementAutoApprovalOperationalError.findMany({
+      where: { phase: 'INITIAL_ATTEMPT_LOOKUP', category: 'DATABASE_READ_FAILED' },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ occurrenceCount: (before?.occurrenceCount ?? 0) + 1,
+      vendorId: null, attemptId: null });
+    expect(JSON.stringify(rows)).not.toContain('private lookup detail');
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+  });
+
+  it('serves read-only attempt history through real authenticated Admin HTTP without leaking finance state', async () => {
+    const { hashPasswordArgon2id } = await import('../backend/src/modules/auth/password-hashing.js');
+    const { createApp } = await import('../backend/src/app.js');
+    const approval = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } });
+    const password = `${approvalId}-http-password`;
+    const passwordHash = await hashPasswordArgon2id(password);
+    const adminId = `${approvalId}-http-admin`;
+    const vendorUserId = `${approvalId}-http-vendor`;
+    await db.user.createMany({ data: [
+      { id: adminId, email: `${adminId}@example.test`, name: 'Readiness HTTP Admin', role: 'ADMIN', passwordHash },
+      { id: vendorUserId, email: `${vendorUserId}@example.test`, name: 'Readiness HTTP Vendor', role: 'VENDOR', passwordHash },
+    ] });
+    const { approveSettlementDraftInternally } = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const attemptId = `${approvalId}-http-approved`;
+    await approveSettlementDraftInternally({ settlementApprovalId: approvalId,
+      expectedVendorId: approval.vendorId, attemptId });
+    const { recordAutoApprovalOperationalError } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-operational-error.service.js');
+    await recordAutoApprovalOperationalError({ phase: 'VENDOR_WORKER', category: 'WORKER_FAILED',
+      error: new Error('private customer payload'), vendorId: approval.vendorId,
+      settlementApprovalId: approvalId, attemptId });
+    const before = {
+      approval: await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } }),
+      attempts: await db.settlementAutoApprovalAttempt.findMany({ where: { settlementApprovalId: approvalId } }),
+      events: await db.settlementAutoApprovalAttemptEvent.findMany({ where: { attemptId } }),
+      ledgers: await db.financeLedgerEntry.findMany({ where: { vendorId: approval.vendorId } }),
+      payouts: await db.payoutBatch.count({ where: { vendorId: approval.vendorId } }),
+      invoices: await db.settlementCommissionInvoice.count({ where: { vendorId: approval.vendorId } }),
+    };
+    const environmentKeys = ['SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED', 'SHIPPING_PROVIDER',
+      'KARGONOMI_BASE_URL', 'KARGONOMI_API_TOKEN'] as const;
+    const originalEnvironment = environmentKeys.map((key) => process.env[key]);
+    process.env.SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED = 'false';
+    process.env.SHIPPING_PROVIDER = 'kargonomi';
+    process.env.KARGONOMI_BASE_URL = 'http://127.0.0.1:1';
+    process.env.KARGONOMI_API_TOKEN = 'disposable-http-test-only';
+    const app = createApp();
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+    async function login(email: string) {
+      const response = await fetch(`${origin}/auth/login`, { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      expect(response.status).toBe(200);
+      return response.headers.get('set-cookie')?.split(';', 1)[0] ?? '';
+    }
+    const path = `/admin/finance/settlement-auto-approval-attempts`;
+    const operationalPath = '/admin/finance/settlement-auto-approval-operational-errors';
+    try {
+      const adminCookie = await login(`${adminId}@example.test`);
+      const vendorCookie = await login(`${vendorUserId}@example.test`);
+      expect(adminCookie).toBeTruthy();
+      expect(vendorCookie).toBeTruthy();
+      expect((await fetch(`${origin}${path}`)).status).toBe(401);
+      expect((await fetch(`${origin}${path}`, { headers: { cookie: vendorCookie } })).status).toBe(403);
+      expect((await fetch(`${origin}${operationalPath}`)).status).toBe(401);
+      expect((await fetch(`${origin}${operationalPath}`, { headers: { cookie: vendorCookie } })).status).toBe(403);
+      const operationalResponse = await fetch(`${origin}${operationalPath}?vendorId=${encodeURIComponent(approval.vendorId)}`,
+        { headers: { cookie: adminCookie } });
+      expect(operationalResponse.status).toBe(200);
+      const operationalText = await operationalResponse.text();
+      expect(operationalText).not.toContain('private customer payload');
+      expect(JSON.parse(operationalText)).toMatchObject({ writesPerformed: false,
+        operationalErrors: [expect.objectContaining({ phase: 'VENDOR_WORKER', vendorId: approval.vendorId,
+          attemptId, occurrenceCount: 1 })] });
+      expect((await fetch(`${origin}${path}/${attemptId}/events`,
+        { headers: { cookie: vendorCookie } })).status).toBe(403);
+      const query = `${origin}${path}?vendorId=${encodeURIComponent(approval.vendorId)}` +
+        `&settlementApprovalId=${encodeURIComponent(approvalId)}&outcome=APPROVED`;
+      const listed = await fetch(query, { headers: { cookie: adminCookie } });
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toMatchObject({ writesPerformed: false,
+        attempts: [expect.objectContaining({ id: attemptId, vendorId: approval.vendorId,
+          outcome: 'APPROVED', currentSettlementStatus: 'APPROVED', exactSuccessfulAttempt: true })],
+      });
+      const history = await fetch(`${origin}${path}/${attemptId}/events`, { headers: { cookie: adminCookie } });
+      expect(history.status).toBe(200);
+      expect((await history.json() as { events: Array<{ outcome: string }> }).events.map((event) => event.outcome))
+        .toEqual(['STARTED', 'APPROVED']);
+      const empty = await fetch(`${origin}${path}?vendorId=another-vendor`, { headers: { cookie: adminCookie } });
+      expect(empty.status).toBe(200);
+      expect((await empty.json() as { attempts: unknown[] }).attempts).toEqual([]);
+      expect((await fetch(`${origin}${path}?cursor=invalid`, { headers: { cookie: adminCookie } })).status).toBe(400);
+      expect((await fetch(`${origin}${path}?outcome=SUCCESS`, { headers: { cookie: adminCookie } })).status).toBe(400);
+      expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId }, include: { lines: true } }))
+        .toEqual(before.approval);
+      expect(await db.settlementAutoApprovalAttempt.findMany({ where: { settlementApprovalId: approvalId } }))
+        .toEqual(before.attempts);
+      expect(await db.settlementAutoApprovalAttemptEvent.findMany({ where: { attemptId } }))
+        .toEqual(before.events);
+      expect(await db.financeLedgerEntry.findMany({ where: { vendorId: approval.vendorId } })).toEqual(before.ledgers);
+      expect(await db.payoutBatch.count({ where: { vendorId: approval.vendorId } })).toBe(before.payouts);
+      expect(await db.settlementCommissionInvoice.count({ where: { vendorId: approval.vendorId } })).toBe(before.invoices);
+    } finally {
+      await app.close();
+      environmentKeys.forEach((key, index) => {
+        const value = originalEnvironment[index];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      });
+    }
+  });
+
   it('reads exact successful attempt evidence separately from a later cancelled settlement state', async () => {
     const { approveSettlementDraftInternally } = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
     const { cancelSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js');
@@ -592,5 +1452,36 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     expect(events?.events.map((event) => event.outcome)).toEqual(['STARTED', 'APPROVED']);
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).approvedBy)
       .toBe('system:settlement_auto_approval');
+  });
+
+  it('keeps an unreconcilable existing attempt distinct from a failed financial approval', async () => {
+    const { runAutomaticSettlementApprovalSweep } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-scheduler.service.js');
+    const { prisma: canonicalPrisma } = await import('../backend/src/db/prisma.js');
+    const approval = await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    const attemptId = `${approvalId}-reconciliation-unavailable`;
+    await db.settlementAutoApprovalAttempt.create({ data: {
+      id: attemptId, settlementApprovalId: approvalId, vendorId: approval.vendorId,
+      outcome: 'UNKNOWN',
+    } });
+    const failure = new Error('private reconciliation detail');
+    const spy = vi.spyOn(canonicalPrisma.settlementAutoApprovalAttempt, 'findUnique').mockRejectedValueOnce(failure);
+    let result: Awaited<ReturnType<typeof runAutomaticSettlementApprovalSweep>>;
+    try { result = await runAutomaticSettlementApprovalSweep({ vendorIds: [approval.vendorId] }); }
+    finally { spy.mockRestore(); }
+    expect(result.reconciliationErrors).toEqual([expect.objectContaining({
+      vendorId: approval.vendorId, settlementApprovalId: approvalId, attemptId,
+    })]);
+    expect(result.skippedVendors).toContain(approval.vendorId);
+    const error = await db.settlementAutoApprovalOperationalError.findFirstOrThrow({
+      where: { phase: 'ATTEMPT_RECONCILIATION', attemptId },
+    });
+    expect(error).toMatchObject({ category: 'RECONCILIATION_FAILED', vendorId: approval.vendorId,
+      settlementApprovalId: approvalId, occurrenceCount: 1 });
+    expect(JSON.stringify(error)).not.toContain('private reconciliation detail');
+    expect((await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: attemptId } })).outcome)
+      .toBe('UNKNOWN');
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
+    expect(await db.payoutBatch.count({ where: { vendorId: approval.vendorId } })).toBe(0);
   });
 });

@@ -43,6 +43,7 @@ import { registerSopyoShopifyDeliveredScheduler } from './modules/vendor-integra
 import { registerSopyoOrderPushWorker } from './modules/vendor-integration/sopyo-order-push-worker.service.js';
 import { registerPassiveSettlementAutoDraftScheduler } from './modules/finance/settlement-auto-draft-scheduler.service.js';
 import { registerSettlementAutoDraftWriteScheduler } from './modules/finance/settlement-auto-draft-write-scheduler.service.js';
+import { registerSettlementAutoApprovalScheduler } from './modules/finance/settlement-auto-approval-scheduler.service.js';
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
 import { registerVendorDirectoryRoutes } from './modules/vendors/vendor-directory.routes.js';
 import { registerVendorProfileAuditLogRoutes } from './modules/vendors/vendor-profile-audit-log.routes.js';
@@ -522,6 +523,7 @@ export function createApp() {
   registerSopyoOrderPushWorker(app, env);
   registerPassiveSettlementAutoDraftScheduler(app, env);
   registerSettlementAutoDraftWriteScheduler(app, env);
+  registerSettlementAutoApprovalScheduler(app, env);
 
   if (env.NODE_ENV !== 'production') {
     const authService = createAuthService(env);

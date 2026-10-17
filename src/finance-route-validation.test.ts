@@ -47,6 +47,7 @@ const cancelR1ReviewPayoutBeforeEftMock = vi.hoisted(() => vi.fn());
 const completeR1CashlessPayoutMock = vi.hoisted(() => vi.fn());
 const listAutoApprovalAttemptsForAdminMock = vi.hoisted(() => vi.fn());
 const listAutoApprovalAttemptEventsForAdminMock = vi.hoisted(() => vi.fn());
+const listAutoApprovalOperationalErrorsForAdminMock = vi.hoisted(() => vi.fn());
 const ZeroNetAcknowledgementErrorMock = vi.hoisted(() => class ZeroNetAcknowledgementError extends Error {
   constructor(readonly code: string, readonly statusCode = 409) { super(code); }
 });
@@ -222,6 +223,7 @@ vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
 vi.mock('../backend/src/modules/finance/settlement-auto-approval-review.service.js', () => ({
   listAutoApprovalAttemptsForAdmin: listAutoApprovalAttemptsForAdminMock,
   listAutoApprovalAttemptEventsForAdmin: listAutoApprovalAttemptEventsForAdminMock,
+  listAutoApprovalOperationalErrorsForAdmin: listAutoApprovalOperationalErrorsForAdminMock,
   AutoApprovalReviewQueryError: class AutoApprovalReviewQueryError extends Error {},
 }));
 
@@ -349,8 +351,22 @@ describe('finance route validation', () => {
     const routes = createRegisteredGetRoutes();
     const list = routes.get('/admin/finance/settlement-auto-approval-attempts');
     const events = routes.get('/admin/finance/settlement-auto-approval-attempts/:id/events');
+    const operational = routes.get('/admin/finance/settlement-auto-approval-operational-errors');
     expect(list).toBeDefined();
     expect(events).toBeDefined();
+    expect(operational).toBeDefined();
+    const operationalDenied = createReply();
+    await operational?.({ authUser: { role: 'vendor' }, query: {} }, operationalDenied);
+    expect(operationalDenied.statusCode).toBe(403);
+    expect(listAutoApprovalOperationalErrorsForAdminMock).not.toHaveBeenCalled();
+    listAutoApprovalOperationalErrorsForAdminMock.mockResolvedValueOnce({ ok: true,
+      writesPerformed: false, operationalErrors: [], nextCursor: null });
+    expect(await operational?.({ authUser: { role: 'admin' }, query: {
+      vendorId: 'vendor-1', limit: '20',
+    } }, createReply())).toMatchObject({ writesPerformed: false, operationalErrors: [] });
+    expect(listAutoApprovalOperationalErrorsForAdminMock).toHaveBeenCalledWith({
+      vendorId: 'vendor-1', limit: 20, cursor: undefined,
+    });
     const denied = createReply();
     await list?.({ query: { vendorId: 'vendor-1' } }, denied);
     expect(denied.statusCode).toBe(403);

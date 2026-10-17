@@ -3,14 +3,17 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { SettlementAutoApprovalHistory } from './SettlementAutoApprovalHistory';
-import { listAutoApprovalAttempts, listAutoApprovalAttemptEvents } from '../features/finance/settlementApprovalsApi';
+import { listAutoApprovalAttempts, listAutoApprovalAttemptEvents,
+  listAutoApprovalOperationalErrors } from '../features/finance/settlementApprovalsApi';
 
 vi.mock('../features/finance/settlementApprovalsApi', () => ({
   listAutoApprovalAttempts: vi.fn(), listAutoApprovalAttemptEvents: vi.fn(),
+  listAutoApprovalOperationalErrors: vi.fn(),
 }));
 
 const listMock = vi.mocked(listAutoApprovalAttempts);
 const eventsMock = vi.mocked(listAutoApprovalAttemptEvents);
+const operationalMock = vi.mocked(listAutoApprovalOperationalErrors);
 const attempt = {
   id: 'attempt-1', settlementApprovalId: 'settlement-1', vendorId: 'vendor-1', vendorName: 'Vendor One',
   actorId: 'system:settlement_auto_approval', outcome: 'UNKNOWN' as const,
@@ -33,6 +36,8 @@ describe('Admin automatic approval history', () => {
         { id: 'event-1', outcome: 'STARTED', reasonCode: 'ATTEMPT_CREATED', createdAt: attempt.createdAt },
         attempt.latestEvent!,
       ], nextCursor: null });
+    operationalMock.mockResolvedValue({ ok: true, writesPerformed: false,
+      operationalErrors: [], nextCursor: null });
   });
   afterEach(cleanup);
 
@@ -82,5 +87,22 @@ describe('Admin automatic approval history', () => {
     listMock.mockRejectedValueOnce(new Error('network'));
     await user.selectOptions(screen.getByLabelText('Attempt outcome'), 'BLOCKED');
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded');
+  });
+
+  it('shows safe operational evidence separately without calling it an approval attempt', async () => {
+    const user = userEvent.setup();
+    operationalMock.mockResolvedValueOnce({ ok: true, writesPerformed: false,
+      operationalErrors: [{ id: 'operational-1', category: 'DATABASE_READ_FAILED', phase: 'VENDOR_DISCOVERY',
+        errorCode: 'P2024', vendorId: null, settlementApprovalId: null, attemptId: null,
+        firstOccurredAt: '2026-10-15T10:00:00.000Z', lastOccurredAt: '2026-10-15T10:01:00.000Z',
+        occurrenceCount: 2 }], nextCursor: null });
+    renderHistory();
+    await user.click(screen.getByRole('button', { name: 'Review automatic approval history' }));
+    const section = await screen.findByRole('region', { name: 'Scheduler and worker operational errors' });
+    expect(within(section).getByText('VENDOR_DISCOVERY')).toBeInTheDocument();
+    expect(within(section).getByText('Global scheduler')).toBeInTheDocument();
+    expect(within(section).getByText('No attempt')).toBeInTheDocument();
+    expect(within(section).getByText('2')).toBeInTheDocument();
+    expect(within(section).getByText(/not financial approval attempts/)).toBeInTheDocument();
   });
 });

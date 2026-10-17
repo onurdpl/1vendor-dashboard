@@ -450,7 +450,8 @@ CREATE TYPE public."SettlementCommissionInvoiceStatus" AS ENUM (
 CREATE TYPE public."SettlementDraftCreationOrigin" AS ENUM (
     'AUTONOMOUS_SCHEDULER',
     'ADMIN_SCHEDULED',
-    'ADMIN_MANUAL'
+    'ADMIN_MANUAL',
+    'CONTROLLED_REPLACEMENT'
 );
 
 
@@ -2349,6 +2350,7 @@ CREATE TABLE public."SettlementApproval" (
     "creationOrigin" public."SettlementDraftCreationOrigin",
     "successfulAutoApprovalAttemptId" text,
     CONSTRAINT "SettlementApproval_autonomous_origin_schedule_check" CHECK ((("creationOrigin" IS DISTINCT FROM 'AUTONOMOUS_SCHEDULER'::public."SettlementDraftCreationOrigin") OR (("scheduledRunDate" IS NOT NULL) AND ("scheduledPeriodEnd" IS NOT NULL) AND ("scheduledCycleKey" IS NOT NULL) AND ("periodEnd" IS NOT NULL)))),
+    CONSTRAINT "SettlementApproval_controlled_replacement_origin_check" CHECK (((("creationOrigin")::text IS DISTINCT FROM 'CONTROLLED_REPLACEMENT'::text) OR (("replacesSettlementApprovalId" IS NOT NULL) AND ("replacementRequestId" IS NOT NULL) AND ("replacementRequestedBy" IS NOT NULL) AND ("replacementReason" IS NOT NULL) AND ("replacementRequestedAt" IS NOT NULL) AND ("scheduledRunDate" IS NULL) AND ("scheduledPeriodEnd" IS NULL) AND ("scheduledCycleKey" IS NULL) AND ("periodStart" IS NULL) AND ("periodEnd" IS NOT NULL) AND ("sourceSnapshotJson" ? 'lateRefundLedgerIds'::text)))),
     CONSTRAINT "SettlementApproval_replacement_audit_check" CHECK (((("replacesSettlementApprovalId" IS NULL) AND ("replacementRequestId" IS NULL) AND ("replacementRequestedBy" IS NULL) AND ("replacementReason" IS NULL) AND ("replacementRequestedAt" IS NULL)) OR (("replacesSettlementApprovalId" IS NOT NULL) AND ("replacementRequestId" IS NOT NULL) AND ("replacementRequestedBy" IS NOT NULL) AND (btrim("replacementRequestedBy") <> ''::text) AND ("replacementReason" IS NOT NULL) AND (btrim("replacementReason") <> ''::text) AND ("replacementRequestedAt" IS NOT NULL))))
 );
 
@@ -2402,6 +2404,26 @@ CREATE TABLE public."SettlementAutoApprovalAttemptEvent" (
     "reasonCode" text,
     "reasonDetail" text,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: SettlementAutoApprovalOperationalError; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."SettlementAutoApprovalOperationalError" (
+    id text NOT NULL,
+    "deduplicationKey" text NOT NULL,
+    category text NOT NULL,
+    phase text NOT NULL,
+    "errorCode" text NOT NULL,
+    "vendorId" text,
+    "settlementApprovalId" text,
+    "attemptId" text,
+    "safeContextJson" jsonb,
+    "firstOccurredAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "lastOccurredAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "occurrenceCount" integer DEFAULT 1 NOT NULL
 );
 
 
@@ -3610,6 +3632,14 @@ ALTER TABLE ONLY public."SettlementAutoApprovalAttemptEvent"
 
 ALTER TABLE ONLY public."SettlementAutoApprovalAttempt"
     ADD CONSTRAINT "SettlementAutoApprovalAttempt_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: SettlementAutoApprovalOperationalError SettlementAutoApprovalOperationalError_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."SettlementAutoApprovalOperationalError"
+    ADD CONSTRAINT "SettlementAutoApprovalOperationalError_pkey" PRIMARY KEY (id);
 
 
 --
@@ -5193,6 +5223,27 @@ CREATE INDEX "SettlementAutoApprovalAttempt_settlementApprovalId_createdAt_id" O
 --
 
 CREATE INDEX "SettlementAutoApprovalAttempt_vendorId_outcome_createdAt_idx" ON public."SettlementAutoApprovalAttempt" USING btree ("vendorId", outcome, "createdAt");
+
+
+--
+-- Name: SettlementAutoApprovalOperationalError_deduplicationKey_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "SettlementAutoApprovalOperationalError_deduplicationKey_key" ON public."SettlementAutoApprovalOperationalError" USING btree ("deduplicationKey");
+
+
+--
+-- Name: SettlementAutoApprovalOperationalError_firstOccurredAt_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementAutoApprovalOperationalError_firstOccurredAt_id_idx" ON public."SettlementAutoApprovalOperationalError" USING btree ("firstOccurredAt", id);
+
+
+--
+-- Name: SettlementAutoApprovalOperationalError_vendorId_firstOccurredAt; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "SettlementAutoApprovalOperationalError_vendorId_firstOccurredAt" ON public."SettlementAutoApprovalOperationalError" USING btree ("vendorId", "firstOccurredAt", id);
 
 
 --

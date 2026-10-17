@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   listAutoApprovalAttemptEvents, listAutoApprovalAttempts,
+  listAutoApprovalOperationalErrors,
   type AutoApprovalAttemptEvent, type AutoApprovalAttemptOutcome,
-  type AutoApprovalAttemptSummary,
+  type AutoApprovalAttemptSummary, type AutoApprovalOperationalError,
 } from '../features/finance/settlementApprovalsApi';
 import { formatDateTime } from '../services/real/formatting';
 
@@ -13,6 +14,16 @@ const OUTCOMES: Array<AutoApprovalAttemptOutcome | ''> = [
 
 function reason(value: string | null) {
   return value || 'No persisted reason';
+}
+
+function operationalExplanation(category: string) {
+  switch (category) {
+    case 'DATABASE_READ_FAILED': return 'Required finance evidence could not be read.';
+    case 'RECONCILIATION_FAILED': return 'An existing approval attempt could not be reconciled.';
+    case 'WORKER_FAILED': return 'A vendor-scoped approval worker did not complete.';
+    case 'UNEXPECTED_SWEEP_FAILURE': return 'The scheduler sweep ended unexpectedly.';
+    default: return 'Operational failure requires Admin review.';
+  }
 }
 
 export function SettlementAutoApprovalHistory({ vendorId }: { vendorId: string }) {
@@ -32,6 +43,10 @@ export function SettlementAutoApprovalHistory({ vendorId }: { vendorId: string }
   const [eventCursor, setEventCursor] = useState<string | null>(null);
   const [eventLoading, setEventLoading] = useState(false);
   const [eventError, setEventError] = useState<string | null>(null);
+  const [operationalErrors, setOperationalErrors] = useState<AutoApprovalOperationalError[]>([]);
+  const [operationalCursor, setOperationalCursor] = useState<string | null>(null);
+  const [operationalLoading, setOperationalLoading] = useState(false);
+  const [operationalError, setOperationalError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -49,6 +64,36 @@ export function SettlementAutoApprovalHistory({ vendorId }: { vendorId: string }
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open, vendorId, allVendors, outcome, appliedSettlementId, appliedReasonFilter]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setOperationalLoading(true);
+    setOperationalError(null);
+    setOperationalErrors([]);
+    setOperationalCursor(null);
+    void listAutoApprovalOperationalErrors({ vendorId: allVendors ? undefined : vendorId.trim() || undefined })
+      .then((result) => { if (!cancelled) {
+        setOperationalErrors(result.operationalErrors); setOperationalCursor(result.nextCursor);
+      } })
+      .catch(() => { if (!cancelled) setOperationalError('Operational errors could not be loaded.'); })
+      .finally(() => { if (!cancelled) setOperationalLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, vendorId, allVendors]);
+
+  async function loadMoreOperationalErrors() {
+    if (!operationalCursor || operationalLoading) return;
+    setOperationalLoading(true);
+    setOperationalError(null);
+    try {
+      const result = await listAutoApprovalOperationalErrors({
+        vendorId: allVendors ? undefined : vendorId.trim() || undefined, cursor: operationalCursor,
+      });
+      setOperationalErrors((current) => [...current, ...result.operationalErrors]);
+      setOperationalCursor(result.nextCursor);
+    } catch { setOperationalError('Older operational errors could not be loaded.'); }
+    finally { setOperationalLoading(false); }
+  }
 
   async function loadMore() {
     if (!cursor || loading) return;
@@ -130,6 +175,27 @@ export function SettlementAutoApprovalHistory({ vendorId }: { vendorId: string }
           {eventCursor ? <button type="button" disabled={eventLoading}
             onClick={() => void showEvents(selected, eventCursor)}>Older events</button> : null}
         </section> : null}
+        <section aria-label="Scheduler and worker operational errors">
+          <h3>Scheduler / worker operational errors</h3>
+          <p className="page-description">These are technical failures, not financial approval attempts or settlement outcomes.</p>
+          {operationalLoading ? <p role="status">Loading operational errors…</p> : null}
+          {operationalError ? <p role="alert">{operationalError}</p> : null}
+          {!operationalLoading && !operationalError && !operationalErrors.length ?
+            <p>No persisted operational errors in this view.</p> : null}
+          {operationalErrors.length ? <div className="op-table-scroll"><table className="settlement-audit-table">
+            <thead><tr><th>Category</th><th>Phase</th><th>Explanation</th><th>Safe code</th><th>Vendor</th>
+              <th>Related attempt</th><th>First observed</th><th>Last observed</th><th>Occurrences</th></tr></thead>
+            <tbody>{operationalErrors.map((item) => <tr key={item.id}>
+              <td>{item.category}</td><td>{item.phase}</td><td>{operationalExplanation(item.category)}</td>
+              <td>{item.errorCode}</td>
+              <td>{item.vendorId ?? 'Global scheduler'}</td><td>{item.attemptId ?? 'No attempt'}</td>
+              <td>{formatDateTime(item.firstOccurredAt)}</td><td>{formatDateTime(item.lastOccurredAt)}</td>
+              <td>{item.occurrenceCount}</td>
+            </tr>)}</tbody>
+          </table></div> : null}
+          {operationalCursor ? <button type="button" disabled={operationalLoading}
+            onClick={() => void loadMoreOperationalErrors()}>Older operational errors</button> : null}
+        </section>
       </> : null}
     </section>
   );

@@ -84,6 +84,7 @@ import {
   AutoApprovalReviewQueryError,
   listAutoApprovalAttemptsForAdmin,
   listAutoApprovalAttemptEventsForAdmin,
+  listAutoApprovalOperationalErrorsForAdmin,
 } from './settlement-auto-approval-review.service.js';
 import { previewSettlementLogoCommissionInvoice } from './settlement-commission-invoice-preview.service.js';
 import {
@@ -1320,6 +1321,27 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement approvals could not be loaded.';
         return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-auto-approval-operational-errors',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      try {
+        return await listAutoApprovalOperationalErrorsForAdmin({
+          vendorId: readOptionalQueryString(request.query, 'vendorId') ?? undefined,
+          cursor: readOptionalQueryString(request.query, 'cursor') ?? undefined,
+          limit: readOptionalQueryNumber(request.query, 'limit') ?? undefined,
+        });
+      } catch (error) {
+        if (error instanceof AutoApprovalReviewQueryError ||
+            error instanceof Error && error.message === 'limit must be a valid number.') {
+          return reply.code(400).send({ message: error.message });
+        }
+        return reply.code(503).send({ message: 'Automatic approval operational errors could not be loaded.' });
       }
     },
   );

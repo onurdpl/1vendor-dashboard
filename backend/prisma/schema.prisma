@@ -139,6 +139,7 @@ enum SettlementDraftCreationOrigin {
   AUTONOMOUS_SCHEDULER
   ADMIN_SCHEDULED
   ADMIN_MANUAL
+  CONTROLLED_REPLACEMENT
 }
 
 enum SettlementApprovalLineType {
@@ -2040,6 +2041,25 @@ model SettlementAutoApprovalAttemptEvent {
   attempt SettlementAutoApprovalAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
 
   @@index([attemptId, createdAt])
+}
+
+/// Operational failures outside canonical settlement approval attempts; never financial authority.
+model SettlementAutoApprovalOperationalError {
+  id String @id @default(cuid())
+  deduplicationKey String @unique
+  category String
+  phase String
+  errorCode String
+  vendorId String?
+  settlementApprovalId String?
+  attemptId String?
+  safeContextJson Json?
+  firstOccurredAt DateTime @default(now())
+  lastOccurredAt DateTime @default(now())
+  occurrenceCount Int @default(1)
+
+  @@index([firstOccurredAt, id])
+  @@index([vendorId, firstOccurredAt, id])
 }
 
 model SettlementScheduleJobRun {

@@ -53,6 +53,34 @@ export function listAutoApprovalAttemptEvents(attemptId: string, cursor?: string
   );
 }
 
+export type AutoApprovalOperationalError = {
+  id: string;
+  category: string;
+  phase: string;
+  errorCode: string;
+  vendorId: string | null;
+  settlementApprovalId: string | null;
+  attemptId: string | null;
+  firstOccurredAt: string;
+  lastOccurredAt: string;
+  occurrenceCount: number;
+};
+export type AutoApprovalOperationalErrorPage = {
+  ok: true;
+  writesPerformed: false;
+  operationalErrors: AutoApprovalOperationalError[];
+  nextCursor: string | null;
+};
+
+export function listAutoApprovalOperationalErrors(filters: { vendorId?: string; cursor?: string }) {
+  const query = new URLSearchParams();
+  if (filters.vendorId) query.set('vendorId', filters.vendorId);
+  if (filters.cursor) query.set('cursor', filters.cursor);
+  return apiClient.get<AutoApprovalOperationalErrorPage>(
+    `/admin/finance/settlement-auto-approval-operational-errors?${query}`,
+  );
+}
+
 export type SettlementApprovalStatus = 'draft' | 'approved' | 'cancelled';
 
 export type DatabaseHealthResponse = {

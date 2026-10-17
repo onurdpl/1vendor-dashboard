@@ -24,7 +24,7 @@ function assertIdentity(input: AttemptIdentity) {
 }
 
 async function appendOutcome(input: AttemptIdentity, outcome: SettlementAutoApprovalAttemptOutcome,
-  reasonCode: string) {
+  reasonCode: string, reasonDetail?: string) {
   await prisma.$transaction(async (tx) => {
     const attempt = await tx.settlementAutoApprovalAttempt.findUnique({ where: { id: input.attemptId } });
     if (!attempt || attempt.settlementApprovalId !== input.settlementApprovalId ||
@@ -37,12 +37,26 @@ async function appendOutcome(input: AttemptIdentity, outcome: SettlementAutoAppr
     }
     await tx.settlementAutoApprovalAttempt.update({
       where: { id: input.attemptId },
-      data: { outcome, reasonCode, completedAt: outcome === 'UNKNOWN' ? null : new Date() },
+      data: { outcome, reasonCode, reasonDetail: reasonDetail ?? null,
+        completedAt: outcome === 'UNKNOWN' ? null : new Date() },
     });
     await tx.settlementAutoApprovalAttemptEvent.create({
-      data: { attemptId: input.attemptId, outcome, reasonCode },
+      data: { attemptId: input.attemptId, outcome, reasonCode, reasonDetail: reasonDetail ?? null },
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+function vendorHoldBlockerEvidence(error: SettlementApprovalRevalidationError): string | undefined {
+  const holds = error.reasons.filter((reason) => reason.code === 'vendor_blocked_finance_hold_active');
+  if (!holds.length || holds.some((reason) => reason.details?.allocationStatus !== 'VENDOR_BLOCKED' ||
+      typeof reason.details?.vendorAllocationId !== 'string' || !reason.details.vendorAllocationId)) return;
+  const heldLines = new Set(holds.map((reason) => reason.settlementApprovalLineId));
+  if (error.reasons.some((reason) => reason.code !== 'vendor_blocked_finance_hold_active' &&
+      (reason.code !== 'settlement_row_not_eligible' || !heldLines.has(reason.settlementApprovalLineId)))) return;
+  return JSON.stringify({ kind: 'VENDOR_BLOCKED_ALLOCATION_V1',
+    lines: holds.map((reason) => ({ lineId: reason.settlementApprovalLineId,
+      ledgerId: reason.financeLedgerEntryId, allocationId: reason.details!.vendorAllocationId }))
+      .sort((a, b) => a.lineId.localeCompare(b.lineId)) });
 }
 
 /** Reconcile persisted authority; never authorizes or retries a financial approval. */
@@ -150,7 +164,29 @@ export async function approveSettlementDraftInternally(input: {
     throw new Error(`Automatic approval attempt already exists: ${previous.classification}/${previous.reasonCode}.`);
   }
   try {
-    return await approveSettlementApprovalAsTrustedSystem(identity);
+    // P2034 is PostgreSQL's rolled-back write conflict/deadlock outcome, not an
+    // ambiguous commit acknowledgement. Revalidate in a fresh canonical
+    // Serializable transaction under the same durable attempt identity.
+    for (let retry = 0; ; retry += 1) {
+      try {
+        return await approveSettlementApprovalAsTrustedSystem(identity);
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') ||
+            retry >= 2) throw error;
+        const attempt = await prisma.settlementAutoApprovalAttempt.findUnique({
+          where: { id: identity.attemptId }, select: { outcome: true, vendorId: true,
+            settlementApprovalId: true, actorId: true },
+        });
+        if (attempt?.outcome !== 'STARTED' || attempt.vendorId !== identity.expectedVendorId ||
+            attempt.settlementApprovalId !== identity.settlementApprovalId || attempt.actorId !== ACTOR) {
+          throw error;
+        }
+        await prisma.settlementAutoApprovalAttemptEvent.create({ data: {
+          attemptId: identity.attemptId, outcome: 'STARTED',
+          reasonCode: 'SERIALIZABLE_TRANSACTION_ROLLED_BACK',
+        } });
+      }
+    }
   } catch (error) {
     // An ambiguous commit response cannot be treated as success without persisted evidence.
     try {
@@ -170,7 +206,8 @@ export async function approveSettlementDraftInternally(input: {
         const reasonCode = error instanceof SettlementApprovalRevalidationError ?
           error.reasons.map((reason) => reason.code).join(',').slice(0, 512) :
           technical ? 'DATABASE_TRANSACTION_FAILED' : blocked ? 'CANONICAL_APPROVAL_BLOCKED' : 'UNCLASSIFIED_FAILURE';
-        await appendOutcome(identity, outcome, reasonCode);
+        await appendOutcome(identity, outcome, reasonCode,
+          error instanceof SettlementApprovalRevalidationError ? vendorHoldBlockerEvidence(error) : undefined);
       }
     } catch {
       // Outage or conflict leaves STARTED for later explicit reconciliation.

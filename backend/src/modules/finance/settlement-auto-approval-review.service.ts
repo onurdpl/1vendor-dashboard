@@ -124,3 +124,32 @@ export async function listAutoApprovalAttemptEventsForAdmin(attemptId: string, c
       exactSuccessfulAttempt: attempt.settlementApproval.successfulAutoApprovalAttemptId === attempt.id },
     events: page, nextCursor: rows.length > limit ? page[page.length - 1]?.id ?? null : null };
 }
+
+/** Independent operational diagnostics; an error is never an approval attempt or financial status. */
+export async function listAutoApprovalOperationalErrorsForAdmin(filters: {
+  vendorId?: string; cursor?: string; limit?: number;
+}) {
+  const vendorId = bounded(filters.vendorId, 'vendorId');
+  const cursor = bounded(filters.cursor, 'cursor');
+  const limit = filters.limit ?? 25;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new AutoApprovalReviewQueryError('limit must be between 1 and 50.');
+  }
+  const where: Prisma.SettlementAutoApprovalOperationalErrorWhereInput =
+    vendorId ? { vendorId } : {};
+  if (cursor && !await prisma.settlementAutoApprovalOperationalError.findFirst({
+    where: { ...where, id: cursor }, select: { id: true },
+  })) throw new AutoApprovalReviewQueryError('cursor is invalid for these filters.');
+  const rows = await prisma.settlementAutoApprovalOperationalError.findMany({
+    where, orderBy: [{ firstOccurredAt: 'desc' }, { id: 'desc' }],
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    take: limit + 1,
+    select: { id: true, category: true, phase: true, errorCode: true, vendorId: true,
+      settlementApprovalId: true, attemptId: true, firstOccurredAt: true,
+      lastOccurredAt: true, occurrenceCount: true },
+  });
+  const page = rows.slice(0, limit);
+  return { ok: true as const, writesPerformed: false as const,
+    operationalErrors: page,
+    nextCursor: rows.length > limit ? page[page.length - 1]?.id ?? null : null };
+}
