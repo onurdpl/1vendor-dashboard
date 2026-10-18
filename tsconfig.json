@@ -17,6 +17,13 @@
     "jsx": "react-jsx"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "backend", "backend/**"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/fin-auto-f03-f04-scheduler-child.ts",
+    "src/fin-auto-f06-crash-child.ts",
+    "backend",
+    "backend/**"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
