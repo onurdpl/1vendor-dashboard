@@ -1,5 +1,86 @@
 import { apiClient } from '../../lib/api-client';
 
+export type AutoApprovalAttemptOutcome = 'STARTED' | 'APPROVED' | 'BLOCKED' | 'TECHNICAL_FAILURE' | 'UNKNOWN';
+export type AutoApprovalAttemptEvent = {
+  id: string;
+  outcome: AutoApprovalAttemptOutcome;
+  reasonCode: string | null;
+  createdAt: string;
+};
+export type AutoApprovalAttemptSummary = {
+  id: string;
+  settlementApprovalId: string;
+  vendorId: string;
+  vendorName: string;
+  actorId: string;
+  outcome: AutoApprovalAttemptOutcome;
+  reasonCode: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  currentSettlementStatus: 'DRAFT' | 'APPROVED' | 'CANCELLED';
+  exactSuccessfulAttempt: boolean;
+  latestEvent: AutoApprovalAttemptEvent | null;
+  eventCount: number;
+};
+export type AutoApprovalAttemptPage = {
+  ok: true;
+  writesPerformed: false;
+  attempts: AutoApprovalAttemptSummary[];
+  nextCursor: string | null;
+};
+export type AutoApprovalAttemptEventsPage = {
+  ok: true;
+  writesPerformed: false;
+  attempt: Pick<AutoApprovalAttemptSummary, 'id' | 'settlementApprovalId' | 'vendorId' | 'actorId' |
+    'outcome' | 'reasonCode' | 'createdAt' | 'completedAt' | 'currentSettlementStatus' | 'exactSuccessfulAttempt'>;
+  events: AutoApprovalAttemptEvent[];
+  nextCursor: string | null;
+};
+
+export function listAutoApprovalAttempts(filters: {
+  vendorId?: string; settlementApprovalId?: string; outcome?: AutoApprovalAttemptOutcome | '';
+  reasonCode?: string; cursor?: string;
+}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+  return apiClient.get<AutoApprovalAttemptPage>(`/admin/finance/settlement-auto-approval-attempts?${query}`);
+}
+
+export function listAutoApprovalAttemptEvents(attemptId: string, cursor?: string) {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  return apiClient.get<AutoApprovalAttemptEventsPage>(
+    `/admin/finance/settlement-auto-approval-attempts/${encodeURIComponent(attemptId)}/events${query}`,
+  );
+}
+
+export type AutoApprovalOperationalError = {
+  id: string;
+  category: string;
+  phase: string;
+  errorCode: string;
+  vendorId: string | null;
+  settlementApprovalId: string | null;
+  attemptId: string | null;
+  firstOccurredAt: string;
+  lastOccurredAt: string;
+  occurrenceCount: number;
+};
+export type AutoApprovalOperationalErrorPage = {
+  ok: true;
+  writesPerformed: false;
+  operationalErrors: AutoApprovalOperationalError[];
+  nextCursor: string | null;
+};
+
+export function listAutoApprovalOperationalErrors(filters: { vendorId?: string; cursor?: string }) {
+  const query = new URLSearchParams();
+  if (filters.vendorId) query.set('vendorId', filters.vendorId);
+  if (filters.cursor) query.set('cursor', filters.cursor);
+  return apiClient.get<AutoApprovalOperationalErrorPage>(
+    `/admin/finance/settlement-auto-approval-operational-errors?${query}`,
+  );
+}
+
 export type SettlementApprovalStatus = 'draft' | 'approved' | 'cancelled';
 
 export type DatabaseHealthResponse = {

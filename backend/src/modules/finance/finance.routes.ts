@@ -80,6 +80,12 @@ import {
   previewApproval,
   SettlementApprovalRevalidationError,
 } from './settlement-approval.service.js';
+import {
+  AutoApprovalReviewQueryError,
+  listAutoApprovalAttemptsForAdmin,
+  listAutoApprovalAttemptEventsForAdmin,
+  listAutoApprovalOperationalErrorsForAdmin,
+} from './settlement-auto-approval-review.service.js';
 import { previewSettlementLogoCommissionInvoice } from './settlement-commission-invoice-preview.service.js';
 import {
   createPendingRecordFromImmutableRequestSnapshot,
@@ -1315,6 +1321,74 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement approvals could not be loaded.';
         return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-auto-approval-operational-errors',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      try {
+        return await listAutoApprovalOperationalErrorsForAdmin({
+          vendorId: readOptionalQueryString(request.query, 'vendorId') ?? undefined,
+          cursor: readOptionalQueryString(request.query, 'cursor') ?? undefined,
+          limit: readOptionalQueryNumber(request.query, 'limit') ?? undefined,
+        });
+      } catch (error) {
+        if (error instanceof AutoApprovalReviewQueryError ||
+            error instanceof Error && error.message === 'limit must be a valid number.') {
+          return reply.code(400).send({ message: error.message });
+        }
+        return reply.code(503).send({ message: 'Automatic approval operational errors could not be loaded.' });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-auto-approval-attempts',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      try {
+        return await listAutoApprovalAttemptsForAdmin({
+          vendorId: readOptionalQueryString(request.query, 'vendorId') ?? undefined,
+          settlementApprovalId: readOptionalQueryString(request.query, 'settlementApprovalId') ?? undefined,
+          outcome: readOptionalQueryString(request.query, 'outcome') ?? undefined,
+          reasonCode: readOptionalQueryString(request.query, 'reasonCode') ?? undefined,
+          from: readOptionalQueryString(request.query, 'from') ?? undefined,
+          to: readOptionalQueryString(request.query, 'to') ?? undefined,
+          cursor: readOptionalQueryString(request.query, 'cursor') ?? undefined,
+          limit: readOptionalQueryNumber(request.query, 'limit') ?? undefined,
+        });
+      } catch (error) {
+        if (error instanceof AutoApprovalReviewQueryError ||
+            error instanceof Error && error.message === 'limit must be a valid number.') {
+          return reply.code(400).send({ message: error.message });
+        }
+        return reply.code(503).send({ message: 'Automatic approval history could not be loaded.' });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-auto-approval-attempts/:id/events',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      try {
+        const { id } = request.params as { id: string };
+        const result = await listAutoApprovalAttemptEventsForAdmin(id,
+          readOptionalQueryString(request.query, 'cursor') ?? undefined,
+          readOptionalQueryNumber(request.query, 'limit') ?? undefined);
+        return result ?? reply.code(404).send({ message: 'Automatic approval attempt not found.' });
+      } catch (error) {
+        if (error instanceof AutoApprovalReviewQueryError ||
+            error instanceof Error && error.message === 'limit must be a valid number.') {
+          return reply.code(400).send({ message: error.message });
+        }
+        return reply.code(503).send({ message: 'Automatic approval history could not be loaded.' });
       }
     },
   );

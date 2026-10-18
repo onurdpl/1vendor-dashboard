@@ -127,10 +127,19 @@ enum SettlementApprovalStatus {
   CANCELLED
 }
 
+enum SettlementAutoApprovalAttemptOutcome {
+  STARTED
+  APPROVED
+  BLOCKED
+  TECHNICAL_FAILURE
+  UNKNOWN
+}
+
 enum SettlementDraftCreationOrigin {
   AUTONOMOUS_SCHEDULER
   ADMIN_SCHEDULED
   ADMIN_MANUAL
+  CONTROLLED_REPLACEMENT
 }
 
 enum SettlementApprovalLineType {
@@ -1962,6 +1971,7 @@ model SettlementApproval {
   correctionDeductionMinor     Int @default(0)
   approvedBy                   String?
   approvedAt                   DateTime?
+  successfulAutoApprovalAttemptId String? @unique
   cancelledBy                  String?
   cancelledAt                  DateTime?
   cancelledFromStatus          SettlementApprovalStatus?
@@ -1989,14 +1999,67 @@ model SettlementApproval {
   originatingFinancialCorrections FinancialCorrectionAuthority[] @relation("ApprovedSettlementCorrectionOrigin")
   approvedDeductionCoverages FinancialCorrectionApprovedDeductionCoverage[]
   payoutOffsetClaims PayoutOffsetClaim[]
+  autoApprovalAttempts SettlementAutoApprovalAttempt[] @relation("SettlementAutoApprovalAttempts")
+  successfulAutoApprovalAttempt SettlementAutoApprovalAttempt? @relation("SuccessfulAutoApprovalAttempt", fields: [successfulAutoApprovalAttemptId, id, vendorId], references: [id, settlementApprovalId, vendorId], onDelete: Restrict)
 
   @@index([vendorId, status])
   @@unique([id, vendorId])
   @@unique([id, vendorId, currency])
+  @@unique([successfulAutoApprovalAttemptId, id, vendorId])
   @@unique([replacesSettlementApprovalId, vendorId])
   @@index([vendorId, scheduledCycleKey])
   @@index([periodStart, periodEnd])
   @@index([createdAt])
+}
+
+model SettlementAutoApprovalAttempt {
+  id String @id
+  settlementApprovalId String
+  vendorId String
+  actorId String @default("system:settlement_auto_approval")
+  outcome SettlementAutoApprovalAttemptOutcome @default(STARTED)
+  reasonCode String?
+  reasonDetail String?
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  settlementApproval SettlementApproval @relation("SettlementAutoApprovalAttempts", fields: [settlementApprovalId, vendorId], references: [id, vendorId], onDelete: Restrict)
+  successfulSettlementApproval SettlementApproval? @relation("SuccessfulAutoApprovalAttempt")
+  events SettlementAutoApprovalAttemptEvent[]
+
+  @@unique([id, settlementApprovalId, vendorId])
+  @@index([settlementApprovalId, createdAt])
+  @@index([vendorId, outcome, createdAt])
+}
+
+model SettlementAutoApprovalAttemptEvent {
+  id String @id @default(cuid())
+  attemptId String
+  outcome SettlementAutoApprovalAttemptOutcome
+  reasonCode String?
+  reasonDetail String?
+  createdAt DateTime @default(now())
+  attempt SettlementAutoApprovalAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@index([attemptId, createdAt])
+}
+
+/// Operational failures outside canonical settlement approval attempts; never financial authority.
+model SettlementAutoApprovalOperationalError {
+  id String @id @default(cuid())
+  deduplicationKey String @unique
+  category String
+  phase String
+  errorCode String
+  vendorId String?
+  settlementApprovalId String?
+  attemptId String?
+  safeContextJson Json?
+  firstOccurredAt DateTime @default(now())
+  lastOccurredAt DateTime @default(now())
+  occurrenceCount Int @default(1)
+
+  @@index([firstOccurredAt, id])
+  @@index([vendorId, firstOccurredAt, id])
 }
 
 model SettlementScheduleJobRun {

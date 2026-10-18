@@ -27,6 +27,7 @@ describeWithPostgres('before-settlement financial correction credit with isolate
   let getBeforeSettlementFinancialCorrectionCreditState: typeof import('../backend/src/modules/finance/financial-correction-before-settlement-credit.service.js')['getBeforeSettlementFinancialCorrectionCreditState'];
   let previewApproval: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['previewApproval'];
   let createDraftApproval: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['createDraftApproval'];
+  let createAdminManualDraftApproval: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['createAdminManualDraftApproval'];
   let approveSettlementApproval: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['approveSettlementApproval'];
   let cancelSettlementApproval: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['cancelSettlementApproval'];
   let preparePayoutBatch: typeof import('../backend/src/modules/finance/finance.service.js')['preparePayoutBatch'];
@@ -71,9 +72,18 @@ describeWithPostgres('before-settlement financial correction credit with isolate
 
   beforeEach(async () => {
     const target = new URL(testDatabaseUrl!);
-    if (process.env.PHASE2E1_TEST_DATABASE_ISOLATED !== '1' ||
+    const package4Target = target.protocol === 'postgresql:' && target.hostname === '127.0.0.1' &&
+      target.username === 'onur' && target.searchParams.get('schema') === 'public' &&
+      process.env.FIN_AUTO_P4_TEST_DATABASE_ISOLATED === '1' &&
+      (target.port === '5433' && target.pathname === '/fin_auto_p4_pg16_8f2ab319' ||
+        target.port === '5432' && target.pathname === '/fin_auto_p4_pg18_143fa61d' ||
+        target.port === '5433' && target.pathname === '/fin_auto_f03f04_pg16_8be49807045e528f' ||
+        target.port === '5432' && target.pathname === '/fin_auto_f03f04_pg18_cec3364d531b5fae' ||
+        target.port === '5433' && target.pathname === '/fin_auto_f06_pg16_7d31e84c1a64' ||
+        target.port === '5432' && target.pathname === '/fin_auto_f06_pg18_4f88ae2b0c39');
+    if (!package4Target && (process.env.PHASE2E1_TEST_DATABASE_ISOLATED !== '1' ||
         !['127.0.0.1', 'localhost'].includes(target.hostname) ||
-        target.pathname.slice(1) !== 'phase2e1_validation') {
+        target.pathname.slice(1) !== 'phase2e1_validation')) {
       throw new Error('Phase 2E1 PostgreSQL test requires the explicitly isolated local phase2e1_validation database.');
     }
     runId = `phase2e1-${process.pid}-${Date.now()}-${++sequence}`;
@@ -84,12 +94,27 @@ describeWithPostgres('before-settlement financial correction credit with isolate
     ({ normalizeRefundEvidence } = await import('../backend/src/modules/finance/refund-evidence-normalizer.service.js'));
     ({ previewTerminalFinancialCorrection } = await import('../backend/src/modules/finance/financial-correction-preview.service.js'));
     ({ applyBeforeSettlementFinancialCorrectionCredit, getBeforeSettlementFinancialCorrectionCreditState } = await import('../backend/src/modules/finance/financial-correction-before-settlement-credit.service.js'));
-    ({ previewApproval, createDraftApproval, approveSettlementApproval, cancelSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js'));
+    ({ previewApproval, createDraftApproval, createAdminManualDraftApproval, approveSettlementApproval, cancelSettlementApproval } = await import('../backend/src/modules/finance/settlement-approval.service.js'));
     ({ preparePayoutBatch, cancelPayoutBatch } = await import('../backend/src/modules/finance/finance.service.js'));
     ({ recordVerifiedDeliveredObservation } = await import('../backend/src/modules/shipping/allocation-delivered-observation.service.js'));
     ({ evaluateSaleSettlementDelay } = await import('../backend/src/modules/finance/settlement-delay-eligibility.service.js'));
     db = new PrismaClient({ datasources: { db: { url: testDatabaseUrl } } });
     await db.$connect();
+    if (package4Target) {
+      const [identity] = await db.$queryRaw<Array<{ databaseName: string; port: number; version: string;
+        systemId: bigint; owner: string }>>`
+        SELECT current_database() AS "databaseName", inet_server_port() AS "port",
+          current_setting('server_version_num') AS "version",
+          (SELECT system_identifier FROM pg_control_system()) AS "systemId",
+          (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()) AS "owner"`;
+      const expectedSystemId = target.port === '5433' ? '7689856229225255193' : '7637676237569338936';
+      const expectedMajor = target.port === '5433' ? 16 : 18;
+      if (identity?.databaseName !== target.pathname.slice(1) || identity.port !== Number(target.port) ||
+          Math.floor(Number(identity.version) / 10000) !== expectedMajor ||
+          String(identity.systemId) !== expectedSystemId || identity.owner !== target.username) {
+        throw new Error('Package 4 PostgreSQL target identity does not match the approved local cluster.');
+      }
+    }
     const accepted = normalized('120.00');
     const incoming = normalized('100.00');
     await db.user.create({ data: { id: ids.admin, email: `${runId}@example.test`, name: 'Phase 2E1 Admin', role: 'ADMIN', passwordHash: 'test-only' } });
@@ -153,6 +178,14 @@ describeWithPostgres('before-settlement financial correction credit with isolate
 
   afterEach(async () => {
     if (!db) return;
+    if (await db.settlementAutoApprovalAttempt.count({ where: { vendorId: ids.vendor } })) {
+      // The durable approval attempt and its events retain their protected parents
+      // until this dedicated disposable suite database is removed.
+      await db.$disconnect();
+      settlementIds.length = 0;
+      payoutIds.length = 0;
+      return;
+    }
     const allOwnedSettlements = await db.settlementApproval.findMany({ where: { vendorId: ids.vendor }, select: { id: true } });
     for (const approval of allOwnedSettlements) {
       if (!settlementIds.includes(approval.id) && approval.id !== ids.historicalSettlement) settlementIds.push(approval.id);
@@ -376,7 +409,8 @@ describeWithPostgres('before-settlement financial correction credit with isolate
     }
   });
 
-  it('settles a standalone gross credit and offsets existing debt only at payout', async () => {
+  it.each(['admin', 'system'] as const)(
+    'settles a standalone gross credit through %s approval and offsets debt only at payout', async (actor) => {
     await setHundredTryCreditFixture();
     const applied = await applyBeforeSettlementFinancialCorrectionCredit(await inputFor(), db as never);
     // The original sale/refund are no longer settlement candidates; the correction remains independent.
@@ -385,12 +419,26 @@ describeWithPostgres('before-settlement financial correction credit with isolate
     const preview = await previewApproval(ids.vendor);
     expect(preview.correctionCredits).toHaveLength(1);
     expect(preview.summary.correctionCreditMinor).toBe(10000);
-    const draft = await createDraftApproval({ vendorId: ids.vendor });
+    const draft = actor === 'system'
+      ? await createAdminManualDraftApproval({ vendorId: ids.vendor })
+      : await createDraftApproval({ vendorId: ids.vendor });
     settlementIds.push(draft.id);
     expect(draft.lines).toHaveLength(0);
     expect(draft.correctionCreditLines).toHaveLength(1);
     expect(draft.correctionCreditLines[0]?.creditId).toBe(applied.creditId);
-    await approveSettlementApproval(draft.id, ids.admin);
+    if (actor === 'system') {
+      const { runAutomaticSettlementApprovalWorker } = await import(
+        '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+      expect(await runAutomaticSettlementApprovalWorker({ vendorId: ids.vendor })).toMatchObject({
+        outcomes: [{ settlementApprovalId: draft.id, classification: 'VERIFIED_COMPLETED' }],
+      });
+    } else {
+      await approveSettlementApproval(draft.id, ids.admin);
+    }
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      status: 'APPROVED', approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : ids.admin,
+      correctionCreditMinor: 10000,
+    });
     await db.vendorBalanceEvent.create({ data: {
       vendorId: ids.vendor, type: 'VENDOR_DEBT_CREATED', amountMinor: -6000, currency: 'TRY',
       sourceType: 'phase2e1_test_existing_debt', sourceId: runId, idempotencyKey: `${runId}-debt`,
@@ -405,6 +453,35 @@ describeWithPostgres('before-settlement financial correction credit with isolate
     await cancelPayoutBatch(payout.id);
     await cancelSettlementApproval(draft.id, ids.admin);
     expect((await previewApproval(ids.vendor)).correctionCredits).toHaveLength(1);
+  });
+
+  it('F-03: competing canonical DRAFT creation cannot consume one correction credit twice', async () => {
+    await setHundredTryCreditFixture();
+    const applied = await applyBeforeSettlementFinancialCorrectionCredit(await inputFor(), db as never);
+    await db.financeLedgerEntry.updateMany({ where: { id: { in: [ids.sale, ids.refundLedger] } },
+      data: { payoutStatus: 'PAID', settlementStatus: 'SETTLED' } });
+    const raced = await Promise.allSettled([
+      createDraftApproval({ vendorId: ids.vendor }),
+      createDraftApproval({ vendorId: ids.vendor }),
+    ]);
+    const successful = raced.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof createDraftApproval>>> =>
+      result.status === 'fulfilled');
+    expect(successful).toHaveLength(1);
+    const draft = successful[0]!.value;
+    settlementIds.push(draft.id);
+    expect(draft.correctionCreditLines).toEqual([
+      expect.objectContaining({ creditId: applied.creditId, amountMinor: 10000 }),
+    ]);
+    expect(await db.financialCorrectionCreditSettlementLine.count({ where: {
+      creditId: applied.creditId, status: 'ACTIVE',
+    } })).toBe(1);
+    expect(await db.settlementApproval.count({ where: { vendorId: ids.vendor, status: 'DRAFT' } })).toBe(1);
+    await approveSettlementApproval(draft.id, ids.admin);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).status).toBe('APPROVED');
+    expect(await db.financialCorrectionCreditSettlementLine.count({ where: {
+      creditId: applied.creditId, status: 'ACTIVE',
+    } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: ids.vendor } })).toBe(0);
   });
 
   it.each([

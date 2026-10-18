@@ -17,22 +17,38 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
 
   beforeAll(async () => {
     const target = new URL(databaseUrl!);
-    if (process.env.SETTLEMENT_UTC_BOUNDARY_TEST_DATABASE_ISOLATED !== '1' ||
+    const package4Target = target.protocol === 'postgresql:' && target.hostname === '127.0.0.1' &&
+      target.username === 'onur' && target.searchParams.get('schema') === 'public' &&
+      process.env.FIN_AUTO_P4_TEST_DATABASE_ISOLATED === '1' &&
+      (target.port === '5433' && target.pathname === '/fin_auto_p4_pg16_8f2ab319' ||
+        target.port === '5432' && target.pathname === '/fin_auto_p4_pg18_143fa61d' ||
+        target.port === '5433' && target.pathname === '/fin_auto_f03f04_pg16_8be49807045e528f' ||
+        target.port === '5432' && target.pathname === '/fin_auto_f03f04_pg18_cec3364d531b5fae');
+    if (!package4Target && (process.env.SETTLEMENT_UTC_BOUNDARY_TEST_DATABASE_ISOLATED !== '1' ||
         target.protocol !== 'postgresql:' || target.hostname !== '127.0.0.1' ||
-        target.pathname.slice(1) !== databaseName || !target.port) {
+        target.pathname.slice(1) !== databaseName || !target.port)) {
       throw new Error('UTC boundary verification requires the dedicated local settlement_utc_boundary_validation database.');
     }
     process.env.NODE_ENV = 'test';
     process.env.DATABASE_URL = databaseUrl;
     db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await db.$connect();
-    const [identity] = await db.$queryRaw<Array<{ version: string; name: string; owner: string; port: number }>>`
+    const [identity] = await db.$queryRaw<Array<{ version: string; name: string; owner: string; port: number;
+      systemId: bigint }>>`
       SELECT current_setting('server_version_num') AS version, current_database() AS name,
-        current_user AS owner, inet_server_port() AS port`;
+        current_user AS owner, inet_server_port() AS port,
+        (SELECT system_identifier FROM pg_control_system()) AS "systemId"`;
     expect([16, 18]).toContain(Math.floor(Number(identity.version) / 10000));
-    expect(identity.name).toBe(databaseName);
+    expect(identity.name).toBe(package4Target ? target.pathname.slice(1) : databaseName);
     expect(identity.owner).toBe(target.username);
     expect(identity.port).toBe(Number(target.port));
+    if (package4Target) {
+      expect(Math.floor(Number(identity.version) / 10000)).toBe(target.port === '5433' ? 16 : 18);
+      expect(String(identity.systemId)).toBe(target.port === '5433' ? '7689856229225255193' : '7637676237569338936');
+      expect(await db.vendorFinancialProfile.count({ where: {
+        active: true, autoSettlementDraftEnabled: true,
+      } })).toBe(0);
+    }
     [schedule, job, approval, { recordVerifiedDeliveredObservation: recordDelivery }] = await Promise.all([
       import('../backend/src/modules/finance/settlement-schedule.service.js'),
       import('../backend/src/modules/finance/settlement-schedule-job.service.js'),
@@ -108,6 +124,17 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
       latestObservation.getUTCFullYear(), latestObservation.getUTCMonth(), latestObservation.getUTCDate(),
     ));
     runDate.setUTCDate(runDate.getUTCDate() + ((3 - runDate.getUTCDay() + 7) % 7 || 7));
+    // JobRun identity is globally unique by runDate. Prior test executions may
+    // have completed the nearest Wednesday, so select an unclaimed future week.
+    let unclaimed = false;
+    for (let week = 0; week < 12; week += 1) {
+      if (!await db.settlementScheduleJobRun.findUnique({ where: { runDate }, select: { id: true } })) {
+        unclaimed = true;
+        break;
+      }
+      runDate.setUTCDate(runDate.getUTCDate() + 7);
+    }
+    expect(unclaimed, 'No unprocessed Wednesday is available within 12 weeks.').toBe(true);
     const runDateKey = runDate.toISOString().slice(0, 10);
     const periodEnd = new Date(runDate.getTime() + millisecondsPerDay - 1);
 
@@ -176,8 +203,9 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
       expect(ledger.settlementStatus).toBe('PENDING');
     }
     expect(await db.settlementApprovalLine.count({ where: { financeLedgerEntryId: { in: f.candidates.map((item) => item.ledgerId) } } })).toBe(0);
-    expect(await db.payoutBatch.count()).toBe(0);
-    expect(await db.financialCorrectionAuthority.count()).toBe(0);
+    const fixtureVendorIds = f.candidates.map((item) => item.vendorId);
+    expect(await db.payoutBatch.count({ where: { vendorId: { in: fixtureVendorIds } } })).toBe(0);
+    expect(await db.financialCorrectionAuthority.count({ where: { vendorId: { in: fixtureVendorIds } } })).toBe(0);
   });
 
   it('keeps a read-only scheduled preview and an unscheduled manual DRAFT independent', async () => {
@@ -200,6 +228,7 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
   it('does not consume JobRun identity before day end and accepts a later same-date run', async () => {
     const f = await fixture(['ready']);
     const [ready] = f.candidates;
+    expect(await db.settlementScheduleJobRun.count({ where: { runDate: f.runDate } })).toBe(0);
     const input = {
       env: { SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true, SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false },
       runDate: f.runDateKey, confirmScheduledSettlementAutoDraftJob: true,
@@ -269,7 +298,7 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
     expect(await db.payoutBatch.count({ where: { vendorId } })).toBe(0);
   });
 
-  it('separates Admin scheduled, verified Admin manual, and unverified service origins', async () => {
+  it('internally approves the two Admin origins but rejects historical NULL origin', async () => {
     const scheduled = await fixture(['ready']);
     const manual = await fixture(['ready']);
     const unverified = await fixture(['ready']);
@@ -298,6 +327,62 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
     const unknown = await approval.createDraftApproval({ vendorId: unverified.candidates[0].vendorId });
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: unknown.id } })).creationOrigin)
       .toBeNull();
+
+    const { approveSettlementDraftInternally } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    for (const [id, vendorId, origin] of [
+      [adminRow.id, adminVendorId, 'ADMIN_SCHEDULED'],
+      [verified.id, manualVendorId, 'ADMIN_MANUAL'],
+    ] as const) {
+      expect(await runAutomaticSettlementApprovalWorker({ vendorId })).toMatchObject({
+        candidatesChecked: 1, outcomes: [{ settlementApprovalId: id, classification: 'VERIFIED_COMPLETED' }],
+      });
+      expect(await db.settlementApproval.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        status: 'APPROVED', approvedBy: 'system:settlement_auto_approval', creationOrigin: origin,
+      });
+    }
+    expect(await runAutomaticSettlementApprovalWorker({ vendorId: unverified.candidates[0].vendorId })).toMatchObject({
+      candidatesChecked: 1, outcomes: [{ settlementApprovalId: unknown.id, attemptId: null,
+        classification: 'BLOCKED', reasonCode: 'UNAPPROVED_DRAFT_ORIGIN' }],
+    });
+    await expect(approveSettlementDraftInternally({ settlementApprovalId: unknown.id,
+      expectedVendorId: unverified.candidates[0].vendorId })).rejects.toThrow(/approved DRAFT creation origin/);
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: unknown.id } })).toMatchObject({
+      status: 'DRAFT', approvedBy: null, creationOrigin: null,
+    });
+    expect(await db.settlementAutoApprovalAttempt.findFirstOrThrow({
+      where: { settlementApprovalId: unknown.id },
+    })).toMatchObject({ outcome: 'BLOCKED', actorId: 'system:settlement_auto_approval' });
+    await approval.approveSettlementApproval(unknown.id, 'admin-origin-test');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: unknown.id } })).toMatchObject({
+      status: 'APPROVED', approvedBy: 'admin-origin-test', creationOrigin: null,
+    });
+  });
+
+  it('keeps an independent vendor eligible when another worker candidate fails finance revalidation', async () => {
+    const f = await fixture(['late', 'ready']);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + 1));
+    const [blocked, independent] = f.candidates;
+    const blockedDraft = await approval.createAdminManualDraftApproval({ vendorId: blocked.vendorId });
+    const eligibleDraft = await approval.createAdminManualDraftApproval({ vendorId: independent.vendorId });
+    await db.vendorAllocation.update({ where: { id: blocked.allocationId },
+      data: { allocationStatus: 'VENDOR_BLOCKED' } });
+    const { runAutomaticSettlementApprovalSweep } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-scheduler.service.js');
+    expect(await runAutomaticSettlementApprovalSweep({ vendorIds: [blocked.vendorId, independent.vendorId] }))
+      .toMatchObject({ vendors: [
+        { vendorId: blocked.vendorId,
+          outcomes: [{ settlementApprovalId: blockedDraft.id, classification: 'BLOCKED' }] },
+        { vendorId: independent.vendorId,
+          outcomes: [{ settlementApprovalId: eligibleDraft.id, classification: 'VERIFIED_COMPLETED' }] },
+      ] });
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: blockedDraft.id } }))
+      .toMatchObject({ status: 'DRAFT', approvedBy: null });
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: eligibleDraft.id } }))
+      .toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval' });
   });
 
   it('does not trust forged job actor strings and keeps autonomous origin immutable in PostgreSQL', async () => {
@@ -349,7 +434,7 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
     });
   });
 
-  it('runs the trusted scheduler path and retains provenance across manual approval', async () => {
+  it('runs the trusted scheduler path and retains provenance across internal approval', async () => {
     const f = await fixture(['ready']);
     const vendorId = f.candidates[0].vendorId;
     const latestJob = await db.settlementScheduleJobRun.aggregate({ _max: { runDate: true } });
@@ -379,10 +464,13 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
       expect(before.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.candidates[0].ledgerId]);
       expect(await db.payoutBatch.count({ where: { vendorId } })).toBe(0);
       expect(await db.settlementCommissionInvoice.count({ where: { settlementApprovalId: id! } })).toBe(0);
-      const approved = await approval.approveSettlementApproval(id!, 'test-admin');
-      expect(approved.status).toBe('approved');
+      const { runAutomaticSettlementApprovalWorker } = await import(
+        '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+      expect(await runAutomaticSettlementApprovalWorker({ vendorId })).toMatchObject({
+        candidatesChecked: 1, outcomes: [{ settlementApprovalId: id!, classification: 'VERIFIED_COMPLETED' }],
+      });
       expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: id! } })).toMatchObject({
-        status: 'APPROVED', creationOrigin: 'AUTONOMOUS_SCHEDULER', approvedBy: 'test-admin',
+        status: 'APPROVED', creationOrigin: 'AUTONOMOUS_SCHEDULER', approvedBy: 'system:settlement_auto_approval',
         grossSalesMinor: before.grossSalesMinor, netPayableMinor: before.netPayableMinor,
       });
     } finally {
@@ -513,7 +601,9 @@ suite('scheduled settlement UTC day-end baseline (PostgreSQL 16 or 18)', () => {
 
   it('does not turn an observation recorded today into historical run-date eligibility', async () => {
     const f = await fixture(['ready']);
-    const historical = new Date(f.runDate.getTime() - 14 * millisecondsPerDay);
+    const observedAt = f.candidates[0].observedAt;
+    const historical = new Date(Date.UTC(observedAt.getUTCFullYear(), observedAt.getUTCMonth(), observedAt.getUTCDate()));
+    historical.setUTCDate(historical.getUTCDate() - ((historical.getUTCDay() - 3 + 7) % 7 || 7));
     expect(historical.getTime() + millisecondsPerDay - 1).toBeLessThan(f.candidates[0].observedAt.getTime());
     const historicalKey = historical.toISOString().slice(0, 10);
     const preview = await schedule.getSettlementScheduleDryRun({ runDate: historicalKey,

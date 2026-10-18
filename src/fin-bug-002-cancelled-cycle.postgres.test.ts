@@ -7,7 +7,7 @@ const databaseName = 'fin_bug_002_validation';
 const dayMs = 86_400_000;
 const jobEnv = { SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: true, SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: false };
 
-suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', () => {
+suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16 or 18)', () => {
   let db: PrismaClient;
   let schedule: typeof import('../backend/src/modules/finance/settlement-schedule.service.js');
   let job: typeof import('../backend/src/modules/finance/settlement-schedule-job.service.js');
@@ -37,8 +37,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const [identity] = await db.$queryRaw<Array<{ version: string; name: string; owner: string; port: number }>>`
       SELECT current_setting('server_version_num') AS version, current_database() AS name,
         current_user AS owner, inet_server_port() AS port`;
-    expect(Number(identity.version)).toBeGreaterThanOrEqual(160000);
-    expect(Number(identity.version)).toBeLessThan(170000);
+    expect([16, 18]).toContain(Math.floor(Number(identity.version) / 10000));
     expect(identity.name).toBe(databaseName);
     expect(identity.owner).toBe(target.username);
     expect(identity.port).toBe(Number(target.port));
@@ -182,7 +181,12 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
   }
 
   async function ingestAcceptedTestRefund(f: Awaited<ReturnType<typeof cancelledFixture>>, suffix: string,
-    amount: string, lineAmount = amount) {
+    amount: string, lineAmount = amount, diagnostic?: {
+      alignLedgerCreatedAt?: boolean;
+      alignLedgerCreatedAtBeforeCommit?: boolean;
+      beforeAlignment?: (evidence: { refundFinanceLedgerEntryId: string; refundRecordId: string;
+        capturedAt: Date }) => Promise<void>;
+    }) {
     const order = await db.shopifyOrder.findUniqueOrThrow({ where: { id: f.allocationId.replace(/-allocation$/, '-order') } });
     const lineId = `${f.allocationId}-line`;
     await db.shopifyOrderLineItem.upsert({ where: { shopifyOrderId_sourceLineItemId: {
@@ -196,34 +200,53 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const refundId = `gid://shopify/Refund/${f.allocationId}-${suffix}`;
     const refundLineId = `${f.allocationId}-${suffix}-refund-line`;
     const transactionGid = `gid://shopify/OrderTransaction/${f.allocationId}-${suffix}`;
-    const result = await db.$transaction((tx) => ingestRefund({
-      transactionClient: tx,
-      payload: { id: refundId, order_id: order.sourceShopifyOrderId,
-        refund_line_items: [{ id: refundLineId, line_item_id: lineId, quantity: 1, subtotal: lineAmount,
-          line_item: { id: lineId, sku: `${f.allocationId}-sku`, title: 'Synthetic test line' } }] },
-      monetaryEvidence: { sourceShopifyRefundId: refundId, classification: 'MONETARY_REFUND',
-        monetaryRefundAmount: amount, currency: 'TRY', reasonCode: 'monetary_refund_verified', sanitizedWarnings: [],
-        selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS', amount, currency: 'TRY' }] },
-      canonicalEvidence: { evidenceSource: 'mock', sourceShopifyRefundId: refundId,
-        sourceShopifyOrderId: order.sourceShopifyOrderId, monetaryClassification: 'MONETARY_REFUND',
-        refundTotalAmount: amount, refundCurrency: 'TRY',
-        selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS', amount, currency: 'TRY' }],
-        lines: [{ sourceRefundLineItemId: refundLineId, sourceLineItemId: lineId,
-          sku: `${f.allocationId}-sku`, quantity: 1, quantityProvenance: 'OBSERVED_VALID',
-          subtotalAmount: lineAmount, subtotalAmountProvenance: 'OBSERVED', subtotalCurrency: 'TRY' }] },
-      canonicalFinancialStatus: 'PARTIALLY_REFUNDED', targetVendorAllocationId: f.allocationId,
-    }));
+    const result = await db.$transaction(async (tx) => {
+      const ingestion = await ingestRefund({
+        transactionClient: tx,
+        payload: { id: refundId, order_id: order.sourceShopifyOrderId,
+          refund_line_items: [{ id: refundLineId, line_item_id: lineId, quantity: 1, subtotal: lineAmount,
+            line_item: { id: lineId, sku: `${f.allocationId}-sku`, title: 'Synthetic test line' } }] },
+        monetaryEvidence: { sourceShopifyRefundId: refundId, classification: 'MONETARY_REFUND',
+          monetaryRefundAmount: amount, currency: 'TRY', reasonCode: 'monetary_refund_verified', sanitizedWarnings: [],
+          selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS', amount, currency: 'TRY' }] },
+        canonicalEvidence: { evidenceSource: 'mock', sourceShopifyRefundId: refundId,
+          sourceShopifyOrderId: order.sourceShopifyOrderId, monetaryClassification: 'MONETARY_REFUND',
+          refundTotalAmount: amount, refundCurrency: 'TRY',
+          selectedTransactions: [{ transactionGid, kind: 'REFUND', status: 'SUCCESS', amount, currency: 'TRY' }],
+          lines: [{ sourceRefundLineItemId: refundLineId, sourceLineItemId: lineId,
+            sku: `${f.allocationId}-sku`, quantity: 1, quantityProvenance: 'OBSERVED_VALID',
+            subtotalAmount: lineAmount, subtotalAmountProvenance: 'OBSERVED', subtotalCurrency: 'TRY' }] },
+        canonicalFinancialStatus: 'PARTIALLY_REFUNDED', targetVendorAllocationId: f.allocationId,
+      });
+      if (diagnostic?.alignLedgerCreatedAtBeforeCommit) {
+        // The simulated application clock is ahead of PostgreSQL's real clock.
+        // Keep the synthetic ledger and accepted snapshot coherent before either
+        // becomes visible to the concurrent approval transaction.
+        const accepted = await tx.refundEvidenceSnapshot.findUniqueOrThrow({ where: {
+          sourceShopifyRefundId_vendorAllocationId: {
+            sourceShopifyRefundId: refundId, vendorAllocationId: f.allocationId,
+          },
+        } });
+        await tx.financeLedgerEntry.update({ where: { id: accepted.refundFinanceLedgerEntryId },
+          data: { createdAt: accepted.capturedAt } });
+      }
+      return ingestion;
+    });
     expect(result).toMatchObject({ ok: true, processingStatus: 'processed', refundAllocationCount: 1 });
     const evidence = await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: {
       sourceShopifyRefundId_vendorAllocationId: { sourceShopifyRefundId: refundId, vendorAllocationId: f.allocationId },
     } });
     expect(evidence).toMatchObject({ historicalEconomicVendorId: f.vendorId,
       historicalSaleFinanceLedgerEntryId: f.ledgerId, evidenceSource: 'mock' });
+    await diagnostic?.beforeAlignment?.(evidence);
+    if (diagnostic?.alignLedgerCreatedAt === false) return evidence;
     // PostgreSQL's default now() is not controlled by Vitest's simulated post-cutoff
     // application clock. Align this synthetic ledger creation time with the event
     // time persisted by the real ingestion service; do not edit accepted evidence.
-    await db.financeLedgerEntry.update({ where: { id: evidence.refundFinanceLedgerEntryId },
-      data: { createdAt: evidence.capturedAt } });
+    if (!diagnostic?.alignLedgerCreatedAtBeforeCommit) {
+      await db.financeLedgerEntry.update({ where: { id: evidence.refundFinanceLedgerEntryId },
+        data: { createdAt: evidence.capturedAt } });
+    }
     expect(await db.financeLedgerEntry.findUniqueOrThrow({ where: { id: evidence.refundFinanceLedgerEntryId } }))
       .toMatchObject({ vendorId: f.vendorId, vendorAllocationId: f.allocationId,
         entryType: 'refund', createdAt: evidence.capturedAt });
@@ -396,6 +419,12 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(result.outcome).toBe('BLOCKED');
     expect(result.replacementLineage).toBe('CLAIMED');
     expect(result.blockers).toContainEqual(expect.objectContaining({ code: 'REPLACEMENT_EXISTS', sourceId: replacementRow.id }));
+    const { approveSettlementDraftInternally } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval.service.js');
+    await expect(approveSettlementDraftInternally({ settlementApprovalId: replacementRow.id,
+      expectedVendorId: f.vendorId })).rejects.toThrow('System settlement approval requires an approved DRAFT creation origin.');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: replacementRow.id } }))
+      .toMatchObject({ status: 'DRAFT', creationOrigin: null, approvedBy: null });
   });
 
   it('2A: post-cutoff refund never joins the original period and incomplete later authority fails closed', async () => {
@@ -572,7 +601,8 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId, status: 'PAID' } })).toBe(0);
   });
 
-  it('2D: a frozen replacement carries two late refunds into distinct later adjustments', async () => {
+  it.each(['admin', 'system'] as const)(
+    '2D: a frozen replacement approved via %s carries two late refunds into distinct later adjustments', async (actor) => {
     const f = await cancelledFixture();
     vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
     const first = await ingestAcceptedTestRefund(f, 'bridge-one', '10.00');
@@ -595,8 +625,26 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } }))
       .toMatchObject({ status: 'CANCELLED' });
 
-    const approved = await approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`);
+    const approved = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: replacementRow.id, expectedVendorId: f.vendorId })
+      : await approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`);
     expect(approved.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: replacementRow.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : `${f.vendorId}-approver`,
+    });
+    if (actor === 'system') {
+      const attempt = await db.settlementAutoApprovalAttempt.findFirstOrThrow({
+        where: { settlementApprovalId: replacementRow.id },
+      });
+      expect(attempt).toMatchObject({ vendorId: f.vendorId, outcome: 'APPROVED' });
+      expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: replacementRow.id } }))
+        .successfulAutoApprovalAttemptId).toBe(attempt.id);
+      expect(await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .reconcileAutomaticApprovalAttempt({ attemptId: attempt.id,
+          settlementApprovalId: replacementRow.id, expectedVendorId: f.vendorId }))
+        .toMatchObject({ classification: 'VERIFIED_COMPLETED', reasonCode: 'EXACT_ATTEMPT_APPROVED' });
+    }
     await expect(approval.approveSettlementApproval(replacementRow.id, `${f.vendorId}-approver`))
       .rejects.toThrow('Only draft settlement approvals can be approved.');
     for (const [evidence, amount] of [[first, 880], [second, 1320]] as const) {
@@ -733,16 +781,24 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     const f = await fixture();
     afterRunDate(f.runDate);
     const evidence = await ingestAcceptedTestRefund({ ...f, originalId: '' }, 'zero-net', '200.00', '200.00');
-    const draft = await approval.createDraftApproval({ vendorId: f.vendorId });
+    const draft = await approval.createAdminManualDraftApproval({ vendorId: f.vendorId });
     expect(new Set(draft.lines.map((line) => line.financeLedgerEntryId)))
       .toEqual(new Set([f.ledgerId, evidence.refundFinanceLedgerEntryId]));
     expect(draft.netPayableMinor).toBe(0);
     return { f, evidence, draft };
   }
 
-  it('approves an ordinary zero-net SALE and exact REFUND', async () => {
-    const { draft } = await ordinaryZeroNetDraft();
-    expect((await approval.approveSettlementApproval(draft.id, 'zero-net-test-admin')).status).toBe('approved');
+  it.each(['admin', 'system'] as const)('approves an ordinary zero-net SALE and exact REFUND via %s', async (actor) => {
+    const { f, draft } = await ordinaryZeroNetDraft();
+    const approved = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: draft.id, expectedVendorId: f.vendorId })
+      : await approval.approveSettlementApproval(draft.id, 'zero-net-test-admin');
+    expect(approved.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : 'zero-net-test-admin',
+      netPayableMinor: 0,
+    });
   });
 
   it.each([
@@ -776,7 +832,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     await db.financeLedgerEntry.update({ where: { id: f.ledgerId },
       data: { createdAt: new Date(periodStart.getTime() - dayMs) } });
     const periodEnd = new Date(refundLedger.createdAt.getTime() + 1_000);
-    const draft = await approval.createDraftApproval({ vendorId: f.vendorId,
+    const draft = await approval.createAdminManualDraftApproval({ vendorId: f.vendorId,
       candidateScope: 'date_range', periodStart, periodEnd, asOfDate: periodEnd });
     expect(draft.lines.map((line) => [line.financeLedgerEntryId, line.lineType]))
       .toEqual([[evidence.refundFinanceLedgerEntryId, 'REFUND']]);
@@ -786,9 +842,18 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     return { f, evidence, draft };
   }
 
-  it('approves a negative-net REFUND DRAFT without executing a payment', async () => {
+  it.each(['admin', 'system'] as const)(
+    'approves a negative-net REFUND DRAFT via %s without executing a payment', async (actor) => {
     const { f, draft } = await negativeNetDraft();
-    expect((await approval.approveSettlementApproval(draft.id, 'negative-net-test-admin')).status).toBe('approved');
+    const approved = actor === 'system'
+      ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+        .approveSettlementDraftInternally({ settlementApprovalId: draft.id, expectedVendorId: f.vendorId })
+      : await approval.approveSettlementApproval(draft.id, 'negative-net-test-admin');
+    expect(approved.status).toBe('approved');
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : 'negative-net-test-admin',
+      netPayableMinor: -880,
+    });
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
@@ -959,7 +1024,8 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
-  it('2D: adjustment write failure rolls back replacement approval and can be retried', async () => {
+  it.each(['admin', 'system'] as const)(
+    '2D: adjustment write failure rolls back %s replacement approval and can be retried', async (actor) => {
     const f = await cancelledFixture();
     vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
     const evidence = await ingestAcceptedTestRefund(f, 'approval-rollback', '10.00');
@@ -970,9 +1036,14 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     await db.$executeRawUnsafe(`CREATE TRIGGER fin_bug_002_adjustment_failure
       BEFORE INSERT ON "SettlementRefundAdjustment" FOR EACH ROW
       EXECUTE FUNCTION fin_bug_002_adjustment_failure()`);
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const failedAttemptId = `${created.replacementSettlementApprovalId}-failed-attempt`;
     try {
-      await expect(approval.approveSettlementApproval(created.replacementSettlementApprovalId,
-        `${f.vendorId}-approver`)).rejects.toThrow('TEST_ADJUSTMENT_WRITE_FAILURE');
+      const operation = actor === 'system' ? internal.approveSettlementDraftInternally({
+        settlementApprovalId: created.replacementSettlementApprovalId,
+        expectedVendorId: f.vendorId, attemptId: failedAttemptId,
+      }) : approval.approveSettlementApproval(created.replacementSettlementApprovalId, `${f.vendorId}-approver`);
+      await expect(operation).rejects.toThrow('TEST_ADJUSTMENT_WRITE_FAILURE');
     } finally {
       await db.$executeRawUnsafe('DROP TRIGGER fin_bug_002_adjustment_failure ON "SettlementRefundAdjustment"');
       await db.$executeRawUnsafe('DROP FUNCTION fin_bug_002_adjustment_failure()');
@@ -983,7 +1054,19 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.settlementRefundAdjustment.count({ where: {
       refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
     } })).toBe(0);
-    await approval.approveSettlementApproval(created.replacementSettlementApprovalId, `${f.vendorId}-approver`);
+    if (actor === 'system') {
+      expect(await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: failedAttemptId } }))
+        .toMatchObject({ outcome: 'TECHNICAL_FAILURE' });
+      expect(await db.settlementAutoApprovalAttemptEvent.count({ where: {
+        attemptId: failedAttemptId, outcome: 'APPROVED',
+      } })).toBe(0);
+      await internal.approveSettlementDraftInternally({
+        settlementApprovalId: created.replacementSettlementApprovalId, expectedVendorId: f.vendorId,
+        attemptId: `${created.replacementSettlementApprovalId}-retry-attempt`,
+      });
+    } else {
+      await approval.approveSettlementApproval(created.replacementSettlementApprovalId, `${f.vendorId}-approver`);
+    }
     expect(await db.settlementApproval.findUniqueOrThrow({ where: {
       id: created.replacementSettlementApprovalId,
     } })).toMatchObject({ status: 'APPROVED' });
@@ -1033,16 +1116,35 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
-  it('2D: concurrent refund ingestion and replacement approval cannot omit an accepted refund', async () => {
+  it.each(['refund-first', 'approval-first'] as const)(
+    '2D: system replacement approval and refund ingestion preserve authority with %s lock arrival', async (first) => {
     const f = await cancelledFixture();
     const request = await replacementRequest(f, 'concurrent-approval-refund');
     const created = await replacementWriter.createControlledSettlementReplacementDraft(request);
     vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
     const held = await holdVendorLock(f.vendorId);
-    const ingestAttempt = ingestAcceptedTestRefund(f, 'concurrent-approval-refund', '10.00');
-    const approvalAttempt = approval.approveSettlementApproval(created.replacementSettlementApprovalId,
-      `${f.vendorId}-approver`);
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const attemptId = `${created.replacementSettlementApprovalId}-${first}-system-attempt`;
+    const startApproval = () => internal.approveSettlementDraftInternally({
+      settlementApprovalId: created.replacementSettlementApprovalId,
+      expectedVendorId: f.vendorId, attemptId,
+    });
+    let ingestAttempt!: ReturnType<typeof ingestAcceptedTestRefund>;
+    let approvalAttempt!: ReturnType<typeof startApproval>;
     try {
+      if (first === 'refund-first') {
+        ingestAttempt = ingestAcceptedTestRefund(f, 'concurrent-approval-refund', '10.00');
+        void ingestAttempt.catch(() => undefined);
+        await waitForCancellationLockWaits(1);
+        approvalAttempt = startApproval();
+        void approvalAttempt.catch(() => undefined);
+      } else {
+        approvalAttempt = startApproval();
+        void approvalAttempt.catch(() => undefined);
+        await waitForCancellationLockWaits(1);
+        ingestAttempt = ingestAcceptedTestRefund(f, 'concurrent-approval-refund', '10.00');
+        void ingestAttempt.catch(() => undefined);
+      }
       await waitForCancellationLockWaits(2);
     } finally {
       await held.release();
@@ -1051,22 +1153,420 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(ingestResult.status).toBe('fulfilled');
     if (ingestResult.status !== 'fulfilled') return;
     const evidence = ingestResult.value;
+    expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toMatchObject({ refundRecordId: evidence.refundRecordId,
+      historicalEconomicVendorId: f.vendorId });
+    expect(await db.financeLedgerEntry.findUniqueOrThrow({ where: {
+      id: evidence.refundFinanceLedgerEntryId,
+    } })).toMatchObject({ vendorId: f.vendorId, entryType: 'refund', payoutStatus: 'HOLD' });
     const row = await db.settlementApproval.findUniqueOrThrow({ where: {
       id: created.replacementSettlementApprovalId,
     } });
     if (approvalResult.status === 'fulfilled') {
       expect(row.status).toBe('APPROVED');
-      expect(await db.settlementRefundAdjustment.findUniqueOrThrow({ where: {
+      expect(row).toMatchObject({ approvedBy: 'system:settlement_auto_approval',
+        successfulAutoApprovalAttemptId: attemptId, periodEnd: f.periodEnd });
+      expect(await db.settlementRefundAdjustment.findUnique({ where: {
         refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
       } })).toMatchObject({ refundRecordId: evidence.refundRecordId,
         originalSettlementApprovalId: row.id, status: 'PENDING' });
     } else {
       expect(row.status).toBe('DRAFT');
+      expect(await db.settlementAutoApprovalAttemptEvent.count({ where: { attemptId, outcome: 'APPROVED' } })).toBe(0);
       expect(await db.settlementRefundAdjustment.count({ where: {
         refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
       } })).toBe(0);
     }
+    expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } }))
+      .toMatchObject({ status: 'CANCELLED' });
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(approvalResult.status === 'fulfilled' ? 1 : 0);
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+  });
+
+  it.each([true, false])(
+    'C11-T1 diagnostic: refund-first visibility with post-commit ledger alignment=%s', async (alignLedgerCreatedAt) => {
+    const f = await cancelledFixture();
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(
+      await replacementRequest(f, `timeline-${alignLedgerCreatedAt}`));
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const held = await holdVendorLock(f.vendorId);
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const attemptId = `${created.replacementSettlementApprovalId}-timeline-${alignLedgerCreatedAt}`;
+    const trace: Array<{ checkpoint: string; elapsedMs: number; detail?: unknown }> = [];
+    const beganAt = performance.now();
+    const mark = (checkpoint: string, detail?: unknown) => trace.push({ checkpoint,
+      elapsedMs: Math.round(performance.now() - beganAt), ...(detail === undefined ? {} : { detail }) });
+    let rawLedgerCreatedAt: Date | null = null;
+    let approvalAtRefundCommit: PromiseSettledResult<Awaited<ReturnType<typeof internal.approveSettlementDraftInternally>>> | null = null;
+    let approvalAttempt!: ReturnType<typeof internal.approveSettlementDraftInternally>;
+    mark('T00_ORIGINAL_CANCELLED', f.originalId);
+    mark('T01_REPLACEMENT_DRAFT', created.replacementSettlementApprovalId);
+    mark('T02_TEST_VENDOR_LOCK_HELD');
+    mark('T03_INGESTION_CALLED');
+    const ingestAttempt = ingestAcceptedTestRefund(f, `timeline-${alignLedgerCreatedAt}`, '10.00', '10.00', {
+      alignLedgerCreatedAt,
+      beforeAlignment: async (evidence) => {
+        mark('T11_INGEST_SERVICE_RETURNED_AFTER_TRANSACTION_COMMIT');
+        const raw = await db.financeLedgerEntry.findUniqueOrThrow({
+          where: { id: evidence.refundFinanceLedgerEntryId }, select: { createdAt: true },
+        });
+        rawLedgerCreatedAt = raw.createdAt;
+        mark('T12_BEFORE_FIXTURE_ALIGNMENT', { ledgerCreatedAt: raw.createdAt.toISOString(),
+          capturedAt: evidence.capturedAt.toISOString(), cutoff: f.periodEnd.toISOString() });
+        // This barrier lets approval finish while the fixture's separate timestamp write is withheld.
+        approvalAtRefundCommit = await Promise.allSettled([approvalAttempt]).then(([result]) => result);
+        mark('T18_APPROVAL_SETTLED_BEFORE_ALIGNMENT', approvalAtRefundCommit.status);
+      },
+    });
+    void ingestAttempt.catch(() => undefined);
+    try {
+      await waitForCancellationLockWaits(1);
+      mark('T05_INGEST_VENDOR_LOCK_WAIT_OBSERVED');
+      mark('T04_APPROVAL_CALLED');
+      approvalAttempt = internal.approveSettlementDraftInternally({
+        settlementApprovalId: created.replacementSettlementApprovalId, expectedVendorId: f.vendorId, attemptId,
+      });
+      void approvalAttempt.catch(() => undefined);
+      await waitForCancellationLockWaits(2);
+      const waiters = await db.$queryRaw<Array<{ pid: number; blockers: number[];
+        queryStartedAt: Date; waitEvent: string | null }>>`
+        SELECT pid, pg_blocking_pids(pid) AS blockers, query_start AS "queryStartedAt",
+          wait_event AS "waitEvent"
+        FROM pg_stat_activity
+        WHERE datname = current_database() AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock' AND query LIKE '%"Vendor"%FOR UPDATE%'
+        ORDER BY query_start, pid`;
+      mark('T06_TWO_VENDOR_LOCK_WAITS_OBSERVED', waiters.map((waiter) => ({
+        pid: waiter.pid, blockers: waiter.blockers,
+        queryStartedAt: waiter.queryStartedAt.toISOString(), waitEvent: waiter.waitEvent,
+      })));
+    } finally {
+      await held.release();
+      mark('T07_TEST_VENDOR_LOCK_RELEASED');
+    }
+    const [ingestResult, approvalResult] = await Promise.allSettled([ingestAttempt, approvalAttempt]);
+    if (alignLedgerCreatedAt && ingestResult.status === 'fulfilled') mark('T13_FIXTURE_ALIGNMENT_COMMITTED');
+    mark('T19_BOTH_CALLS_SETTLED', { ingestion: ingestResult.status, approval: approvalResult.status });
+    expect(ingestResult.status).toBe('fulfilled');
+    if (ingestResult.status !== 'fulfilled') return;
+    const evidence = ingestResult.value;
+    const [ledger, settlement, adjustment, directLines, debtEvents, claimCount, attemptEvents] = await Promise.all([
+      db.financeLedgerEntry.findUniqueOrThrow({ where: { id: evidence.refundFinanceLedgerEntryId } }),
+      db.settlementApproval.findUniqueOrThrow({ where: { id: created.replacementSettlementApprovalId } }),
+      db.settlementRefundAdjustment.findUnique({ where: {
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId } }),
+      db.settlementApprovalLine.count({ where: { financeLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        lineType: 'REFUND' } }),
+      db.vendorBalanceEvent.count({ where: { financeLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        type: 'VENDOR_DEBT_CREATED' } }),
+      db.payoutOffsetClaim.count({ where: { vendorId: f.vendorId, sourceType: 'REFUND_ADJUSTMENT' } }),
+      db.settlementAutoApprovalAttemptEvent.findMany({ where: { attemptId }, select: { outcome: true, reasonCode: true } }),
+    ]);
+    const { calculateRefundOffsetAmounts } = await import('../backend/src/modules/finance/refund-offset.service.js');
+    const amounts = calculateRefundOffsetAmounts({ refundAmount: ledger.amount,
+      commissionPercentSnapshot: ledger.commissionPercentSnapshot,
+      commissionVatPercentSnapshot: ledger.commissionVatPercentSnapshot });
+    expect(amounts).toMatchObject({ refundMinor: 1000, commissionReversalMinor: 100,
+      commissionVatReversalMinor: 20, vendorPayableReversalMinor: 880 });
+    expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId } })).toMatchObject({
+        refundRecordId: evidence.refundRecordId, historicalEconomicVendorId: f.vendorId,
+        historicalSaleFinanceLedgerEntryId: f.ledgerId });
+    expect(rawLedgerCreatedAt).not.toBeNull();
+    expect(approvalAtRefundCommit?.status).toBe(approvalResult.status);
+    expect(directLines).toBeLessThanOrEqual(1);
+    expect(debtEvents).toBeLessThanOrEqual(1);
+    mark('T19_PERSISTED_STATE', { approvalStatus: settlement.status, approvedBy: settlement.approvedBy,
+      frozenLateRefundLedgerIds: (settlement.sourceSnapshotJson as { lateRefundLedgerIds?: string[] } | null)?.lateRefundLedgerIds,
+      refundLedgerId: ledger.id, refundRecordId: evidence.refundRecordId,
+      refundCapturedAt: evidence.capturedAt.toISOString(), rawLedgerCreatedAt: rawLedgerCreatedAt?.toISOString(),
+      finalLedgerCreatedAt: ledger.createdAt.toISOString(), qualifiesAfterCutoff: ledger.createdAt > f.periodEnd,
+      refundPayoutStatus: ledger.payoutStatus, refundHoldReason: ledger.settlementHoldReason,
+      adjustmentId: adjustment?.id ?? null, adjustmentAmountMinor: adjustment?.originalAmountMinor ?? null,
+      directLines, debtEvents, claimCount, attemptEvents });
+    console.info('C11-T1-DIAGNOSTIC', JSON.stringify(trace));
+    if (alignLedgerCreatedAt && settlement.status === 'APPROVED') {
+      expect(adjustment || directLines > 0 || debtEvents > 0 || claimCount > 0,
+        'An APPROVED replacement must not omit the exact accepted late-refund obligation.').toBeTruthy();
+    }
+  });
+
+  it('C11-T1 control: a fully committed and aligned refund is visible to a fresh approval attempt', async () => {
+    const f = await cancelledFixture();
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(
+      await replacementRequest(f, 'timeline-sequential'));
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'timeline-sequential', '10.00');
+    const ledger = await db.financeLedgerEntry.findUniqueOrThrow({
+      where: { id: evidence.refundFinanceLedgerEntryId },
+    });
+    expect(ledger.createdAt.getTime()).toBeGreaterThan(f.periodEnd.getTime());
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const attemptId = `${created.replacementSettlementApprovalId}-timeline-sequential`;
+    await expect(internal.approveSettlementDraftInternally({
+      settlementApprovalId: created.replacementSettlementApprovalId,
+      expectedVendorId: f.vendorId, attemptId,
+    })).rejects.toThrow('Replacement late-refund authority changed before approval.');
+    const settlement = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: created.replacementSettlementApprovalId },
+    });
+    const attempt = await db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: attemptId } });
+    console.info('C11-T1-SEQUENTIAL-CONTROL', JSON.stringify({
+      refundLedgerId: ledger.id, ledgerCreatedAt: ledger.createdAt.toISOString(),
+      capturedAt: evidence.capturedAt.toISOString(), cutoff: f.periodEnd.toISOString(),
+      approvalStatus: settlement.status, attemptOutcome: attempt.outcome,
+      frozenLateRefundLedgerIds: (settlement.sourceSnapshotJson as { lateRefundLedgerIds?: string[] } | null)?.lateRefundLedgerIds,
+    }));
+    expect(settlement.status).toBe('DRAFT');
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(0);
+  });
+
+  it('C11-T1 control: a fresh approval before fixture alignment does not silently omit the refund', async () => {
+    const f = await cancelledFixture();
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(
+      await replacementRequest(f, 'timeline-unaligned-sequential'));
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const attemptId = `${created.replacementSettlementApprovalId}-timeline-unaligned-sequential`;
+    let approvalError: unknown;
+    const evidence = await ingestAcceptedTestRefund(f, 'timeline-unaligned-sequential', '10.00', '10.00', {
+      beforeAlignment: async (snapshot) => {
+        const raw = await db.financeLedgerEntry.findUniqueOrThrow({
+          where: { id: snapshot.refundFinanceLedgerEntryId }, select: { createdAt: true },
+        });
+        expect(raw.createdAt.getTime()).toBeLessThan(f.periodEnd.getTime());
+        expect(snapshot.capturedAt.getTime()).toBeGreaterThan(f.periodEnd.getTime());
+        try {
+          await internal.approveSettlementDraftInternally({
+            settlementApprovalId: created.replacementSettlementApprovalId,
+            expectedVendorId: f.vendorId, attemptId,
+          });
+        } catch (error) {
+          approvalError = error;
+        }
+        console.info('C11-T1-UNALIGNED-FRESH-CONTROL', JSON.stringify({
+          refundLedgerId: snapshot.refundFinanceLedgerEntryId,
+          rawLedgerCreatedAt: raw.createdAt.toISOString(), capturedAt: snapshot.capturedAt.toISOString(),
+          cutoff: f.periodEnd.toISOString(),
+          approvalError: approvalError instanceof Error ? approvalError.message : null,
+        }));
+      },
+    });
+    expect(approvalError).toBeInstanceOf(Error);
+    expect((approvalError as Error).message).toBe('Replacement late-refund authority changed before approval.');
+    expect(await db.settlementApproval.findUniqueOrThrow({
+      where: { id: created.replacementSettlementApprovalId },
+    })).toMatchObject({ status: 'DRAFT' });
+    expect(await db.settlementRefundAdjustment.count({ where: {
+      refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+    } })).toBe(0);
+  });
+
+  it('C11-A1-01 observes the real bridge return in the refund-first lock race', async () => {
+    const f = await cancelledFixture();
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(
+      await replacementRequest(f, 'a1-refund-first'));
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const bridgeModule = await import('../backend/src/modules/finance/settlement-replacement-late-refund.service.js');
+    const bridgeSpy = vi.spyOn(bridgeModule, 'verifyReplacementLateRefundBridges');
+    const held = await holdVendorLock(f.vendorId);
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const attemptId = `${created.replacementSettlementApprovalId}-a1-refund-first`;
+    let approvalAttempt!: ReturnType<typeof internal.approveSettlementDraftInternally>;
+    let approvalAtRefundCommit: PromiseSettledResult<Awaited<typeof approvalAttempt>> | null = null;
+    const ingestion = ingestAcceptedTestRefund(f, 'a1-refund-first', '10.00', '10.00', {
+      alignLedgerCreatedAtBeforeCommit: true,
+      beforeAlignment: async (accepted) => {
+        const committedLedger = await db.financeLedgerEntry.findUniqueOrThrow({
+          where: { id: accepted.refundFinanceLedgerEntryId }, select: { createdAt: true },
+        });
+        expect(committedLedger.createdAt).toEqual(accepted.capturedAt);
+        expect(committedLedger.createdAt.getTime()).toBeGreaterThan(f.periodEnd.getTime());
+        approvalAtRefundCommit = (await Promise.allSettled([approvalAttempt]))[0];
+      },
+    });
+    void ingestion.catch(() => undefined);
+    try {
+      try {
+        await waitForCancellationLockWaits(1);
+        approvalAttempt = internal.approveSettlementDraftInternally({
+          settlementApprovalId: created.replacementSettlementApprovalId,
+          expectedVendorId: f.vendorId, attemptId,
+        });
+        void approvalAttempt.catch(() => undefined);
+        await waitForCancellationLockWaits(2);
+      } finally {
+        await held.release();
+      }
+      const [ingestionResult, approvalResult] = await Promise.allSettled([ingestion, approvalAttempt]);
+      expect(ingestionResult.status).toBe('fulfilled');
+      if (ingestionResult.status !== 'fulfilled') return;
+      const evidence = ingestionResult.value;
+      expect(approvalAtRefundCommit?.status).toBe(approvalResult.status);
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+      const [, input] = bridgeSpy.mock.calls[0];
+      const actual = await bridgeSpy.mock.results[0].value;
+      const fresh = await bridgeSpy.mock.results[1].value;
+      expect(input).toMatchObject({ vendorId: f.vendorId, cutoff: f.periodEnd,
+        saleLedgerIds: [f.ledgerId], allocationIds: [f.allocationId] });
+      expect(actual).toEqual({ bridges: [], unverifiedRefundLedgerIds: [] });
+      expect(fresh).toEqual({ bridges: [{ refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        refundRecordId: evidence.refundRecordId, historicalSaleFinanceLedgerEntryId: f.ledgerId }],
+      unverifiedRefundLedgerIds: [] });
+      expect(approvalResult.status).toBe('rejected');
+      const [settlement, ledger, refundRecord, adjustment, applications, directLines, debtEvents, claims, attempt, attemptEvents] = await Promise.all([
+        db.settlementApproval.findUniqueOrThrow({ where: { id: created.replacementSettlementApprovalId } }),
+        db.financeLedgerEntry.findUniqueOrThrow({ where: { id: evidence.refundFinanceLedgerEntryId } }),
+        db.refundRecord.findUniqueOrThrow({ where: { id: evidence.refundRecordId } }),
+        db.settlementRefundAdjustment.findUnique({ where: { refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId } }),
+        db.settlementRefundAdjustmentApplication.count({ where: { settlementRefundAdjustment: {
+          refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId } } }),
+        db.settlementApprovalLine.count({ where: { financeLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+          lineType: 'REFUND' } }),
+        db.vendorBalanceEvent.count({ where: { financeLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+          type: 'VENDOR_DEBT_CREATED' } }),
+        db.payoutOffsetClaim.count({ where: { vendorId: f.vendorId } }),
+        db.settlementAutoApprovalAttempt.findUniqueOrThrow({ where: { id: attemptId } }),
+        db.settlementAutoApprovalAttemptEvent.findMany({ where: { attemptId } }),
+      ]);
+      console.info('C11-A1-REFUND-FIRST', JSON.stringify({ settlementId: settlement.id, vendorId: f.vendorId,
+        cutoff: input.cutoff.toISOString(), actual, approvalOutcome: approvalResult.status,
+        settlementStatus: settlement.status, attemptOutcome: attempt.outcome,
+        refundLedgerId: ledger.id, refundRecordId: evidence.refundRecordId,
+        capturedAt: evidence.capturedAt.toISOString(), ledgerCreatedAt: ledger.createdAt.toISOString(),
+        payoutStatus: ledger.payoutStatus, adjustmentId: adjustment?.id ?? null,
+        applications, directLines, debtEvents, claims,
+        attemptEvents: attemptEvents.map((event) => event.outcome) }));
+      expect(refundRecord).toMatchObject({ vendorAllocationId: f.allocationId,
+        status: 'processed' });
+      expect(refundRecord.amount?.toString()).toBe('10');
+      const { calculateRefundOffsetAmounts } = await import('../backend/src/modules/finance/refund-offset.service.js');
+      expect(calculateRefundOffsetAmounts({ refundAmount: ledger.amount,
+        commissionPercentSnapshot: ledger.commissionPercentSnapshot,
+        commissionVatPercentSnapshot: ledger.commissionVatPercentSnapshot })).toMatchObject({
+        refundMinor: 1000, commissionReversalMinor: 100,
+        commissionVatReversalMinor: 20, vendorPayableReversalMinor: 880,
+      });
+      expect(settlement).toMatchObject({ status: 'DRAFT', grossSalesMinor: 20000,
+        commissionMinor: 2000, commissionVatMinor: 400, netPayableMinor: 17600 });
+      expect(adjustment).toBeNull();
+      expect({ applications, directLines, debtEvents, claims }).toEqual({
+        applications: 0, directLines: 0, debtEvents: 0, claims: 0,
+      });
+      expect(attemptEvents.some((event) => event.outcome === 'APPROVED')).toBe(false);
+      expect(applications).toBe(0);
+      expect(await db.refundEvidenceSnapshot.findUniqueOrThrow({ where: {
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId } })).toMatchObject({
+        refundRecordId: evidence.refundRecordId, historicalSaleFinanceLedgerEntryId: f.ledgerId,
+        historicalEconomicVendorId: f.vendorId });
+      expect(await db.settlementApproval.findUniqueOrThrow({ where: { id: f.originalId } }))
+        .toMatchObject({ status: 'CANCELLED' });
+      expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+      if (settlement.status === 'APPROVED') {
+        expect(adjustment || directLines > 0 || debtEvents > 0 || claims > 0,
+          'An APPROVED replacement must not omit the exact accepted late-refund obligation.').toBeTruthy();
+      }
+    } finally {
+      bridgeSpy.mockRestore();
+    }
+  });
+
+  it('C11-A1-02 observes the real bridge return during a fresh approval', async () => {
+    const f = await cancelledFixture();
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(
+      await replacementRequest(f, 'a1-fresh'));
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const evidence = await ingestAcceptedTestRefund(f, 'a1-fresh', '10.00');
+    const bridgeModule = await import('../backend/src/modules/finance/settlement-replacement-late-refund.service.js');
+    const bridgeSpy = vi.spyOn(bridgeModule, 'verifyReplacementLateRefundBridges');
+    try {
+      await expect(approval.approveSettlementApproval(created.replacementSettlementApprovalId,
+        `${f.vendorId}-approver`)).rejects.toThrow('Replacement late-refund authority changed before approval.');
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+      const [, input] = bridgeSpy.mock.calls[0];
+      const actual = await bridgeSpy.mock.results[0].value;
+      expect(input).toMatchObject({ vendorId: f.vendorId, cutoff: f.periodEnd,
+        saleLedgerIds: [f.ledgerId], allocationIds: [f.allocationId] });
+      expect(actual).toEqual({ bridges: [{ refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        refundRecordId: evidence.refundRecordId, historicalSaleFinanceLedgerEntryId: f.ledgerId }],
+      unverifiedRefundLedgerIds: [] });
+      expect(await db.settlementApproval.findUniqueOrThrow({ where: {
+        id: created.replacementSettlementApprovalId }, select: { status: true } })).toMatchObject({ status: 'DRAFT' });
+      expect(await db.settlementRefundAdjustment.count({ where: {
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId } })).toBe(0);
+      console.info('C11-A1-FRESH-BRIDGE', JSON.stringify({ settlementId: created.replacementSettlementApprovalId,
+        vendorId: f.vendorId, cutoff: input.cutoff.toISOString(), actual }));
+    } finally {
+      bridgeSpy.mockRestore();
+    }
+  });
+
+  it('C11-A1-03 observes approval-first routing without duplicate refund effect', async () => {
+    const f = await cancelledFixture();
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(
+      await replacementRequest(f, 'a1-approval-first'));
+    vi.setSystemTime(new Date(f.periodEnd.getTime() + dayMs));
+    const bridgeModule = await import('../backend/src/modules/finance/settlement-replacement-late-refund.service.js');
+    const bridgeSpy = vi.spyOn(bridgeModule, 'verifyReplacementLateRefundBridges');
+    const held = await holdVendorLock(f.vendorId);
+    const internal = await import('../backend/src/modules/finance/settlement-auto-approval.service.js');
+    const attemptId = `${created.replacementSettlementApprovalId}-a1-approval-first`;
+    const approvalAttempt = internal.approveSettlementDraftInternally({
+      settlementApprovalId: created.replacementSettlementApprovalId,
+      expectedVendorId: f.vendorId, attemptId,
+    });
+    void approvalAttempt.catch(() => undefined);
+    let ingestion!: ReturnType<typeof ingestAcceptedTestRefund>;
+    try {
+      try {
+        await waitForCancellationLockWaits(1);
+        ingestion = ingestAcceptedTestRefund(f, 'a1-approval-first', '10.00');
+        void ingestion.catch(() => undefined);
+        await waitForCancellationLockWaits(2);
+      } finally {
+        await held.release();
+      }
+      const [approvalResult, ingestionResult] = await Promise.allSettled([approvalAttempt, ingestion]);
+      expect(approvalResult.status).toBe('fulfilled');
+      expect(ingestionResult.status).toBe('fulfilled');
+      if (ingestionResult.status !== 'fulfilled') return;
+      const evidence = ingestionResult.value;
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+      const [, input] = bridgeSpy.mock.calls[0];
+      const actual = await bridgeSpy.mock.results[0].value;
+      expect(actual).toEqual({ bridges: [], unverifiedRefundLedgerIds: [] });
+      const [settlement, adjustment, directLines, debtEvents, claimCount, attemptEvents] = await Promise.all([
+        db.settlementApproval.findUniqueOrThrow({ where: { id: created.replacementSettlementApprovalId } }),
+        db.settlementRefundAdjustment.findUnique({ where: { refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId } }),
+        db.settlementApprovalLine.count({ where: { financeLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+          lineType: 'REFUND' } }),
+        db.vendorBalanceEvent.count({ where: { financeLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+          type: 'VENDOR_DEBT_CREATED' } }),
+        db.payoutOffsetClaim.count({ where: { vendorId: f.vendorId } }),
+        db.settlementAutoApprovalAttemptEvent.findMany({ where: { attemptId } }),
+      ]);
+      console.info('C11-A1-APPROVAL-FIRST', JSON.stringify({ settlementId: settlement.id, vendorId: f.vendorId,
+        cutoff: input.cutoff.toISOString(), actual, settlementStatus: settlement.status,
+        refundLedgerId: evidence.refundFinanceLedgerEntryId, refundRecordId: evidence.refundRecordId,
+        adjustmentId: adjustment?.id ?? null, adjustmentAmountMinor: adjustment?.originalAmountMinor ?? null,
+        directLines, debtEvents, claimCount,
+        attemptEvents: attemptEvents.map((event) => event.outcome) }));
+      expect(settlement).toMatchObject({ status: 'APPROVED', approvedBy: 'system:settlement_auto_approval',
+        successfulAutoApprovalAttemptId: attemptId });
+      expect(adjustment).toMatchObject({ refundRecordId: evidence.refundRecordId,
+        refundFinanceLedgerEntryId: evidence.refundFinanceLedgerEntryId,
+        originalSettlementApprovalId: settlement.id, originalAmountMinor: 880,
+        appliedAmountMinor: 0, remainingAmountMinor: 880, status: 'PENDING' });
+      expect({ directLines, debtEvents, claimCount }).toEqual({
+        directLines: 0, debtEvents: 0, claimCount: 0 });
+    } finally {
+      bridgeSpy.mockRestore();
+    }
   });
 
   it('2C1-C: a refund ledger without accepted evidence cannot borrow a sibling identity', async () => {
@@ -1326,6 +1826,7 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       where: { id: result.replacementSettlementApprovalId }, include: { lines: true },
     });
     expect(persisted).toMatchObject({ status: 'DRAFT', vendorId: f.vendorId,
+      creationOrigin: 'CONTROLLED_REPLACEMENT',
       replacesSettlementApprovalId: f.originalId, replacementRequestId: request.requestId,
       replacementRequestedBy: request.adminUserId, replacementReason: request.reason,
       scheduledCycleKey: null, scheduledRunDate: null, scheduledPeriodEnd: null,
@@ -1341,6 +1842,37 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       include: { lines: true } })).toEqual(originalBefore);
     expect(await db.settlementScheduleJobRun.findUniqueOrThrow({ where: { id: jobBefore.id } })).toEqual(jobBefore);
     expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: f.originalId } })).toBe(1);
+    await expect(db.$executeRaw`
+      UPDATE "SettlementApproval" SET "creationOrigin" = NULL WHERE "id" = ${persisted.id}
+    `).rejects.toThrow(/creation origin is immutable/);
+    expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: persisted.id } })).creationOrigin)
+      .toBe('CONTROLLED_REPLACEMENT');
+    await expect(db.settlementApproval.create({ data: {
+      vendorId: f.vendorId, creationOrigin: 'CONTROLLED_REPLACEMENT',
+      grossSalesMinor: 0, refundTotalMinor: 0, commissionMinor: 0,
+      commissionVatMinor: 0, netPayableMinor: 0, sourceSnapshotJson: {},
+    } })).rejects.toThrow();
+  });
+
+  it('4B.3 worker approves a canonically created controlled replacement without payout or invoice', async () => {
+    const f = await cancelledFixture();
+    const created = await replacementWriter.createControlledSettlementReplacementDraft(
+      await replacementRequest(f, 'worker-controlled-replacement'));
+    const { runAutomaticSettlementApprovalWorker } = await import(
+      '../backend/src/modules/finance/settlement-auto-approval-worker.service.js');
+    expect(await runAutomaticSettlementApprovalWorker({ vendorId: f.vendorId })).toMatchObject({
+      outcomes: [{ settlementApprovalId: created.replacementSettlementApprovalId,
+        classification: 'VERIFIED_COMPLETED' }],
+    });
+    expect(await db.settlementApproval.findUniqueOrThrow({
+      where: { id: created.replacementSettlementApprovalId },
+    })).toMatchObject({ status: 'APPROVED', creationOrigin: 'CONTROLLED_REPLACEMENT',
+      approvedBy: 'system:settlement_auto_approval' });
+    expect(await db.settlementAutoApprovalAttempt.count({ where: {
+      settlementApprovalId: created.replacementSettlementApprovalId, outcome: 'APPROVED',
+    } })).toBe(1);
+    expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
+    expect(await db.settlementCommissionInvoice.count({ where: { vendorId: f.vendorId } })).toBe(0);
   });
 
   it('2B: exact request replay is idempotent, while changed identity or audit evidence is rejected', async () => {
@@ -1862,10 +2394,11 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
     expect(await db.settlementApproval.count({ where: { replacesSettlementApprovalId: originalId } })).toBe(0);
   });
 
-  it('rolls back cancellation audit when approval wins a Serializable race', async () => {
+  it.each(['admin', 'system'] as const)(
+    'rolls back cancellation audit when %s approval wins a Serializable race', async (actor) => {
     const f = await fixture();
     afterRunDate(f.runDate);
-    const created = await schedule.createSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
+    const created = await schedule.createAdminSettlementScheduleDrafts({ runDate: f.runDateKey, vendorId: f.vendorId,
       confirmAutoSettlementDrafts: true });
     const id = created.createdDrafts[0].settlementApprovalId;
     const held = await holdVendorLock(f.vendorId);
@@ -1874,7 +2407,10 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       const attempt = approval.cancelSettlementApproval(id, `${f.vendorId}-canceller`);
       const settled = Promise.allSettled([attempt]);
       await waitForCancellationLockWaits(1);
-      const approved = await approval.approveSettlementApproval(id, `${f.vendorId}-approver`);
+      const approved = actor === 'system'
+        ? await (await import('../backend/src/modules/finance/settlement-auto-approval.service.js'))
+          .approveSettlementDraftInternally({ settlementApprovalId: id, expectedVendorId: f.vendorId })
+        : await approval.approveSettlementApproval(id, `${f.vendorId}-approver`);
       expect(approved.status).toBe('approved');
       await held.release();
       outcome = (await settled)[0];
@@ -1888,7 +2424,9 @@ suite('FIN-BUG-002 current cancelled scheduled cycle behavior (PostgreSQL 16)', 
       code: 'P2010', meta: { code: '40001' },
     });
     expect(persisted).toMatchObject({ status: 'APPROVED', cancelledFromStatus: null,
-      cancelledBy: null, cancelledAt: null, approvedBy: `${f.vendorId}-approver`, scheduledCycleKey: f.cycleKey });
+      cancelledBy: null, cancelledAt: null,
+      approvedBy: actor === 'system' ? 'system:settlement_auto_approval' : `${f.vendorId}-approver`,
+      scheduledCycleKey: f.cycleKey });
     expect(persisted.lines.map((line) => line.financeLedgerEntryId)).toEqual([f.ledgerId]);
     expect(await db.settlementApproval.count({ where: { vendorId: f.vendorId } })).toBe(1);
     expect(await db.payoutBatch.count({ where: { vendorId: f.vendorId } })).toBe(0);
