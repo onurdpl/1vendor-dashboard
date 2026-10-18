@@ -528,6 +528,18 @@ Create a calmer daily workspace across Dashboard, Orders, Finance, Returns, Prod
 
 Continue shaping Finance into a seller money home. Overview should stay simple. Transactions, settlements, payments, reports, and refund details should provide drill-down evidence.
 
+#### Vendor Settlement & Payout Breakdown — future proposal
+
+**FUTURE FEATURE / NOT IMPLEMENTED. Priority: NOT DECIDED. Implementation: NOT AUTHORIZED.** This is a separate vendor-facing, primarily read-only financial-transparency feature, not part of FIN-AUTO-001. Proposed navigation, subject to discovery rather than existing route approval: Finance → Settlements → Settlement Detail → Order Financial Breakdown; Finance → Payouts → Payout Detail; potentially Account Transactions / Financial Movements.
+
+- **Proposed settlement list:** settlement reference, applicable period, creation/approval dates, status, included-order count, gross included sales, commission, commission VAT, refund effects, other adjustments, net entitlement, and related payout reference/status only where an actual link exists. A row opens the underlying transaction breakdown.
+- **Proposed settlement detail:** order reference/date, movement type and status, product/line reference, VAT-inclusive sale amount, commission and separate commission VAT, refund impact, vendor credit, vendor deduction/debt, other supported adjustment, net effect, reason and related record reference. Individual movements should expose their authoritative supporting evidence.
+- **Proposed payout detail:** payout reference/status, included settlements and entitlements, credits, debts/deductions, debt offsets, net cash amount, recorded payment-confirmation date if any, and related financial references. It should explain the difference between summed settlement entitlements and payout, and identify amounts unsettled or carried forward where authoritative data supports that distinction.
+
+Vendor isolation is mandatory. Settlement and payout are separate authorities; APPROVED is not PAID. PAID history remains immutable, and post-payment refunds cannot rewrite prior paid amounts. Later credits/debts must link to their actual authority, with no duplicate economic effect or settlement-level/payout-level conflation. Product sale/refund values are VAT-inclusive under existing rules; commission VAT is separate. Do not invent a product-VAT split or calculate financial truth in the frontend. Missing provenance must be shown as UNKNOWN, not inferred. No Admin approval, payout execution, EFT or Mark Paid control is proposed for these screens.
+
+**Discovery still required; feasibility UNKNOWN:** inspect current vendor finance routes and permissions, settlement approvals/lines, payout batches/lines, financial adjustments, refund ledger, vendor Finance UI, authorization boundaries and existing aggregations before choosing API fields or routes. This proposal neither creates a new financial formula nor authorizes implementation.
+
 ### Orders
 
 Make order states consistent across row, right rail, and detail. Blocked, refunded, transferred, returned, and fulfilled stories must never conflict.
