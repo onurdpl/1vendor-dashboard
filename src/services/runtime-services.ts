@@ -2107,6 +2107,13 @@ export const runtimeServices = {
         updatedAt: new Date().toISOString(),
       };
     },
+    async adminVendorShippingConfig(vendorId: string, options: ReadRequestOptions = {}) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.getAdminVendorShippingConfig(vendorId, { signal: options.signal });
+      }
+
+      return runtimeServices.orders.vendorShippingConfig(vendorId, options);
+    },
     async updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.updateVendorShippingConfig(vendorId, input);

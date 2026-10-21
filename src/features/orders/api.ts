@@ -9,6 +9,7 @@ export {
   getVendorOrdersWorkflowSummary,
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
+  getAdminVendorShippingConfig,
   listOrders,
   planAllocationSplit,
   probeShopifyReturnLabelUpload,

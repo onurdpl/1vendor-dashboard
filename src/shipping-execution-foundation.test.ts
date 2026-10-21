@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
+  vendor: {
+    findUnique: vi.fn(),
+  },
+  userVendorAccess: {
+    findMany: vi.fn(),
+  },
   vendorAllocation: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -390,6 +396,8 @@ describe('shipping execution foundation', () => {
 
   beforeEach(() => {
     clearKargonomiLocationLookupCache();
+    prismaMock.vendor.findUnique.mockReset();
+    prismaMock.userVendorAccess.findMany.mockReset();
     prismaMock.vendorAllocation.findUnique.mockReset();
     prismaMock.vendorAllocation.update.mockReset();
     prismaMock.vendorShippingConfig.findUnique.mockReset();
@@ -3362,5 +3370,102 @@ describe('shipping execution foundation', () => {
     const app = { get: vi.fn(), put: vi.fn(), post: vi.fn() };
     registerShippingExecutionRoutes(app as never, env);
     expect(app.post.mock.calls.map(([path]) => path)).not.toContain('/shipments/:id/update-navlungo');
+  });
+
+  it('keeps vendor shipping access scoped while Admin reads an existing linked or unlinked vendor', async () => {
+    type Handler = (request: unknown, reply: unknown) => Promise<unknown>;
+    const gets = new Map<string, { options: { preHandler: Array<Handler> }; handler: Handler }>();
+    const app = {
+      get: (path: string, options: { preHandler: Array<Handler> }, handler: Handler) => {
+        gets.set(path, { options, handler });
+      },
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    registerShippingExecutionRoutes(app as never, env);
+    const admin = gets.get('/admin/vendors/:vendorId/shipping-config');
+    const vendor = gets.get('/shipping/config');
+    expect(admin?.options.preHandler).toHaveLength(1);
+    expect(vendor?.options.preHandler).toHaveLength(2);
+
+    const reply = () => {
+      const result = { code: vi.fn(), send: vi.fn() };
+      result.code.mockReturnValue(result);
+      return result;
+    };
+    const unauthenticatedReply = reply();
+    await admin!.options.preHandler[0](
+      { method: 'GET', headers: {}, routeOptions: { url: '/admin/vendors/:vendorId/shipping-config' } },
+      unauthenticatedReply,
+    );
+    expect(unauthenticatedReply.code).toHaveBeenCalledWith(401);
+
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([
+      { vendorId: 'sporjinal-v2', vendor: { name: 'Sporjinal', status: 'inactive' } },
+    ]);
+    const ownRequest = { authUser: { id: 'vendor-user', role: 'vendor' }, headers: { 'x-vendor-id': 'sporjinal-v2' }, vendorContext: null as unknown };
+    await vendor!.options.preHandler[1](ownRequest, reply());
+    expect(ownRequest.vendorContext).toMatchObject({ vendorId: 'sporjinal-v2' });
+    expect(await vendor!.handler(ownRequest, reply()))
+      .toMatchObject({ vendorId: 'sporjinal-v2', source: 'default' });
+    const otherDenied = reply();
+    await vendor!.options.preHandler[1](
+      { authUser: { id: 'vendor-user', role: 'vendor' }, headers: { 'x-vendor-id': 'other-vendor' } },
+      otherDenied,
+    );
+    expect(otherDenied.code).toHaveBeenCalledWith(403);
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([]);
+    const noAccess = reply();
+    await vendor!.options.preHandler[1](ownRequest, noAccess);
+    expect(noAccess.code).toHaveBeenCalledWith(403);
+
+    for (const role of ['vendor', 'support', 'finance']) {
+      const denied = reply();
+      await admin!.handler({ authUser: { role }, params: { vendorId: 'sporjinal-v2' } }, denied);
+      expect(denied.code).toHaveBeenCalledWith(403);
+    }
+    expect(prismaMock.vendor.findUnique).not.toHaveBeenCalled();
+
+    prismaMock.vendor.findUnique
+      .mockResolvedValueOnce({ id: 'sporjinal-v2', status: 'active' })
+      .mockResolvedValueOnce({ id: 'sporjinal-v2', status: 'inactive' })
+      .mockResolvedValue({ id: 'sporjinal-v2', status: 'inactive' });
+    const config = {
+      ...buildKargonomiShippingConfig(),
+      vendorId: 'sporjinal-v2',
+      shopifyLocationGid: 'gid://shopify/Location/101',
+      providerMetadata: { kargonomiShippingProviderId: '15', returnReceiverName: 'Test receiver' },
+      warehouses: [{
+        id: 'warehouse-v2', configId: 'config-v2', vendorId: 'sporjinal-v2', provider: 'KARGONOMI',
+        warehouseId: '112668', name: 'Test warehouse', address: 'Test address', isDefault: true,
+        metadata: null, createdAt: new Date(), updatedAt: new Date(),
+      }],
+    };
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(config);
+    for (const linked of [true, false]) {
+      const result = await admin!.handler({
+        authUser: { role: 'admin' }, params: { vendorId: 'sporjinal-v2' },
+        headers: { 'x-vendor-id': linked ? 'sporjinal-v2' : 'other-vendor' },
+      }, reply());
+      expect(result).toMatchObject({
+        vendorId: 'sporjinal-v2', shopifyLocationGid: 'gid://shopify/Location/101',
+        providerMetadata: config.providerMetadata,
+        warehouses: [expect.objectContaining({ vendorId: 'sporjinal-v2', name: 'Test warehouse' })],
+      });
+    }
+    expect(prismaMock.vendor.findUnique).toHaveBeenCalledWith({
+      where: { id: 'sporjinal-v2' }, select: { id: true },
+    });
+
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(null);
+    expect(await admin!.handler({ authUser: { role: 'admin' }, params: { vendorId: 'sporjinal-v2' } }, reply()))
+      .toMatchObject({ vendorId: 'sporjinal-v2', source: 'default', warehouses: [] });
+    prismaMock.vendor.findUnique.mockResolvedValue(null);
+    const missing = reply();
+    await admin!.handler({ authUser: { role: 'admin' }, params: { vendorId: 'missing' } }, missing);
+    expect(missing.code).toHaveBeenCalledWith(404);
+    expect(prismaMock.vendorShippingConfig.findUnique).toHaveBeenCalledTimes(4);
+    expect(prismaMock.vendorShippingConfig.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorShippingWarehouse.upsert).not.toHaveBeenCalled();
   });
 });

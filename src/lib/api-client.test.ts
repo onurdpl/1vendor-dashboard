@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from './api-client';
 import { EXPIRED_SESSION_MESSAGE, getCurrentUser, getToken, peekExpiredSessionNotice, setCurrentUser, setCurrentVendorId, setToken } from './auth';
 import { ApiError } from './api/errors';
+import { getAdminVendorShippingConfig } from '../services/real/orders';
 
 describe('apiClient vendor-scoped headers', () => {
   const fetchMock = vi.fn();
@@ -66,6 +67,17 @@ describe('apiClient vendor-scoped headers', () => {
 
     expect(headers.get('X-Vendor-Id')).toBeNull();
     expect(headers.get('Authorization')).toBe('Bearer test-token');
+  });
+
+  it('reads Admin shipping config by route Vendor ID without a workspace Vendor header', async () => {
+    setCurrentVendorId('demo-vendor-a');
+
+    await getAdminVendorShippingConfig('sporjinal-v2');
+
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/admin/vendors/sporjinal-v2/shipping-config');
+    const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
+    expect(init.method).toBe('GET');
+    expect((init.headers as Headers).get('X-Vendor-Id')).toBeNull();
   });
 
   it('clears stale session state when the backend rejects the token', async () => {

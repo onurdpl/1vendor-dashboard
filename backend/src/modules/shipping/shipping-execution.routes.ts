@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
+import { prisma } from '../../db/prisma.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
@@ -67,6 +68,24 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       const vendorId = request.vendorContext?.vendorId;
       if (!vendorId) {
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      return getVendorShippingConfig(vendorId);
+    },
+  );
+
+  app.get<{ Params: { vendorId: string } }>(
+    '/admin/vendors/:vendorId/shipping-config',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const vendorId = request.params.vendorId;
+      const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { id: true } });
+      if (!vendor) {
+        return reply.code(404).send({ message: 'Vendor could not be found.' });
       }
 
       return getVendorShippingConfig(vendorId);

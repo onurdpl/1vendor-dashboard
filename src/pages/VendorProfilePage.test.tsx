@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorProfilePage } from './VendorProfilePage';
 import { ApiError } from '../lib/api/errors';
@@ -30,6 +30,9 @@ import { getCurrentVendorContext, setCurrentUser, setCurrentVendorId, setToken }
 
 const getVendorShippingConfigMock = vi.fn<
   (options?: { vendorId?: string | null; signal?: AbortSignal }) => Promise<VendorShippingConfig>
+>();
+const getAdminVendorShippingConfigMock = vi.fn<
+  (vendorId: string, options?: { signal?: AbortSignal }) => Promise<VendorShippingConfig>
 >();
 const getShippingProviderDiagnosticsMock = vi.fn();
 const updateVendorShippingConfigMock = vi.fn();
@@ -95,6 +98,8 @@ vi.mock('../features/orders/api', async () => {
     ...actual,
     getVendorShippingConfig: (options?: { vendorId?: string | null; signal?: AbortSignal }) =>
       getVendorShippingConfigMock(options),
+    getAdminVendorShippingConfig: (vendorId: string, options?: { signal?: AbortSignal }) =>
+      getAdminVendorShippingConfigMock(vendorId, options),
     getShippingProviderDiagnostics: (options?: { vendorId?: string | null; provider?: string | null; signal?: AbortSignal }) =>
       getShippingProviderDiagnosticsMock(options),
     updateVendorShippingConfig: (vendorId: string, input: unknown) => updateVendorShippingConfigMock(vendorId, input),
@@ -424,7 +429,7 @@ function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
   };
 }
 
-function renderVendorProfilePage(initialEntries = ['/vendor/profile']) {
+function renderVendorProfilePage(initialEntries = ['/vendor/profile'], showVendorNavigation = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -436,6 +441,7 @@ function renderVendorProfilePage(initialEntries = ['/vendor/profile']) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
+        {showVendorNavigation ? <Link to="/admin/vendors/demo-vendor-b">Open Vendor B</Link> : null}
         <Routes>
           <Route path="/vendor/profile" element={<VendorProfilePage />} />
           <Route path="/admin/vendors/:vendorId" element={<VendorProfilePage />} />
@@ -484,6 +490,11 @@ describe('VendorProfilePage', () => {
     });
     getVendorShippingConfigMock.mockReset();
     getVendorShippingConfigMock.mockResolvedValue(shippingConfig);
+    getAdminVendorShippingConfigMock.mockReset();
+    getAdminVendorShippingConfigMock.mockImplementation(async (vendorId, options) => ({
+      ...await getVendorShippingConfigMock({ vendorId, signal: options?.signal }),
+      vendorId,
+    }));
     getShippingProviderDiagnosticsMock.mockReset();
     getShippingProviderDiagnosticsMock.mockResolvedValue(shippingProviderDiagnostics());
     updateVendorShippingConfigMock.mockReset();
@@ -1678,6 +1689,69 @@ describe('VendorProfilePage', () => {
     expect(getVendorBillingProfileMock).toHaveBeenCalledWith('sporborsa', expect.any(Object));
     expect(getVendorStatusMock).toHaveBeenCalledWith('sporborsa', expect.any(Object));
     expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-b');
+  });
+
+  it('keeps Admin shipping and warehouse data isolated while another Vendor loads and fails', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    let rejectVendorB: ((error: Error) => void) | undefined;
+    getAdminVendorShippingConfigMock.mockImplementation((vendorId) => vendorId === 'demo-vendor-a'
+      ? Promise.resolve(shippingConfig)
+      : new Promise<VendorShippingConfig>((_resolve, reject) => { rejectVendorB = reject; }));
+
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a'], true);
+    const shippingSection = (await screen.findByRole('heading', { name: 'Shipping operations' })).closest('section')!;
+    const warehouseSection = screen.getByRole('heading', { name: 'Warehouse and returns' }).closest('section')!;
+    expect(await within(warehouseSection).findByText('Main warehouse')).toBeInTheDocument();
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('link', { name: 'Open Vendor B' }));
+    await waitFor(() => expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-b', expect.any(Object)));
+    expect(within(shippingSection).getByRole('heading', { name: 'Loading shipping setup' })).toBeInTheDocument();
+    expect(within(warehouseSection).getByRole('heading', { name: 'Loading warehouse setup' })).toBeInTheDocument();
+    expect(within(warehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(within(shippingSection).queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+
+    rejectVendorB?.(new Error('Vendor B shipping read failed.'));
+    expect(await within(shippingSection).findByText('Vendor B shipping read failed.')).toBeInTheDocument();
+    expect(within(warehouseSection).getByText('Vendor B shipping read failed.')).toBeInTheDocument();
+    expect(within(warehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
+
+    getAdminVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
+      vendorId: 'demo-vendor-b',
+      defaultWarehouseId: 'warehouse-b',
+      warehouses: [{
+        ...shippingConfig.warehouses[0], id: 'warehouse-b', vendorId: 'demo-vendor-b',
+        warehouseId: 'warehouse-b', name: 'Vendor B warehouse', address: 'Vendor B address',
+      }],
+    });
+    await user.click(within(shippingSection).getByRole('button', { name: 'Retry' }));
+    expect(await within(warehouseSection).findByText('Vendor B warehouse')).toBeInTheDocument();
+    expect(within(warehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(within(shippingSection).getByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
+  });
+
+  it('rejects an Admin shipping response for a different Vendor before rendering an editor', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    getAdminVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'other-vendor' });
+
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+    expect(await screen.findAllByText('Shipping configuration vendor identity does not match the requested vendor.'))
+      .toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
   });
 
   it('creates admin route correction tickets with the route vendor context override', async () => {

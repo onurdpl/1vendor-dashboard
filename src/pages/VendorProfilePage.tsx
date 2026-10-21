@@ -16,7 +16,7 @@ import { AdminVendorPasswordResetSection } from '../components/AdminVendorPasswo
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getAdminVendorFinancialProfile, getFinanceProfile, updateVendorFinancialProfile } from '../features/finance/api';
-import { getVendorShippingConfig } from '../features/orders/api';
+import { getAdminVendorShippingConfig, getVendorShippingConfig } from '../features/orders/api';
 import {
   createAdminVendorSupportTicket,
   createSupportTicket,
@@ -1178,9 +1178,19 @@ export function VendorProfilePage() {
   sopyoCredentialVendorRef.current = currentVendor.vendorId;
 
   const shippingQuery = useQueryResource(
-    queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
-    ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: canLoadProfile },
+    isAdminVendorRoute
+      ? queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId)
+      : queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
+    async ({ signal }) => {
+      const config = isAdminVendorRoute
+        ? await getAdminVendorShippingConfig(currentVendor.vendorId, { signal })
+        : await getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal });
+      if (config.vendorId !== currentVendor.vendorId) {
+        throw new Error('Shipping configuration vendor identity does not match the requested vendor.');
+      }
+      return config;
+    },
+    { enabled: canLoadProfile, placeholderData: () => undefined },
   );
   const financeQuery = useQueryResource(
     queryKeys.vendorProfile.financeProfile(currentVendor.vendorId, isAdmin ? 'admin' : 'vendor'),
@@ -1226,7 +1236,7 @@ export function VendorProfilePage() {
   );
   const sopyoConfigured = savedSopyoConfiguredVendorId === currentVendor.vendorId || sopyoCredentialQuery.data?.configured === true;
 
-  const shippingConfig = shippingQuery.data;
+  const shippingConfig = shippingQuery.data?.vendorId === currentVendor.vendorId ? shippingQuery.data : null;
   const financeProfile = isAdmin && savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
   const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
   const vendorStatus = savedVendorStatus?.vendorId === currentVendor.vendorId

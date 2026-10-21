@@ -12,8 +12,8 @@ import {
   cancelShipmentExecution,
   createReturnShipmentLabel,
   createShipmentExecution,
+  getAdminVendorShippingConfig,
   getOrder,
-  getVendorShippingConfig,
   probeShopifyReturnLabelUpload,
   probeTryOtoReturnAwbPrint,
   probeTryOtoReturnDetails,
@@ -1502,13 +1502,29 @@ export function OrderDetailPage() {
       enabled: authContextReady && Boolean(orderId),
     },
   );
-  const { data: vendorShippingConfig } = useQueryResource(
+  const shippingVendorId = order && order.id === orderId && order.assignedVendorId === currentVendor.vendorId
+    ? order.assignedVendorId
+    : null;
+  const { data: shippingConfigResponse } = useQueryResource(
     queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
-    ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
+    async ({ signal }) => {
+      if (!shippingVendorId) {
+        throw new Error('Shipping vendor context is unavailable.');
+      }
+      const config = await getAdminVendorShippingConfig(shippingVendorId, { signal });
+      if (config.vendorId !== shippingVendorId) {
+        throw new Error('Shipping configuration vendor identity does not match the requested vendor.');
+      }
+      return config;
+    },
     {
-      enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId) && Boolean(order),
+      enabled: authContextReady && isAdmin && Boolean(shippingVendorId),
+      placeholderData: () => undefined,
     },
   );
+  const vendorShippingConfig = shippingConfigResponse?.vendorId === shippingVendorId
+    ? shippingConfigResponse
+    : null;
   const { data: relatedReturnsData } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),

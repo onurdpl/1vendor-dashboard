@@ -244,6 +244,10 @@ export async function getVendorShippingConfig(options: { vendorId?: string | nul
   return runtimeServices.orders.vendorShippingConfig(options.vendorId ?? undefined, { signal: options.signal });
 }
 
+export async function getAdminVendorShippingConfig(vendorId: string, options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.orders.adminVendorShippingConfig(vendorId, { signal: options.signal });
+}
+
 export async function updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {
   return runtimeServices.orders.updateVendorShippingConfig(vendorId, input);
 }

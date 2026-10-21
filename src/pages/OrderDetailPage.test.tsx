@@ -24,6 +24,7 @@ const splitAllocationMock = vi.fn<(
 ) => Promise<AllocationSplitExecutionResponse>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
 const getVendorShippingConfigMock = vi.fn();
+const getAdminVendorShippingConfigMock = vi.fn();
 const updateVendorShippingConfigMock = vi.fn();
 const syncKargonomiWarehouseDetailsMock = vi.fn();
 const createShipmentExecutionMock = vi.fn();
@@ -94,6 +95,8 @@ vi.mock('../features/orders/api', async () => {
     getShippingProviderDiagnostics: (options?: { vendorId?: string | null; provider?: string | null }) =>
       getShippingProviderDiagnosticsMock(options),
     getVendorShippingConfig: (options?: { vendorId?: string | null }) => getVendorShippingConfigMock(options),
+    getAdminVendorShippingConfig: (vendorId: string, options?: { signal?: AbortSignal }) =>
+      getAdminVendorShippingConfigMock(vendorId, options),
     updateVendorShippingConfig: (vendorId: string, input: unknown) => updateVendorShippingConfigMock(vendorId, input),
     syncKargonomiWarehouseDetails: (vendorId: string, warehouseId: string) =>
       syncKargonomiWarehouseDetailsMock(vendorId, warehouseId),
@@ -806,7 +809,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       errorMessage: null,
     });
     getVendorShippingConfigMock.mockReset();
-    getVendorShippingConfigMock.mockResolvedValue({
+    getAdminVendorShippingConfigMock.mockReset();
+    const defaultShippingConfig = {
       vendorId: 'sporjinal',
       preferredProvider: 'kargonomi',
       shippingEnabled: true,
@@ -832,7 +836,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:28:50.786Z',
-    });
+    };
+    getVendorShippingConfigMock.mockResolvedValue(defaultShippingConfig);
+    getAdminVendorShippingConfigMock.mockResolvedValue(defaultShippingConfig);
     updateVendorShippingConfigMock.mockReset();
     updateVendorShippingConfigMock.mockResolvedValue({
       vendorId: 'sporjinal',
@@ -5250,8 +5256,28 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'kargonomi',
       'kargonomi',
     ]);
-    expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' }));
+    expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('sporjinal', expect.any(Object));
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
   }, 10000);
+
+  it('does not initialize Admin Order Detail shipping from another Vendor response', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true, defaultVendorId: 'sporjinal',
+    });
+    getAdminVendorShippingConfigMock.mockResolvedValue({
+      vendorId: 'other-vendor', preferredProvider: 'navlungo', shippingEnabled: true,
+      warehouses: [{ id: 'other-warehouse', vendorId: 'other-vendor', name: 'Other vendor warehouse' }],
+    });
+
+    renderOrderDetail();
+    expect(await screen.findByText('Order #1028')).toBeInTheDocument();
+    await waitFor(() => expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('sporjinal', expect.any(Object)));
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('Other vendor warehouse')).not.toBeInTheDocument();
+  });
 
   it('normalizes saved Try OTO config to Kargonomi for active editing', async () => {
     setCurrentUser({
@@ -5263,7 +5289,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
-    getVendorShippingConfigMock.mockResolvedValueOnce({
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce({
       vendorId: 'sporjinal',
       preferredProvider: 'try_oto',
       shippingEnabled: true,
@@ -5537,7 +5563,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         warnings: [],
       }),
     );
-    getVendorShippingConfigMock.mockResolvedValueOnce({
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce({
       vendorId: 'sporjinal',
       preferredProvider: 'kargonomi',
       shippingEnabled: true,
@@ -5626,7 +5652,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         warnings: [],
       }),
     );
-    getVendorShippingConfigMock.mockResolvedValueOnce({
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce({
       vendorId: 'sporjinal',
       preferredProvider: 'kargonomi',
       shippingEnabled: true,
@@ -5696,7 +5722,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
-    getVendorShippingConfigMock.mockResolvedValueOnce({
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce({
       vendorId: 'sporjinal',
       preferredProvider: 'navlungo',
       shippingEnabled: true,
@@ -5984,7 +6010,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
   it('keeps shipment actions available for vendor orders when Try OTO is the saved provider', async () => {
     getOrderMock.mockResolvedValue(orderWithoutShipment);
-    getVendorShippingConfigMock.mockResolvedValueOnce({
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce({
       vendorId: 'sporjinal',
       preferredProvider: 'try_oto',
       shippingEnabled: true,
@@ -6026,7 +6052,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: false,
       defaultVendorId: 'sporjinal',
     });
-    getVendorShippingConfigMock.mockResolvedValueOnce({
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce({
       vendorId: 'sporjinal',
       preferredProvider: 'try_oto',
       shippingEnabled: true,

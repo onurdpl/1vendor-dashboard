@@ -1150,6 +1150,13 @@ export async function getVendorShippingConfig(options: { vendorId?: string | nul
   });
 }
 
+export async function getAdminVendorShippingConfig(vendorId: string, options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<VendorShippingConfig>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/shipping-config`,
+    { skipVendorContext: true, signal: options.signal },
+  );
+}
+
 export async function updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {
   return apiClient.put<VendorShippingConfig>(
     `/admin/vendors/${encodeURIComponent(vendorId)}/shipping-config`,
