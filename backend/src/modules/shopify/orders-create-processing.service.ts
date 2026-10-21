@@ -239,6 +239,13 @@ export function createOrdersCreateProcessingService(input: {
         event: processingInput.event,
         payload: processingInput.payload,
         sellerInfo: sellerInfoResult.sellerInfo,
+        canonicalOrder: sellerInfoResult.source === 'shopify_admin'
+          ? {
+              orderGid: sellerInfoResult.orderGid,
+              createdAtUtc: sellerInfoResult.createdAtUtc,
+              source: 'SHOPIFY_ADMIN_GRAPHQL',
+            }
+          : null,
         lineItemImages,
         taxSnapshot,
         mode: processingInput.mode,

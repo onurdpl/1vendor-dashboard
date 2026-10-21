@@ -179,6 +179,8 @@ export type OrderIngestionFailureCode =
   | 'missing_sku'
   | 'missing_seller_mapping'
   | 'unknown_vendor'
+  | 'vendor_identity_unverified'
+  | 'vendor_ownership_conflict'
   | 'protected_finance_state'
   | 'existing_local_order_requires_current_state_repair'
   | 'transient_database_or_network'
@@ -213,6 +215,11 @@ export type OrderIngestionInput = {
   event: WebhookEvent;
   payload: ShopifyOrdersCreateWebhookPayload;
   sellerInfo: SellerInfoMap;
+  canonicalOrder?: {
+    orderGid: string | null | undefined;
+    createdAtUtc: string | null | undefined;
+    source: 'SHOPIFY_ADMIN_GRAPHQL' | null;
+  } | null;
   lineItemImages?: ShopifyOrderLineItemImage[];
   taxSnapshot?: FetchOrderTaxSnapshotResult | null;
   mode?: OrderIngestionMode;

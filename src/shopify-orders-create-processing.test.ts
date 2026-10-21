@@ -57,6 +57,8 @@ describe('orders/create reusable processing service', () => {
       sellerInfo: { 'SKU-1': 'sporjinal' },
       attempts: 1,
       source: 'shopify_admin',
+      orderGid: 'gid://shopify/Order/2001',
+      createdAtUtc: '2026-10-21T08:00:00.000Z',
     });
     ingestionMock.ingestShopifyOrderWebhook.mockResolvedValue({
       ok: true,
@@ -114,6 +116,11 @@ describe('orders/create reusable processing service', () => {
       event: event(),
       payload,
       sellerInfo: { 'SKU-1': 'sporjinal' },
+      canonicalOrder: {
+        orderGid: 'gid://shopify/Order/2001',
+        createdAtUtc: '2026-10-21T08:00:00.000Z',
+        source: 'SHOPIFY_ADMIN_GRAPHQL',
+      },
       lineItemImages: [],
       taxSnapshot: null,
       mode: 'upsert',

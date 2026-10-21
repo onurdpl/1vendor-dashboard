@@ -1,5 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
+import { resolveOrderSellerVendorsFromEvidence, VendorIdentityRoutingError } from './vendor-identity-routing.service.js';
+import type { VendorIdentityCutoverSnapshot } from './vendor-identity-cutover.service.js';
 import { buildSaleLedgerEntryId } from '../finance/sale-ledger.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from './order-ingestion.types.js';
 
@@ -202,12 +204,14 @@ export type ShopifyOrderBackfillBlockReasonCode =
   | 'backfill_returned_order_blocked'
   | 'backfill_seller_info_missing'
   | 'backfill_unknown_vendor'
+  | 'backfill_vendor_identity_unverified'
   | 'backfill_payload_incomplete';
 
 export type BackfillLocalStore = {
   findOrderBySourceId(sourceShopifyOrderId: string): Promise<{ id: string } | null>;
   findOrdersByNumber(sourceShopifyOrderNumber: string): Promise<Array<{ sourceShopifyOrderId: string }>>;
   listVendors(): Promise<Array<{ id: string }>>;
+  listVendorIdentityCutovers(slugs: string[]): Promise<VendorIdentityCutoverSnapshot[]>;
   listActiveFinancialProfiles(vendorIds: string[]): Promise<Array<{
     vendorId: string;
     commissionPercent: unknown;
@@ -419,6 +423,9 @@ function getDefaultLocalStore(): BackfillLocalStore {
         select: { sourceShopifyOrderId: true },
       }),
     listVendors: () => prisma.vendor.findMany({ select: { id: true } }),
+    listVendorIdentityCutovers: (slugs) => prisma.vendorIdentityCutover.findMany({
+      where: { externalSellerSlug: { in: slugs } },
+    }),
     listActiveFinancialProfiles: (vendorIds) =>
       prisma.vendorFinancialProfile.findMany({
         where: {
@@ -757,9 +764,32 @@ async function buildPreflightReport(input: {
 
   const vendors = await input.localStore.listVendors();
   const vendorIds = new Set(vendors.map((vendor) => vendor.id));
+  const sellerSlugs = lineItems.map((lineItem) => {
+    const sku = normalizeOptionalString(lineItem.sku);
+    return sku && sellerInfo ? normalizeOptionalString(sellerInfo[sku]) : null;
+  });
+  const cutovers = await input.localStore.listVendorIdentityCutovers(
+    Array.from(new Set(sellerSlugs.filter((slug): slug is string => Boolean(slug)))),
+  );
+  let resolvedVendors: Map<string, string> | null = null;
+  if (sellerSlugs.every(Boolean)) {
+    try {
+      resolvedVendors = resolveOrderSellerVendorsFromEvidence({
+        sellerSlugs,
+        sourceShopifyOrderId: orderId,
+        canonicalOrder: { orderGid: input.order.id, createdAtUtc: input.order.createdAt, source: 'SHOPIFY_ADMIN_GRAPHQL' },
+        cutovers,
+        knownVendorIds: vendorIds,
+      });
+    } catch (error) {
+      if (!(error instanceof VendorIdentityRoutingError)) throw error;
+      addBlockReason(reasons, error.reason === 'UNKNOWN_VENDOR' ? 'backfill_unknown_vendor' : 'backfill_vendor_identity_unverified');
+    }
+  }
   const expectedLineItems = lineItems.map((lineItem, index) => {
     const sku = normalizeOptionalString(lineItem.sku);
-    const vendorId = sku && sellerInfo ? normalizeOptionalString(sellerInfo[sku]) : null;
+    const slug = sellerSlugs[index];
+    const vendorId = slug ? resolvedVendors?.get(slug.trim().toLowerCase()) ?? null : null;
     if (!sku) {
       missingFields.push(`lineItems[${index}].sku`);
     }

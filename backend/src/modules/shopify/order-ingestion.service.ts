@@ -14,10 +14,12 @@ import type {
 import type { FetchOrderTaxSnapshotResult, ShopifyOrderLineItemImage, ShopifyTaxLineSnapshot } from './shopify-admin.types.js';
 import {
   finalizeFencedOrdersCreateSuccess,
+  acquireShopifyOrderTransactionLock,
   isOrdersCreateLostFenceError,
   lockAndVerifyOrdersCreateOwnership,
   OrdersCreateLostFenceError,
 } from './orders-create-ownership.service.js';
+import { resolveOrderSellerVendors, VendorIdentityRoutingError } from './vendor-identity-routing.service.js';
 
 const DEFAULT_VENDOR_INTEGRATION_VAT_RATE = '10';
 
@@ -757,41 +759,6 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
   }
 
   try {
-    const vendors = await prisma.vendor.findMany();
-    const vendorIds = new Set(vendors.map((vendor) => vendor.id));
-
-    const resolvedLineItems = parsedOrder.lineItems.map((lineItem) => {
-      if (!lineItem.sku) {
-        throw nonRetryableFailure(
-          'missing_sku',
-          `Line item ${lineItem.sourceLineItemId} is missing SKU and cannot be allocated.`,
-        );
-      }
-
-      const vendorId = normalizeVendorSlug(input.sellerInfo[lineItem.sku]);
-      if (!vendorId) {
-        throw nonRetryableFailure(
-          'missing_seller_mapping',
-          `No seller_info mapping found for SKU ${lineItem.sku}.`,
-          'reconciliation_required',
-        );
-      }
-
-      if (!vendorIds.has(vendorId)) {
-        throw nonRetryableFailure(
-          'unknown_vendor',
-          `seller_info mapped SKU ${lineItem.sku} to unknown vendor ${vendorId}.`,
-          'reconciliation_required',
-        );
-      }
-
-      return {
-        ...lineItem,
-        vendorId,
-        imageUrl: resolveImageUrl(lineItem),
-      };
-    });
-
     const orderSnapshot = {
       sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
       shopifyCreatedAt: parsedOrder.shopifyCreatedAt,
@@ -831,6 +798,61 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
     const result = await prisma.$transaction(async (tx) => {
       if (input.executionContext) {
         await lockAndVerifyOrdersCreateOwnership(tx, input.executionContext);
+      } else {
+        await acquireShopifyOrderTransactionLock(tx, parsedOrder.sourceShopifyOrderId);
+      }
+
+      const sellerSlugs = parsedOrder.lineItems.map((lineItem) => {
+        if (!lineItem.sku) {
+          throw nonRetryableFailure('missing_sku', `Line item ${lineItem.sourceLineItemId} is missing SKU and cannot be allocated.`);
+        }
+        const slug = normalizeVendorSlug(input.sellerInfo[lineItem.sku]);
+        if (!slug) {
+          throw nonRetryableFailure('missing_seller_mapping', `No seller_info mapping found for SKU ${lineItem.sku}.`, 'reconciliation_required');
+        }
+        return slug;
+      });
+      let resolvedVendors: Map<string, string>;
+      try {
+        resolvedVendors = await resolveOrderSellerVendors({
+          db: tx,
+          sellerSlugs,
+          sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId,
+          canonicalOrder: input.canonicalOrder ?? null,
+        });
+      } catch (error) {
+        if (error instanceof VendorIdentityRoutingError) {
+          throw nonRetryableFailure(error.reason === 'UNKNOWN_VENDOR' ? 'unknown_vendor' : 'vendor_identity_unverified', error.message, 'reconciliation_required');
+        }
+        throw error;
+      }
+      const resolvedLineItems = parsedOrder.lineItems.map((lineItem, index) => ({
+        ...lineItem,
+        vendorId: resolvedVendors.get(sellerSlugs[index]!)!,
+        imageUrl: resolveImageUrl(lineItem),
+      }));
+
+      const existingOwnedLines = await tx.shopifyOrderLineItem.findMany({
+        where: { order: { sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId } },
+        select: { sourceLineItemId: true, originalVendorId: true },
+      });
+      const expectedByLine = new Map(resolvedLineItems.map((lineItem) => [lineItem.sourceLineItemId, lineItem.vendorId]));
+      if (existingOwnedLines.some((line) => expectedByLine.get(line.sourceLineItemId) !== line.originalVendorId)) {
+        throw nonRetryableFailure('vendor_ownership_conflict', 'Existing Shopify order line ownership conflicts with canonical vendor resolution; local ownership preserved.', 'reconciliation_required');
+      }
+      const existingOrderIdentity = await tx.shopifyOrder.findUnique({
+        where: { sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId },
+        select: { id: true },
+      });
+      if (existingOrderIdentity) {
+        const existingAllocations = await tx.vendorAllocation.findMany({
+          where: { sourceShopifyOrderId: existingOrderIdentity.id },
+          select: { originalVendorId: true },
+        });
+        const expectedVendors = new Set(resolvedLineItems.map((lineItem) => lineItem.vendorId));
+        if (existingAllocations.some((allocation) => !expectedVendors.has(allocation.originalVendorId))) {
+          throw nonRetryableFailure('vendor_ownership_conflict', 'Existing allocation ownership conflicts with canonical vendor resolution; local ownership preserved.', 'reconciliation_required');
+        }
       }
 
       let shopifyOrder;

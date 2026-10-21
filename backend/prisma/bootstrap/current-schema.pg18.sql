@@ -1208,6 +1208,39 @@ END;
 $_$;
 
 
+--
+-- Name: vendor_identity_cutover_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.vendor_identity_cutover_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Vendor identity cutover cannot be deleted';
+  END IF;
+
+  IF (NEW."id", NEW."externalSellerSlug", NEW."previousVendorId", NEW."replacementVendorId",
+      NEW."approvedCutoverAt", NEW."createdByUserId", NEW."approvedByUserId",
+      NEW."createdAt", NEW."approvedAt")
+     IS DISTINCT FROM
+     (OLD."id", OLD."externalSellerSlug", OLD."previousVendorId", OLD."replacementVendorId",
+      OLD."approvedCutoverAt", OLD."createdByUserId", OLD."approvedByUserId",
+      OLD."createdAt", OLD."approvedAt") THEN
+    RAISE EXCEPTION 'Vendor identity cutover authority is immutable';
+  END IF;
+
+  IF OLD."active" AND (NOT NEW."active" OR NEW."activatedAt" IS DISTINCT FROM OLD."activatedAt") THEN
+    RAISE EXCEPTION 'Activated vendor identity cutover cannot be changed';
+  END IF;
+  IF NOT OLD."active" AND NEW."active" AND NEW."activatedAt" IS NULL THEN
+    RAISE EXCEPTION 'Vendor identity cutover activation requires activatedAt';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
 SET default_table_access_method = heap;
 
 --
@@ -3055,6 +3088,29 @@ CREATE TABLE public."VendorFinancialProfile" (
 
 
 --
+-- Name: VendorIdentityCutover; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorIdentityCutover" (
+    id text NOT NULL,
+    "externalSellerSlug" text NOT NULL,
+    "previousVendorId" text NOT NULL,
+    "replacementVendorId" text NOT NULL,
+    "approvedCutoverAt" timestamp(3) with time zone NOT NULL,
+    active boolean DEFAULT false NOT NULL,
+    "createdByUserId" text NOT NULL,
+    "approvedByUserId" text NOT NULL,
+    "createdAt" timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "approvedAt" timestamp(3) with time zone NOT NULL,
+    "activatedAt" timestamp(3) with time zone,
+    CONSTRAINT "VendorIdentityCutover_activation_check" CHECK ((active = ("activatedAt" IS NOT NULL))),
+    CONSTRAINT "VendorIdentityCutover_previous_slug_check" CHECK (("previousVendorId" = "externalSellerSlug")),
+    CONSTRAINT "VendorIdentityCutover_slug_check" CHECK (("externalSellerSlug" ~ '^[a-z0-9][a-z0-9_-]*$'::text)),
+    CONSTRAINT "VendorIdentityCutover_vendor_distinct_check" CHECK (("previousVendorId" <> "replacementVendorId"))
+);
+
+
+--
 -- Name: VendorIntegrationAuditLog; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3849,6 +3905,14 @@ ALTER TABLE ONLY public."VendorBillingProfile"
 
 ALTER TABLE ONLY public."VendorFinancialProfile"
     ADD CONSTRAINT "VendorFinancialProfile_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorIdentityCutover VendorIdentityCutover_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIdentityCutover"
+    ADD CONSTRAINT "VendorIdentityCutover_pkey" PRIMARY KEY (id);
 
 
 --
@@ -5829,6 +5893,27 @@ CREATE UNIQUE INDEX "VendorFinancialProfile_vendorId_key" ON public."VendorFinan
 
 
 --
+-- Name: VendorIdentityCutover_externalSellerSlug_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VendorIdentityCutover_externalSellerSlug_key" ON public."VendorIdentityCutover" USING btree ("externalSellerSlug");
+
+
+--
+-- Name: VendorIdentityCutover_previousVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIdentityCutover_previousVendorId_idx" ON public."VendorIdentityCutover" USING btree ("previousVendorId");
+
+
+--
+-- Name: VendorIdentityCutover_replacementVendorId_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorIdentityCutover_replacementVendorId_idx" ON public."VendorIdentityCutover" USING btree ("replacementVendorId");
+
+
+--
 -- Name: VendorIntegrationAuditLog_clientId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6211,6 +6296,13 @@ CREATE TRIGGER settlement_auto_approval_attempt_guard_trigger BEFORE INSERT OR D
 --
 
 CREATE TRIGGER settlement_auto_approval_link_guard_trigger BEFORE UPDATE ON public."SettlementApproval" FOR EACH ROW EXECUTE FUNCTION public.settlement_auto_approval_link_guard();
+
+
+--
+-- Name: VendorIdentityCutover vendor_identity_cutover_immutable_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER vendor_identity_cutover_immutable_trigger BEFORE DELETE OR UPDATE ON public."VendorIdentityCutover" FOR EACH ROW EXECUTE FUNCTION public.vendor_identity_cutover_immutable();
 
 
 --
@@ -7755,6 +7847,38 @@ ALTER TABLE ONLY public."VendorBillingProfile"
 
 ALTER TABLE ONLY public."VendorFinancialProfile"
     ADD CONSTRAINT "VendorFinancialProfile_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorIdentityCutover VendorIdentityCutover_approvedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIdentityCutover"
+    ADD CONSTRAINT "VendorIdentityCutover_approvedByUserId_fkey" FOREIGN KEY ("approvedByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorIdentityCutover VendorIdentityCutover_createdByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIdentityCutover"
+    ADD CONSTRAINT "VendorIdentityCutover_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorIdentityCutover VendorIdentityCutover_previousVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIdentityCutover"
+    ADD CONSTRAINT "VendorIdentityCutover_previousVendorId_fkey" FOREIGN KEY ("previousVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorIdentityCutover VendorIdentityCutover_replacementVendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorIdentityCutover"
+    ADD CONSTRAINT "VendorIdentityCutover_replacementVendorId_fkey" FOREIGN KEY ("replacementVendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

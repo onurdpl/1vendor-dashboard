@@ -3,6 +3,8 @@ import type { SellerInfoMap } from './shopify-admin.types.js';
 type FetchSellerInfo = (orderId: string, options?: { signal?: AbortSignal }) => Promise<{
   sellerInfo: SellerInfoMap | null;
   source: 'mock' | 'shopify_admin';
+  orderGid?: string | null;
+  createdAtUtc?: string | null;
 }>;
 
 export type FetchSellerInfoWithRetryResult =
@@ -11,6 +13,8 @@ export type FetchSellerInfoWithRetryResult =
       sellerInfo: SellerInfoMap;
       attempts: number;
       source: 'mock' | 'shopify_admin';
+      orderGid?: string | null;
+      createdAtUtc?: string | null;
     }
   | {
       ok: false;
@@ -71,6 +75,8 @@ export async function fetchSellerInfoWithRetry(input: {
         sellerInfo: result.sellerInfo,
         attempts: attempt,
         source: result.source,
+        orderGid: result.orderGid,
+        createdAtUtc: result.createdAtUtc,
       };
     }
 

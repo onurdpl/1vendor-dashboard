@@ -87,7 +87,7 @@ describe('orders/create seller_info retry and abort support', () => {
     vi.useRealTimers();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        data: { order: { metafield: { value: '{"SKU-1":"sporjinal"}' } } },
+        data: { order: { id: 'gid://shopify/Order/2001', createdAt: '2026-10-21T08:00:00Z', metafield: { value: '{"SKU-1":"sporjinal"}' } } },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         data: { order: { id: 'gid://shopify/Order/2001', lineItems: { edges: [] } } },
@@ -111,11 +111,17 @@ describe('orders/create seller_info retry and abort support', () => {
     } as never);
     const controller = new AbortController();
 
-    await service.fetchOrderSellerInfo('2001', { signal: controller.signal });
+    const sellerResult = await service.fetchOrderSellerInfo('2001', { signal: controller.signal });
     await service.fetchOrderLineItemImages('2001', { signal: controller.signal });
     await service.fetchOrderTaxSnapshot('2001', { signal: controller.signal });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(sellerResult).toMatchObject({
+      orderGid: 'gid://shopify/Order/2001', createdAtUtc: '2026-10-21T08:00:00Z', source: 'shopify_admin',
+    });
+    const sellerQuery = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).query as string;
+    expect(sellerQuery).toContain('createdAt');
+    expect(sellerQuery).toContain('id');
     for (const call of fetchMock.mock.calls) {
       expect(call[1]).toMatchObject({ signal: controller.signal });
     }

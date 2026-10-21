@@ -8,6 +8,7 @@ import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { buildSaleLedgerEntryId, upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
+import { resolveOrderSellerVendors, VendorIdentityRoutingError } from '../shopify/vendor-identity-routing.service.js';
 import { preserveCurrentSopyoDelivered, preserveVerifiedSopyoDelivered } from '../shopify/sopyo-delivered-projection.service.js';
 import type {
   CanonicalShopifyOrderLineItemSnapshot,
@@ -687,9 +688,38 @@ async function repairCanonicalOrderLineItems(input: {
     canonicalByLineItemId.set(normalizeCanonicalLineItemId(lineItem.sourceLineItemId || lineItem.lineItemGid), lineItem);
   }
 
-  const sellerVendorIds = canonicalOrderSnapshot.sellerInfo
-    ? new Set((await prisma.vendor.findMany({ select: { id: true } })).map((vendor) => vendor.id))
-    : null;
+  let resolvedSellerVendors: Map<string, string> | null = null;
+  if (canonicalOrderSnapshot.sellerInfo) {
+    const sellerSlugs = canonicalOrderSnapshot.lineItems.map((lineItem) =>
+      lineItem.sku ? normalizeVendorSlug(canonicalOrderSnapshot.sellerInfo?.[lineItem.sku]) : null);
+    if (sellerSlugs.every(Boolean)) {
+      try {
+        resolvedSellerVendors = await resolveOrderSellerVendors({
+          db: prisma,
+          sellerSlugs,
+          sourceShopifyOrderId: shopifyOrder.sourceShopifyOrderId,
+          canonicalOrder: {
+            orderGid: canonicalOrderSnapshot.orderGid,
+            createdAtUtc: canonicalOrderSnapshot.shopifyCreatedAt,
+            source: canonicalOrderSnapshot.source === 'shopify_admin' ? 'SHOPIFY_ADMIN_GRAPHQL' : null,
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof VendorIdentityRoutingError)) throw error;
+        warnings.push(error.message);
+        await upsertCanonicalOrderSignal({
+          ruleKey: CANONICAL_ORDER_SIGNAL_RULE_KEYS.requiresManualReview,
+          sourceShopifyOrderId: shopifyOrder.sourceShopifyOrderId,
+          sourceShopifyOrderNumber: shopifyOrder.sourceShopifyOrderNumber,
+          title: 'Shopify vendor identity requires manual review',
+          description: 'Canonical order identity or vendor cutover authority could not be verified. Local ownership was preserved.',
+          suggestedAction: 'Review canonical Shopify order identity and approved vendor mapping.',
+          metadata: { reason: error.reason },
+        });
+        return { blocked: true, operationalConflict: false, manualReview: true };
+      }
+    }
+  }
   let operationalConflict = false;
   let manualReview = false;
   let repairedCount = 0;
@@ -753,20 +783,10 @@ async function repairCanonicalOrderLineItems(input: {
 
     const sellerInfoVendorId =
       canonicalOrderSnapshot.sellerInfo && canonicalLineItem.sku
-        ? normalizeVendorSlug(canonicalOrderSnapshot.sellerInfo[canonicalLineItem.sku])
+        ? resolvedSellerVendors?.get(normalizeVendorSlug(canonicalOrderSnapshot.sellerInfo[canonicalLineItem.sku]) ?? '') ?? null
         : null;
     if (sellerInfoVendorId) {
-      if (!sellerVendorIds?.has(sellerInfoVendorId)) {
-        const change = {
-          scope: localLineItem.id,
-          field: 'sellerInfo',
-          localValue: normalizeComparableString(localLineItem.originalVendorId),
-          canonicalValue: sellerInfoVendorId,
-        };
-        skippedFields.push(change);
-        warnings.push(`seller_info mapped SKU ${canonicalLineItem.sku} to unknown vendor ${sellerInfoVendorId}.`);
-        manualReview = true;
-      } else if (normalizeComparableString(localLineItem.originalVendorId) !== sellerInfoVendorId) {
+      if (normalizeComparableString(localLineItem.originalVendorId) !== sellerInfoVendorId) {
         const hasAllocationLinks = (localLineItem.allocationLineItems ?? []).length > 0;
         if (hasAllocationLinks || normalizeComparableString(localLineItem.originalVendorId)) {
           const change = {

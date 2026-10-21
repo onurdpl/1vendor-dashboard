@@ -13,6 +13,7 @@ const prismaMock = vi.hoisted(() => ({
   vendor: {
     findMany: vi.fn(),
   },
+  vendorIdentityCutover: { findMany: vi.fn() },
   vendorAllocation: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -236,6 +237,7 @@ describe('canonical Shopify order reconciliation', () => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation((callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
     prismaMock.vendor.findMany.mockResolvedValue([{ id: 'vendor-a' }, { id: 'vendor-b' }]);
+    prismaMock.vendorIdentityCutover.findMany.mockResolvedValue([]);
     reconcileShopifyOrderRefundsMock.mockResolvedValue(null);
   });
 
@@ -334,9 +336,7 @@ describe('canonical Shopify order reconciliation', () => {
     await createReconciliationService(buildEnv(snapshot)).reconcileShopifyOrder('order-1');
 
     expect(prismaMock.shopifyOrderLineItem.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        originalVendorId: 'vendor-a',
-      }),
+      data: expect.objectContaining({ originalVendorId: 'vendor-a' }),
     }));
   });
 
@@ -431,6 +431,24 @@ describe('canonical Shopify order reconciliation', () => {
       data: expect.objectContaining({
         originalVendorId: 'vendor-b',
       }),
+    }));
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('does not transfer existing ownership when active cutover authority is unverified', async () => {
+    const snapshot = buildCanonicalSnapshot({ sellerInfo: { 'SKU-1': 'vendor-a' } });
+    prismaMock.vendorIdentityCutover.findMany.mockResolvedValue([{
+      externalSellerSlug: 'vendor-a', previousVendorId: 'vendor-a', replacementVendorId: 'vendor-b',
+      approvedCutoverAt: new Date('2026-06-01T00:00:00.000Z'), active: true,
+      activatedAt: new Date('2026-05-31T00:00:00.000Z'),
+    }]);
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder());
+
+    const result = await createReconciliationService(buildEnv(snapshot)).reconcileShopifyOrder('order-1');
+
+    expect(result?.reconciliationStatus).toBe('needs_attention');
+    expect(prismaMock.shopifyOrderLineItem.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ originalVendorId: 'vendor-b' }),
     }));
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });

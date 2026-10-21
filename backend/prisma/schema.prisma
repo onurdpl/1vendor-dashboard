@@ -461,6 +461,8 @@ model User {
   zeroNetCorrectionAcknowledgements    FinancialCorrectionZeroNetAcknowledgement[] @relation("zeroNetCorrectionAcknowledgementActor")
   paidFinancialCorrections              FinancialCorrectionAuthority[] @relation("paidFinancialCorrectionActor")
   legacyRefundFinanceReviewEvents      LegacyRefundFinanceReviewEvent[] @relation("legacyRefundFinanceReviewEventActor")
+  identityCutoversCreated              VendorIdentityCutover[] @relation("vendorIdentityCutoverCreatedBy")
+  identityCutoversApproved             VendorIdentityCutover[] @relation("vendorIdentityCutoverApprovedBy")
   r1ReviewCancellationAttestations      PayoutR1ReviewCancellationAttestation[]
   r1CashlessCompletions                  PayoutR1CashlessCompletion[]
 }
@@ -509,6 +511,29 @@ model Vendor {
   refundTerminalEvidenceReviews RefundTerminalEvidenceReview[] @relation("refundTerminalEvidenceReviewEconomicVendor")
   refundTerminalConflictEvidence RefundTerminalConflictEvidence[] @relation("refundTerminalConflictEvidenceEconomicVendor")
   legacyRefundFinanceReviews     LegacyRefundFinanceReview[] @relation("legacyRefundFinanceReviewObservedVendor")
+  identityCutoversFrom            VendorIdentityCutover[] @relation("vendorIdentityCutoverPreviousVendor")
+  identityCutoversTo              VendorIdentityCutover[] @relation("vendorIdentityCutoverReplacementVendor")
+}
+
+model VendorIdentityCutover {
+  id                  String    @id @default(cuid())
+  externalSellerSlug  String    @unique
+  previousVendorId    String
+  replacementVendorId String
+  approvedCutoverAt   DateTime  @db.Timestamptz(3)
+  active              Boolean   @default(false)
+  createdByUserId     String
+  approvedByUserId    String
+  createdAt           DateTime  @default(now()) @db.Timestamptz(3)
+  approvedAt          DateTime  @db.Timestamptz(3)
+  activatedAt         DateTime? @db.Timestamptz(3)
+  previousVendor      Vendor    @relation("vendorIdentityCutoverPreviousVendor", fields: [previousVendorId], references: [id], onDelete: Restrict)
+  replacementVendor   Vendor    @relation("vendorIdentityCutoverReplacementVendor", fields: [replacementVendorId], references: [id], onDelete: Restrict)
+  createdBy           User      @relation("vendorIdentityCutoverCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  approvedBy          User      @relation("vendorIdentityCutoverApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([previousVendorId])
+  @@index([replacementVendorId])
 }
 
 model SupportTicket {

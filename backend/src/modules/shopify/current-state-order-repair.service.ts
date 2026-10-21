@@ -8,6 +8,8 @@ import {
 } from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
+import { resolveOrderSellerVendors, resolveOrderSellerVendorsFromEvidence, VendorIdentityRoutingError } from './vendor-identity-routing.service.js';
+import type { VendorIdentityCutoverSnapshot } from './vendor-identity-cutover.service.js';
 import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import { resolveAllocationOutboundSnapshot } from '../orders/allocation-outbound-snapshot.service.js';
 import { canonicalRefundToWebhookPayload } from '../reconciliation/canonical-refund-reconciliation.service.js';
@@ -99,6 +101,7 @@ type LocalRepairState = {
   duplicateOrderIdsForNumber: string[];
   vendorIds: string[];
   activeFinancialProfileVendorIds: string[];
+  cutovers: VendorIdentityCutoverSnapshot[];
 };
 
 export type CurrentStateOrderRepairDependencies = {
@@ -299,7 +302,7 @@ function validateCanonicalBundle(bundle: CanonicalRepairBundle, state: LocalRepa
     problems.push('Shopify seller_info is missing or invalid.');
   }
 
-  const mappedVendorIds = new Set<string>();
+  const sellerSlugs: string[] = [];
   const lineItemIds = new Set<string>();
   for (const lineItem of order.lineItems) {
     if (!lineItem.sourceLineItemId || lineItemIds.has(lineItem.sourceLineItemId)) {
@@ -318,11 +321,29 @@ function validateCanonicalBundle(bundle: CanonicalRepairBundle, state: LocalRepa
       problems.push(`No seller_info mapping exists for SKU ${lineItem.sku}.`);
       continue;
     }
-    mappedVendorIds.add(vendorId);
+    sellerSlugs.push(vendorId);
   }
 
   const knownVendors = new Set(state.vendorIds);
   const activeProfiles = new Set(state.activeFinancialProfileVendorIds);
+  let mappedVendorIds = new Set<string>();
+  try {
+    const resolved = resolveOrderSellerVendorsFromEvidence({
+      sellerSlugs,
+      sourceShopifyOrderId: order.sourceShopifyOrderId,
+      canonicalOrder: {
+        orderGid: order.orderGid,
+        createdAtUtc: order.shopifyCreatedAt,
+        source: order.source === 'shopify_admin' ? 'SHOPIFY_ADMIN_GRAPHQL' : null,
+      },
+      cutovers: state.cutovers,
+      knownVendorIds: knownVendors,
+    });
+    mappedVendorIds = new Set(resolved.values());
+  } catch (error) {
+    if (!(error instanceof VendorIdentityRoutingError)) throw error;
+    problems.push(error.message);
+  }
   for (const vendorId of mappedVendorIds) {
     if (!knownVendors.has(vendorId)) {
       problems.push(`seller_info maps to unknown vendor ${vendorId}.`);
@@ -492,6 +513,7 @@ function lineAmount(unitPrice: string | null, quantity: number) {
 async function applyBaseOrderInTransaction(
   tx: Prisma.TransactionClient,
   bundle: CanonicalRepairBundle,
+  resolvedVendors: ReadonlyMap<string, string>,
 ) {
   const snapshot = bundle.order;
   const existingOrder = await tx.shopifyOrder.findUnique({
@@ -502,8 +524,19 @@ async function applyBaseOrderInTransaction(
           financeEntries: { where: { entryType: 'sale' }, select: { id: true } },
         },
       },
+      lineItems: { select: { sourceLineItemId: true, originalVendorId: true } },
     },
   });
+  const expectedByLine = new Map(snapshot.lineItems.map((lineItem) => [
+    lineItem.sourceLineItemId,
+    resolvedVendors.get(normalizeVendorId(snapshot.sellerInfo?.[lineItem.sku ?? '']) ?? ''),
+  ]));
+  if (existingOrder?.lineItems?.some((lineItem) => expectedByLine.get(lineItem.sourceLineItemId) !== lineItem.originalVendorId)) {
+    throw new CurrentStateOrderRepairError('vendor_ownership_conflict', 'Existing Shopify order ownership conflicts with canonical vendor identity.', 409);
+  }
+  if (existingOrder?.allocations.some((allocation) => !new Set(resolvedVendors.values()).has(allocation.originalVendorId))) {
+    throw new CurrentStateOrderRepairError('vendor_ownership_conflict', 'Existing allocation ownership conflicts with canonical vendor identity.', 409);
+  }
   const shopifyOrder = existingOrder
     ? await tx.shopifyOrder.update({
         where: { id: existingOrder.id },
@@ -527,7 +560,7 @@ async function applyBaseOrderInTransaction(
   if (shouldCreateAllocationGraph) {
     for (const lineItem of snapshot.lineItems) {
       const sku = lineItem.sku as string;
-      const vendorId = normalizeVendorId(snapshot.sellerInfo?.[sku]) as string;
+      const vendorId = resolvedVendors.get(normalizeVendorId(snapshot.sellerInfo?.[sku]) as string)!;
       const orderLineItem = await tx.shopifyOrderLineItem.upsert({
         where: {
           shopifyOrderId_sourceLineItemId: {
@@ -787,7 +820,7 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
     },
 
     async inspectLocalState(bundle) {
-      const [existingOrder, duplicateOrders, vendors, profiles] = await Promise.all([
+      const [existingOrder, duplicateOrders, vendors, profiles, cutovers] = await Promise.all([
         prisma.shopifyOrder.findUnique({
           where: { sourceShopifyOrderId: bundle.order.sourceShopifyOrderId },
           include: {
@@ -806,6 +839,9 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
         }),
         prisma.vendor.findMany({ select: { id: true } }),
         prisma.vendorFinancialProfile.findMany({ where: { active: true }, select: { vendorId: true } }),
+        prisma.vendorIdentityCutover.findMany({
+          where: { externalSellerSlug: { in: Object.values(bundle.order.sellerInfo ?? {}).map((slug) => normalizeVendorId(slug)).filter((slug): slug is string => Boolean(slug)) } },
+        }),
       ]);
       return {
         orderExists: Boolean(existingOrder),
@@ -821,6 +857,7 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
         duplicateOrderIdsForNumber: duplicateOrders.map((order) => order.sourceShopifyOrderId),
         vendorIds: vendors.map((vendor) => vendor.id),
         activeFinancialProfileVendorIds: profiles.map((profile) => profile.vendorId),
+        cutovers,
       };
     },
 
@@ -843,7 +880,32 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
           input.bundle.order.sourceShopifyOrderId,
           input.inspectedState,
         );
-        const base = await applyBaseOrderInTransaction(tx, input.bundle);
+        const sellerSlugs = input.bundle.order.lineItems.map((lineItem) => normalizeVendorId(input.bundle.order.sellerInfo?.[lineItem.sku ?? '']));
+        const resolvedVendors = await resolveOrderSellerVendors({
+          db: tx,
+          sellerSlugs,
+          sourceShopifyOrderId: input.bundle.order.sourceShopifyOrderId,
+          canonicalOrder: {
+            orderGid: input.bundle.order.orderGid,
+            createdAtUtc: input.bundle.order.shopifyCreatedAt,
+            source: input.bundle.order.source === 'shopify_admin' ? 'SHOPIFY_ADMIN_GRAPHQL' : null,
+          },
+        });
+        const plannedVendors = resolveOrderSellerVendorsFromEvidence({
+          sellerSlugs,
+          sourceShopifyOrderId: input.bundle.order.sourceShopifyOrderId,
+          canonicalOrder: {
+            orderGid: input.bundle.order.orderGid,
+            createdAtUtc: input.bundle.order.shopifyCreatedAt,
+            source: input.bundle.order.source === 'shopify_admin' ? 'SHOPIFY_ADMIN_GRAPHQL' : null,
+          },
+          cutovers: input.inspectedState.cutovers,
+          knownVendorIds: new Set(input.inspectedState.vendorIds),
+        });
+        if ([...resolvedVendors].some(([slug, vendorId]) => plannedVendors.get(slug) !== vendorId)) {
+          throw new CurrentStateOrderRepairError('repair_plan_stale', 'Vendor identity changed after the repair plan was prepared. Run a fresh dry-run.', 409);
+        }
+        const base = await applyBaseOrderInTransaction(tx, input.bundle, resolvedVendors);
 
         const monetaryRefunds = getMonetaryRefunds(input.bundle, input.refundEvidence);
         const refundReviewWarnings: string[] = [];

@@ -215,6 +215,7 @@ function dependencies(input: {
     duplicateOrderIdsForNumber: [],
     vendorIds: ['yalispor'],
     activeFinancialProfileVendorIds: ['yalispor'],
+    cutovers: [],
     ...input.state,
   };
   const executeRepair = vi.fn(async () => {
@@ -244,11 +245,44 @@ function dependencies(input: {
   return { deps, executeRepair, recordFailure, state };
 }
 
+const activeCutover = {
+  externalSellerSlug: 'sporjinal', previousVendorId: 'sporjinal', replacementVendorId: 'demo-sporjinal',
+  approvedCutoverAt: new Date('2026-07-11T16:00:00.000Z'), active: true,
+  activatedAt: new Date('2026-07-10T16:00:00.000Z'),
+};
+
 function service(deps: CurrentStateOrderRepairDependencies) {
   return createCurrentStateOrderRepairService({ NODE_ENV: 'test' } as AppEnv, deps);
 }
 
 describe('Shopify current-state order repair', () => {
+  it('preflights a canonical replacement owner without treating seller slug as the Vendor.id', async () => {
+    const fixture = dependencies({
+      order: canonicalOrder({
+        sellerInfo: { 'SKU-1': 'sporjinal' }, source: 'shopify_admin',
+        shopifyCreatedAt: '2026-07-11T16:00:00.000Z',
+      }),
+      state: {
+        vendorIds: ['sporjinal', 'demo-sporjinal'],
+        activeFinancialProfileVendorIds: ['sporjinal', 'demo-sporjinal'],
+        cutovers: [activeCutover],
+      },
+    });
+    const result = await service(fixture.deps).repair({ orderIdentifier: '#1105', actor });
+    expect(result.ok).toBe(true);
+    expect(result.executed).toBe(false);
+    expect(fixture.executeRepair).not.toHaveBeenCalled();
+  });
+
+  it('rejects ambiguous creation time at an active cutover before repair', async () => {
+    const fixture = dependencies({
+      order: canonicalOrder({ sellerInfo: { 'SKU-1': 'sporjinal' }, source: 'shopify_admin', shopifyCreatedAt: '2026-07-11T16:00:00Z' }),
+      state: { vendorIds: ['sporjinal', 'demo-sporjinal'], activeFinancialProfileVendorIds: ['sporjinal', 'demo-sporjinal'], cutovers: [activeCutover] },
+    });
+    await expect(service(fixture.deps).repair({ orderIdentifier: '#1105', actor }))
+      .rejects.toThrow(/SHOPIFY_ORDER_TIME_MISSING_OR_INVALID/);
+    expect(fixture.executeRepair).not.toHaveBeenCalled();
+  });
   it('builds verified refund ingestion input with canonical evidence separate from its compatibility payload', () => {
     const refund = canonicalRefund();
     const bundle = {
@@ -473,6 +507,7 @@ describe('Shopify current-state order repair', () => {
           allocations: [
             {
               id: 'alloc-yalispor-7856043819345',
+              originalVendorId: 'yalispor',
               financeEntries: [{ id: 'sale-ledger-voided' }],
             },
           ],
@@ -484,6 +519,7 @@ describe('Shopify current-state order repair', () => {
     const result = await __currentStateOrderRepairTesting.applyBaseOrderInTransaction(
       tx as never,
       { order, refundCollection: canonicalRefundCollection([]), refunds: [], returns: [] },
+      new Map([['yalispor', 'yalispor']]),
     );
 
     expect(result.summary).toEqual({
@@ -513,6 +549,7 @@ describe('Shopify current-state order repair', () => {
     await __currentStateOrderRepairTesting.applyBaseOrderInTransaction(
       tx as never,
       { order: canonicalOrder(), refundCollection: canonicalRefundCollection([]), refunds: [], returns: [] },
+      new Map([['yalispor', 'yalispor']]),
     );
 
     expect(tx.vendorShippingConfig.findUnique).toHaveBeenCalledWith({
@@ -730,7 +767,7 @@ describe('Shopify current-state order repair', () => {
   it('rejects seller_info mappings to an unknown vendor before mutation', async () => {
     const fixture = dependencies({ state: { vendorIds: ['another-vendor'] } });
     await expect(service(fixture.deps).repair({ orderIdentifier: '#1105', execute: true, actor }))
-      .rejects.toThrow(/unknown vendor yalispor/i);
+      .rejects.toThrow(/UNKNOWN_VENDOR/);
     expect(fixture.executeRepair).not.toHaveBeenCalled();
   });
 

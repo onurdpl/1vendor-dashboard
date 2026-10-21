@@ -18,6 +18,8 @@ export type FetchRecentShopifyOrdersPageResult = {
 export type FetchOrderSellerInfoResult = {
   sellerInfo: SellerInfoMap | null;
   source: 'mock' | 'shopify_admin';
+  orderGid?: string | null;
+  createdAtUtc?: string | null;
 };
 
 export type ShopifyOrderLineItemImage = {

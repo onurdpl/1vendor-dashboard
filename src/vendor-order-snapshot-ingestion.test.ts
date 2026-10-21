@@ -7,6 +7,7 @@ const prismaMock = vi.hoisted(() => ({
   vendor: {
     findMany: vi.fn(),
   },
+  vendorIdentityCutover: { findMany: vi.fn() },
   webhookEvent: {
     update: vi.fn(),
   },
@@ -18,9 +19,11 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
   },
   shopifyOrderLineItem: {
+    findMany: vi.fn(),
     upsert: vi.fn(),
   },
   vendorAllocation: {
+    findMany: vi.fn(),
     findUnique: vi.fn(),
     upsert: vi.fn(),
   },
@@ -78,6 +81,7 @@ function buildSimpleOrderPayload(orderId = 2001, sku = 'SKU-1') {
 
 function mockSuccessfulDbWrites() {
   prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }]);
+  prismaMock.vendorIdentityCutover.findMany.mockResolvedValue([]);
   prismaMock.webhookEvent.update.mockResolvedValue({});
   prismaMock.shopifyOrder.upsert.mockResolvedValue({ id: 'shopify-order-db-1' });
   prismaMock.shopifyOrder.findFirst.mockResolvedValue(null);
@@ -85,8 +89,10 @@ function mockSuccessfulDbWrites() {
   prismaMock.shopifyOrder.create.mockResolvedValue({ id: 'shopify-order-db-1' });
   prismaMock.shopifyOrder.update.mockResolvedValue({});
   prismaMock.shopifyOrderLineItem.upsert.mockResolvedValue({ id: 'shopify-line-db-1' });
+  prismaMock.shopifyOrderLineItem.findMany.mockResolvedValue([]);
   prismaMock.vendorAllocation.upsert.mockResolvedValue({ id: 'alloc-sporjinal-2001' });
   prismaMock.vendorAllocation.findUnique.mockResolvedValue(null);
+  prismaMock.vendorAllocation.findMany.mockResolvedValue([]);
   prismaMock.sopyoOrderPush.createMany.mockResolvedValue({ count: 1 });
   prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(null);
   prismaMock.vendorAllocationLineItem.upsert.mockResolvedValue({});
@@ -99,6 +105,72 @@ describe('vendor order snapshot ingestion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSuccessfulDbWrites();
+  });
+
+  const cutover = {
+    externalSellerSlug: 'sporjinal', previousVendorId: 'sporjinal', replacementVendorId: 'demo-sporjinal',
+    approvedCutoverAt: new Date('2026-11-01T12:00:00.000Z'), active: true,
+    activatedAt: new Date('2026-10-31T12:00:00.000Z'),
+  };
+
+  it('routes canonical pre/post-cutover orders without changing seller_info or another vendor', async () => {
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }, { id: 'demo-sporjinal' }, { id: 'yalispor' }]);
+    prismaMock.vendorIdentityCutover.findMany.mockResolvedValue([cutover]);
+    for (const [orderId, createdAtUtc, expectedVendor] of [
+      [2301, '2026-10-31T12:00:00Z', 'sporjinal'],
+      [2302, '2026-11-01T12:00:00.000Z', 'demo-sporjinal'],
+    ] as const) {
+      prismaMock.vendorAllocation.upsert.mockClear();
+      const result = await ingestShopifyOrderWebhook({
+        event: { id: `event-${orderId}` } as never,
+        sellerInfo: { 'SKU-1': 'sporjinal', 'SKU-2': 'yalispor' },
+        payload: { ...buildSimpleOrderPayload(orderId), line_items: [
+          { id: orderId + 1000, sku: 'SKU-1', title: 'A', quantity: 1, price: '100.00' },
+          { id: orderId + 2000, sku: 'SKU-2', title: 'B', quantity: 1, price: '20.00' },
+        ] },
+        canonicalOrder: { orderGid: `gid://shopify/Order/${orderId}`, createdAtUtc, source: 'SHOPIFY_ADMIN_GRAPHQL' },
+      });
+      expect(result.ok).toBe(true);
+      expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: `alloc-${expectedVendor}-${orderId}` },
+      }));
+      expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: `alloc-yalispor-${orderId}` },
+      }));
+    }
+  });
+
+  it('rejects ambiguous canonical time and contradictory order identity before any order write', async () => {
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }, { id: 'demo-sporjinal' }]);
+    prismaMock.vendorIdentityCutover.findMany.mockResolvedValue([cutover]);
+    for (const canonicalOrder of [
+      { orderGid: 'gid://shopify/Order/999', createdAtUtc: '2026-11-02T00:00:00Z', source: 'SHOPIFY_ADMIN_GRAPHQL' as const },
+      { orderGid: 'gid://shopify/Order/2303', createdAtUtc: '2026-11-01T12:00:00Z', source: 'SHOPIFY_ADMIN_GRAPHQL' as const },
+      { orderGid: 'gid://shopify/Order/2303', createdAtUtc: null, source: 'SHOPIFY_ADMIN_GRAPHQL' as const },
+    ]) {
+      const result = await ingestShopifyOrderWebhook({
+        event: { id: 'event-2303' } as never, sellerInfo: { 'SKU-1': 'sporjinal' },
+        payload: buildSimpleOrderPayload(2303), canonicalOrder,
+      });
+      expect(result).toMatchObject({ ok: false, failureCode: 'vendor_identity_unverified' });
+      expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+      expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    }
+  });
+
+  it('preserves an existing historical line owner after cutover instead of creating a new allocation', async () => {
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }, { id: 'demo-sporjinal' }]);
+    prismaMock.vendorIdentityCutover.findMany.mockResolvedValue([cutover]);
+    prismaMock.shopifyOrderLineItem.findMany.mockResolvedValue([{ sourceLineItemId: '3304', originalVendorId: 'sporjinal' }]);
+    const result = await ingestShopifyOrderWebhook({
+      event: { id: 'event-2304' } as never, sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2304),
+      canonicalOrder: { orderGid: 'gid://shopify/Order/2304', createdAtUtc: '2026-11-02T00:00:00Z', source: 'SHOPIFY_ADMIN_GRAPHQL' },
+    });
+    expect(result).toMatchObject({ ok: false, failureCode: 'vendor_ownership_conflict' });
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(upsertSaleLedgerForAllocationMock).not.toHaveBeenCalled();
   });
 
   it('persists vendor integration order snapshot fields from the Shopify payload', async () => {
@@ -556,7 +628,7 @@ describe('vendor order snapshot ingestion', () => {
   });
 
   it('refuses a retained snapshot when the local order already exists', async () => {
-    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce({ id: 'existing-order' });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValue({ id: 'existing-order' });
 
     const result = await ingestShopifyOrderWebhook({
       event: { id: 'webhook-retained-existing-order' } as never,

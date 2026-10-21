@@ -73,6 +73,8 @@ async function parseCanonicalShopifyResponse<T>(response: Response): Promise<Sho
 
 type OrderSellerInfoQueryResponse = {
   order: {
+    id?: string | null;
+    createdAt?: string | null;
     metafield: {
       value: string | null;
     } | null;
@@ -1549,6 +1551,8 @@ export function createShopifyAdminService(env: AppEnv) {
           query: `
             query GetOrderSellerInfo($id: ID!) {
               order(id: $id) {
+                id
+                createdAt
                 metafield(namespace: "custom", key: "seller_info") {
                   value
                 }
@@ -1575,6 +1579,8 @@ export function createShopifyAdminService(env: AppEnv) {
     return {
       sellerInfo: parseSellerInfoValue(json.data?.order?.metafield?.value ?? null),
       source: 'shopify_admin',
+      orderGid: json.data?.order?.id ?? null,
+      createdAtUtc: json.data?.order?.createdAt ?? null,
     };
   }
 

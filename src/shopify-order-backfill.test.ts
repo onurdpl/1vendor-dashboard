@@ -186,6 +186,7 @@ function localStore(overrides: Partial<BackfillLocalStore> = {}): BackfillLocalS
     findOrderBySourceId: vi.fn(async () => null),
     findOrdersByNumber: vi.fn(async () => []),
     listVendors: vi.fn(async () => [{ id: 'sporjinal' }]),
+    listVendorIdentityCutovers: vi.fn(async () => []),
     listActiveFinancialProfiles: vi.fn(async () => [
       {
         vendorId: 'sporjinal',
@@ -258,6 +259,29 @@ describe('manual Shopify order backfill', () => {
       'fin-sporjinal-sale-7632165011793-alloc-sporjinal-7632165011793',
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the shared cutover authority for historical and new canonical backfill orders', async () => {
+    const mapping = {
+      externalSellerSlug: 'sporjinal', previousVendorId: 'sporjinal', replacementVendorId: 'demo-sporjinal',
+      approvedCutoverAt: new Date('2026-05-25T00:00:00.000Z'), active: true,
+      activatedAt: new Date('2026-05-24T00:00:00.000Z'),
+    };
+    for (const [createdAt, expected] of [
+      ['2026-05-20T13:07:18Z', 'sporjinal'],
+      ['2026-05-26T13:07:18Z', 'demo-sporjinal'],
+    ]) {
+      const store = localStore({
+        listVendors: vi.fn(async () => [{ id: 'sporjinal' }, { id: 'demo-sporjinal' }]),
+        listVendorIdentityCutovers: vi.fn(async () => [mapping]),
+      });
+      const result = await runShopifyOrderBackfill({ ...validEnv, SHOPIFY_ORDER_BACKFILL_CONFIRM: undefined }, {
+        fetch: shopifyFetchFor({ ...shopifyOrderNode(), createdAt }), localStore: store,
+      });
+      expect(result.expectedVendors).toEqual([expected]);
+      expect(result.expectedAllocations).toEqual([`alloc-${expected}-7632165011793`]);
+      expect(result.liveBackfillAttempted).toBe(false);
+    }
   });
 
   it('imports only the requested eligible order through the existing orders/create endpoint after explicit confirmation', async () => {
