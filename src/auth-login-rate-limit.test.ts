@@ -4,12 +4,14 @@ import type { AppEnv } from '../backend/src/config/env.js';
 
 const findUniqueMock = vi.hoisted(() => vi.fn());
 const updateMock = vi.hoisted(() => vi.fn());
+const updateManyMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: {
     user: {
       findUnique: findUniqueMock,
       update: updateMock,
+      updateMany: updateManyMock,
     },
   },
 }));
@@ -61,6 +63,7 @@ function buildUser() {
     role: 'VENDOR',
     status: 'active',
     passwordHash: makeDemoPasswordHash('demo123'),
+    credentialVersion: 0,
     vendorLinks: [
       {
         vendor: {
@@ -259,6 +262,10 @@ describe('auth login rate limiting', () => {
     resetLoginRateLimitForTests();
     findUniqueMock.mockResolvedValue(buildUser());
     updateMock.mockResolvedValue({});
+    updateManyMock.mockImplementation(async ({ data }: { data: { passwordHash: string } }) => {
+      findUniqueMock.mockResolvedValue({ ...buildUser(), passwordHash: data.passwordHash });
+      return { count: 1 };
+    });
   });
 
   it('keeps login behavior unchanged under the configured limit', async () => {

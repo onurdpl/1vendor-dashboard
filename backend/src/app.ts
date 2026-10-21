@@ -48,6 +48,7 @@ import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-bil
 import { registerVendorDirectoryRoutes } from './modules/vendors/vendor-directory.routes.js';
 import { registerVendorProfileAuditLogRoutes } from './modules/vendors/vendor-profile-audit-log.routes.js';
 import { registerVendorProvisioningRoutes } from './modules/vendors/vendor-provisioning.routes.js';
+import { registerVendorPasswordResetRoutes } from './modules/vendors/vendor-password-reset.routes.js';
 import { registerVendorStatusRoutes } from './modules/vendors/vendor-status.routes.js';
 import { registerLogoIsbasiRoutes } from './modules/logo-isbasi/logo-isbasi.routes.js';
 import { registerIyzicoMarketplaceDiagnosticsRoutes } from './modules/iyzico/iyzico-marketplace.routes.js';
@@ -502,6 +503,7 @@ export function createApp() {
   registerVendorIntegrationRoutes(app, env);
   registerVendorDirectoryRoutes(app, env);
   registerVendorProvisioningRoutes(app, env);
+  registerVendorPasswordResetRoutes(app, env);
   registerVendorStatusRoutes(app, env);
   registerVendorBillingProfileRoutes(app, env);
   registerVendorProfileAuditLogRoutes(app, env);

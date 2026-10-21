@@ -8,17 +8,17 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "c2fa048cf98025a9be93334c51349f32b3611ef10a63c48ed6e47c16a9431a4f"
+    "sha256": "3f67b12eda1e87903caaaa4d0a26c67ccadaf44e87ff207ede7a1d0f2576ce88"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "c09b8b1fd9ea9f13b7d5bb25b9d9a1185dd9e416453fa314333110f5455ab7e4"
+    "sha256": "e249c8e1d69309517c71783ac3dd8c063c8458d22463127bc14b9104bb571a91"
   },
   "catalog": {
-    "sha256": "1478f53c33ccf5db48887db4c7e9822e7739253c6c5abf68bfccbfb009f1901a"
+    "sha256": "b62f714cc85df218dd1e8417c633335db29c50c39ea7a3697594c7b85f8b8a0a"
   },
-  "migrationCutoff": "20261021120000_add_vendor_identity_cutover",
-  "baselineMigrationFilesSha256": "f2d5ef0763e3b4c8bd8f4d426dc6b92c6988b153f9c36d91cfa9c64ebf5cd95c",
+  "migrationCutoff": "20261021150000_add_vendor_password_reset",
+  "baselineMigrationFilesSha256": "391ce02bf3c7f5576c8d6bb7db92f2d88bf1afed74dd41c512a8f58e748244c2",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -150,6 +150,7 @@
     "20261015140000_add_settlement_auto_approval_attempt",
     "20261017120000_add_controlled_replacement_origin",
     "20261017130000_add_settlement_auto_approval_operational_error",
-    "20261021120000_add_vendor_identity_cutover"
+    "20261021120000_add_vendor_identity_cutover",
+    "20261021150000_add_vendor_password_reset"
   ]
 }

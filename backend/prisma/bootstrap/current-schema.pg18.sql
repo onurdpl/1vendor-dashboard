@@ -2917,7 +2917,8 @@ CREATE TABLE public."User" (
     status text DEFAULT 'active'::text NOT NULL,
     "passwordHash" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    "updatedAt" timestamp(3) without time zone NOT NULL
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "credentialVersion" integer DEFAULT 0 NOT NULL
 );
 
 
@@ -3200,6 +3201,22 @@ CREATE TABLE public."VendorIntegrationStatusEvent" (
     "idempotencyKey" text NOT NULL,
     "requestId" text,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: VendorPasswordResetAudit; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VendorPasswordResetAudit" (
+    "operationId" text NOT NULL,
+    "actorAdminUserId" text NOT NULL,
+    "targetUserId" text NOT NULL,
+    "vendorId" text NOT NULL,
+    "eventType" text DEFAULT 'PASSWORD_RESET'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "credentialVersion" integer NOT NULL,
+    CONSTRAINT "VendorPasswordResetAudit_eventType_check" CHECK (("eventType" = 'PASSWORD_RESET'::text))
 );
 
 
@@ -3953,6 +3970,14 @@ ALTER TABLE ONLY public."VendorIntegrationShipmentEvent"
 
 ALTER TABLE ONLY public."VendorIntegrationStatusEvent"
     ADD CONSTRAINT "VendorIntegrationStatusEvent_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VendorPasswordResetAudit VendorPasswordResetAudit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorPasswordResetAudit"
+    ADD CONSTRAINT "VendorPasswordResetAudit_pkey" PRIMARY KEY ("operationId");
 
 
 --
@@ -6012,6 +6037,20 @@ CREATE INDEX "VendorIntegrationStatusEvent_vendorIdentifier_createdAt_idx" ON pu
 
 
 --
+-- Name: VendorPasswordResetAudit_targetUserId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorPasswordResetAudit_targetUserId_createdAt_idx" ON public."VendorPasswordResetAudit" USING btree ("targetUserId", "createdAt");
+
+
+--
+-- Name: VendorPasswordResetAudit_vendorId_createdAt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VendorPasswordResetAudit_vendorId_createdAt_idx" ON public."VendorPasswordResetAudit" USING btree ("vendorId", "createdAt");
+
+
+--
 -- Name: VendorProfileAuditLog_fieldName_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7935,6 +7974,30 @@ ALTER TABLE ONLY public."VendorIntegrationStatusEvent"
 
 ALTER TABLE ONLY public."VendorIntegrationStatusEvent"
     ADD CONSTRAINT "VendorIntegrationStatusEvent_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES public."VendorAllocation"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VendorPasswordResetAudit VendorPasswordResetAudit_actorAdminUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorPasswordResetAudit"
+    ADD CONSTRAINT "VendorPasswordResetAudit_actorAdminUserId_fkey" FOREIGN KEY ("actorAdminUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorPasswordResetAudit VendorPasswordResetAudit_targetUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorPasswordResetAudit"
+    ADD CONSTRAINT "VendorPasswordResetAudit_targetUserId_fkey" FOREIGN KEY ("targetUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VendorPasswordResetAudit VendorPasswordResetAudit_vendorId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VendorPasswordResetAudit"
+    ADD CONSTRAINT "VendorPasswordResetAudit_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES public."Vendor"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --

@@ -124,7 +124,7 @@ export function createAuthService(env: AppEnv) {
     return expected.length === provided.length && timingSafeEqual(expected, provided);
   }
 
-  async function buildUserResponse(userId: string): Promise<AuthUserResponse | null> {
+  async function buildUserResponse(userId: string, tokenVersion: number): Promise<AuthUserResponse | null> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -136,7 +136,7 @@ export function createAuthService(env: AppEnv) {
       },
     });
 
-    if (!user || !isActiveUser(user.status)) {
+    if (!user || !isActiveUser(user.status) || user.credentialVersion !== tokenVersion) {
       return null;
     }
 
@@ -207,14 +207,30 @@ export function createAuthService(env: AppEnv) {
       };
     }
 
+    let expectedPasswordHash = user.passwordHash;
     if (passwordVerification.needsMigration) {
       const migratedPasswordHash = await hashPasswordArgon2id(credentials.password);
-      await prisma.user.update({
-        where: { id: user.id },
+      const migration = await prisma.user.updateMany({
+        where: { id: user.id, passwordHash: user.passwordHash, credentialVersion: user.credentialVersion },
         data: {
           passwordHash: migratedPasswordHash,
         },
       });
+      if (migration.count !== 1) {
+        timing.serviceTotalMs = elapsedMs(serviceStartedAt);
+        return { success: false, token: null, user: null, timing, failureStage: 'password_verify', failureReason: 'invalid_password' };
+      }
+      expectedPasswordHash = migratedPasswordHash;
+    }
+
+    const currentCredential = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { passwordHash: true, credentialVersion: true, status: true },
+    });
+    if (!currentCredential || currentCredential.passwordHash !== expectedPasswordHash ||
+        currentCredential.credentialVersion !== user.credentialVersion || !isActiveUser(currentCredential.status)) {
+      timing.serviceTotalMs = elapsedMs(serviceStartedAt);
+      return { success: false, token: null, user: null, timing, failureStage: 'password_verify', failureReason: 'invalid_password' };
     }
 
     const authUser = mapUserRecordToAuthResponse(user);
@@ -223,6 +239,7 @@ export function createAuthService(env: AppEnv) {
       sub: authUser.id,
       email: authUser.email,
       role: authUser.role,
+      credentialVersion: user.credentialVersion,
     });
     timing.tokenSignMs = elapsedMs(tokenSignStartedAt);
     timing.serviceTotalMs = elapsedMs(serviceStartedAt);
@@ -270,7 +287,10 @@ export function createAuthService(env: AppEnv) {
       };
     }
 
-    const user = await buildUserResponse(payload.sub);
+    const tokenVersion = payload.credentialVersion === undefined ? 0 : payload.credentialVersion;
+    const user = typeof payload.sub === 'string' && Number.isSafeInteger(tokenVersion) && tokenVersion >= 0
+      ? await buildUserResponse(payload.sub, tokenVersion)
+      : null;
     return {
       jwtVerifySuccess: true,
       userLookupSuccess: Boolean(user),

@@ -839,6 +839,7 @@ describe('VendorProfilePage', () => {
     expect(await screen.findByRole('heading', { name: 'Demo Vendor A' })).toBeInTheDocument();
     expect(screen.getByText('Marketplace Seller Workspace')).toBeInTheDocument();
     expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Vendor login credentials' })).not.toBeInTheDocument();
     expect(screen.queryByText('Active workspace')).not.toBeInTheDocument();
     expect(screen.queryByText('Healthy workspace')).not.toBeInTheDocument();
 
@@ -1508,6 +1509,7 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Vendor ID: created-vendor')).toBeInTheDocument();
     expect(screen.getByText('Route-scoped vendor profile')).toBeInTheDocument();
     expect(screen.getByText('Admin view')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor login credentials' })).toBeInTheDocument();
     expect(screen.getByText('Integration token missing')).toBeInTheDocument();
     expect(screen.getAllByText('created-vendor').length).toBeGreaterThan(0);
     const shell = screen.getByTestId('vendor-profile-shell');

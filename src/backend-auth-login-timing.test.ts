@@ -4,6 +4,7 @@ import type { AppEnv } from '../backend/src/config/env.js';
 
 const findUniqueMock = vi.hoisted(() => vi.fn());
 const updateMock = vi.hoisted(() => vi.fn());
+const updateManyMock = vi.hoisted(() => vi.fn());
 const queryRawMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -11,6 +12,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
     user: {
       findUnique: findUniqueMock,
       update: updateMock,
+      updateMany: updateManyMock,
     },
     $queryRaw: queryRawMock,
   },
@@ -30,18 +32,20 @@ describe('backend auth login timing', () => {
     findUniqueMock.mockReset();
     updateMock.mockReset();
     updateMock.mockResolvedValue({});
+    updateManyMock.mockReset();
     queryRawMock.mockReset();
   });
 
-  it('returns safe stage timings and avoids a duplicate successful-login user query', async () => {
+  it('returns safe stage timings and rechecks credentials before issuing a token', async () => {
     const { createAuthService } = await import('../backend/src/modules/auth/auth.service');
-    findUniqueMock.mockResolvedValue({
+    const original = {
       id: 'user-1',
       email: 'vendor@example.com',
       name: 'Vendor User',
       role: 'VENDOR',
       status: 'active',
       passwordHash: makeDemoPasswordHash('demo123'),
+      credentialVersion: 0,
       vendorLinks: [
         {
           vendor: {
@@ -54,6 +58,11 @@ describe('backend auth login timing', () => {
           },
         },
       ],
+    };
+    findUniqueMock.mockResolvedValue(original);
+    updateManyMock.mockImplementation(async ({ data }: { data: { passwordHash: string } }) => {
+      findUniqueMock.mockResolvedValue({ ...original, passwordHash: data.passwordHash });
+      return { count: 1 };
     });
 
     const result = await createAuthService(authEnv).login({
@@ -72,7 +81,7 @@ describe('backend auth login timing', () => {
         restrictionChangedAt: null,
       },
     ]);
-    expect(findUniqueMock).toHaveBeenCalledTimes(1);
+    expect(findUniqueMock).toHaveBeenCalledTimes(2);
     expect(findUniqueMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { email: 'vendor@example.com' },
@@ -85,6 +94,13 @@ describe('backend auth login timing', () => {
         },
       }),
     );
+    expect(findUniqueMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'user-1' },
+      select: { passwordHash: true, credentialVersion: true, status: true },
+    }));
+    expect(updateManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'user-1', passwordHash: original.passwordHash, credentialVersion: 0 },
+    }));
     expect(result?.timing).toMatchObject({
       dbConnectionAcquisitionMode: 'not_probed',
       vendorAccessLookupMode: 'included_in_user_lookup',

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import jwt from '../backend/node_modules/jsonwebtoken/index.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 import { buildAuthHashReport } from '../backend/src/modules/auth/auth-hash-report.cli.js';
@@ -7,6 +8,7 @@ import { upsertSeedUser } from '../backend/prisma/seed-user-utils.js';
 
 const findUniqueMock = vi.hoisted(() => vi.fn());
 const updateMock = vi.hoisted(() => vi.fn());
+const updateManyMock = vi.hoisted(() => vi.fn());
 const queryRawMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -14,6 +16,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
     user: {
       findUnique: findUniqueMock,
       update: updateMock,
+      updateMany: updateManyMock,
       findMany: vi.fn(),
     },
     $queryRaw: queryRawMock,
@@ -35,6 +38,7 @@ function buildUser(passwordHash: string) {
     role: 'VENDOR',
     status: 'active',
     passwordHash,
+    credentialVersion: 0,
     vendorLinks: [
       {
         vendor: {
@@ -78,11 +82,13 @@ describe('auth password hashing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryRawMock.mockReset();
+    updateManyMock.mockResolvedValue({ count: 1 });
   });
 
   it('lets an Argon2id user login without changing the response shape', async () => {
     const passwordHash = await hashPasswordArgon2id('demo123');
     findUniqueMock.mockResolvedValueOnce(buildUser(passwordHash));
+    findUniqueMock.mockResolvedValueOnce({ passwordHash, credentialVersion: 0, status: 'active' });
 
     const result = await createAuthService(authEnv).login({
       email: 'vendor@example.com',
@@ -111,6 +117,7 @@ describe('auth password hashing', () => {
         },
       ],
     });
+    findUniqueMock.mockResolvedValueOnce({ passwordHash, credentialVersion: 0, status: 'active' });
 
     const result = await createAuthService(authEnv).login({
       email: 'vendor@example.com',
@@ -132,8 +139,12 @@ describe('auth password hashing', () => {
   });
 
   it('lets a legacy demo_sha256_v1 user login and migrates the hash to Argon2id', async () => {
-    findUniqueMock.mockResolvedValueOnce(buildUser(makeDemoPasswordHash('demo123')));
-    updateMock.mockResolvedValueOnce({});
+    const legacyHash = makeDemoPasswordHash('demo123');
+    findUniqueMock.mockResolvedValueOnce(buildUser(legacyHash));
+    updateManyMock.mockImplementationOnce(async ({ data }: { data: { passwordHash: string } }) => {
+      findUniqueMock.mockResolvedValueOnce({ passwordHash: data.passwordHash, credentialVersion: 0, status: 'active' });
+      return { count: 1 };
+    });
 
     const result = await createAuthService(authEnv).login({
       email: 'vendor@example.com',
@@ -142,8 +153,8 @@ describe('auth password hashing', () => {
 
     expectLoginResponseShape(result);
     expect(result?.timing.passwordHashMode).toBe('demo_sha256_v1');
-    expect(updateMock).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
+    expect(updateManyMock).toHaveBeenCalledWith({
+      where: { id: 'user-1', passwordHash: legacyHash, credentialVersion: 0 },
       data: {
         passwordHash: expect.stringMatching(/^\$argon2id\$/),
       },
@@ -160,6 +171,45 @@ describe('auth password hashing', () => {
 
     expect(result).toBeNull();
     expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts a version-zero legacy JWT only before credential rotation and rejects malformed versions', async () => {
+    const service = createAuthService(authEnv);
+    const payload = { sub: 'user-1', email: 'vendor@example.com', role: 'vendor' };
+    const legacyToken = jwt.sign(payload, authEnv.JWT_SECRET);
+    const malformedToken = jwt.sign({ ...payload, credentialVersion: '0' }, authEnv.JWT_SECRET);
+    findUniqueMock.mockResolvedValue(buildUser('unused'));
+    expect((await service.inspectToken(legacyToken)).user?.id).toBe('user-1');
+    expect((await service.inspectToken(malformedToken)).user).toBeNull();
+    findUniqueMock.mockResolvedValue({ ...buildUser('unused'), credentialVersion: 1 });
+    expect((await service.inspectToken(legacyToken)).user).toBeNull();
+  });
+
+  it('does not overwrite a reset hash when legacy migration loses the compare-and-set race', async () => {
+    const legacyHash = makeDemoPasswordHash('demo123');
+    findUniqueMock.mockResolvedValueOnce(buildUser(legacyHash));
+    updateManyMock.mockResolvedValueOnce({ count: 0 });
+    const result = await createAuthService(authEnv).login({ email: 'vendor@example.com', password: 'demo123' });
+    expect(result).toBeNull();
+    expect(updateManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'user-1', passwordHash: legacyHash, credentialVersion: 0 },
+    }));
+  });
+
+  it('does not issue a token when reset occurs after password verification', async () => {
+    const passwordHash = await hashPasswordArgon2id('demo123');
+    findUniqueMock.mockResolvedValueOnce(buildUser(passwordHash));
+    findUniqueMock.mockResolvedValueOnce({ passwordHash: 'reset-hash', credentialVersion: 1, status: 'active' });
+    const result = await createAuthService(authEnv).login({ email: 'vendor@example.com', password: 'demo123' });
+    expect(result).toBeNull();
+  });
+
+  it('includes the current credential version in every new JWT', async () => {
+    const passwordHash = await hashPasswordArgon2id('demo123');
+    findUniqueMock.mockResolvedValueOnce({ ...buildUser(passwordHash), credentialVersion: 2 });
+    findUniqueMock.mockResolvedValueOnce({ passwordHash, credentialVersion: 2, status: 'active' });
+    const result = await createAuthService(authEnv).login({ email: 'vendor@example.com', password: 'demo123' });
+    expect(jwt.decode(result!.token)).toMatchObject({ sub: 'user-1', credentialVersion: 2 });
   });
 
   it('does not overwrite existing passwordHash values in seed updates', async () => {

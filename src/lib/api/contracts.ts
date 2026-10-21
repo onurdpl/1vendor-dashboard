@@ -2292,6 +2292,34 @@ export type VendorProvisioningResult = {
   restrictionReason: string;
 };
 
+export type VendorLoginUser = {
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  vendorMembershipCount: number;
+  credentialVersion: number;
+  resetEligible: boolean;
+  ineligibilityReason: string | null;
+};
+
+export type VendorLoginUsersResponse = { vendorId: string; users: VendorLoginUser[] };
+export type VendorPasswordResetInput = { operationId: string; expectedCredentialVersion: number };
+export type VendorPasswordResetResult = {
+  operationId: string;
+  vendorId: string;
+  targetUserId: string;
+  credentialVersion: number;
+  createdAt: string;
+  temporaryPassword: string;
+};
+export type VendorPasswordResetOperation = Omit<VendorPasswordResetResult, 'temporaryPassword'> & {
+  actorAdminUserId: string;
+  eventType: 'PASSWORD_RESET';
+  status: 'COMMITTED';
+};
+
 export type VendorProfileSnapshotImpact =
   | 'FUTURE_LEDGER_ROWS_ONLY'
   | 'FUTURE_SETTLEMENT_APPROVALS_ONLY'

@@ -12,6 +12,7 @@ import {
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { VendorShippingConfigEditor } from '../components/VendorShippingConfigEditor';
+import { AdminVendorPasswordResetSection } from '../components/AdminVendorPasswordResetSection';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getAdminVendorFinancialProfile, getFinanceProfile, updateVendorFinancialProfile } from '../features/finance/api';
@@ -2633,6 +2634,8 @@ export function VendorProfilePage() {
           </MetadataGroup>
         </OperationalSection>
         </div>
+
+        {isAdminVendorRoute && isAdmin ? <AdminVendorPasswordResetSection vendorId={currentVendor.vendorId} /> : null}
 
         <div className="vendor-profile-anchor-section">
         {isAdmin ? (

@@ -65,6 +65,7 @@ export type JwtPayload = {
   sub: string;
   email: string;
   role: AuthRole;
+  credentialVersion?: number;
 };
 
 export function mapRole(role: UserRole): AuthRole {

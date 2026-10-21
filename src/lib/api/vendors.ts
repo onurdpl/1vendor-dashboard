@@ -4,6 +4,7 @@ import type {
   VendorBillingLegalSelfView,
   VendorBillingProfileInput,
   VendorProvisioningInput,
+  VendorPasswordResetInput,
   VendorStatusInput,
 } from './contracts';
 
@@ -29,6 +30,18 @@ export function updateVendorStatus(vendorId: string, input: VendorStatusInput) {
 
 export function provisionVendor(input: VendorProvisioningInput) {
   return runtimeServices.vendors.provision(input);
+}
+
+export function listVendorLoginUsers(vendorId: string, options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.vendors.loginUsers(vendorId, options);
+}
+
+export function resetVendorUserPassword(vendorId: string, userId: string, input: VendorPasswordResetInput) {
+  return runtimeServices.vendors.resetPassword(vendorId, userId, input);
+}
+
+export function getVendorPasswordResetOperation(vendorId: string, operationId: string) {
+  return runtimeServices.vendors.passwordResetOperation(vendorId, operationId);
 }
 
 export function listVendorProfileAuditLogs(

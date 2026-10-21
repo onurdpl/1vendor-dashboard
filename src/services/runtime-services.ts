@@ -64,6 +64,10 @@ import type {
   VendorBillingProfileInput,
   VendorProvisioningInput,
   VendorProvisioningResult,
+  VendorLoginUsersResponse,
+  VendorPasswordResetInput,
+  VendorPasswordResetOperation,
+  VendorPasswordResetResult,
   VendorStatusInput,
   VendorShippingConfigUpdate,
   VendorIntegrationProviderManagement,
@@ -519,6 +523,18 @@ export const runtimeServices = {
             vendorStatus: 'inactive',
             restrictionReason: input.restrictionReason,
           }),
+    loginUsers: (vendorId: string, options: ReadRequestOptions = {}): Promise<VendorLoginUsersResponse> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.listVendorLoginUsers(vendorId, { signal: options.signal })
+        : Promise.resolve({ vendorId, users: [] }),
+    resetPassword: (vendorId: string, userId: string, input: VendorPasswordResetInput): Promise<VendorPasswordResetResult> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.resetVendorUserPassword(vendorId, userId, input)
+        : Promise.reject(new Error('Password reset requires the real Admin API.')),
+    passwordResetOperation: (vendorId: string, operationId: string): Promise<VendorPasswordResetOperation> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.getVendorPasswordResetOperation(vendorId, operationId)
+        : Promise.reject(new Error('Password reset history requires the real Admin API.')),
     probeLogoIsbasiLogin: () =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.probeLogoIsbasiLogin()

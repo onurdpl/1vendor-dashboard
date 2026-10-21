@@ -443,6 +443,7 @@ model User {
   role                                 UserRole
   status                               String                            @default("active")
   passwordHash                         String
+  credentialVersion                    Int                               @default(0)
   createdAt                            DateTime                          @default(now())
   updatedAt                            DateTime                          @updatedAt
   vendorLinks                          UserVendorAccess[]
@@ -465,6 +466,8 @@ model User {
   identityCutoversApproved             VendorIdentityCutover[] @relation("vendorIdentityCutoverApprovedBy")
   r1ReviewCancellationAttestations      PayoutR1ReviewCancellationAttestation[]
   r1CashlessCompletions                  PayoutR1CashlessCompletion[]
+  passwordResetsAsActor                  VendorPasswordResetAudit[] @relation("passwordResetActor")
+  passwordResetsAsTarget                 VendorPasswordResetAudit[] @relation("passwordResetTarget")
 }
 
 model Vendor {
@@ -477,6 +480,7 @@ model Vendor {
   createdAt                    DateTime                      @default(now())
   updatedAt                    DateTime                      @updatedAt
   users                        UserVendorAccess[]
+  passwordResetAudits          VendorPasswordResetAudit[]
   originalAllocations          VendorAllocation[]            @relation("originalVendor")
   assignedAllocations          VendorAllocation[]            @relation("assignedVendor")
   financeEntries               FinanceLedgerEntry[]
@@ -684,6 +688,22 @@ model UserVendorAccess {
   vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@unique([userId, vendorId])
+}
+
+model VendorPasswordResetAudit {
+  operationId      String   @id
+  actorAdminUserId String
+  targetUserId     String
+  vendorId         String
+  eventType        String   @default("PASSWORD_RESET")
+  createdAt        DateTime @default(now())
+  credentialVersion Int
+  actorAdmin       User     @relation("passwordResetActor", fields: [actorAdminUserId], references: [id], onDelete: Restrict)
+  targetUser       User     @relation("passwordResetTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  vendor           Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  @@index([targetUserId, createdAt])
+  @@index([vendorId, createdAt])
 }
 
 model VendorIntegrationClient {

@@ -29,6 +29,7 @@ export const queryKeys = {
     },
     vendors: {
       directory: (search = '', status = 'all') => ['admin', 'vendors', 'directory', search, status] as const,
+      loginUsers: (vendorId: string) => ['admin', 'vendors', vendorId, 'login-users'] as const,
     },
     vendorIntegration: {
       providers: () => ['admin', 'vendor-integration', 'providers'] as const,

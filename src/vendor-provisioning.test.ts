@@ -11,6 +11,7 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   userVendorAccess: {
     create: vi.fn(),
@@ -110,6 +111,7 @@ function buildProvisionedLoginRecord(passwordHash: string) {
     role: 'VENDOR',
     status: 'active',
     passwordHash,
+    credentialVersion: 0,
     vendorLinks: [
       {
         vendor: {
@@ -227,6 +229,7 @@ describe('backend vendor provisioning', () => {
     });
     const passwordHash = prismaMock.user.create.mock.calls[0]?.[0].data.passwordHash;
     prismaMock.user.findUnique.mockResolvedValueOnce(buildProvisionedLoginRecord(passwordHash));
+    prismaMock.user.findUnique.mockResolvedValueOnce({ passwordHash, credentialVersion: 0, status: 'active' });
 
     const loginResult = await createAuthService(authEnv).login({
       email: 'ADMIN@NEWVENDOR.TEST',

@@ -19,6 +19,10 @@ import type {
   VendorDirectoryStatusFilter,
   VendorProvisioningInput,
   VendorProvisioningResult,
+  VendorLoginUsersResponse,
+  VendorPasswordResetInput,
+  VendorPasswordResetOperation,
+  VendorPasswordResetResult,
   VendorProfileAuditLog,
   VendorStatus,
   VendorStatusInput,
@@ -89,6 +93,23 @@ export function provisionVendor(input: VendorProvisioningInput) {
     input,
     { skipVendorContext: true },
   );
+}
+
+export function listVendorLoginUsers(vendorId: string, options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<VendorLoginUsersResponse>(`/admin/vendors/${encodeURIComponent(vendorId)}/login-users`,
+    { signal: options.signal, skipVendorContext: true });
+}
+
+export function resetVendorUserPassword(vendorId: string, userId: string, input: VendorPasswordResetInput) {
+  return apiClient.post<VendorPasswordResetResult>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/users/${encodeURIComponent(userId)}/password-reset`,
+    input, { skipVendorContext: true });
+}
+
+export function getVendorPasswordResetOperation(vendorId: string, operationId: string) {
+  return apiClient.get<VendorPasswordResetOperation>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/password-reset-operations/${encodeURIComponent(operationId)}`,
+    { skipVendorContext: true });
 }
 
 export function listVendorProfileAuditLogs(
