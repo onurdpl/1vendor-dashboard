@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { readAdminVendorTargetHeader, resolveAdminVendorTarget } from '../vendor-access/admin-vendor-target.service.js';
 import { requireUnrestrictedVendorMutation } from '../vendor-access/restricted-vendor.js';
 import {
   addBlockedAllocationResolutionNote,
@@ -93,10 +94,24 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   const authMiddleware = createAuthMiddleware(authService);
   const shopifyAdminService = createShopifyAdminService(env);
 
+  const resolveOrdersReadVendor = async (request: Parameters<typeof requireVendorAccess>[0], reply: FastifyReply) => {
+    if (request.authUser?.role !== 'admin') return requireVendorAccess(request, reply);
+
+    const result = await resolveAdminVendorTarget(request, readAdminVendorTargetHeader(request));
+    if (!result.ok) return reply.code(result.code).send({ message: result.message });
+    request.vendorContext = {
+      vendorId: result.vendor.id,
+      vendorName: result.vendor.name,
+      vendorStatus: result.vendor.status,
+      role: result.actor.role,
+      accessScope: 'admin',
+    };
+  };
+
   app.get(
     '/orders',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveOrdersReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -122,7 +137,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   app.get(
     '/orders/workflow-summary',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveOrdersReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
