@@ -106,8 +106,9 @@ describe('admin vendor directory service', () => {
       orderBy: [
         { updatedAt: 'desc' },
         { createdAt: 'desc' },
+        { id: 'desc' },
       ],
-      take: 100,
+      take: 101,
     });
     expect(result.vendors).toEqual([
       {
@@ -134,6 +135,8 @@ describe('admin vendor directory service', () => {
       },
     ]);
     expect(JSON.stringify(result)).not.toMatch(/temporaryPassword|passwordHash|tokenPlaintext|tokenHash/i);
+    expect(result.hasMore).toBe(false);
+    expect(result.nextCursor).toBeNull();
   });
 
   it('searches vendor ID and name case-insensitively', async () => {
@@ -174,6 +177,128 @@ describe('admin vendor directory service', () => {
       }),
     );
   });
+
+  it('uses the unchanged 100 default and 200 maximum limits with one bounded lookahead row', async () => {
+    await listAdminVendorDirectory();
+    expect(prismaMock.vendor.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 101 }));
+    await listAdminVendorDirectory({ limit: 500 });
+    expect(prismaMock.vendor.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 201 }));
+  });
+
+  it('paginates 523 vendors without duplicates or gaps, including identical timestamps and names', async () => {
+    const rows = Array.from({ length: 523 }, (_, index) => ({
+      ...activeVendor,
+      id: `vendor-${String(index).padStart(4, '0')}`,
+      name: index % 3 === 0 ? 'Same name' : `Vendor ${index}`,
+      status: index % 2 === 0 ? 'active' : 'inactive',
+      updatedAt: new Date(Date.UTC(2026, 6, 6, 0, 0, Math.floor(index / 5))),
+      createdAt: new Date(Date.UTC(2026, 6, 1, 0, 0, Math.floor(index / 10))),
+    }));
+
+    function matches(row: typeof rows[number], condition: Record<string, any>): boolean {
+      if (condition.AND && !condition.AND.every((part: Record<string, any>) => matches(row, part))) return false;
+      if (condition.OR && !condition.OR.some((part: Record<string, any>) => matches(row, part))) return false;
+      for (const field of ['id', 'name', 'status', 'updatedAt', 'createdAt'] as const) {
+        const predicate = condition[field];
+        if (predicate === undefined) continue;
+        const value = row[field];
+        if (typeof predicate === 'object' && predicate !== null && !(predicate instanceof Date)) {
+          if (predicate.contains !== undefined && !String(value).toLowerCase().includes(String(predicate.contains).toLowerCase())) return false;
+          if (predicate.not !== undefined && value === predicate.not) return false;
+          if (predicate.lt !== undefined && !(value < predicate.lt)) return false;
+        } else if (value instanceof Date && predicate instanceof Date ? value.getTime() !== predicate.getTime() : value !== predicate) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    prismaMock.vendor.findMany.mockImplementation(async ({ where, take }: { where: Record<string, any>; take: number }) =>
+      rows.filter((row) => matches(row, where)).sort((left, right) =>
+        right.updatedAt.getTime() - left.updatedAt.getTime()
+        || right.createdAt.getTime() - left.createdAt.getTime()
+        || right.id.localeCompare(left.id),
+      ).slice(0, take));
+
+    async function collect(options: { search?: string; status?: string; limit?: number }) {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      let pageCount = 0;
+      do {
+        const result = await listAdminVendorDirectory({ ...options, ...(cursor ? { cursor } : {}) });
+        ids.push(...result.vendors.map((vendor) => vendor.vendorId));
+        pageCount += 1;
+        expect(result.hasMore).toBe(Boolean(result.nextCursor));
+        cursor = result.nextCursor;
+      } while (cursor && pageCount < 600);
+      expect(pageCount).toBeLessThan(600);
+      return ids;
+    }
+
+    const firstPage = await listAdminVendorDirectory();
+    expect(firstPage.vendors).toHaveLength(100);
+    expect(firstPage.hasMore).toBe(true);
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+
+    const all = await collect({});
+    expect(all).toHaveLength(523);
+    expect(new Set(all).size).toBe(523);
+    expect(new Set(all)).toEqual(new Set(rows.map((row) => row.id)));
+    const active = await collect({ status: 'active', limit: 31 });
+    expect(active).toHaveLength(262);
+    expect(new Set(active)).toEqual(new Set(rows.filter((row) => row.status === 'active').map((row) => row.id)));
+    const restricted = await collect({ status: 'restricted', limit: 31 });
+    expect(restricted).toHaveLength(261);
+    expect(new Set(restricted)).toEqual(new Set(rows.filter((row) => row.status !== 'active').map((row) => row.id)));
+    const duplicateNames = await collect({ search: 'same name', limit: 19 });
+    expect(duplicateNames).toHaveLength(175);
+    expect(new Set(duplicateNames)).toEqual(new Set(rows.filter((row) => row.name === 'Same name').map((row) => row.id)));
+    const idSearch = await collect({ search: 'vendor-000', limit: 3 });
+    expect(idSearch).toHaveLength(10);
+    expect(new Set(idSearch)).toEqual(new Set(rows.filter((row) => row.id.includes('vendor-000')).map((row) => row.id)));
+    expect(await collect({ search: 'missing' })).toEqual([]);
+  });
+
+  it('returns no cursor for an exact last page and rejects malformed or incompatible cursors', async () => {
+    const second = { ...restrictedVendor, id: 'sporjinal-2', updatedAt: new Date('2026-07-05T10:00:00.000Z') };
+    const third = { ...restrictedVendor, id: 'sporjinal-3', updatedAt: new Date('2026-07-04T10:00:00.000Z') };
+    prismaMock.vendor.findMany.mockResolvedValueOnce([restrictedVendor, second, third]);
+    const first = await listAdminVendorDirectory({ limit: 2, search: 'spor', status: 'restricted' });
+    expect(first.vendors).toHaveLength(2);
+    expect(first.hasMore).toBe(true);
+    expect(first.nextCursor).toEqual(expect.any(String));
+
+    prismaMock.vendor.findMany.mockResolvedValueOnce([third]);
+    const last = await listAdminVendorDirectory({ limit: 2, search: 'spor', status: 'restricted', cursor: first.nextCursor });
+    expect(last.vendors).toHaveLength(1);
+    expect(last.hasMore).toBe(false);
+    expect(last.nextCursor).toBeNull();
+    expect(prismaMock.vendor.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { AND: [
+        { OR: [
+          { id: { contains: 'spor', mode: 'insensitive' } },
+          { name: { contains: 'spor', mode: 'insensitive' } },
+        ], status: { not: 'active' } },
+        { OR: [
+          { updatedAt: { lt: second.updatedAt } },
+          { updatedAt: second.updatedAt, createdAt: { lt: second.createdAt } },
+          { updatedAt: second.updatedAt, createdAt: second.createdAt, id: { lt: second.id } },
+        ] },
+      ] },
+    }));
+
+    const beforeInvalid = prismaMock.vendor.findMany.mock.calls.length;
+    for (const cursor of ['', 'not+base64', 'e30', Buffer.from(JSON.stringify({ v: 2 })).toString('base64url')]) {
+      await expect(listAdminVendorDirectory({ cursor })).rejects.toThrow('Invalid vendor directory cursor.');
+    }
+    await expect(listAdminVendorDirectory({ cursor: first.nextCursor, limit: 2, search: 'other', status: 'restricted' }))
+      .rejects.toThrow('does not match');
+    await expect(listAdminVendorDirectory({ cursor: first.nextCursor, limit: 2, search: 'spor', status: 'active' }))
+      .rejects.toThrow('does not match');
+    await expect(listAdminVendorDirectory({ cursor: first.nextCursor, limit: 3, search: 'spor', status: 'restricted' }))
+      .rejects.toThrow('does not match');
+    expect(prismaMock.vendor.findMany).toHaveBeenCalledTimes(beforeInvalid);
+  });
 });
 
 describe('admin vendor directory route', () => {
@@ -200,6 +325,24 @@ describe('admin vendor directory route', () => {
         ],
       }),
     );
+  });
+
+  it('allows an admin with no Vendor memberships', async () => {
+    const { gets } = createRegisteredRoutes();
+    const result = await gets.get('/admin/vendors')?.(
+      { authUser: { role: 'admin', vendorAccess: [] } as never },
+      createReply(),
+    );
+    expect(result).toEqual(expect.objectContaining({ vendors: [expect.objectContaining({ vendorId: 'yalispor' })] }));
+  });
+
+  it('returns 400 for malformed and mismatched cursors before querying vendors', async () => {
+    const { gets } = createRegisteredRoutes();
+    const reply = createReply();
+    const result = await gets.get('/admin/vendors')?.({ authUser: { role: 'admin' }, query: { cursor: 'bad!' } }, reply);
+    expect(reply.statusCode).toBe(400);
+    expect(result).toEqual({ status: 400, body: { message: 'Invalid vendor directory cursor.' } });
+    expect(prismaMock.vendor.findMany).not.toHaveBeenCalled();
   });
 
   it.each(['vendor', 'support', 'finance', undefined])('rejects %s access to the vendor directory', async (role) => {
