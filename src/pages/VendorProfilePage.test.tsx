@@ -1734,7 +1734,7 @@ describe('VendorProfilePage', () => {
     await user.click(within(shippingSection).getByRole('button', { name: 'Retry' }));
     expect(await within(warehouseSection).findByText('Vendor B warehouse')).toBeInTheDocument();
     expect(within(warehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
-    expect(within(shippingSection).getByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
+    expect(await within(shippingSection).findByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
   });
 
   it('rejects an Admin shipping response for a different Vendor before rendering an editor', async () => {
