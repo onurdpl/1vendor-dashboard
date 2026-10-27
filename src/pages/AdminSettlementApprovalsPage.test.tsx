@@ -991,6 +991,7 @@ describe('Settlement Review queue cleanup', () => {
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
     const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getDraftSettlementRow(queue)).toBeInTheDocument());
     await user.click(getDraftSettlementRow(queue));
     await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
 
