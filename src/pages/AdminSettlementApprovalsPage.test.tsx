@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { AdminSettlementApprovalsPage } from './AdminSettlementApprovalsPage';
 import {
@@ -242,6 +242,36 @@ function getDraftSettlementRow(queue: HTMLElement) {
   return row;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function vendorApprovalList(vendorId: string, id: string): SettlementApprovalListResponse {
+  return {
+    ...recentApprovalsResponse,
+    vendorId,
+    approvals: [{ ...recentApprovalsResponse.approvals[0], id, vendorId }],
+  };
+}
+
+function selectQueueVendor(vendorId: string) {
+  fireEvent.change(screen.getByPlaceholderText('Vendor id'), { target: { value: vendorId } });
+}
+
+function DeepLinkNavigationProbe() {
+  const navigate = useNavigate();
+  return <>
+    <button onClick={() => navigate('/admin/finance/settlement-approvals')}>Clear link</button>
+    <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=approval-a')}>Restore link</button>
+  </>;
+}
+
 describe('Settlement Review queue cleanup', () => {
   beforeEach(() => {
     cleanup();
@@ -295,6 +325,195 @@ describe('Settlement Review queue cleanup', () => {
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('replacement-draft-id'));
     await waitFor(() => expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('replacement-vendor'));
+  });
+
+  it('hides the previous vendor rows and actions immediately, and keeps them hidden after a failed request or empty filter', async () => {
+    const vendorB = deferred<SettlementApprovalListResponse>();
+    listSettlementApprovalsMock.mockImplementation((id) =>
+      id === 'vendor-b' ? vendorB.promise : Promise.resolve(recentApprovalsResponse));
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+
+    selectQueueVendor('vendor-b');
+    expect(getQueueRows(queue)).toHaveLength(0);
+    expect(within(queue).queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+    expect(within(queue).queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    expect(within(queue).getByText('Loading recent approvals...')).toBeInTheDocument();
+
+    await act(async () => vendorB.reject(new Error('Vendor B unavailable')));
+    expect(within(queue).getByText('No settlement approvals found.')).toBeInTheDocument();
+    expect(getQueueRows(queue)).toHaveLength(0);
+    selectQueueVendor('');
+    expect(getQueueRows(queue)).toHaveLength(0);
+    expect(listSettlementApprovalsMock).not.toHaveBeenCalledWith('');
+  });
+
+  it('rejects a list response whose envelope or settlement row belongs to another vendor', async () => {
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'vendor-b'
+        ? { ...vendorApprovalList('vendor-b', 'approval-b'), approvals: recentApprovalsResponse.approvals }
+        : recentApprovalsResponse);
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    selectQueueVendor('vendor-b');
+    await waitFor(() => expect(screen.getByText('Settlement list vendor identity did not match the selected vendor.')).toBeInTheDocument());
+    expect(getQueueRows(queue)).toHaveLength(0);
+  });
+
+  it('ignores out-of-order A and B list responses after the filter reaches C', async () => {
+    const responses = {
+      yalispor: deferred<SettlementApprovalListResponse>(),
+      'vendor-b': deferred<SettlementApprovalListResponse>(),
+      'vendor-c': deferred<SettlementApprovalListResponse>(),
+    };
+    listSettlementApprovalsMock.mockImplementation((id) => responses[id as keyof typeof responses].promise);
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    selectQueueVendor('vendor-b');
+    selectQueueVendor('vendor-c');
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('vendor-c'));
+
+    await act(async () => responses.yalispor.resolve(recentApprovalsResponse));
+    await act(async () => responses['vendor-b'].resolve(vendorApprovalList('vendor-b', 'approval-b')));
+    expect(getQueueRows(queue)).toHaveLength(0);
+    await act(async () => responses['vendor-c'].resolve(vendorApprovalList('vendor-c', 'approval-c')));
+    expect(getQueueRows(queue)).toHaveLength(1);
+    expect(within(getQueueRows(queue)[0]).getByText('vendor-c')).toBeInTheDocument();
+  });
+
+  it('does not let a late A detail response change the selected B vendor or detail', async () => {
+    const delayedA = deferred<SettlementApproval>();
+    const vendorBDetail = { ...selectedRecentApproval, id: 'approval-b', vendorId: 'vendor-b' };
+    getSettlementApprovalMock.mockImplementation((id) =>
+      id === selectedDraftRefundApproval.id ? delayedA.promise : Promise.resolve(vendorBDetail));
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'vendor-b' ? vendorApprovalList('vendor-b', 'approval-b') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+
+    selectQueueVendor('vendor-b');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    await user.click(getQueueRows(queue)[0]);
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-b'));
+    await act(async () => delayedA.resolve(selectedDraftRefundApproval));
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(getQueueRows(queue)).toHaveLength(1);
+    expect(within(queue).getAllByText('vendor-b').length).toBeGreaterThan(0);
+  });
+
+  it('does not show an old vendor detail error under the new vendor', async () => {
+    const delayedA = deferred<SettlementApproval>();
+    getSettlementApprovalMock.mockReturnValue(delayedA.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'vendor-b' ? vendorApprovalList('vendor-b', 'approval-b') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    selectQueueVendor('vendor-b');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    await act(async () => delayedA.reject(new Error('Old vendor detail failed')));
+    expect(screen.queryByText('Old vendor detail failed')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+  });
+
+  it('preserves the explicit vendor selection when a deep-link detail arrives late', async () => {
+    const delayedLink = deferred<SettlementApproval>();
+    getSettlementApprovalMock.mockReturnValue(delayedLink.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'vendor-b' ? vendorApprovalList('vendor-b', 'approval-b') : recentApprovalsResponse);
+    renderPage('/admin/finance/settlement-approvals?approvalId=approval-a');
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-a'));
+    selectQueueVendor('vendor-b');
+    await act(async () => delayedLink.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
+    expect(within(screen.getByLabelText('Settlement review queue')).getAllByText('vendor-b').length).toBeGreaterThan(0);
+  });
+
+  it('ignores repeated late responses for the same deep link after an explicit vendor change', async () => {
+    const first = deferred<SettlementApproval>();
+    const second = deferred<SettlementApproval>();
+    getSettlementApprovalMock
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'vendor-b' ? vendorApprovalList('vendor-b', 'approval-b') : recentApprovalsResponse);
+    render(
+      <MemoryRouter initialEntries={['/admin/finance/settlement-approvals?approvalId=approval-a']}>
+        <DeepLinkNavigationProbe />
+        <AdminSettlementApprovalsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(1));
+    selectQueueVendor('vendor-b');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore link' }));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    await act(async () => second.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
+    await act(async () => first.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
+  });
+
+  it('does not apply an old vendor mutation refetch after the new vendor list has loaded', async () => {
+    const oldRefetch = deferred<SettlementApprovalListResponse>();
+    let oldVendorCalls = 0;
+    listSettlementApprovalsMock.mockImplementation((id) => {
+      if (id === 'vendor-b') return Promise.resolve(vendorApprovalList('vendor-b', 'approval-b'));
+      oldVendorCalls += 1;
+      return oldVendorCalls === 1 ? Promise.resolve(recentApprovalsResponse) : oldRefetch.promise;
+    });
+    getSettlementApprovalMock.mockResolvedValue(selectedDraftRefundApproval);
+    approveSettlementApprovalMock.mockResolvedValue(approvedDraftRefundApproval);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(oldVendorCalls).toBe(2));
+
+    selectQueueVendor('vendor-b');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    await act(async () => oldRefetch.resolve(approvalsAfterApproveResponse));
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(getQueueRows(queue)).toHaveLength(1);
+    expect(within(getQueueRows(queue)[0]).getByText('vendor-b')).toBeInTheDocument();
+  });
+
+  it('does not apply an old vendor detail refetch after a vendor switch', async () => {
+    const oldDetailRefetch = deferred<SettlementApproval>();
+    let detailCalls = 0;
+    getSettlementApprovalMock.mockImplementation((id) => {
+      if (id !== 'approval-1') return Promise.resolve(selectedRecentApproval);
+      detailCalls += 1;
+      return detailCalls === 1 ? Promise.resolve(selectedDraftRefundApproval) : oldDetailRefetch.promise;
+    });
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'vendor-b' ? vendorApprovalList('vendor-b', 'approval-b') : recentApprovalsResponse);
+    approveSettlementApprovalMock.mockResolvedValue(approvedDraftRefundApproval);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(detailCalls).toBe(2));
+    selectQueueVendor('vendor-b');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    await act(async () => oldDetailRefetch.resolve(approvedDraftRefundApproval));
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(within(getQueueRows(queue)[0]).getByText('vendor-b')).toBeInTheDocument();
   });
 
   it('renders the settlement review queue as the primary page', async () => {
@@ -579,12 +798,191 @@ describe('Settlement Review queue cleanup', () => {
     expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
+  it('shows the actual Sporjinal settlement and vendor in a Cancel confirmation', async () => {
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'sporjinal' ? vendorApprovalList('sporjinal', 'sporjinal-approval') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    selectQueueVendor('sporjinal');
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    await user.click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+    const dialog = screen.getByRole('dialog', { name: 'Cancel Settlement' });
+    expect(dialog).toHaveTextContent('Vendor: sporjinal');
+    expect(dialog).toHaveTextContent('Settlement: sporjinal-approval');
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('invalidates an Approve confirmation when the vendor or selected settlement changes', async () => {
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'sporjinal' ? vendorApprovalList('sporjinal', 'sporjinal-approval') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    expect(screen.getByRole('dialog', { name: 'Approve Settlement' })).toBeInTheDocument();
+    await user.click(getQueueRows(queue)[0]);
+    expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    selectQueueVendor('sporjinal');
+    expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('invalidates a Cancel confirmation when the selected vendor changes', async () => {
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'sporjinal' ? vendorApprovalList('sporjinal', 'sporjinal-approval') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    selectQueueVendor('sporjinal');
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    await user.click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+    selectQueueVendor('yalispor');
+    expect(screen.queryByRole('dialog', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('invalidates confirmation when queue filters change the visible settlement selection', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    fireEvent.change(within(queue).getByPlaceholderText('Vendor, settlement, status'), { target: { value: 'no-match' } });
+    expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks the financial POST if the vendor changes during the read-only target check', async () => {
+    const targetCheck = deferred<SettlementApproval>();
+    getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockReturnValueOnce(targetCheck.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'sporjinal' ? vendorApprovalList('sporjinal', 'sporjinal-approval') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    selectQueueVendor('sporjinal');
+    await act(async () => targetCheck.resolve(selectedDraftRefundApproval));
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('sporjinal');
+    expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+  });
+
+  it('rejects a canonical detail whose vendor does not own the confirmed settlement', async () => {
+    getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockResolvedValueOnce({ ...selectedDraftRefundApproval, vendorId: 'sporjinal' });
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(screen.getByText('Settlement target changed. Select the settlement action again.')).toBeInTheDocument());
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a confirmation open after a read-only target-check failure without sending a POST', async () => {
+    getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockRejectedValueOnce(new Error('Target check unavailable'));
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' }));
+    expect(await screen.findByText('Target check unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Approve Settlement' })).toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('uses a synchronous guard against two submits of the same confirmation', async () => {
+    const targetCheck = deferred<SettlementApproval>();
+    getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockReturnValueOnce(targetCheck.promise)
+      .mockResolvedValueOnce(approvedDraftRefundApproval);
+    approveSettlementApprovalMock.mockResolvedValue(approvedDraftRefundApproval);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    const confirm = within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' });
+    act(() => {
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+    });
+    expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2);
+    await act(async () => targetCheck.resolve(selectedDraftRefundApproval));
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledTimes(1));
+    expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1');
+  });
+
+  it('keeps an in-flight POST on its original target and hides its late result under another vendor', async () => {
+    const lateApproval = deferred<SettlementApproval>();
+    approveSettlementApprovalMock.mockReturnValue(lateApproval.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'sporjinal' ? vendorApprovalList('sporjinal', 'sporjinal-approval') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    selectQueueVendor('sporjinal');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).toBeDisabled();
+    await act(async () => lateApproval.resolve(approvedDraftRefundApproval));
+    await waitFor(() => expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).not.toBeDisabled());
+    expect(approveSettlementApprovalMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('sporjinal');
+    expect(within(getQueueRows(queue)[0]).getByText('sporjinal')).toBeInTheDocument();
+    expect(screen.queryByText('Settlement approved.')).not.toBeInTheDocument();
+    expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not report success or refetch when a POST response identifies another settlement', async () => {
+    approveSettlementApprovalMock.mockResolvedValue({ ...approvedDraftRefundApproval, id: 'other-approval' });
+    const user = userEvent.setup();
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Approve Settlement' })).getByRole('button', { name: 'Approve Settlement' }));
+    expect(await screen.findByText('Settlement response did not match the requested target. Review its current state before another action.')).toBeInTheDocument();
+    expect(screen.queryByText('Settlement approved.')).not.toBeInTheDocument();
+    expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(1);
+  });
+
   it('confirms and executes approve settlement with list and detail refetch', async () => {
     const user = userEvent.setup();
     listSettlementApprovalsMock
       .mockResolvedValueOnce(recentApprovalsResponse)
       .mockResolvedValueOnce(approvalsAfterApproveResponse);
     getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
       .mockResolvedValueOnce(selectedDraftRefundApproval)
       .mockResolvedValueOnce(approvedDraftRefundApproval);
     approveSettlementApprovalMock.mockResolvedValue(approvedDraftRefundApproval);
@@ -598,11 +996,13 @@ describe('Settlement Review queue cleanup', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Approve Settlement' });
     expect(dialog).toHaveTextContent('This will approve the settlement for vendor payment review.');
+    expect(dialog).toHaveTextContent('Vendor: yalispor');
+    expect(dialog).toHaveTextContent('Settlement: approval-1');
     await user.click(within(dialog).getByRole('button', { name: 'Approve Settlement' }));
 
     await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(3));
     expect(screen.getByText('Settlement approved.')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
     expect(within(queue).queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
@@ -635,6 +1035,7 @@ describe('Settlement Review queue cleanup', () => {
       .mockResolvedValueOnce(approvalsAfterCancelResponse);
     getSettlementApprovalMock
       .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
       .mockResolvedValueOnce(cancelledDraftRefundApproval);
     cancelSettlementApprovalMock.mockResolvedValue(cancelledDraftRefundApproval);
 
@@ -647,11 +1048,13 @@ describe('Settlement Review queue cleanup', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Cancel Settlement' });
     expect(dialog).toHaveTextContent('This will cancel the settlement approval. Active refund adjustment applications may be reversed by the backend.');
+    expect(dialog).toHaveTextContent('Vendor: yalispor');
+    expect(dialog).toHaveTextContent('Settlement: approval-1');
     await user.click(within(dialog).getByRole('button', { name: 'Cancel Settlement' }));
 
     await waitFor(() => expect(cancelSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(3));
     expect(screen.getByText('Settlement cancelled.')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
     expect(within(queue).getByText('No action available')).toBeInTheDocument();
@@ -685,6 +1088,7 @@ describe('Settlement Review queue cleanup', () => {
       .mockResolvedValueOnce(recentApprovalsResponse)
       .mockResolvedValueOnce(approvalsAfterApproveResponse);
     getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
       .mockResolvedValueOnce(selectedDraftRefundApproval)
       .mockResolvedValueOnce(approvedDraftRefundApproval);
 
