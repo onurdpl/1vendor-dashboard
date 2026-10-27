@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   EmptyStatePanel,
   MetadataGroup,
@@ -47,6 +47,18 @@ type PaymentQueueItem =
       vendorId: string;
       batch: PayoutBatch;
     };
+
+type PendingPaymentAction = {
+  action: PaymentAction;
+  itemId: string;
+  source: PaymentQueueItem['source'];
+  vendorId: string;
+  batchId: string | null;
+  vendorFilter: string;
+  requestId: string | null;
+  r1Payment: boolean;
+  paymentLabel: string;
+};
 
 const HIGH_VALUE_AMOUNT = 100000;
 
@@ -402,6 +414,7 @@ function buildQueueItems(vendorId: string, dashboard: FinanceDashboard | null, b
 
 function PaymentActionConfirmationModal({
   action,
+  target,
   eftDate,
   eftTime,
   eftUtcOffset,
@@ -426,6 +439,7 @@ function PaymentActionConfirmationModal({
   onEftAmountChange,
 }: {
   action: PaymentAction;
+  target: PendingPaymentAction;
   eftDate: string;
   eftTime: string;
   eftUtcOffset: string;
@@ -495,6 +509,8 @@ function PaymentActionConfirmationModal({
         <p className="eyebrow">Payment preparation</p>
         <h3 id="payment-action-confirmation-title">{config.title}</h3>
         <p className="page-description">{config.body}</p>
+        <p className="page-description">Vendor: {target.vendorId} · Payment: {target.paymentLabel}
+          {target.batchId ? ` · Batch: ${target.batchId}` : ''}</p>
         {action === 'mark_paid' ? (
           <div className="op-form-grid">
             <p className="page-description">Enter the actual bank-record EFT time. This is your Admin attestation, not bank verification.</p>
@@ -571,8 +587,10 @@ export function AdminPaymentPreparationPage() {
   const [periodFilter, setPeriodFilter] = useState('all');
   const [highValueOnly, setHighValueOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<PaymentAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingPaymentAction | null>(null);
   const [actionSubmitting, setActionSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const contextVersionRef = useRef(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [paymentReference, setPaymentReference] = useState('');
@@ -584,7 +602,7 @@ export function AdminPaymentPreparationPage() {
   const [confirmNoEft, setConfirmNoEft] = useState(false);
   const [confirmCashless, setConfirmCashless] = useState(false);
   const [eftAmount, setEftAmount] = useState('');
-  const [preparationRequestId, setPreparationRequestId] = useState<string | null>(null);
+  const normalizedVendorFilter = vendorFilter.trim();
 
   const r1StatusQuery = useQueryResource(
     ['admin', 'finance', 'r1-payout-status'],
@@ -593,33 +611,39 @@ export function AdminPaymentPreparationPage() {
   );
   const r1Enabled = r1StatusQuery.data?.enabled === true;
   const obligationsQuery = useQueryResource(
-    ['admin', 'finance', 'r1-obligations', vendorFilter],
-    ({ signal }) => getAdminPayoutOffsetObligations(vendorFilter, signal),
-    { enabled: r1Enabled && Boolean(vendorFilter), routeName: 'Payment preparation',
-      endpoint: '/admin/finance/r1-payout-obligations' },
+    ['admin', 'finance', 'r1-obligations', normalizedVendorFilter],
+    ({ signal }) => getAdminPayoutOffsetObligations(normalizedVendorFilter, signal),
+    { enabled: r1Enabled && Boolean(normalizedVendorFilter), routeName: 'Payment preparation',
+      endpoint: '/admin/finance/r1-payout-obligations', placeholderData: () => undefined },
   );
 
   const batchesQuery = useQueryResource(
-    ['admin', 'finance', 'payment-preparation', 'batches', vendorFilter],
-    ({ signal }) => listPayoutBatches({ vendorId: vendorFilter || null, signal }),
+    ['admin', 'finance', 'payment-preparation', 'batches', normalizedVendorFilter],
+    ({ signal }) => listPayoutBatches({ vendorId: normalizedVendorFilter || null, signal }),
     {
       routeName: 'Payment preparation',
       endpoint: '/admin/payout-batches',
+      placeholderData: () => undefined,
     },
   );
 
   const readinessQuery = useQueryResource(
-    ['admin', 'finance', 'payment-preparation', 'readiness', vendorFilter],
-    ({ signal }) => getPaymentPreparationReadiness({ vendorId: vendorFilter || null, signal }),
+    ['admin', 'finance', 'payment-preparation', 'readiness', normalizedVendorFilter],
+    ({ signal }) => getPaymentPreparationReadiness({ vendorId: normalizedVendorFilter || null, signal }),
     {
       routeName: 'Payment preparation',
       endpoint: '/finance',
+      placeholderData: () => undefined,
     },
   );
 
   const batches = batchesQuery.data ?? [];
   const readiness = readinessQuery.data ?? null;
-  const queueItems = useMemo(() => buildQueueItems(vendorFilter, readiness, batches), [batches, readiness, vendorFilter]);
+  const mismatchedBatch = Boolean(normalizedVendorFilter && batches.some((batch) => batch.vendorId !== normalizedVendorFilter));
+  const queueItems = useMemo(
+    () => mismatchedBatch ? [] : buildQueueItems(normalizedVendorFilter, readiness, batches),
+    [batches, mismatchedBatch, normalizedVendorFilter, readiness],
+  );
 
   const periodOptions = useMemo(() => {
     const keys = Array.from(new Set(queueItems.map(getPaymentPeriodKey)));
@@ -665,19 +689,21 @@ export function AdminPaymentPreparationPage() {
   const selectedWaitingReason = selectedItem ? getWaitingReason(selectedItem) : null;
   const supportedActions = selectedItem ? getSupportedPaymentActions(selectedItem) : [];
   const loading = batchesQuery.isLoading || readinessQuery.isLoading;
-  const blockingError = batchesQuery.isError || readinessQuery.isError;
+  const blockingError = batchesQuery.isError || readinessQuery.isError || mismatchedBatch;
   const errorDescription =
+    (mismatchedBatch ? 'Payment records do not match the selected Vendor.' : null) ??
     batchesQuery.error ?? readinessQuery.error ?? 'Unable to load payment preparation data.';
 
   async function refetchQueue() {
     await Promise.all([
       batchesQuery.refetch(),
       readinessQuery.refetch(),
-      ...(r1Enabled && vendorFilter ? [obligationsQuery.refetch()] : []),
+      ...(r1Enabled && normalizedVendorFilter ? [obligationsQuery.refetch()] : []),
     ]);
   }
 
   function openAction(action: PaymentAction) {
+    if (!selectedItem || blockingError || loading || submittingRef.current || !supportedActions.includes(action)) return;
     setActionError(null);
     setActionSuccess(null);
     setPaymentReference('');
@@ -689,56 +715,85 @@ export function AdminPaymentPreparationPage() {
     setConfirmNoEft(false);
     setConfirmCashless(false);
     setEftAmount('');
-    setPreparationRequestId(action === 'prepare' ? crypto.randomUUID() : null);
-    setPendingAction(action);
+    setPendingAction({
+      action,
+      itemId: selectedItem.id,
+      source: selectedItem.source,
+      vendorId: selectedItem.vendorId,
+      batchId: selectedItem.source === 'batch' ? selectedItem.batch.id : null,
+      vendorFilter: normalizedVendorFilter,
+      requestId: action === 'prepare' ? crypto.randomUUID() : null,
+      r1Payment: selectedItem.source === 'batch' && hasAmount(selectedItem.batch.r1OffsetAmount),
+      paymentLabel: getPaymentLabel(selectedItem).primary,
+    });
   }
 
   async function handleConfirmAction() {
-    if (!pendingAction || !selectedItem) {
+    if (!pendingAction || submittingRef.current) {
       return;
     }
+    const target = pendingAction;
+    if (!selectedItem || blockingError || loading || target.vendorFilter !== normalizedVendorFilter ||
+      target.itemId !== selectedItem.id || target.source !== selectedItem.source ||
+      target.vendorId !== selectedItem.vendorId ||
+      target.batchId !== (selectedItem.source === 'batch' ? selectedItem.batch.id : null) ||
+      !supportedActions.includes(target.action)) {
+      setPendingAction(null);
+      setActionError('Payment selection changed. Select the item again.');
+      return;
+    }
+    const contextVersion = contextVersionRef.current;
+    submittingRef.current = true;
     setActionSubmitting(true);
     setActionError(null);
     setActionSuccess(null);
     try {
-      if (pendingAction === 'prepare') {
-        await preparePayoutBatch(selectedItem.vendorId, preparationRequestId ?? crypto.randomUUID());
-        setPreparationRequestId(null);
-        setActionSuccess('Payment batch prepared.');
-      } else if (pendingAction === 'mark_review' && selectedItem.source === 'batch') {
-        await markPayoutBatchReview(selectedItem.batch.id);
-        setActionSuccess('Payment batch moved to review.');
-      } else if (pendingAction === 'mark_paid' && selectedItem.source === 'batch') {
+      let successMessage: string;
+      if (target.action === 'prepare' && target.requestId) {
+        await preparePayoutBatch(target.vendorId, target.requestId);
+        successMessage = 'Payment batch prepared.';
+      } else if (target.action === 'mark_review' && target.batchId) {
+        await markPayoutBatchReview(target.batchId);
+        successMessage = 'Payment batch moved to review.';
+      } else if (target.action === 'mark_paid' && target.batchId) {
         if (!eftDate || !eftTime || !/^(Z|[+-]\d{2}:\d{2})$/.test(eftUtcOffset.trim())) {
           throw new Error('Enter the bank EFT date, time and explicit UTC offset.');
         }
         const seconds = eftTime.length === 5 ? ':00' : '';
-        await markPayoutBatchPaid(selectedItem.batch.id, {
+        await markPayoutBatchPaid(target.batchId, {
           eftDeclaredAt: `${eftDate}T${eftTime}${seconds}${eftUtcOffset.trim()}`,
-          ...(hasAmount(selectedItem.batch.r1OffsetAmount) ? { eftAmountMinor: parseEnteredEftMinor(eftAmount) } : {}),
+          ...(target.r1Payment ? { eftAmountMinor: parseEnteredEftMinor(eftAmount) } : {}),
           paymentReference: paymentReference.trim() || undefined,
           internalNote: internalNote.trim() || undefined,
         });
-        setActionSuccess('Payment marked paid.');
-      } else if (pendingAction === 'cancel' && selectedItem.source === 'batch') {
-        await cancelPayoutBatch(selectedItem.batch.id);
-        setActionSuccess('Payment batch cancelled.');
-      } else if (pendingAction === 'cancel_review' && selectedItem.source === 'batch') {
+        successMessage = 'Payment marked paid.';
+      } else if (target.action === 'cancel' && target.batchId) {
+        await cancelPayoutBatch(target.batchId);
+        successMessage = 'Payment batch cancelled.';
+      } else if (target.action === 'cancel_review' && target.batchId) {
         if (!actionReason.trim() || !confirmNoEft) throw new Error('Written reason and no-EFT confirmation are required.');
-        await cancelR1ReviewPayout(selectedItem.batch.id, actionReason.trim());
-        setActionSuccess('R1 review cancelled; reservations released.');
-      } else if (pendingAction === 'complete_cashless' && selectedItem.source === 'batch') {
+        await cancelR1ReviewPayout(target.batchId, actionReason.trim());
+        successMessage = 'R1 review cancelled; reservations released.';
+      } else if (target.action === 'complete_cashless' && target.batchId) {
         if (!actionReason.trim() || !confirmNoEft || !confirmCashless) {
           throw new Error('Written reason, no-EFT and cashless confirmations are required.');
         }
-        await completeR1CashlessPayout(selectedItem.batch.id, actionReason.trim());
-        setActionSuccess('Cashless offset completed. No bank payment recorded.');
+        await completeR1CashlessPayout(target.batchId, actionReason.trim());
+        successMessage = 'Cashless offset completed. No bank payment recorded.';
+      } else {
+        throw new Error('Payment target is unavailable. Select the item again.');
       }
-      setPendingAction(null);
-      await refetchQueue();
+      if (contextVersionRef.current === contextVersion) {
+        setActionSuccess(successMessage);
+        setPendingAction(null);
+        await refetchQueue();
+      }
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Payment preparation action failed.');
+      if (contextVersionRef.current === contextVersion) {
+        setActionError(error instanceof Error ? error.message : 'Payment preparation action failed.');
+      }
     } finally {
+      submittingRef.current = false;
       setActionSubmitting(false);
     }
   }
@@ -778,7 +833,14 @@ export function AdminPaymentPreparationPage() {
           </label>
           <label>
             <span>Vendor</span>
-            <input value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)} placeholder="Vendor id" />
+            <input value={vendorFilter} onChange={(event) => {
+              contextVersionRef.current += 1;
+              setVendorFilter(event.target.value);
+              setSelectedId(null);
+              setPendingAction(null);
+              setActionError(null);
+              setActionSuccess(null);
+            }} placeholder="Vendor id" />
           </label>
           <label>
             <span>Status</span>
@@ -845,7 +907,13 @@ export function AdminPaymentPreparationPage() {
                   <OperationalTableRow
                     key={item.id}
                     selected={item.id === selectedItem?.id}
-                    onSelect={() => setSelectedId(item.id)}
+                    onSelect={() => {
+                      if (item.id !== selectedItem?.id) {
+                        contextVersionRef.current += 1;
+                        setPendingAction(null);
+                        setSelectedId(item.id);
+                      }
+                    }}
                   >
                     <span><strong>{vendorLabel}</strong></span>
                     <span>
@@ -966,7 +1034,7 @@ export function AdminPaymentPreparationPage() {
                           formatPaymentAmount(selectedItem.batch.netAmount)} />
                     </MetadataGroup>
                   ) : null}
-                  {r1Enabled && selectedItem.vendorId === vendorFilter ? (
+                  {r1Enabled && selectedItem.vendorId === normalizedVendorFilter ? (
                     <MetadataGroup title="Current outstanding obligations">
                       <MetadataRow label="Authority" value={obligationsQuery.data?.status ?? 'Unknown'} />
                       <MetadataRow label="Refund obligations outstanding (including reservations)"
@@ -1092,7 +1160,8 @@ export function AdminPaymentPreparationPage() {
       </section>
       {pendingAction ? (
         <PaymentActionConfirmationModal
-          action={pendingAction}
+          action={pendingAction.action}
+          target={pendingAction}
           eftDate={eftDate}
           eftTime={eftTime}
           eftUtcOffset={eftUtcOffset}
@@ -1102,7 +1171,7 @@ export function AdminPaymentPreparationPage() {
           confirmNoEft={confirmNoEft}
           confirmCashless={confirmCashless}
           eftAmount={eftAmount}
-          r1Payment={selectedItem?.source === 'batch' && hasAmount(selectedItem.batch.r1OffsetAmount)}
+          r1Payment={pendingAction.r1Payment}
           submitting={actionSubmitting}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void handleConfirmAction()}
