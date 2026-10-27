@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -169,7 +169,6 @@ const payoutBatches: PayoutBatch[] = [
   }),
   makeBatch({
     id: 'batch-cancelled-raw-55555555',
-    vendorId: '33333333-3333-3333-3333-333333333333',
     status: 'cancelled',
     refundAmount: 'TRY 0.00',
     warning: null,
@@ -199,6 +198,24 @@ function renderPage() {
 
 function getQueueRows() {
   return screen.getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+}
+
+function queryQueueRows() {
+  return screen.queryAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+}
+
+function changeVendorFilter(vendorId: string) {
+  fireEvent.change(screen.getByLabelText('Vendor', { exact: true }), { target: { value: vendorId } });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 async function selectQueueRow(user: ReturnType<typeof userEvent.setup>, matcher: (row: HTMLElement) => boolean) {
@@ -706,5 +723,151 @@ describe('AdminPaymentPreparationPage', () => {
     expect(screen.getByRole('button', { name: 'Preparing...' })).toBeDisabled();
     resolvePrepare(makeBatch({ id: 'batch-prepared-raw-77777777', status: 'draft' }));
     expect(await screen.findByText('Payment batch prepared.')).toBeInTheDocument();
+  });
+
+  it('keeps All Vendors batches and uses the selected batch Vendor and ID', async () => {
+    const user = userEvent.setup();
+    const other = makeBatch({ id: 'other-vendor-batch', vendorId: 'vendor-b', status: 'draft', grossAmount: '123.00' });
+    listPayoutBatchesMock.mockResolvedValue([makeBatch({ id: 'vendor-a-batch' }), other]);
+    getPaymentPreparationReadinessMock.mockResolvedValue(null);
+    renderPage();
+    changeVendorFilter('');
+
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(2));
+    expect(listPayoutBatchesMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: null }));
+    await selectQueueRow(user, (row) => row.textContent?.includes('vendor-b') ?? false);
+    await user.click(within(screen.getByLabelText('Payment preparation detail panel')).getByRole('button', { name: 'Mark for Review' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Vendor: vendor-b');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Batch: other-vendor-batch');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark for Review' }));
+    await waitFor(() => expect(markPayoutBatchReviewMock).toHaveBeenCalledExactlyOnceWith('other-vendor-batch'));
+  });
+
+  it('shows only selected Vendor records and rejects mismatched server batches', async () => {
+    const own = makeBatch({ id: 'vendor-a-batch', vendorId: 'yalispor' });
+    const other = makeBatch({ id: 'vendor-b-batch', vendorId: 'vendor-b' });
+    listPayoutBatchesMock.mockResolvedValueOnce([own, other]);
+    getPaymentPreparationReadinessMock.mockResolvedValue(null);
+    renderPage();
+
+    expect(await screen.findByText('Payment records do not match the selected Vendor.')).toBeInTheDocument();
+    expect(queryQueueRows()).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Mark for Review' })).not.toBeInTheDocument();
+  });
+
+  it('shows only B batches after switching from A to the B filter', async () => {
+    listPayoutBatchesMock.mockImplementation(({ vendorId }) => Promise.resolve(vendorId === 'vendor-b'
+      ? [makeBatch({ id: 'vendor-b-batch', vendorId: 'vendor-b', grossAmount: '222.00' })]
+      : [makeBatch({ id: 'vendor-a-batch', grossAmount: '111.00' })]));
+    getPaymentPreparationReadinessMock.mockResolvedValue(null);
+    renderPage();
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(1));
+    expect(queryQueueRows()[0]).toHaveTextContent('111.00');
+
+    changeVendorFilter('vendor-b');
+    expect(queryQueueRows()).toHaveLength(0);
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(1));
+    expect(queryQueueRows()[0]).toHaveTextContent('vendor-b');
+    expect(queryQueueRows()[0]).toHaveTextContent('222.00');
+    expect(queryQueueRows()[0]).not.toHaveTextContent('111.00');
+  });
+
+  it('hides A during B loading and failure without restoring A actions', async () => {
+    const pendingB = deferred<PayoutBatch[]>();
+    listPayoutBatchesMock.mockImplementation(({ vendorId }) => vendorId === 'vendor-b'
+      ? pendingB.promise : Promise.resolve([makeBatch({ id: 'vendor-a-batch' })]));
+    getPaymentPreparationReadinessMock.mockResolvedValue(null);
+    renderPage();
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(1));
+
+    changeVendorFilter('vendor-b');
+    expect(queryQueueRows()).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Mark for Review' })).not.toBeInTheDocument();
+    await act(async () => pendingB.reject(new Error('Vendor B unavailable')));
+    expect(await screen.findByText('Vendor B unavailable')).toBeInTheDocument();
+    expect(queryQueueRows()).toHaveLength(0);
+    expect(markPayoutBatchReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores late A and B results after a rapid A to B to C switch', async () => {
+    const pendingA = deferred<PayoutBatch[]>();
+    const pendingB = deferred<PayoutBatch[]>();
+    const pendingAReadiness = deferred<FinanceDashboard | null>();
+    const pendingBReadiness = deferred<FinanceDashboard | null>();
+    listPayoutBatchesMock.mockImplementation(({ vendorId }) => {
+      if (vendorId === 'yalispor') return pendingA.promise;
+      if (vendorId === 'vendor-b') return pendingB.promise;
+      return Promise.resolve([makeBatch({ id: 'vendor-c-batch', vendorId: 'vendor-c', grossAmount: '333.00' })]);
+    });
+    getPaymentPreparationReadinessMock.mockImplementation(({ vendorId }) => {
+      if (vendorId === 'yalispor') return pendingAReadiness.promise;
+      if (vendorId === 'vendor-b') return pendingBReadiness.promise;
+      return Promise.resolve(null);
+    });
+    renderPage();
+    changeVendorFilter('vendor-b');
+    changeVendorFilter('vendor-c');
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(1));
+    expect(queryQueueRows()[0]).toHaveTextContent('vendor-c');
+
+    await act(async () => {
+      pendingA.resolve([makeBatch({ id: 'late-a-batch' })]);
+      pendingB.resolve([makeBatch({ id: 'late-b-batch', vendorId: 'vendor-b' })]);
+      pendingAReadiness.resolve(financeDashboard);
+      pendingBReadiness.resolve(financeDashboard);
+    });
+    expect(queryQueueRows()).toHaveLength(1);
+    expect(queryQueueRows()[0]).toHaveTextContent('vendor-c');
+    expect(screen.getByLabelText('Payment preparation detail panel')).toHaveTextContent('333.00');
+    expect(screen.queryByText('Ready payment preparation')).not.toBeInTheDocument();
+  });
+
+  it('closes a frozen confirmation when the Vendor or selected batch changes', async () => {
+    const user = userEvent.setup();
+    listPayoutBatchesMock.mockImplementation(({ vendorId }) => Promise.resolve(vendorId === 'vendor-b'
+      ? [makeBatch({ id: 'vendor-b-batch', vendorId: 'vendor-b' })]
+      : [makeBatch({ id: 'first-a-batch' }), makeBatch({ id: 'second-a-batch', grossAmount: '222.00' })]));
+    getPaymentPreparationReadinessMock.mockResolvedValue(null);
+    renderPage();
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(2));
+    await user.click(within(screen.getByLabelText('Payment preparation detail panel')).getByRole('button', { name: 'Mark for Review' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Batch: first-a-batch');
+    await user.click(queryQueueRows()[1]);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(markPayoutBatchReviewMock).not.toHaveBeenCalled();
+
+    await user.click(within(screen.getByLabelText('Payment preparation detail panel')).getByRole('button', { name: 'Mark for Review' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Batch: second-a-batch');
+    changeVendorFilter('vendor-b');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(1));
+    expect(queryQueueRows()[0]).toHaveTextContent('vendor-b');
+    expect(markPayoutBatchReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a started POST on its original target and ignores its late result after switching Vendors', async () => {
+    const user = userEvent.setup();
+    const pendingPost = deferred<PayoutBatch>();
+    markPayoutBatchReviewMock.mockImplementation(() => pendingPost.promise);
+    listPayoutBatchesMock.mockImplementation(({ vendorId }) => Promise.resolve(vendorId === 'vendor-b'
+      ? [makeBatch({ id: 'vendor-b-batch', vendorId: 'vendor-b' })]
+      : [makeBatch({ id: 'vendor-a-batch' })]));
+    getPaymentPreparationReadinessMock.mockResolvedValue(null);
+    renderPage();
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(1));
+    await user.click(within(screen.getByLabelText('Payment preparation detail panel')).getByRole('button', { name: 'Mark for Review' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark for Review' }));
+    expect(markPayoutBatchReviewMock).toHaveBeenCalledExactlyOnceWith('vendor-a-batch');
+
+    changeVendorFilter('vendor-b');
+    await waitFor(() => expect(queryQueueRows()).toHaveLength(1));
+    expect(queryQueueRows()[0]).toHaveTextContent('vendor-b');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Payment preparation detail panel')).getByRole('button', { name: 'Mark for Review' })).toBeDisabled();
+    await act(async () => pendingPost.resolve(makeBatch({ id: 'vendor-a-batch', status: 'review' })));
+    expect(markPayoutBatchReviewMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Payment batch moved to review.')).not.toBeInTheDocument();
+    expect(queryQueueRows()).toHaveLength(1);
+    expect(queryQueueRows()[0]).toHaveTextContent('vendor-b');
   });
 });
