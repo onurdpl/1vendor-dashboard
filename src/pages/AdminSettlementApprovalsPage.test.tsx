@@ -291,9 +291,29 @@ function economicList(vendorId: string): SettlementApprovalListResponse {
     netPayableMinor: isYali ? 7777 : 88888, scheduledCycleKey: isYali ? 'YaliReference' : 'SporReference' }] };
 }
 
+function linkedFixture(vendorId: string, id: string, gross: number, net: number,
+  status: SettlementApproval['status'] = 'approved') {
+  const detail: SettlementApproval = { ...selectedRecentApproval, id, vendorId, status,
+    grossSalesMinor: gross, netPayableMinor: net, commissionMinor: gross - net, commissionVatMinor: 0,
+    approvedAt: status === 'approved' ? selectedRecentApproval.approvedAt : null,
+    approvedBy: status === 'approved' ? selectedRecentApproval.approvedBy : null,
+    lines: [{ ...settlementLine, id: `${id}-line`, financeLedgerEntryId: `${id}-ledger`,
+      amountMinor: gross, commissionMinor: gross - net, commissionVatMinor: 0, payableImpactMinor: net }] };
+  const summary = { ...recentApprovalsResponse.approvals[0], id, vendorId, status,
+    grossSalesMinor: gross, netPayableMinor: net, lineCount: 1, scheduledCycleKey: `${id}Reference` };
+  return { detail, summary };
+}
+
+function linkedList(vendorId: string, ...fixtures: ReturnType<typeof linkedFixture>[]): SettlementApprovalListResponse {
+  return { ...recentApprovalsResponse, vendorId, approvals: fixtures.map((fixture) => fixture.summary) };
+}
+
 function DeepLinkNavigationProbe() {
   const navigate = useNavigate();
   return <>
+    <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=link-x')}>Link X</button>
+    <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=link-y')}>Link Y</button>
+    <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=link-foreign')}>Foreign link</button>
     <button onClick={() => navigate('/admin/finance/settlement-approvals')}>Clear link</button>
     <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=approval-a')}>Restore link</button>
   </>;
@@ -531,28 +551,253 @@ describe('Settlement Review queue cleanup', () => {
     expect(listSettlementApprovalsMock).not.toHaveBeenCalled();
   });
 
-  it('still opens a same-vendor replacement deep link under the canonical guard', async () => {
-    getSettlementApprovalMock.mockResolvedValue({ ...selectedRecentApproval, id: 'same-vendor-replacement' });
-    renderPage('/admin/finance/settlement-approvals?approvalId=same-vendor-replacement');
-    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('same-vendor-replacement'));
-    await waitFor(() => expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(2));
-    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('Yalispor');
+  it.each(['approve', 'cancel'] as const)('selects the exact same-Vendor deep link and preserves normal %s', async (action) => {
+    fixedWorkspaceVendors();
+    const own = linkedFixture('yalispor', 'link-x', 65432, 32100, action === 'approve' ? 'draft' : 'approved');
+    const other = linkedFixture('yalispor', 'other-own', 11111, 7777);
+    let current = own.detail;
+    listSettlementApprovalsMock.mockImplementation(async () => linkedList('yalispor', other, {
+      detail: current, summary: { ...own.summary, status: current.status } }));
+    getSettlementApprovalMock.mockImplementation(async (id) => id === own.detail.id ? current : other.detail);
+    const mutation = action === 'approve' ? approveSettlementApprovalMock : cancelSettlementApprovalMock;
+    mutation.mockImplementation(async () => {
+      current = { ...current, status: action === 'approve' ? 'approved' : 'cancelled', writesPerformed: true };
+      return current;
+    });
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(within(queue).getByLabelText('Settlement review detail panel')).toHaveTextContent('654.32'));
+    const panel = within(queue).getByLabelText('Settlement review detail panel');
+    expect(panel).toHaveTextContent('321.00');
+    expect(panel).toHaveTextContent('Link-Xreference');
+    const title = action === 'approve' ? 'Approve Settlement' : 'Cancel Settlement';
+    const user = userEvent.setup();
+    await user.click(within(queue).getByRole('button', { name: title }));
+    const dialog = screen.getByRole('dialog', { name: title });
+    expect(dialog).toHaveTextContent('Settlement: link-x');
+    expect(dialog).toHaveTextContent('Vendor: yalispor');
+    await user.click(within(dialog).getByRole('button', { name: title }));
+    await waitFor(() => expect(mutation).toHaveBeenCalledExactlyOnceWith('link-x'));
     expect(getCurrentVendorContext().vendorId).toBe('yalispor');
   });
 
-  it('hides a foreign replacement deep link behind the canonical render guard (Phase B pending)', async () => {
-    const linked = { ...selectedRecentApproval, id: 'replacement-draft-id', vendorId: 'replacement-vendor' };
-    getSettlementApprovalMock.mockResolvedValue(linked);
-    renderPage('/admin/finance/settlement-approvals?approvalId=replacement-draft-id');
-
-    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('replacement-draft-id'));
-    await act(async () => {});
-    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('Yalispor');
-    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(0);
-    expect(screen.queryByLabelText('Automatic approval history')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
-    expect(listSettlementApprovalsMock).not.toHaveBeenCalledWith('replacement-vendor');
+  it('rejects a foreign deep link with a mismatch message while preserving the active financial list and actions', async () => {
+    fixedWorkspaceVendors();
+    const own = linkedFixture('yalispor', 'own-record', 11111, 7777);
+    const foreign = linkedFixture('sporjinal', 'link-foreign', 987654, 765432, 'draft');
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', own));
+    getSettlementApprovalMock.mockImplementation(async (id) => id === foreign.detail.id ? foreign.detail : own.detail);
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-foreign');
+    expect(await screen.findByText(/requested settlement belongs to a different Vendor/)).toBeInTheDocument();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    expect(queue).toHaveTextContent('111.11');
+    const panel = within(queue).getByLabelText('Settlement review detail panel');
+    expect(panel).toHaveTextContent('77.77');
+    expect(panel).toHaveTextContent('Own-Recordreference');
+    expect(document.body).not.toHaveTextContent('9,876.54');
+    expect(document.body).not.toHaveTextContent('7,654.32');
+    expect(document.body).not.toHaveTextContent(/link-foreignreference/i);
+    expect(getSettlementApprovalReadinessMock).not.toHaveBeenCalledWith('link-foreign');
+    expect(listSettlementApprovalsMock).not.toHaveBeenCalledWith('sporjinal');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('Yalıspor');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    await userEvent.setup().click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: own-record');
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('link-foreign');
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, null, '', '   ', 42])('rejects unverifiable deep-link Vendor identity %s without changing context', async (identity) => {
+    const foreign = linkedFixture('sporjinal', 'link-foreign', 987654, 765432);
+    getSettlementApprovalMock.mockResolvedValue({ ...foreign.detail, vendorId: identity } as unknown as SettlementApproval);
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-foreign');
+    expect(await screen.findByText('The requested settlement Vendor identity could not be verified.')).toBeInTheDocument();
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    expect(document.body).not.toHaveTextContent('9,876.54');
+    expect(listSettlementApprovalsMock).not.toHaveBeenCalledWith('sporjinal');
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['wrong-id', '', undefined])('rejects returned settlement identity %s', async (id) => {
+    getSettlementApprovalMock.mockResolvedValue({ ...selectedRecentApproval, id, grossSalesMinor: 987654 } as unknown as SettlementApproval);
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    expect(await screen.findByText('The requested settlement response identity could not be verified.')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('9,876.54');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('does not resolve a deep link without a canonical Vendor', async () => {
+    selectQueueVendor('');
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-foreign');
+    expect(await screen.findByText('Select a Vendor in your workspace to open this settlement.')).toBeInTheDocument();
+    expect(getSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(listSettlementApprovalsMock).not.toHaveBeenCalled();
+    expect(getCurrentVendorContext().vendorId).toBe('');
+  });
+
+  it('keeps the latest URL settlement selected when an older deep-link GET resolves last', async () => {
+    fixedWorkspaceVendors();
+    const x = linkedFixture('yalispor', 'link-x', 11111, 7777);
+    const y = linkedFixture('yalispor', 'link-y', 65432, 32100);
+    const pendingX = deferred<SettlementApproval>();
+    const pendingY = deferred<SettlementApproval>();
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', x, y));
+    getSettlementApprovalMock.mockImplementation((id) => id === 'link-x' ? pendingX.promise : pendingY.promise);
+    render(<MemoryRouter initialEntries={['/admin/finance/settlement-approvals?approvalId=link-x']}>
+      <DeepLinkNavigationProbe /><AdminSettlementApprovalsPage />
+    </MemoryRouter>);
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('link-x'));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Link Y' }));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('link-y'));
+    await act(async () => pendingY.resolve({ ...y.detail, periodStart: '2001-01-01T00:00:00.000Z' }));
+    const queue = screen.getByLabelText('Settlement review queue');
+    const panel = within(queue).getByLabelText('Settlement review detail panel');
+    expect(panel).toHaveTextContent('654.32');
+    expect(panel).toHaveTextContent('321.00');
+    expect(panel).toHaveTextContent('2001');
+    await userEvent.setup().click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-y');
+    await act(async () => pendingX.resolve({ ...x.detail, periodStart: '1990-01-01T00:00:00.000Z' }));
+    expect(panel).toHaveTextContent('654.32');
+    expect(panel).toHaveTextContent('2001');
+    expect(panel).not.toHaveTextContent('1990');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-y');
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('clears a foreign mismatch when navigation opens a valid same-Vendor settlement', async () => {
+    fixedWorkspaceVendors();
+    const own = linkedFixture('yalispor', 'link-x', 65432, 32100);
+    const foreign = linkedFixture('sporjinal', 'link-foreign', 987654, 765432);
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', own));
+    getSettlementApprovalMock.mockImplementation(async (id) => id === 'link-x' ?
+      { ...own.detail, periodStart: '2001-01-01T00:00:00.000Z' } : foreign.detail);
+    render(<MemoryRouter initialEntries={['/admin/finance/settlement-approvals?approvalId=link-foreign']}>
+      <DeepLinkNavigationProbe /><AdminSettlementApprovalsPage />
+    </MemoryRouter>);
+    expect(await screen.findByText(/requested settlement belongs to a different Vendor/)).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Link X' }));
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(within(queue).getByLabelText('Settlement review detail panel')).toHaveTextContent('2001'));
+    expect(screen.queryByText(/requested settlement belongs to a different Vendor/)).not.toBeInTheDocument();
+    expect(queue).toHaveTextContent('654.32');
+    expect(queue).toHaveTextContent('321.00');
+    expect(document.body).not.toHaveTextContent('9,876.54');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    await userEvent.setup().click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+  });
+
+  it('requires a fresh GET after manually switching to the previously blocked target Vendor', async () => {
+    fixedWorkspaceVendors();
+    const own = linkedFixture('yalispor', 'own-record', 11111, 7777);
+    const foreign = linkedFixture('sporjinal', 'link-foreign', 987654, 765432);
+    const fresh = deferred<SettlementApproval>();
+    getSettlementApprovalMock.mockResolvedValueOnce({ ...foreign.detail, periodStart: '1990-01-01T00:00:00.000Z' })
+      .mockReturnValueOnce(fresh.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) => id === 'yalispor' ? linkedList(id, own) : linkedList(id, foreign));
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-foreign');
+    expect(await screen.findByText(/requested settlement belongs to a different Vendor/)).toBeInTheDocument();
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    expect(getSettlementApprovalMock).toHaveBeenCalledTimes(1);
+    act(() => setCurrentVendorId('sporjinal'));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    expect(getSettlementApprovalMock).toHaveBeenNthCalledWith(2, 'link-foreign');
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    expect(queue).not.toHaveTextContent('1990');
+    await act(async () => fresh.resolve({ ...foreign.detail, periodStart: '2001-01-01T00:00:00.000Z' }));
+    expect(within(queue).getByLabelText('Settlement review detail panel')).toHaveTextContent('2001');
+    expect(queue).toHaveTextContent('9,876.54');
+    expect(queue).toHaveTextContent('7,654.32');
+    expect(queue).not.toHaveTextContent('111.11');
+    expect(queue).not.toHaveTextContent('1990');
+    expect(screen.queryByText(/requested settlement belongs to a different Vendor/)).not.toBeInTheDocument();
+    expect(getCurrentVendorContext().vendorId).toBe('sporjinal');
+  });
+
+  it('ignores a pending A deep-link result after switching to B and accepts only B fresh validation', async () => {
+    fixedWorkspaceVendors();
+    const own = linkedFixture('yalispor', 'link-x', 11111, 7777);
+    const b = linkedFixture('sporjinal', 'b-record', 99999, 88888);
+    const old = deferred<SettlementApproval>();
+    const fresh = deferred<SettlementApproval>();
+    getSettlementApprovalMock.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) => id === 'yalispor' ? linkedList(id, own) : linkedList(id, b));
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(1));
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+    await userEvent.setup().click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+    act(() => setCurrentVendorId('sporjinal'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(queue).toHaveTextContent('999.99'));
+    await act(async () => old.resolve({ ...own.detail, periodStart: '1990-01-01T00:00:00.000Z' }));
+    expect(screen.queryByText(/requested settlement belongs to a different Vendor/)).not.toBeInTheDocument();
+    expect(queue).not.toHaveTextContent('1990');
+    expect(queue).not.toHaveTextContent('111.11');
+    expect(queue).toHaveTextContent('888.88');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // The still-linked A record is foreign in B; only the fresh B-context GET may report that mismatch.
+    await act(async () => fresh.resolve(own.detail));
+    expect(await screen.findByText(/requested settlement belongs to a different Vendor/)).toBeInTheDocument();
+    expect(queue).toHaveTextContent('999.99');
+    expect(queue).not.toHaveTextContent('111.11');
+    expect(getCurrentVendorContext().vendorId).toBe('sporjinal');
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects the original deep-link generation after A to B to A even when the Vendor ID matches again', async () => {
+    fixedWorkspaceVendors();
+    const own = linkedFixture('yalispor', 'link-x', 65432, 32100);
+    const old = deferred<SettlementApproval>();
+    const fresh = deferred<SettlementApproval>();
+    getSettlementApprovalMock.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+    listSettlementApprovalsMock.mockImplementation(async (id) => id === 'yalispor' ? linkedList(id, own) : economicList(id));
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(1));
+    act(() => { setCurrentVendorId('sporjinal'); setCurrentVendorId('yalispor'); });
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    await act(async () => old.resolve({ ...own.detail, periodStart: '1990-01-01T00:00:00.000Z' }));
+    const queue = screen.getByLabelText('Settlement review queue');
+    expect(queue).not.toHaveTextContent('1990');
+    await act(async () => fresh.resolve({ ...own.detail, periodStart: '2001-01-01T00:00:00.000Z' }));
+    const panel = within(queue).getByLabelText('Settlement review detail panel');
+    expect(panel).toHaveTextContent('2001');
+    expect(panel).toHaveTextContent('654.32');
+    expect(panel).toHaveTextContent('321.00');
+    expect(panel).not.toHaveTextContent('1990');
+    expect(queue).not.toHaveTextContent('999.99');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+  });
+
+  it.each(['Settlement not found', 'Settlement service unavailable'])(
+    'clears the previous linked detail and preserves active rows on API error: %s', async (message) => {
+      const own = linkedFixture('yalispor', 'link-x', 65432, 32100);
+      getSettlementApprovalMock.mockResolvedValueOnce({ ...own.detail, periodStart: '1990-01-01T00:00:00.000Z' })
+        .mockRejectedValueOnce(new Error(message));
+      listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', own));
+      render(<MemoryRouter initialEntries={['/admin/finance/settlement-approvals?approvalId=link-x']}>
+        <DeepLinkNavigationProbe /><AdminSettlementApprovalsPage />
+      </MemoryRouter>);
+      const queue = screen.getByLabelText('Settlement review queue');
+      await waitFor(() => expect(within(queue).getByLabelText('Settlement review detail panel')).toHaveTextContent('1990'));
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Link Y' }));
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(queue).not.toHaveTextContent('1990');
+      expect(getQueueRows(queue)).toHaveLength(1);
+      expect(queue).toHaveTextContent('654.32');
+      expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+      expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+    });
 
   it('hides the previous vendor rows and actions immediately, and keeps them hidden after a failed request or empty filter', async () => {
     const vendorB = deferred<SettlementApprovalListResponse>();
@@ -668,9 +913,11 @@ describe('Settlement Review queue cleanup', () => {
   it('ignores repeated late responses for the same deep link after an explicit vendor change', async () => {
     const first = deferred<SettlementApproval>();
     const second = deferred<SettlementApproval>();
+    const third = deferred<SettlementApproval>();
     getSettlementApprovalMock
       .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
+      .mockReturnValueOnce(second.promise)
+      .mockReturnValueOnce(third.promise);
     listSettlementApprovalsMock.mockImplementation(async (id) =>
       id === 'vendor-b' ? vendorApprovalList('vendor-b', 'approval-b') : recentApprovalsResponse);
     render(
@@ -681,9 +928,11 @@ describe('Settlement Review queue cleanup', () => {
     );
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(1));
     selectQueueVendor('vendor-b');
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('button', { name: 'Clear link' }));
     fireEvent.click(screen.getByRole('button', { name: 'Restore link' }));
-    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(3));
+    await act(async () => third.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
     await act(async () => second.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
     await act(async () => first.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
     expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('vendor-b');

@@ -1961,7 +1961,6 @@ export function AdminSettlementApprovalsPage() {
   const listRequestVersionRef = useRef(0);
   const detailRequestVersionRef = useRef(0);
   const actionRunVersionRef = useRef(0);
-  const manualVendorSelectionRef = useRef(false);
   const selectedQueueApprovalIdRef = useRef('');
   const settlementPostInFlightRef = useRef(false);
   const settlementActionConfirmationRef = useRef<SettlementActionConfirmation | null>(null);
@@ -1977,6 +1976,9 @@ export function AdminSettlementApprovalsPage() {
   const [health, setHealth] = useState<DatabaseHealthResponse | null>(null);
   const [preview, setPreview] = useState<SettlementApprovalPreview | null>(null);
   const [approval, setApproval] = useState<SettlementApproval | null>(null);
+  const [linkedApprovalFailure, setLinkedApprovalFailure] = useState<{
+    requestId: string; vendorId: string; contextVersion: number; message: string;
+  } | null>(null);
   const [recentApprovalsState, setRecentApprovalsState] = useState<{
     vendorId: string;
     approvals: SettlementApprovalSummary[];
@@ -2018,8 +2020,7 @@ export function AdminSettlementApprovalsPage() {
     }
   }
 
-  function selectVendorId(nextVendorId: string, manual = false) {
-    if (manual) manualVendorSelectionRef.current = true;
+  function selectVendorId(nextVendorId: string) {
     const hadConfirmation = settlementActionConfirmationRef.current !== null;
     if (hadConfirmation) clearSettlementActionConfirmation();
     selectedQueueApprovalIdRef.current = '';
@@ -2035,6 +2036,7 @@ export function AdminSettlementApprovalsPage() {
         : 'Vendor changed. Select the settlement action again.'
       : null);
     setSuccess(null);
+    setLinkedApprovalFailure(null);
     setApprovalId('');
     setApproval(null);
     setRecentApprovalsState({ vendorId: '', approvals: [] });
@@ -2046,7 +2048,7 @@ export function AdminSettlementApprovalsPage() {
       const currentVendorId = getCurrentVendorContext().vendorId.trim();
       if (activeVendorIdRef.current !== currentVendorId) {
         activeVendorIdRef.current = currentVendorId;
-        selectVendorId(currentVendorId, true);
+        selectVendorId(currentVendorId);
       }
     };
     const unsubscribeVendor = onVendorChange(invalidateContext);
@@ -2056,7 +2058,7 @@ export function AdminSettlementApprovalsPage() {
       // Invalidate even if a rapid cross-tab A -> B -> A has already returned to A.
       const currentVendorId = getCurrentVendorContext().vendorId.trim();
       activeVendorIdRef.current = currentVendorId;
-      selectVendorId(currentVendorId, true);
+      selectVendorId(currentVendorId);
     };
     window.addEventListener('storage', invalidateStoredContext);
     invalidateContext();
@@ -2069,25 +2071,60 @@ export function AdminSettlementApprovalsPage() {
   useEffect(() => {
     if (activeVendorIdRef.current !== appReadiness.currentVendor.vendorId) {
       activeVendorIdRef.current = appReadiness.currentVendor.vendorId;
-      selectVendorId(appReadiness.currentVendor.vendorId, true);
+      selectVendorId(appReadiness.currentVendor.vendorId);
     }
   }, [appReadiness.currentVendor.vendorId]);
 
   useEffect(() => {
+    setLinkedApprovalFailure(null);
     if (!linkedApprovalId) return;
+    const requestVendorId = canonicalVendorId;
+    const contextVersion = vendorContextVersionRef.current;
+    const fail = (message: string) => setLinkedApprovalFailure({
+      requestId: linkedApprovalId, vendorId: requestVendorId, contextVersion, message,
+    });
+    if (!requestVendorId) {
+      fail('Select a Vendor in your workspace to open this settlement.');
+      return;
+    }
+    if (vendorGeneration !== contextVersion || vendorContextRef.current !== requestVendorId ||
+        getCurrentVendorContext().vendorId.trim() !== requestVendorId) return;
+
     let cancelled = false;
+    const requestVersion = ++detailRequestVersionRef.current;
+    const isCurrent = () => !cancelled &&
+      contextVersion === vendorContextVersionRef.current &&
+      requestVersion === detailRequestVersionRef.current &&
+      vendorContextRef.current === requestVendorId &&
+      getCurrentVendorContext().vendorId.trim() === requestVendorId;
+    clearSettlementActionConfirmation();
+    selectedQueueApprovalIdRef.current = '';
+    setApprovalId('');
+    setApproval(null);
+    setSuccess(null);
     void getSettlementApproval(linkedApprovalId)
       .then((result) => {
-        if (cancelled || manualVendorSelectionRef.current) return;
-        selectVendorId(result.vendorId);
+        if (!isCurrent()) return;
+        if (!result || typeof result.id !== 'string' || result.id !== linkedApprovalId) {
+          fail('The requested settlement response identity could not be verified.');
+          return;
+        }
+        if (typeof result.vendorId !== 'string' || !result.vendorId.trim()) {
+          fail('The requested settlement Vendor identity could not be verified.');
+          return;
+        }
+        if (result.vendorId !== requestVendorId) {
+          fail('The requested settlement belongs to a different Vendor. Switch to the appropriate Vendor in your workspace to view this record.');
+          return;
+        }
         setApprovalId(result.id);
         setApproval(result);
       })
       .catch((requestError) => {
-        if (!cancelled && !manualVendorSelectionRef.current) setError(getErrorMessage(requestError));
+        if (isCurrent()) fail(getErrorMessage(requestError));
       });
     return () => { cancelled = true; };
-  }, [linkedApprovalId]);
+  }, [linkedApprovalId, canonicalVendorId, vendorGeneration]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3184,6 +3221,12 @@ export function AdminSettlementApprovalsPage() {
       <WorkspaceHeader />
 
       {dbWarnings.length ? <ReadinessList title="Database warnings" items={dbWarnings} tone="warning" /> : null}
+
+      {linkedApprovalFailure && linkedApprovalFailure.requestId === linkedApprovalId &&
+        linkedApprovalFailure.vendorId === canonicalVendorId &&
+        linkedApprovalFailure.contextVersion === vendorContextVersionRef.current ? (
+        <SettlementDraftFailurePanel message={linkedApprovalFailure.message} summary={null} />
+      ) : null}
 
       {canonicalContextReady && error ? <SettlementDraftFailurePanel message={error} summary={draftFailureSummary} /> : null}
       {canonicalContextReady && invoiceRecordsWarning ? (
