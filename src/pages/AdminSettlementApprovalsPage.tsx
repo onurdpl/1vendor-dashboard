@@ -1343,7 +1343,6 @@ function SettlementReviewQueue({
   pendingSettlementAction,
   vendorId,
   vendorName,
-  onVendorIdChange,
   workflowTab,
   onWorkflowTabChange,
   search,
@@ -1364,7 +1363,6 @@ function SettlementReviewQueue({
   pendingSettlementAction: SettlementQueueAction | null;
   vendorId: string;
   vendorName: string;
-  onVendorIdChange: (value: string) => void;
   workflowTab: SettlementReviewWorkflowTab;
   onWorkflowTabChange: (tab: SettlementReviewWorkflowTab) => void;
   search: string;
@@ -1488,7 +1486,7 @@ function SettlementReviewQueue({
         </label>
         <label>
           <span>Vendor</span>
-          <input value={vendorId} onChange={(event) => onVendorIdChange(event.target.value)} placeholder="Vendor id" />
+          <input value={vendorId ? vendorName || vendorId : ''} readOnly placeholder="No vendor selected" />
         </label>
         <label>
           <span>Status</span>
@@ -1952,7 +1950,8 @@ export function AdminSettlementApprovalsPage() {
   const [searchParams] = useSearchParams();
   const linkedApprovalId = searchParams.get('approvalId')?.trim() ?? '';
   const appReadiness = useAppReadiness();
-  const initialVendorId = appReadiness.currentVendor.vendorId || 'yalispor';
+  const initialVendorId = appReadiness.currentVendor.vendorId;
+  const activeVendorIdRef = useRef(initialVendorId);
   const [vendorId, setVendorId] = useState(initialVendorId);
   const vendorContextRef = useRef(initialVendorId.trim());
   const vendorContextVersionRef = useRef(0);
@@ -2036,8 +2035,9 @@ export function AdminSettlementApprovalsPage() {
   }
 
   useEffect(() => {
-    if (!vendorContextRef.current) {
-      selectVendorId(appReadiness.currentVendor.vendorId || 'yalispor');
+    if (activeVendorIdRef.current !== appReadiness.currentVendor.vendorId) {
+      activeVendorIdRef.current = appReadiness.currentVendor.vendorId;
+      selectVendorId(appReadiness.currentVendor.vendorId, true);
     }
   }, [appReadiness.currentVendor.vendorId]);
 
@@ -3164,8 +3164,7 @@ export function AdminSettlementApprovalsPage() {
             : (busyAction === 'approve' || busyAction === 'cancel' ? busyAction : null)
         }
         vendorId={vendorId}
-        vendorName={appReadiness.currentVendor.vendorName}
-        onVendorIdChange={(value) => selectVendorId(value, true)}
+        vendorName={vendorId === appReadiness.currentVendor.vendorId ? appReadiness.currentVendor.vendorName : vendorId}
         workflowTab={settlementWorkflowTab}
         onWorkflowTabChange={(value) => { invalidateSettlementQueueSelection(); setSettlementWorkflowTab(value); }}
         search={settlementQueueSearch}
@@ -3206,7 +3205,7 @@ export function AdminSettlementApprovalsPage() {
             <div className="op-toolbar settlement-toolbar" aria-label="Settlement vendor controls">
               <label>
                 <span>Vendor</span>
-                <input value={vendorId} onChange={(event) => selectVendorId(event.target.value, true)} placeholder="yalispor" />
+                <input value={vendorId === appReadiness.currentVendor.vendorId ? appReadiness.currentVendor.vendorName || vendorId : vendorId} readOnly placeholder="No vendor selected" />
               </label>
               <label>
                 <span>Draft notes</span>

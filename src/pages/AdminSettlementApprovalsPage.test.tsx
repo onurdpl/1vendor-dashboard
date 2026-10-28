@@ -260,8 +260,18 @@ function vendorApprovalList(vendorId: string, id: string): SettlementApprovalLis
   };
 }
 
-function selectQueueVendor(vendorId: string) {
-  fireEvent.change(screen.getByPlaceholderText('Vendor id'), { target: { value: vendorId } });
+function selectQueueVendor(vendorId: string, vendorName = vendorId) {
+  act(() => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: vendorId ? ['yalispor', vendorId] : [],
+      vendorDetails: vendorId
+        ? [{ vendorId, vendorName }, ...(vendorId === 'yalispor' ? [] : [{ vendorId: 'yalispor', vendorName: 'Yalispor' }])]
+        : [],
+      canSwitchVendors: true, defaultVendorId: vendorId,
+    });
+    setCurrentVendorId(vendorId);
+  });
 }
 
 function DeepLinkNavigationProbe() {
@@ -318,13 +328,46 @@ describe('Settlement Review queue cleanup', () => {
     vi.clearAllMocks();
   });
 
+  it('shows the active vendor name read-only and follows vendor context changes without accepting typing', async () => {
+    selectQueueVendor('yalispor', 'Yalıspor');
+    listSettlementApprovalsMock.mockImplementation(async (id) =>
+      id === 'sporjinal' ? vendorApprovalList(id, 'sporjinal-approval') : recentApprovalsResponse);
+    const user = userEvent.setup();
+    renderPage();
+    const field = screen.getByLabelText('Vendor', { selector: 'input' });
+    expect(field).toHaveValue('Yalıspor');
+    expect(field).toHaveAttribute('readonly');
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    await user.type(field, 'wrong-vendor');
+    expect(field).toHaveValue('Yalıspor');
+    expect(listSettlementApprovalsMock).not.toHaveBeenCalledWith('wrong-vendor');
+
+    selectQueueVendor('sporjinal', 'Sporjinal');
+    expect(field).toHaveValue('Sporjinal');
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('sporjinal'));
+    expect(within(screen.getByLabelText('Settlement review queue')).queryByText('Yalıspor')).not.toBeInTheDocument();
+    await user.clear(screen.getByPlaceholderText('Vendor, settlement, status'));
+    expect(field).toHaveValue('Sporjinal');
+  });
+
+  it('keeps an initially missing vendor context empty without a fallback vendor request', async () => {
+    selectQueueVendor('');
+    renderPage();
+    const field = screen.getByLabelText('Vendor', { selector: 'input' });
+    expect(field).toHaveValue('');
+    expect(field).toHaveAttribute('readonly');
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(0);
+    await act(async () => {});
+    expect(listSettlementApprovalsMock).not.toHaveBeenCalled();
+  });
+
   it('opens an explicit replacement deep link from the scheduled settlement page', async () => {
     const linked = { ...selectedRecentApproval, id: 'replacement-draft-id', vendorId: 'replacement-vendor' };
     getSettlementApprovalMock.mockResolvedValue(linked);
     renderPage('/admin/finance/settlement-approvals?approvalId=replacement-draft-id');
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('replacement-draft-id'));
-    await waitFor(() => expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('replacement-vendor'));
+    await waitFor(() => expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('replacement-vendor'));
   });
 
   it('hides the previous vendor rows and actions immediately, and keeps them hidden after a failed request or empty filter', async () => {
@@ -402,7 +445,7 @@ describe('Settlement Review queue cleanup', () => {
     await user.click(getQueueRows(queue)[0]);
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-b'));
     await act(async () => delayedA.resolve(selectedDraftRefundApproval));
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('vendor-b');
     expect(getQueueRows(queue)).toHaveLength(1);
     expect(within(queue).getAllByText('vendor-b').length).toBeGreaterThan(0);
   });
@@ -421,7 +464,7 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
     await act(async () => delayedA.reject(new Error('Old vendor detail failed')));
     expect(screen.queryByText('Old vendor detail failed')).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('vendor-b');
   });
 
   it('preserves the explicit vendor selection when a deep-link detail arrives late', async () => {
@@ -433,7 +476,7 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-a'));
     selectQueueVendor('vendor-b');
     await act(async () => delayedLink.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('vendor-b');
     expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
     expect(within(screen.getByLabelText('Settlement review queue')).getAllByText('vendor-b').length).toBeGreaterThan(0);
   });
@@ -459,7 +502,7 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
     await act(async () => second.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
     await act(async () => first.resolve({ ...selectedRecentApproval, id: 'approval-a', vendorId: 'yalispor' }));
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('vendor-b');
     expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
   });
 
@@ -485,7 +528,7 @@ describe('Settlement Review queue cleanup', () => {
     selectQueueVendor('vendor-b');
     await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
     await act(async () => oldRefetch.resolve(approvalsAfterApproveResponse));
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('vendor-b');
     expect(getQueueRows(queue)).toHaveLength(1);
     expect(within(getQueueRows(queue)[0]).getByText('vendor-b')).toBeInTheDocument();
   });
@@ -512,7 +555,7 @@ describe('Settlement Review queue cleanup', () => {
     selectQueueVendor('vendor-b');
     await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
     await act(async () => oldDetailRefetch.resolve(approvedDraftRefundApproval));
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('vendor-b');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('vendor-b');
     expect(within(getQueueRows(queue)[0]).getByText('vendor-b')).toBeInTheDocument();
   });
 
@@ -877,7 +920,7 @@ describe('Settlement Review queue cleanup', () => {
     selectQueueVendor('sporjinal');
     await act(async () => targetCheck.resolve(selectedDraftRefundApproval));
     expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('sporjinal');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('sporjinal');
     expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
   });
 
@@ -956,7 +999,7 @@ describe('Settlement Review queue cleanup', () => {
     await act(async () => lateApproval.resolve(approvedDraftRefundApproval));
     await waitFor(() => expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).not.toBeDisabled());
     expect(approveSettlementApprovalMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByPlaceholderText('Vendor id')).toHaveValue('sporjinal');
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('sporjinal');
     expect(within(getQueueRows(queue)[0]).getByText('sporjinal')).toBeInTheDocument();
     expect(screen.queryByText('Settlement approved.')).not.toBeInTheDocument();
     expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2);
