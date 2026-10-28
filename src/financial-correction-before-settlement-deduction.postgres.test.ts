@@ -749,7 +749,8 @@ describeWithPostgres('before-settlement financial correction deduction with isol
       include: { lines: true, correctionCreditLines: true, correctionDeductionLines: true } });
     expect(after).toMatchObject({ status: 'DRAFT', approvedBy: null, approvedAt: null });
     expect(after[field]).toBe(before[field] + 1);
-    expect(after.lines).toEqual(before.lines);
+    expect([...after.lines].sort((a, b) => a.id.localeCompare(b.id)))
+      .toEqual([...before.lines].sort((a, b) => a.id.localeCompare(b.id)));
     expect(after.correctionCreditLines).toEqual(before.correctionCreditLines);
     expect(after.correctionDeductionLines).toEqual(before.correctionDeductionLines);
     expect(await db.financialCorrectionCreditSettlementLine.count({ where: {
