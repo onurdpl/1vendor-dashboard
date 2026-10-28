@@ -1,9 +1,11 @@
+import { useLayoutEffect } from 'react';
+import * as readiness from '../lib/appReadiness';
 import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
-import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { getCurrentVendorContext, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { AdminSettlementApprovalsPage } from './AdminSettlementApprovalsPage';
 import {
   approveSettlementApproval,
@@ -274,6 +276,21 @@ function selectQueueVendor(vendorId: string, vendorName = vendorId) {
   });
 }
 
+function fixedWorkspaceVendors(initialVendorId = 'yalispor') {
+  setCurrentUser({ email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+    vendorAccess: ['yalispor', 'sporjinal'],
+    vendorDetails: [{ vendorId: 'yalispor', vendorName: 'Yalıspor' }, { vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+    canSwitchVendors: true, defaultVendorId: 'yalispor' });
+  setCurrentVendorId(initialVendorId);
+}
+
+function economicList(vendorId: string): SettlementApprovalListResponse {
+  const isYali = vendorId === 'yalispor';
+  return { ...recentApprovalsResponse, vendorId, approvals: [{ ...recentApprovalsResponse.approvals[0],
+    id: `${vendorId}-economic-record`, vendorId, grossSalesMinor: isYali ? 11111 : 99999,
+    netPayableMinor: isYali ? 7777 : 88888, scheduledCycleKey: isYali ? 'YaliReference' : 'SporReference' }] };
+}
+
 function DeepLinkNavigationProbe() {
   const navigate = useNavigate();
   return <>
@@ -326,7 +343,160 @@ describe('Settlement Review queue cleanup', () => {
     cleanup();
     window.localStorage.clear();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
+
+  it.each([['yalispor', 'sporjinal', '111.11', '77.77', /YaliReference/i],
+    ['sporjinal', 'yalispor', '999.99', '888.88', /SporReference/i]] as const)(
+    'isolates economic rows and Summary immediately on %s to %s while loading', async (from, to, gross, net, reference) => {
+      fixedWorkspaceVendors(from);
+      const pending = deferred<SettlementApprovalListResponse>();
+      listSettlementApprovalsMock.mockImplementation((id) => id === to ? pending.promise : Promise.resolve(economicList(from)));
+      renderPage();
+      const queue = screen.getByLabelText('Settlement review queue');
+      await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
+      const panel = within(queue).getByLabelText('Settlement review detail panel');
+      expect(panel).toHaveTextContent(gross);
+      expect(panel).toHaveTextContent(net);
+      expect(within(queue).getAllByText(reference).length).toBeGreaterThan(0);
+      await userEvent.setup().click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+      expect(screen.getByRole('dialog')).toHaveTextContent(`${from}-economic-record`);
+      act(() => {
+        setCurrentVendorId(to);
+        // Invoke the existing DOM handler before React can render/effects can run.
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel Settlement' }));
+      });
+      expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(getQueueRows(queue)).toHaveLength(0);
+      expect(queue).not.toHaveTextContent(gross);
+      expect(queue).not.toHaveTextContent(net);
+      expect(within(queue).queryByText(reference)).not.toBeInTheDocument();
+      expect(within(queue).getByText('Loading recent approvals...')).toBeInTheDocument();
+      await act(async () => pending.resolve(economicList(to)));
+      expect(getQueueRows(queue)).toHaveLength(1);
+      expect(within(queue).getByLabelText('Settlement review detail panel')).toHaveTextContent(to === 'yalispor' ? '111.11' : '999.99');
+      expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveAttribute('readonly');
+    });
+
+  it('hides old financial content in the layout commit before passive context synchronization', async () => {
+    fixedWorkspaceVendors();
+    const originalHook = readiness.useAppReadiness;
+    let override: ReturnType<typeof readiness.getAppReadinessSnapshot> | undefined;
+    vi.spyOn(readiness, 'useAppReadiness').mockImplementation(() => {
+      const actual = originalHook();
+      return override ?? actual;
+    });
+    listSettlementApprovalsMock.mockImplementation((id) => id === 'sporjinal'
+      ? new Promise(() => {}) : Promise.resolve(economicList('yalispor')));
+    const commits: Array<{ text: string; history: boolean; dialog: boolean; requestedB: boolean; field: string }> = [];
+    let record = false;
+    function CommitProbe() {
+      useLayoutEffect(() => {
+        if (!record) return;
+        commits.push({ text: screen.getByLabelText('Settlement review queue').textContent || '',
+          history: Boolean(screen.queryByLabelText('Automatic approval history')),
+          dialog: Boolean(screen.queryByRole('dialog')),
+          requestedB: listSettlementApprovalsMock.mock.calls.some(([id]) => id === 'sporjinal'),
+          field: (screen.getByLabelText('Vendor', { selector: 'input' }) as HTMLInputElement).value });
+      });
+      return null;
+    }
+    const tree = () => <MemoryRouter><AdminSettlementApprovalsPage /><CommitProbe /></MemoryRouter>;
+    const view = render(tree());
+    await waitFor(() => expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Cancel Settlement' }));
+    override = { ...readiness.getAppReadinessSnapshot(), currentVendor: {
+      vendorId: 'sporjinal', vendorName: 'Sporjinal', scope: 'runtime-vendor-context' } };
+    record = true;
+    view.rerender(tree());
+    expect(commits.length).toBeGreaterThan(0);
+    expect(commits[0].requestedB).toBe(false);
+    expect(commits[0].field).toBe('Sporjinal');
+    expect(commits[0].text).not.toMatch(/111\.11|77\.77|YaliReference|yalispor-economic-record/i);
+    expect(commits[0].history).toBe(false);
+    expect(commits[0].dialog).toBe(false);
+  });
+
+  it.each(['vendor notification', 'cross-tab storage notification'] as const)(
+    'rejects the first A request after batched A to B to A via %s', async (notification) => {
+    fixedWorkspaceVendors();
+    const oldA = deferred<SettlementApprovalListResponse>();
+    const newA = deferred<SettlementApprovalListResponse>();
+    listSettlementApprovalsMock.mockReturnValueOnce(oldA.promise).mockReturnValueOnce(newA.promise);
+    renderPage();
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(1));
+    act(() => {
+      if (notification === 'vendor notification') {
+        setCurrentVendorId('sporjinal'); setCurrentVendorId('yalispor');
+      } else {
+        for (const id of ['sporjinal', 'yalispor']) {
+          window.localStorage.setItem('vendor-dashboard.current-vendor-id', id);
+          window.dispatchEvent(new StorageEvent('storage', { key: 'vendor-dashboard.current-vendor-id', newValue: id }));
+        }
+      }
+    });
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2));
+    await act(async () => oldA.resolve({ ...economicList('yalispor'), approvals: [{
+      ...economicList('yalispor').approvals[0], grossSalesMinor: 123456, scheduledCycleKey: 'OldGeneration' }] }));
+    const queue = screen.getByLabelText('Settlement review queue');
+    expect(getQueueRows(queue)).toHaveLength(0);
+    expect(queue).not.toHaveTextContent('1,234.56');
+    expect(queue).not.toHaveTextContent('OldGeneration');
+    await act(async () => newA.resolve(economicList('yalispor')));
+    expect(getQueueRows(queue)).toHaveLength(1);
+    expect(queue).toHaveTextContent('111.11');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+  });
+
+  it('preserves Search, Status, Settlement Period, High Value and normal selection', async () => {
+    listSettlementApprovalsMock.mockResolvedValue({ ...recentApprovalsResponse, approvals: [
+      { ...recentApprovalsResponse.approvals[0], netPayableMinor: 80000, scheduledCycleKey: 'approved-cycle' },
+      { ...recentApprovalsResponse.approvals[1], scheduledCycleKey: 'draft-cycle' },
+    ] });
+    renderPage();
+    const user = userEvent.setup();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    const search = within(queue).getByLabelText('Search');
+    await user.type(search, 'no-such-record');
+    expect(getQueueRows(queue)).toHaveLength(0);
+    await user.clear(search);
+    expect(getQueueRows(queue)).toHaveLength(2);
+    await user.selectOptions(within(queue).getByLabelText('Status'), 'draft');
+    expect(getQueueRows(queue)).toHaveLength(1);
+    expect(getQueueRows(queue)[0]).toHaveTextContent('7,598.00');
+    await user.selectOptions(within(queue).getByLabelText('Status'), 'all');
+    await user.selectOptions(within(queue).getByLabelText('Settlement Period'), 'approved-cycle');
+    expect(getQueueRows(queue)).toHaveLength(1);
+    expect(getQueueRows(queue)[0]).toHaveTextContent('2,200.00');
+    await user.selectOptions(within(queue).getByLabelText('Settlement Period'), 'all');
+    await user.click(within(queue).getByLabelText('High Value only'));
+    expect(getQueueRows(queue)).toHaveLength(1);
+    await user.click(getQueueRows(queue)[0]);
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveAttribute('readonly');
+  });
+
+  it.each(['Approve Settlement', 'Cancel Settlement'] as const)(
+    'checks the live canonical getter before %s even before a vendor notification', async (action) => {
+      fixedWorkspaceVendors();
+      renderPage();
+      const user = userEvent.setup();
+      const queue = screen.getByLabelText('Settlement review queue');
+      await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+      if (action === 'Approve Settlement') await user.click(getDraftSettlementRow(queue));
+      await user.click(within(queue).getByRole('button', { name: action }));
+      const dialog = screen.getByRole('dialog', { name: action });
+      const readsBeforeConfirm = getSettlementApprovalMock.mock.calls.length;
+      // Model storage changing before the vendor-change notification/render is delivered.
+      window.localStorage.setItem('vendor-dashboard.current-vendor-id', 'sporjinal');
+      await user.click(within(dialog).getByRole('button', { name: action }));
+      expect(getSettlementApprovalMock).toHaveBeenCalledTimes(readsBeforeConfirm);
+      expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+      expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
 
   it('shows the active vendor name read-only and follows vendor context changes without accepting typing', async () => {
     selectQueueVendor('yalispor', 'Yalıspor');
@@ -361,13 +531,27 @@ describe('Settlement Review queue cleanup', () => {
     expect(listSettlementApprovalsMock).not.toHaveBeenCalled();
   });
 
-  it('opens an explicit replacement deep link from the scheduled settlement page', async () => {
+  it('still opens a same-vendor replacement deep link under the canonical guard', async () => {
+    getSettlementApprovalMock.mockResolvedValue({ ...selectedRecentApproval, id: 'same-vendor-replacement' });
+    renderPage('/admin/finance/settlement-approvals?approvalId=same-vendor-replacement');
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('same-vendor-replacement'));
+    await waitFor(() => expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(2));
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('Yalispor');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+  });
+
+  it('hides a foreign replacement deep link behind the canonical render guard (Phase B pending)', async () => {
     const linked = { ...selectedRecentApproval, id: 'replacement-draft-id', vendorId: 'replacement-vendor' };
     getSettlementApprovalMock.mockResolvedValue(linked);
     renderPage('/admin/finance/settlement-approvals?approvalId=replacement-draft-id');
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('replacement-draft-id'));
-    await waitFor(() => expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('replacement-vendor'));
+    await act(async () => {});
+    expect(screen.getByLabelText('Vendor', { selector: 'input' })).toHaveValue('Yalispor');
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(0);
+    expect(screen.queryByLabelText('Automatic approval history')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+    expect(listSettlementApprovalsMock).not.toHaveBeenCalledWith('replacement-vendor');
   });
 
   it('hides the previous vendor rows and actions immediately, and keeps them hidden after a failed request or empty filter', async () => {
