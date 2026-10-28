@@ -160,6 +160,7 @@ async function validateBaseline(postgresMajor) {
 }
 
 function runPrisma(arguments_, label) {
+  const startedAt = process.hrtime.bigint();
   const result = spawnSync(process.execPath, [prismaCliPath, ...arguments_], {
     cwd: backendDirectory,
     env: {
@@ -168,12 +169,21 @@ function runPrisma(arguments_, label) {
     },
     encoding: 'utf8',
   });
+  const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+  const diagnostics = `exitCode=${result.status}, signal=${result.signal}, durationMs=${durationMs.toFixed(1)}`;
+  const redact = (value) => {
+    let text = String(value).replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, '[REDACTED_DATABASE_URL]');
+    for (const secret of [targetUrl.username, targetUrl.password].flatMap((value) => [value, decodeURIComponent(value)])) {
+      if (secret) text = text.split(secret).join('[REDACTED_CREDENTIAL]');
+    }
+    return text;
+  };
   if (result.error) {
-    throw new Error(`${label} could not start: ${result.error.message}`);
+    throw new Error(`${label} subprocess error (${diagnostics}): ${redact(result.error.message)}`);
   }
-  if (result.status !== 0) {
-    const details = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
-    throw new Error(`${label} failed${details ? `:\n${details}` : '.'}`);
+  if (result.status !== 0 || result.signal !== null) {
+    const details = redact([result.stdout, result.stderr].filter(Boolean).join('\n').trim());
+    throw new Error(`${label} failed (${diagnostics})${details ? `:\n${details}` : '.'}`);
   }
 }
 
