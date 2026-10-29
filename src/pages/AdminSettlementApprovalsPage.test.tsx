@@ -415,6 +415,130 @@ describe('Settlement Review queue cleanup', () => {
   }
   const fullCounts = { all: 73, needs_review: 3, ready_for_approval: 40, refund_review: 0, vendor_hold: 9, approved: 30, paid: 0 };
 
+  it.each(['loaded', 'error'] as const)('does not infer a definitive action permission while authority is pending or %s', async outcome => {
+    const x = linkedFixture('yalispor','authority-pending-x',8765432,6543210,'draft');
+    const authority = deferred<SettlementApprovalListResponse>();
+    listSettlementApprovalsMock.mockReturnValue(authority.promise);
+    historyMock.mockResolvedValue(historyPage('yalispor',[x]));
+    getSettlementApprovalMock.mockResolvedValue(x.detail);
+    renderPage('/admin/finance/settlement-approvals?approvalId=authority-pending-x');
+    const panel = await screen.findByLabelText('Settlement review detail panel');
+    await waitFor(() => expect(panel).toHaveTextContent('Financial action availability is not verified while current data is loading or unavailable.'));
+    expect(panel).not.toHaveTextContent('Viewing it does not authorize Approve or Cancel.');
+    expect(within(panel).queryByRole('button',{name:/Approve Settlement|Cancel Settlement/})).not.toBeInTheDocument();
+    await act(async () => {
+      if (outcome === 'error') authority.reject(new Error('Authority unavailable'));
+      else authority.resolve(linkedList('yalispor',x));
+    });
+    if (outcome === 'error') {
+      expect(panel).toHaveTextContent('Financial action availability is not verified');
+      expect(panel).not.toHaveTextContent('Viewing it does not authorize Approve or Cancel.');
+      expect(within(panel).queryByRole('button',{name:/Approve Settlement|Cancel Settlement/})).not.toBeInTheDocument();
+    } else {
+      expect(await within(panel).findByRole('button',{name:'Approve Settlement'})).toBeInTheDocument();
+      expect(panel).not.toHaveTextContent('Financial action availability is not verified');
+    }
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['initial','after-empty-scan'] as const)('keeps genuine no-match Search messaging for %s exhaustion', async mode => {
+    historyMock.mockImplementation(async (_,query) => !query?.search ? historyPage('yalispor',[]) :
+      mode === 'after-empty-scan' && !query.cursor
+        ? {...historyPage('yalispor',[],'empty-scan'),hasMore:null,searchState:'MORE_CANDIDATES'}
+        : {...historyPage('yalispor',[]),searchState:'EXHAUSTED'});
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Search'),{target:{value:'no-match'}});
+    if (mode === 'after-empty-scan') {
+      await screen.findByText(/Search scan incomplete/);
+      await userEvent.setup().click(screen.getByRole('button',{name:'Continue Search'}));
+    }
+    await screen.findByText('No settlements match the selected workflow and filters.');
+    expect(screen.queryByText(/Search completed. No additional settlements/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(0);
+  });
+
+  it('explains summary counts without altering seven backend values or workflow navigation', async () => {
+    countsMock.mockResolvedValue({ok:true,writesPerformed:false,vendorId:'yalispor',counts:fullCounts});
+    renderPage();
+    expect(screen.getByText('Workflow counts reflect settlement summaries, not payout payments or complete refund evidence. Refund and Paid are not populated by the current summary classification.')).toBeInTheDocument();
+    const tabs = screen.getByLabelText('Settlement review workflow tabs');
+    await within(tabs).findByRole('button',{name:'All73'});
+    const labels = ['All73','Summary flags3','No summary flags40','Refund0','Hold9','Approved30','Paid0'];
+    expect(within(tabs).getAllByRole('button')).toHaveLength(7);
+    for (const name of labels) expect(within(tabs).getByRole('button',{name})).toBeInTheDocument();
+    await userEvent.setup().click(within(tabs).getByRole('button',{name:'Paid0'}));
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]?.workflow).toBe('paid'));
+    expect(within(tabs).getByRole('button',{name:'Paid0'})).toHaveClass('is-active');
+    expect(countsMock).toHaveBeenCalledTimes(1);
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled(); expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['later_%[raw]', 'all'].flatMap(raw => ['reload','clear','vendor','retry'].map(finish => ({raw,finish}))))(
+    'retains verified period $raw across mutation metadata refresh and $finish', async ({raw,finish}) => {
+      fixedWorkspaceVendors();
+      const x = linkedFixture('yalispor','period-refresh-x',12345,9876,'draft');
+      const approved = {...x.detail,status:'approved' as const};
+      const label = `Verified label for ${raw}`;
+      let mutated = false, metadataFailed = false;
+      listSettlementApprovalsMock.mockImplementation(async vendor => linkedList(vendor,...(vendor === 'yalispor'
+        ? [{...x,summary:{...x.summary,status:mutated ? 'approved' as const : 'draft' as const}}] : [])));
+      historyMock.mockImplementation(async vendor => historyPage(vendor,vendor === 'yalispor' ? [x] : []));
+      getSettlementApprovalMock.mockImplementation(async () => mutated ? approved : x.detail);
+      approveSettlementApprovalMock.mockImplementation(async () => {mutated = true; return approved;});
+      periodsMock.mockImplementation(async (vendor,query) => {
+        if (mutated && finish === 'retry' && !query?.cursor && !metadataFailed) {
+          metadataFailed = true; throw new Error('Period metadata unavailable');
+        }
+        return {ok:true,writesPerformed:false,vendorId:vendor,
+          periods:query?.cursor ? [{value:raw,label}] : [{value:`${vendor}-first`,label:`${vendor} First period`}],
+          hasMore:!query?.cursor,nextCursor:query?.cursor ? null : 'period-page2'};
+      });
+      renderPage();
+      const user = userEvent.setup();
+      await screen.findByText('yalispor First period');
+      await user.click(screen.getByRole('button',{name:'Load More Periods'}));
+      await screen.findByRole('option',{name:label});
+      const select = screen.getByLabelText('Settlement Period');
+      await user.selectOptions(select,JSON.stringify([raw]));
+      await user.click(await screen.findByRole('button',{name:'Approve Settlement'}));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Approve Settlement'}));
+      await waitFor(() => expect(periodsMock).toHaveBeenCalledTimes(3));
+      if (finish === 'retry') {
+        await screen.findByText('Period metadata unavailable');
+        expect(select).toHaveDisplayValue(label);
+        await user.click(screen.getByRole('button',{name:'Retry periods'}));
+        await waitFor(() => expect(periodsMock).toHaveBeenCalledTimes(4));
+        expect(screen.queryByText('Period metadata unavailable')).not.toBeInTheDocument();
+      }
+      expect(select).toHaveValue(JSON.stringify([raw])); expect(select).toHaveDisplayValue(label);
+      expect(within(select).getAllByRole('option',{name:label})).toHaveLength(1);
+      expect(historyMock.mock.calls.at(-1)?.[1]?.periodKey).toBe(raw);
+      expect(approveSettlementApprovalMock).toHaveBeenCalledExactlyOnceWith('period-refresh-x');
+      if (finish === 'reload') {
+        await user.click(screen.getByRole('button',{name:'Load More Periods'}));
+        await waitFor(() => expect(periodsMock).toHaveBeenCalledTimes(4));
+        expect(within(select).getAllByRole('option',{name:label})).toHaveLength(1);
+        expect(within(select).getAllByRole('option').map(option => (option as HTMLOptionElement).value))
+          .toEqual(['all-periods',JSON.stringify(['yalispor-first']),JSON.stringify([raw])]);
+        expect(select).toHaveDisplayValue(label);
+      } else if (finish === 'clear') {
+        await user.selectOptions(select,'all-periods');
+        expect(select).toHaveDisplayValue('All periods');
+        expect(within(select).queryByRole('option',{name:label})).not.toBeInTheDocument();
+        expect(historyMock.mock.calls.at(-1)?.[1]?.periodKey).toBeUndefined();
+      } else if (finish === 'vendor') {
+        act(() => setCurrentVendorId('sporjinal'));
+        expect(within(select).queryByRole('option',{name:label})).not.toBeInTheDocument();
+        await screen.findByText('sporjinal First period');
+        expect(select).toHaveDisplayValue('All periods');
+        expect(historyMock.mock.calls.at(-1)?.[0]).toBe('sporjinal');
+        expect(historyMock.mock.calls.at(-1)?.[1]?.periodKey).toBeUndefined();
+      }
+      expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+    });
+
   it('replaces pages across more than 20 records, returns to page 1, and never expands action authority', async () => {
     const fixtures = Array.from({ length: 25 }, (_, i) => linkedFixture('yalispor', `history-${i}`, (i + 1) * 11111, 7777, 'draft'));
     historyMock.mockImplementation(async (_, query) => historyPage('yalispor', query?.cursor ? fixtures.slice(20) : fixtures.slice(0,20), query?.cursor ? null : 'page2'));
@@ -483,7 +607,8 @@ describe('Settlement Review queue cleanup', () => {
     expect(screen.getByText('Page 2')).toBeInTheDocument();
     expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
     await userEvent.setup().click(screen.getByRole('button',{name:'Next'}));
-    await screen.findByText('No settlements match the selected workflow and filters.');
+    await screen.findByText('Search completed. No additional settlements were found in this page. Use Previous to view earlier results.');
+    expect(screen.queryByText('No settlements match the selected workflow and filters.')).not.toBeInTheDocument();
     expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
     await userEvent.setup().click(screen.getByRole('button',{name:'Previous'}));
     await screen.findByText('Gross TRY 76,543.21');
@@ -756,6 +881,7 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(panel).toHaveTextContent('historical-browse-only'));
     expect(panel).toHaveTextContent('87,654.32');
     expect(panel).not.toHaveTextContent('current-authority');
+    expect(panel).toHaveTextContent('This record is read-only under the current action-authority data. Viewing it does not authorize Approve or Cancel.');
     expect(within(panel).queryByRole('button', { name: /Approve Settlement|Cancel Settlement/ })).not.toBeInTheDocument();
     expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
     expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
@@ -992,7 +1118,7 @@ describe('Settlement Review queue cleanup', () => {
     expect(panel).not.toHaveTextContent('111.11');
     expect(panel).not.toHaveTextContent('77.77');
     expect(panel).not.toHaveTextContent('recent-y-0');
-    expect(panel).toHaveTextContent(/temporarily unavailable.*current loaded Vendor list/);
+    expect(panel).toHaveTextContent('This record is read-only under the current action-authority data. Viewing it does not authorize Approve or Cancel.');
     expect(within(panel).queryByRole('button', { name: /Approve Settlement|Cancel Settlement/ })).not.toBeInTheDocument();
     expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
     expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
@@ -1024,6 +1150,8 @@ describe('Settlement Review queue cleanup', () => {
       expect(panel).toHaveTextContent(/outside the currently displayed results/);
       await user.click(await within(panel).findByRole('button', { name: 'Approve Settlement' }));
       expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+      expect(panel).not.toHaveTextContent('Viewing it does not authorize Approve or Cancel.');
+      expect(panel).not.toHaveTextContent('Financial action availability is not verified');
       expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
       expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
     });
@@ -1129,7 +1257,7 @@ describe('Settlement Review queue cleanup', () => {
     } else {
       expect(panel).toHaveTextContent('link-x');
       expect(panel).toHaveTextContent('321.00');
-      expect(panel).toHaveTextContent(/temporarily unavailable/);
+      expect(panel).toHaveTextContent('This record is read-only under the current action-authority data. Viewing it does not authorize Approve or Cancel.');
       expect(within(panel).queryByRole('button', { name: /Approve Settlement|Cancel Settlement/ })).not.toBeInTheDocument();
       expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
     }

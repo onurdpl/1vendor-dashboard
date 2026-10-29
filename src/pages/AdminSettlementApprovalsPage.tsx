@@ -1477,6 +1477,7 @@ function SettlementReviewQueue({
         ))}
       </div>
       <p className="page-description">Queue groups and badges use summary data, not verified financial readiness. Select a DRAFT for the current backend check; approval revalidates at confirmation.</p>
+      <p className="page-description">Workflow counts reflect settlement summaries, not payout payments or complete refund evidence. Refund and Paid are not populated by the current summary classification.</p>
       <div className="op-toolbar settlement-review-filters" aria-label="Settlement review filters">
         <label className="op-search-input">
           <span>Search</span>
@@ -1560,7 +1561,9 @@ function SettlementReviewQueue({
               <>
                 <MetadataGroup title="Summary">
                   {outsideResults ? <p>The selected settlement is outside the currently displayed results.</p> : null}
-                  {activeApprovalId && !listedTarget ? <p>Financial actions are temporarily unavailable because this settlement is outside the current loaded Vendor list. This is a display limitation, not a financial eligibility decision.</p> : null}
+                  {exactDetail && !hasActionAuthority ? <p>{actionListCurrent && !loading
+                    ? 'This record is read-only under the current action-authority data. Viewing it does not authorize Approve or Cancel.'
+                    : 'Financial action availability is not verified while current data is loading or unavailable.'}</p> : null}
                   {activeApprovalId ? <>
                     <MetadataRow label="Settlement ID" value={selectedQueueApproval.id} />
                     <MetadataRow label="Status" value={selectedQueueApproval.status.toUpperCase()} />
@@ -1949,6 +1952,7 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
 
 type HistoryFilters = { search: string; status: SettlementStatusFilter; period: string | null;
   workflow: SettlementReviewWorkflowTab; highValue: boolean };
+type SettlementHistoryPosition = { cursor?: string; page: number; hadMatches: boolean };
 function useSettlementHistory(vendorId: string, generation: number, vendorName: string, filters: HistoryFilters, refresh: number) {
   const [term, setTerm] = useState(filters.search.trim().toLowerCase());
   const rawTerm = filters.search.trim().toLowerCase();
@@ -1961,18 +1965,18 @@ function useSettlementHistory(vendorId: string, generation: number, vendorName: 
   const requests = useRef({ rows: 0, periods: 0, counts: 0 });
   const pending = useRef({ rows: false, periods: false });
   const [rows, setRows] = useState<{ key: string; data: SettlementHistoryPage | null; loading: boolean; error: string | null;
-    cursor?: string; previous: Array<{ cursor?: string; page: number }>; page: number }>({ key: '', data: null, loading: false, error: null, previous: [], page: 1 });
+    cursor?: string; previous: SettlementHistoryPosition[]; page: number }>({ key: '', data: null, loading: false, error: null, previous: [], page: 1 });
   const [periods, setPeriods] = useState<{ scope: string; options: Array<{ value: string; label: string }>; cursor: string | null;
     loading: boolean; error: string | null }>({ scope: '', options: [], cursor: null, loading: false, error: null });
   const [counts, setCounts] = useState<{ scope: string; data: SettlementWorkflowCounts | null; loading: boolean; error: string | null }>(
     { scope: '', data: null, loading: false, error: null });
   const rowsRef = useRef(rows); rowsRef.current = rows;
   const periodsRef = useRef(periods); periodsRef.current = periods;
-  const requestedPage = useRef<{key: string; cursor?: string; previous: Array<{cursor?: string; page: number}>; page: number} | null>(null);
+  const requestedPage = useRef<{key: string; cursor?: string; previous: SettlementHistoryPosition[]; page: number} | null>(null);
   const authorized = () => Boolean(vendorId && getCurrentVendorContext().vendorId.trim() === vendorId);
   const invalidate = () => { requests.current.rows++; requests.current.periods++; requests.current.counts++;
     pending.current.rows = false; pending.current.periods = false; };
-  async function loadRows(cursor?: string, previous: Array<{ cursor?: string; page: number }> = [], page = 1, signal?: AbortSignal) {
+  async function loadRows(cursor?: string, previous: SettlementHistoryPosition[] = [], page = 1, signal?: AbortSignal) {
     if (!authorized() || pending.current.rows || rawTerm !== term) return;
     const version = ++requests.current.rows; pending.current.rows = true;
     requestedPage.current = { key, cursor, previous, page };
@@ -2041,9 +2045,10 @@ function useSettlementHistory(vendorId: string, generation: number, vendorName: 
   const currentRows = authorized() && rows.key === key && rawTerm === term;
   return { rows: currentRows ? rows.data?.approvals ?? [] : [], loading: Boolean(vendorId) && (!currentRows || rows.loading),
     error: currentRows ? rows.error : null, data: currentRows ? rows.data : null, page: currentRows ? rows.page : 1,
+    hasEarlierMatches: currentRows && rows.previous.some(position => position.hadMatches),
     canPrevious: currentRows && rows.previous.length > 0,
     previous: () => { const old = rowsRef.current; const target = old.previous.at(-1); if (old.key === key && target) void loadRows(target.cursor, old.previous.slice(0, -1), target.page); },
-    next: () => { const old = rowsRef.current; if (old.key === key && old.data?.nextCursor) void loadRows(old.data.nextCursor, [...old.previous, { cursor: old.cursor, page: old.page }], old.page + 1); },
+    next: () => { const old = rowsRef.current; if (old.key === key && old.data?.nextCursor) void loadRows(old.data.nextCursor, [...old.previous, { cursor: old.cursor, page: old.page, hadMatches: old.data.approvals.length > 0 }], old.page + 1); },
     retry: () => { const target = requestedPage.current; if (target?.key === key) void loadRows(target.cursor, target.previous, target.page); },
     periods: authorized() && periods.scope === scope ? periods : { scope, options: [], cursor: null, loading: Boolean(vendorId), error: null },
     morePeriods: () => { const old = periodsRef.current; if (old.scope === scope && old.cursor) void loadPeriods(old.cursor); },
@@ -2117,6 +2122,9 @@ export function AdminSettlementApprovalsPage() {
   const [settlementQueueStatusFilter, setSettlementQueueStatusFilter] = useState<SettlementStatusFilter>('all');
   const [settlementQueuePeriodFilter, setSettlementQueuePeriodFilter] = useState<string | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
+  const [selectedPeriodOption, setSelectedPeriodOption] = useState<{
+    vendorId: string; generation: number; option: { value: string; label: string };
+  } | null>(null);
   const [settlementHighValueOnly, setSettlementHighValueOnly] = useState(false);
   const [settlementActionConfirmation, setSettlementActionConfirmation] = useState<SettlementActionConfirmation | null>(null);
   const [logoCreateConfirmations, setLogoCreateConfirmations] = useState<Record<string, boolean>>({});
@@ -2138,6 +2146,7 @@ export function AdminSettlementApprovalsPage() {
   function selectVendorId(nextVendorId: string) {
     history.invalidate();
     setSettlementQueuePeriodFilter(null);
+    setSelectedPeriodOption(null);
     const hadConfirmation = settlementActionConfirmationRef.current !== null;
     if (hadConfirmation) clearSettlementActionConfirmation();
     selectedQueueApprovalIdRef.current = '';
@@ -3402,6 +3411,23 @@ export function AdminSettlementApprovalsPage() {
     action();
   }
 
+  // Retain only the explicitly selected, previously verified option across a
+  // same-Vendor metadata refresh; other pages are still loaded only on demand.
+  const retainedPeriodOption = canonicalContextReady && selectedPeriodOption?.vendorId === canonicalVendorId &&
+    selectedPeriodOption.generation === vendorGeneration && selectedPeriodOption.option.value === settlementQueuePeriodFilter
+    ? selectedPeriodOption.option : null;
+  const periodOptions = retainedPeriodOption && !history.periods.options.some(option => option.value === retainedPeriodOption.value)
+    ? [...history.periods.options, retainedPeriodOption] : history.periods.options;
+  function changePeriodFilter(value: string | null) {
+    if (!canonicalContextReady || getCurrentVendorContext().vendorId.trim() !== canonicalVendorId) return;
+    const option = value === null ? null : periodOptions.find(item => item.value === value);
+    if (value !== null && !option) return;
+    changeBrowsing(() => {
+      setSelectedPeriodOption(option ? { vendorId: canonicalVendorId, generation: vendorGeneration, option } : null);
+      setSettlementQueuePeriodFilter(value);
+    });
+  }
+
   const showSettlementDetailTools = false;
 
   return (
@@ -3427,11 +3453,13 @@ export function AdminSettlementApprovalsPage() {
       <SettlementReviewQueue
         emptyMessage={history.error ? null : history.data?.searchState === 'MORE_CANDIDATES'
           ? 'No matches in this candidate batch. Continue Search to examine more history.'
+          : history.data?.searchState === 'EXHAUSTED' && history.hasEarlierMatches
+            ? 'Search completed. No additional settlements were found in this page. Use Previous to view earlier results.'
           : settlementQueueSearch.trim() || settlementQueueStatusFilter !== 'all' || settlementQueuePeriodFilter !== null || settlementHighValueOnly || settlementWorkflowTab !== 'all'
             ? 'No settlements match the selected workflow and filters.' : 'No settlement approvals found.'}
         approvals={history.rows}
         authorityApprovals={visibleRecentApprovals}
-        periodOptions={history.periods.options}
+        periodOptions={periodOptions}
         workflowCounts={history.counts.data}
         loading={history.loading}
 
@@ -3454,7 +3482,7 @@ export function AdminSettlementApprovalsPage() {
         statusFilter={settlementQueueStatusFilter}
         onStatusFilterChange={(value) => { changeBrowsing(() => setSettlementQueueStatusFilter(value)); }}
         periodFilter={settlementQueuePeriodFilter}
-        onPeriodFilterChange={(value) => { changeBrowsing(() => setSettlementQueuePeriodFilter(value)); }}
+        onPeriodFilterChange={changePeriodFilter}
         highValueOnly={settlementHighValueOnly}
         onHighValueOnlyChange={(value) => { changeBrowsing(() => setSettlementHighValueOnly(value)); }}
         onOpenApproval={(id) => void handleOpenRecentApproval(id)}
