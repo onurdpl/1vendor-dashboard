@@ -1501,6 +1501,38 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     commissionVatMinor: 2_000, netPayableMinor: 88_000,
     sourceSnapshotJson: { fixture: 'history-b1', index },
   }));
+  const filterVendor = `${prefix}-filters`, filterForeignVendor = `${prefix}-filters-foreign`;
+  const filterFixtures = Array.from({ length: 132 }, (_, index) => {
+    const kind = index % 6;
+    return { ...fixtures[index], id: `${prefix}-filter-${String(index).padStart(4, '0')}`, vendorId: filterVendor,
+      createdAt: new Date(Date.UTC(2026, kind === 3 || kind === 5 ? 8 : 9, 1, 0, 0, Math.floor(index / 12))),
+      scheduledCycleKey: kind === 0 ? `${prefix}-cycle-${index}` : null,
+      scheduledPeriodEnd: kind === 0 || kind === 1 || kind === 4 ? new Date('2026-08-31T23:59:59.999Z') : null,
+      scheduledRunDate: kind <= 2 ? new Date('2026-07-01T00:00:00.000Z') : null,
+      netPayableMinor: [99999, 100000, 100001, -99999, -100000, -100001, 0, -2147483648][index % 8],
+      currency: index % 2 ? 'USD' : 'TRY',
+    };
+  });
+  // Literal cycle keys override even date-like/month-like values. Empty string alone falls back.
+  filterFixtures.push(...['', 'all', ' ', '2026-02-30', '2026-08-31', '2026-09'].map((key, index) => ({
+    ...filterFixtures[0], id: `${prefix}-literal-${index}`, scheduledCycleKey: key,
+    scheduledPeriodEnd: new Date('2026-08-31T00:00:00.000Z'),
+  })));
+  filterFixtures.push(...[
+    { scheduledPeriodEnd: new Date('2026-08-30T23:59:59.999Z') },
+    { scheduledPeriodEnd: new Date('2026-09-01T00:00:00.000Z') },
+    { createdAt: new Date('2026-09-30T23:59:59.999Z') },
+    { createdAt: new Date('2026-10-01T00:00:00.000Z') },
+    { scheduledRunDate: new Date('2026-06-30T23:59:59.999Z') },
+    { scheduledRunDate: new Date('2026-07-02T00:00:00.000Z') },
+    { scheduledPeriodEnd: new Date('2024-02-29T23:59:59.999Z') },
+  ].map((dates, index) => ({ ...filterFixtures[0], id: `${prefix}-boundary-${index}`,
+    scheduledCycleKey: null, scheduledPeriodEnd: null, scheduledRunDate: null, ...dates })));
+  const filterOrdered = [...filterFixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  const rawPeriod = (row: typeof filterFixtures[number]) => row.scheduledCycleKey ||
+    row.scheduledPeriodEnd?.toISOString().slice(0, 10) || row.scheduledRunDate?.toISOString().slice(0, 10) ||
+    row.createdAt.toISOString().slice(0, 7);
   const ordered = [...fixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
     (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 
@@ -1549,10 +1581,13 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     expect(serviceIdentity).toEqual(identity);
     list = service.listSettlementApprovalsForVendor;
     expect(await db.vendor.count({ where: { id: { in: [vendorA, vendorB, emptyVendor] } } })).toBe(0);
-    await db.vendor.createMany({ data: [vendorA, vendorB, emptyVendor].map(id => ({ id, name: id })) });
+    await db.vendor.createMany({ data: [vendorA, vendorB, emptyVendor, filterVendor, filterForeignVendor].map(id => ({ id, name: id })) });
     await db.settlementApproval.createMany({ data: [
       ...fixtures,
       ...fixtures.slice(0, 27).map(row => ({ ...row, id: `${row.id}-foreign`, vendorId: vendorB })),
+      ...filterFixtures,
+      ...filterFixtures.slice(0, 24).map(row => ({ ...row, id: `${row.id}-foreign`, vendorId: filterForeignVendor,
+        scheduledCycleKey: null })),
     ] });
   });
   afterAll(async () => { await db?.$disconnect(); });
@@ -1607,7 +1642,7 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     for (const cursor of ['bad!', Buffer.from(JSON.stringify({ v: 99 })).toString('base64url')])
       await expect(page(vendorA, { cursor })).rejects.toThrow('cursor');
     for (const limit of [0, -1, 1.5, 101]) await expect(page(vendorA, { limit })).rejects.toThrow('limit');
-    for (const key of ['search', 'status', 'period', 'highValueOnly', 'workflow', 'searchTimeZone'])
+    for (const key of ['search', 'period', 'workflow', 'searchTimeZone'])
       await expect(page(vendorA, { [key]: 'value' })).rejects.toThrow('Unsupported');
     await expect(page('')).rejects.toThrow('vendorId');
   });
@@ -1643,4 +1678,96 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     expect(await db.financeLedgerEntry.count({ where })).toBe(ledgerCount);
     expect(await db.payoutBatch.count({ where })).toBe(payoutCount);
   });
+  async function traverseFilters(query: Record<string, unknown>, expected = filterOrdered) {
+    const ids: string[] = []; let cursor: string | null = null;
+    do {
+      const result = await page(filterVendor, { limit: 7, ...query, ...(cursor ? { cursor } : {}) });
+      expect(result.approvals.length).toBeLessThanOrEqual(7);
+      expect(result.approvals.every(row => row.vendorId === filterVendor)).toBe(true);
+      ids.push(...result.approvals.map(row => row.id));
+      expect(result.hasMore).toBe(result.nextCursor !== null);
+      cursor = result.nextCursor;
+      if (ids.length > filterFixtures.length) throw new Error('Unbounded or duplicate filtered traversal');
+    } while (cursor);
+    expect(ids).toEqual(expected.map(row => row.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    return ids;
+  }
+
+  it.each(['DRAFT', 'APPROVED', 'CANCELLED'])('traverses every %s row across pages and equal timestamps', async (status) => {
+    const expected = filterOrdered.filter(row => row.status === status);
+    expect(expected.length).toBeGreaterThan(20);
+    await traverseFilters({ status: status.toLowerCase() }, expected);
+  });
+
+  it.each(['2026-08-31', '2026-07-01', '2026-09', '2024-02-29', 'all', ' ', '2026-02-30']) (
+    'matches literal period %j with every precedence/fallback across complete history', async (periodKey) => {
+      const expected = filterOrdered.filter(row => rawPeriod(row) === periodKey);
+      expect(expected.length).toBeGreaterThan(0);
+      await traverseFilters({ periodKey }, expected);
+    });
+
+  it('filters an old unique cycle outside the first 20 and does not substitute its lower-priority dates', async () => {
+    const target = filterOrdered.filter(row => row.scheduledCycleKey?.startsWith(`${prefix}-cycle`)).at(-1)!;
+    expect(filterOrdered.indexOf(target)).toBeGreaterThan(20);
+    await traverseFilters({ periodKey: target.scheduledCycleKey }, [target]);
+    expect(rawPeriod(target)).not.toBe(target.scheduledPeriodEnd?.toISOString().slice(0, 10));
+  });
+
+  it('applies inclusive absolute high-value filtering including negative Int minimum, zero and currency independence', async () => {
+    const expected = filterOrdered.filter(row => Math.abs(row.netPayableMinor) >= 100000);
+    for (const amount of [100000, 100001, -100000, -100001, -2147483648])
+      expect(expected.some(row => row.netPayableMinor === amount)).toBe(true);
+    for (const amount of [99999, -99999, 0]) expect(expected.some(row => row.netPayableMinor === amount)).toBe(false);
+    expect(new Set(expected.map(row => row.currency))).toEqual(new Set(['TRY', 'USD']));
+    await traverseFilters({ highValueOnly: true }, expected);
+    await traverseFilters({ status: 'all', highValueOnly: 'false' });
+  });
+
+  it.each([
+    { status: 'draft', periodKey: '2026-09' },
+    { status: 'approved', highValueOnly: true },
+    { periodKey: '2026-08-31', highValueOnly: true },
+    { status: 'draft', periodKey: '2026-09', highValueOnly: true },
+  ])('ANDs all filters before bounded pagination: %j', async (query) => {
+    const expected = filterOrdered.filter(row => (!query.status || row.status.toLowerCase() === query.status) &&
+      (!query.periodKey || rawPeriod(row) === query.periodKey) &&
+      (!query.highValueOnly || Math.abs(row.netPayableMinor) >= 100000));
+    expect(expected.length).toBeGreaterThan(7);
+    await traverseFilters(query, expected);
+  });
+
+  it('binds filtered cursors to Vendor, status, raw period and value, preserving unfiltered v1 continuation', async () => {
+    const query = { status: 'draft', periodKey: '2026-09', highValueOnly: true, limit: 2 };
+    const first = await page(filterVendor, query);
+    expect(first.nextCursor).not.toBeNull();
+    const cursor = first.nextCursor!;
+    await expect(page(filterVendor, { ...query, status: 'DRAFT', highValueOnly: 'true', cursor }))
+      .resolves.toMatchObject({ vendorId: filterVendor });
+    for (const override of [{ status: 'approved' }, { status: 'all' }, { periodKey: '2026-08-31' },
+      { periodKey: undefined }, { highValueOnly: false }, { limit: 3 }])
+      await expect(page(filterVendor, { ...query, ...override, cursor })).rejects.toThrow('cursor');
+    await expect(page(filterForeignVendor, { ...query, cursor })).rejects.toThrow('cursor');
+    const old = await page(filterVendor, { limit: 2 });
+    expect(JSON.parse(Buffer.from(old.nextCursor!, 'base64url').toString()).v).toBe(1);
+    await expect(page(filterVendor, { limit: 2, status: 'all', highValueOnly: false, cursor: old.nextCursor })).resolves.toBeDefined();
+    await expect(page(filterVendor, { ...query, cursor: old.nextCursor })).rejects.toThrow('cursor');
+    expect(await page(filterVendor, { periodKey: 'no-such-cycle' })).toEqual({
+      ok: true, writesPerformed: false, vendorId: filterVendor, approvals: [], hasMore: false, nextCursor: null,
+    });
+  });
+
+  it('preserves every stored settlement field, ledger and payout while applying filters', async () => {
+    const where = { vendorId: { in: [filterVendor, filterForeignVendor] } };
+    const before = await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } });
+    const ledgers = await db.financeLedgerEntry.findMany({ where, orderBy: { id: 'asc' } });
+    const payouts = await db.payoutBatch.findMany({ where, orderBy: { id: 'asc' } });
+    await traverseFilters({ status: 'draft', periodKey: '2026-09', highValueOnly: true },
+      filterOrdered.filter(row => row.status === 'DRAFT' && rawPeriod(row) === '2026-09' && Math.abs(row.netPayableMinor) >= 100000));
+    await page(filterForeignVendor, { highValueOnly: true, periodKey: '2026-08-31' });
+    expect(await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } })).toEqual(before);
+    expect(await db.financeLedgerEntry.findMany({ where, orderBy: { id: 'asc' } })).toEqual(ledgers);
+    expect(await db.payoutBatch.findMany({ where, orderBy: { id: 'asc' } })).toEqual(payouts);
+  });
+
 });

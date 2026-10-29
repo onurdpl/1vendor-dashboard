@@ -1493,7 +1493,7 @@ describe('settlement approval foundation', () => {
       expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
     });
 
-  it.each(['search', 'searchTimeZone', 'status', 'period', 'highValueOnly', 'workflow', 'unexpected'])(
+  it.each(['search', 'searchTimeZone', 'period', 'workflow', 'unexpected'])(
     'rejects unsupported cursor-mode parameter %s rather than pretending to filter history', async (key) => {
       await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', [key]: 'value' })).rejects.toThrow('Unsupported');
       expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
@@ -1531,6 +1531,80 @@ describe('settlement approval foundation', () => {
     expect(await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', limit: '100' }))
       .toMatchObject({ approvals: [], hasMore: false, nextCursor: null });
     expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 101 }));
+  });
+
+  it.each(['draft', 'APPROVED', 'Cancelled'])('normalizes status %s into the database enum before pagination', async (status) => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue([]);
+    await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', status });
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { vendorId: 'vendor-a', AND: [{ status: status.toUpperCase() }] }, take: 21,
+    }));
+  });
+
+  it.each([true, 'true'])('uses inclusive positive and negative SQL high-value boundaries for %j', async (highValueOnly) => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue([]);
+    await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', highValueOnly });
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { vendorId: 'vendor-a', AND: [{ OR: [
+        { netPayableMinor: { gte: 100000 } }, { netPayableMinor: { lte: -100000 } },
+      ] }] },
+    }));
+  });
+
+  it.each([
+    { status: 'PAID' }, { status: '' }, { status: ' draft ' }, { status: null }, { status: ['draft'] },
+    { highValueOnly: 'yes' }, { highValueOnly: 'TRUE' }, { highValueOnly: 1 }, { highValueOnly: null },
+    { highValueOnly: ['true'] }, { periodKey: '' }, { periodKey: null }, { periodKey: 202610 },
+    { periodKey: ['2026-10'] }, { periodKey: 'x'.repeat(513) },
+  ])('rejects malformed filter forms before any database query: %j', async (filters) => {
+    await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', ...filters })).rejects.toThrow();
+    expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['2026-02-30', 'all', ' cycle key ', ' '])('keeps raw cycle key %j literal without timezone or trimming', async (periodKey) => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue([]);
+    await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', periodKey });
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { vendorId: 'vendor-a', AND: [{ OR: [{ scheduledCycleKey: periodKey }] }] },
+    }));
+  });
+
+  it('binds v2 cursors to normalized filters and rejects every filter/Vendor/limit mismatch', async () => {
+    const rows = Array.from({ length: 3 }, (_, i) => ({ ...buildApproval({ id: `filtered-${i}`, status: 'DRAFT' }),
+      _count: { lines: 0 } }));
+    prismaMock.settlementApproval.findMany.mockResolvedValue(rows);
+    const query = { pagination: 'cursor', limit: 2, status: 'draft', periodKey: '2026-10', highValueOnly: 'true' };
+    const first = await listSettlementApprovalsForVendor('vendor-a', query);
+    if (!('nextCursor' in first)) throw new Error('Expected cursor mode');
+    const decoded = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString());
+    expect(decoded).toMatchObject({ v: 2, filters: { status: 'DRAFT', periodKey: '2026-10', highValueOnly: true } });
+    await expect(listSettlementApprovalsForVendor('vendor-a', { ...query, status: 'DRAFT', highValueOnly: true,
+      cursor: first.nextCursor })).resolves.toMatchObject({ vendorId: 'vendor-a' });
+    for (const override of [{ status: 'approved' }, { status: 'all' }, { periodKey: '2026-09' },
+      { periodKey: undefined }, { highValueOnly: false }, { limit: 3 }]) {
+      prismaMock.settlementApproval.findMany.mockClear();
+      await expect(listSettlementApprovalsForVendor('vendor-a', { ...query, ...override, cursor: first.nextCursor }))
+        .rejects.toThrow('cursor');
+      expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+    }
+    await expect(listSettlementApprovalsForVendor('vendor-b', { ...query, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    for (const filters of [null, [], { ...decoded.filters, extra: true }, { ...decoded.filters, status: 'draft' },
+      { ...decoded.filters, highValueOnly: 'true' }]) {
+      await expect(listSettlementApprovalsForVendor('vendor-a', { ...query,
+        cursor: Buffer.from(JSON.stringify({ ...decoded, filters })).toString('base64url') })).rejects.toThrow('cursor');
+    }
+  });
+
+  it('preserves v1 unfiltered cursors with all/false normalization and rejects reuse with active filters', async () => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue([]);
+    const cursor = Buffer.from(JSON.stringify({ v: 1, vendorId: 'vendor-a', limit: 20,
+      id: 'old-b1-anchor', createdAt: '2026-10-01T00:00:00.000Z' })).toString('base64url');
+    for (const highValueOnly of [false, 'false', undefined]) {
+      await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', status: 'all', highValueOnly, cursor }))
+        .resolves.toMatchObject({ approvals: [] });
+    }
+    for (const filters of [{ status: 'draft' }, { periodKey: '2026-10' }, { highValueOnly: true }])
+      await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', cursor, ...filters })).rejects.toThrow('cursor');
   });
 
   it('lists recent settlement approvals for a vendor newest first without writes', async () => {

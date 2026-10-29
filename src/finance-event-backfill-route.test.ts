@@ -135,7 +135,8 @@ describe('finance event backfill route', () => {
       .toEqual({ status: 400, body: { message: 'vendorId is required.' } });
     expect(await route.handler({ authUser: { role: 'admin' }, query: { vendorId: 'vendor-a' } }, reply)).toEqual(recent);
     expect(listSettlementApprovalsForVendorMock).toHaveBeenLastCalledWith('vendor-a');
-    const query = { vendorId: 'vendor-a', pagination: 'cursor', limit: '20', cursor: 'opaque' };
+    const query = { vendorId: 'vendor-a', pagination: 'cursor', limit: '20', cursor: 'opaque',
+      status: 'draft', periodKey: '2026-10', highValueOnly: 'true' };
     const page = { ...recent, hasMore: false, nextCursor: null };
     listSettlementApprovalsForVendorMock.mockResolvedValue(page);
     expect(await route.handler({ authUser: { role: 'admin' }, query }, reply)).toEqual(page);
@@ -143,6 +144,25 @@ describe('finance event backfill route', () => {
     listSettlementApprovalsForVendorMock.mockRejectedValue(new Error('Invalid settlement history cursor or Vendor/limit mismatch.'));
     expect(await route.handler({ authUser: { role: 'admin' }, query }, reply))
       .toEqual({ status: 400, body: { message: 'Invalid settlement history cursor or Vendor/limit mismatch.' } });
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('maps actual cursor filter validation failures to HTTP 400 without an unfiltered fallback', async () => {
+    const actual = await vi.importActual<typeof import('../backend/src/modules/finance/settlement-approval.service.js')>(
+      '../backend/src/modules/finance/settlement-approval.service.js');
+    listSettlementApprovalsForVendorMock.mockImplementation(actual.listSettlementApprovalsForVendor);
+    const gets = new Map<string, (req: unknown, reply: unknown) => Promise<unknown>>();
+    const app = { get: vi.fn((path, _options, handler) => gets.set(path, handler)), put: vi.fn(), post: vi.fn() };
+    registerFinanceRoutes(app as never, {} as never);
+    const handler = gets.get('/admin/finance/settlement-approvals')!;
+    const reply = { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) };
+    for (const filters of [{ status: 'PAID' }, { status: ['draft', 'approved'] }, { periodKey: '' },
+      { periodKey: ['x'] }, { highValueOnly: '1' }, { highValueOnly: ['true'] }, { search: 'x' },
+      { searchTimeZone: 'UTC' }, { workflow: 'ready' }, { cursor: 'invalid!' }]) {
+      expect(await handler({ authUser: { role: 'admin' }, query: {
+        vendorId: 'vendor-a', pagination: 'cursor', ...filters,
+      } }, reply)).toMatchObject({ status: 400, body: { message: expect.any(String) } });
+    }
     expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
