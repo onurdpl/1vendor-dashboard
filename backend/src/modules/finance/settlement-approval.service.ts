@@ -1,4 +1,4 @@
-import { matchesSettlementSearch } from './settlement-search-presentation.js';
+import { matchesSettlementSearch, settlementSummaryPeriodLabel } from './settlement-search-presentation.js';
 import {
   Prisma,
   SettlementApprovalLineType,
@@ -3458,6 +3458,56 @@ export async function getSettlementApproval(id: string): Promise<SettlementAppro
   });
 
   return approval ? mapApproval(approval, false) : null;
+}
+
+type PeriodMetadataBoundary = { createdAt: string; id: string };
+export function buildSettlementPeriodMetadataQuery(vendorId: string, limit: number, boundary: PeriodMetadataBoundary | null = null) {
+  // DateTime columns are UTC timestamp(3) WITHOUT time zone: to_char has no session timezone conversion.
+  return Prisma.sql`WITH keyed AS (
+    SELECT "id", "createdAt", "scheduledCycleKey", "scheduledPeriodEnd", "scheduledRunDate",
+      (COALESCE(NULLIF("scheduledCycleKey", ''), to_char("scheduledPeriodEnd", 'YYYY-MM-DD'),
+        to_char("scheduledRunDate", 'YYYY-MM-DD'), to_char("createdAt", 'YYYY-MM'))) COLLATE "C" AS value
+    FROM "SettlementApproval" WHERE "vendorId" = ${vendorId}
+  ), ranked AS (
+    SELECT *, first_value("createdAt") OVER (PARTITION BY value ORDER BY "createdAt" DESC, "id" DESC) AS first_created,
+      first_value("id") OVER (PARTITION BY value ORDER BY "createdAt" DESC, "id" DESC) AS first_id,
+      row_number() OVER (PARTITION BY value ORDER BY "createdAt" ASC, "id" ASC) AS oldest
+    FROM keyed
+  ) SELECT value, "id", "createdAt", "scheduledCycleKey", "scheduledPeriodEnd", "scheduledRunDate", first_created, first_id
+    FROM ranked WHERE oldest = 1
+      ${boundary ? Prisma.sql`AND (first_created < (${new Date(boundary.createdAt)}::timestamptz AT TIME ZONE 'UTC') OR
+        (first_created = (${new Date(boundary.createdAt)}::timestamptz AT TIME ZONE 'UTC') AND first_id < ${boundary.id}))` : Prisma.empty}
+    ORDER BY first_created DESC, first_id DESC LIMIT ${limit + 1}`;
+}
+
+export async function listSettlementPeriodMetadata(vendorId: string, query: Record<string, unknown> = {}) {
+  if (!vendorId?.trim()) throw new Error('vendorId is required.');
+  if (Object.keys(query).some(key => !['vendorId', 'limit', 'cursor'].includes(key)))
+    throw new Error('Unsupported period metadata query parameter.');
+  const parsed = parseSettlementHistoryQuery(vendorId, { pagination: 'cursor', limit: query.limit });
+  let boundary: PeriodMetadataBoundary | null = null;
+  if (query.cursor !== undefined) {
+    try {
+      if (typeof query.cursor !== 'string' || query.cursor.length > 16384 || !/^[A-Za-z0-9_-]+$/.test(query.cursor)) throw new Error();
+      const raw = Buffer.from(query.cursor, 'base64url').toString('utf8');
+      if (Buffer.from(raw).toString('base64url') !== query.cursor) throw new Error();
+      const token = JSON.parse(raw);
+      if (Object.keys(token).sort().join(',') !== 'createdAt,id,kind,limit,v,vendorId' || token.kind !== 'periods' || token.v !== 1) throw new Error();
+      const { kind: _kind, ...legacy } = token;
+      const position = parseSettlementHistoryQuery(vendorId, { pagination: 'cursor', limit: parsed.limit,
+        cursor: Buffer.from(JSON.stringify(legacy)).toString('base64url') }).cursor!;
+      boundary = { createdAt: position.createdAt, id: position.id };
+    } catch { throw new Error('Invalid period metadata cursor or Vendor/limit mismatch.'); }
+  }
+  type Row = { value: string; id: string; createdAt: Date; scheduledCycleKey: string | null;
+    scheduledPeriodEnd: Date | null; scheduledRunDate: Date | null; first_created: Date; first_id: string };
+  const rows = await prisma.$queryRaw<Row[]>(buildSettlementPeriodMetadataQuery(vendorId, parsed.limit, boundary));
+  const page = rows.slice(0, parsed.limit), hasMore = rows.length > parsed.limit, last = page.at(-1);
+  return { ok: true, writesPerformed: false, vendorId, periods: page.map(row => ({ value: row.value,
+    label: settlementSummaryPeriodLabel({ createdAt: row.createdAt.toISOString(), scheduledCycleKey: row.scheduledCycleKey,
+      scheduledPeriodEnd: toIso(row.scheduledPeriodEnd), scheduledRunDate: toIso(row.scheduledRunDate) }),
+  })), hasMore, nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ v: 1, kind: 'periods', vendorId,
+    limit: parsed.limit, createdAt: last.first_created.toISOString(), id: last.first_id })).toString('base64url') : null };
 }
 
 // Full Search is a separately opted-in bounded scan. null hasMore means unknown;

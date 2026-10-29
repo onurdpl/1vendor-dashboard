@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
 const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
+const listSettlementPeriodMetadataMock = vi.hoisted(() => vi.fn());
 const listSettlementApprovalsForVendorMock = vi.hoisted(() => vi.fn());
 const approveSettlementApprovalMock = vi.hoisted(() => vi.fn());
 const assessSettlementApprovalReadinessMock = vi.hoisted(() => vi.fn());
@@ -35,6 +36,7 @@ vi.mock('../backend/src/modules/finance/finance-event-relink.service.js', () => 
 
 vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => ({
   listSettlementApprovalsForVendor: listSettlementApprovalsForVendorMock,
+  listSettlementPeriodMetadata: listSettlementPeriodMetadataMock,
   assessSettlementApprovalReadiness: assessSettlementApprovalReadinessMock,
   approveSettlementApproval: approveSettlementApprovalMock,
   cancelSettlementApproval: vi.fn(),
@@ -102,6 +104,7 @@ const { registerFinanceRoutes } = await import('../backend/src/modules/finance/f
 describe('finance event backfill route', () => {
   beforeEach(() => {
     listSettlementApprovalsForVendorMock.mockReset();
+    listSettlementPeriodMetadataMock.mockReset();
     getFinanceEventBackfillPlanMock.mockReset();
     getFinanceEventRelinkPlanMock.mockReset();
     relinkExistingFinanceEventsMock.mockReset();
@@ -115,6 +118,27 @@ describe('finance event backfill route', () => {
     executeSettlementLogoCommissionInvoiceCreateMock.mockReset();
     previewSettlementLogoOutgoingInvoiceSyncMock.mockReset();
     persistSettlementLogoSalesInvoiceSyncMock.mockReset();
+  });
+
+  it('serves period metadata only to authenticated Admin roles with explicit Vendor and validation failures as 400', async () => {
+    const gets = new Map<string, { options: { preHandler: unknown[] }; handler: (req: unknown, reply: unknown) => Promise<unknown> }>();
+    const app = { get: vi.fn((path, options, handler) => gets.set(path, { options, handler })), put: vi.fn(), post: vi.fn() };
+    registerFinanceRoutes(app as never, {} as never);
+    const route = gets.get('/admin/finance/settlement-approvals/periods')!;
+    expect(route.options.preHandler).toHaveLength(1);
+    const reply = { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) };
+    for (const role of ['vendor', 'support', 'finance', undefined])
+      expect(await route.handler({ authUser: { role }, query: { vendorId: 'a' } }, reply)).toMatchObject({ status: 403 });
+    expect(listSettlementPeriodMetadataMock).not.toHaveBeenCalled();
+    expect(await route.handler({ authUser: { role: 'admin' }, query: {} }, reply)).toMatchObject({ status: 400 });
+    const query = { vendorId: 'a', limit: '20' }, response = { ok: true, writesPerformed: false, vendorId: 'a', periods: [], hasMore: false, nextCursor: null };
+    listSettlementPeriodMetadataMock.mockResolvedValue(response);
+    expect(await route.handler({ authUser: { role: 'admin' }, query }, reply)).toEqual(response);
+    expect(listSettlementPeriodMetadataMock).toHaveBeenCalledWith('a', query);
+    const actual = await vi.importActual<typeof import('../backend/src/modules/finance/settlement-approval.service.js')>('../backend/src/modules/finance/settlement-approval.service.js');
+    listSettlementPeriodMetadataMock.mockImplementation(actual.listSettlementPeriodMetadata);
+    for (const invalid of [{ limit: '0' }, { limit: ['20'] }, { cursor: 'bad!' }, { search: 'x' }, { status: 'draft' }])
+      expect(await route.handler({ authUser: { role: 'admin' }, query: { vendorId: 'a', ...invalid } }, reply)).toMatchObject({ status: 400 });
   });
 
   it('preserves the legacy settlement list call and exposes cursor mode only through Admin GET', async () => {

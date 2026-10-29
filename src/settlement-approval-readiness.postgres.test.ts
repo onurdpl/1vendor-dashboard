@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
+import { Prisma, PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -2110,6 +2110,78 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
         scheduledPeriodEnd: row.scheduledPeriodEnd?.toISOString(), scheduledRunDate: row.scheduledRunDate?.toISOString() });
       expect((await list(vendorId, { pagination: 'cursor', search: label })).approvals.map(item => item.id)).toEqual([row.id]);
     }
+  });
+
+  it('pages complete distinct period metadata with Map-compatible representatives and round-trip filtering', async () => {
+    const { listSettlementPeriodMetadata: metadata, buildSettlementPeriodMetadataQuery } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const { settlementSummaryPeriodLabel } = await import('../backend/src/modules/finance/settlement-search-presentation.js');
+    const vendorId = `${prefix}-metadata`;
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    await db.settlementApproval.createMany({ data: Array.from({ length: 601 }, (_, i) => ({
+      ...fixtures[0], id: `${vendorId}-${String(i).padStart(4, '0')}`, vendorId,
+      createdAt: new Date(Date.UTC(2030, 0, 1, 0, 0, Math.floor(i / 7))),
+      scheduledPeriodEnd: new Date(Date.UTC(2029, 0, 1 + Math.floor(i / 10), 0, i % 10)),
+    })) });
+    const verify = async (target: string, limit: number) => {
+      const raw = await db.settlementApproval.findMany({ where: { vendorId: target }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      const expected = new Map<string, string>();
+      for (const row of raw) {
+        const key = row.scheduledCycleKey || row.scheduledPeriodEnd?.toISOString().slice(0, 10) ||
+          row.scheduledRunDate?.toISOString().slice(0, 10) || row.createdAt.toISOString().slice(0, 7);
+        expected.set(key, settlementSummaryPeriodLabel({ ...row, createdAt: row.createdAt.toISOString(),
+          scheduledPeriodEnd: row.scheduledPeriodEnd?.toISOString(), scheduledRunDate: row.scheduledRunDate?.toISOString() }));
+      }
+      const actual: Array<{ value: string; label: string }> = []; let cursor: string | null = null; let pages = 0;
+      do {
+        const result = await metadata(target, { limit, ...(cursor ? { cursor } : {}) });
+        expect(result.periods.length).toBeLessThanOrEqual(limit);
+        expect(result.vendorId).toBe(target); expect(result.writesPerformed).toBe(false);
+        actual.push(...result.periods); pages++; cursor = result.nextCursor;
+        expect(result.hasMore).toBe(cursor !== null);
+        if (pages > 100) throw new Error('Unbounded metadata traversal');
+      } while (cursor);
+      expect(actual).toEqual([...expected].map(([value, label]) => ({ value, label })));
+      expect(new Set(actual.map(row => row.value)).size).toBe(actual.length);
+      for (const { value } of actual) {
+        const ids: string[] = []; let next: string | null = null;
+        do {
+          const result = await page(target, { periodKey: value, limit: 100, ...(next ? { cursor: next } : {}) });
+          ids.push(...result.approvals.map(row => row.id)); next = result.nextCursor;
+        } while (next);
+        expect(ids).toEqual(raw.filter(row => (row.scheduledCycleKey || row.scheduledPeriodEnd?.toISOString().slice(0, 10) ||
+          row.scheduledRunDate?.toISOString().slice(0, 10) || row.createdAt.toISOString().slice(0, 7)) === value).map(row => row.id));
+      }
+      return { actual, pages };
+    };
+    const before = await db.settlementApproval.findMany({ where: { vendorId }, orderBy: { id: 'asc' } });
+    const result = await verify(vendorId, 7);
+    expect(result.actual).toHaveLength(61); expect(result.pages).toBe(9);
+    const literal = await verify(filterVendor, 3);
+    expect(literal.actual.some(row => row.value === 'all')).toBe(true);
+    expect(literal.actual.some(row => row.value === ' ')).toBe(true);
+    expect((await verify(emptyVendor, 20)).actual).toEqual([]);
+    const one = `${prefix}-metadata-one`;
+    await db.vendor.create({ data: { id: one, name: one } });
+    await db.settlementApproval.create({ data: { ...fixtures[0], id: one, vendorId: one } });
+    expect((await verify(one, 20)).actual).toHaveLength(1);
+    const first = await metadata(vendorId, { limit: 7 });
+    await expect(metadata(filterVendor, { limit: 7, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    await expect(metadata(vendorId, { limit: 8, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    for (const cursor of ['bad!', '', 'x'.repeat(16385), Buffer.from(JSON.stringify({ v: 1 })).toString('base64url')])
+      await expect(metadata(vendorId, { cursor })).rejects.toThrow('cursor');
+    for (const limit of [0, 101, -1, '1.2', ['20'], null]) await expect(metadata(vendorId, { limit })).rejects.toThrow('limit');
+    await expect(metadata(vendorId, { workflow: 'all' })).rejects.toThrow('Unsupported');
+    const plan = await db.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${buildSettlementPeriodMetadataQuery(vendorId, 7)}`);
+    console.info('Period metadata measured', JSON.stringify(plan), 'pages', result.pages, 'keys', result.actual.length);
+    const token = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString());
+    const continuation = { createdAt: token.createdAt, id: token.id };
+    const zoned = await db.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Honolulu'`;
+      return tx.$queryRaw(buildSettlementPeriodMetadataQuery(vendorId, 7, continuation));
+    });
+    const utc = await db.$queryRaw(buildSettlementPeriodMetadataQuery(vendorId, 7, continuation));
+    expect(zoned).toEqual(utc);
+    expect(await db.settlementApproval.findMany({ where: { vendorId }, orderBy: { id: 'asc' } })).toEqual(before);
   });
 
 });
