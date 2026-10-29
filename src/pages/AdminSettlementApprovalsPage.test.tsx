@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentVendorContext, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { AdminSettlementApprovalsPage } from './AdminSettlementApprovalsPage';
 import {
@@ -13,6 +13,8 @@ import {
   getDatabaseHealth,
   getSettlementApproval,
   getSettlementApprovalReadiness,
+  listAutoApprovalAttempts,
+  listAutoApprovalOperationalErrors,
   listSettlementApprovals,
   previewSettlementApproval,
   type SettlementApproval,
@@ -38,6 +40,8 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     getSettlementCommissionInvoiceDiagnostics: vi.fn(),
     getSettlementCommissionInvoiceRecords: vi.fn(),
     listSettlementApprovals: vi.fn(),
+    listAutoApprovalAttempts: vi.fn(),
+    listAutoApprovalOperationalErrors: vi.fn(),
     persistLogoSalesInvoiceSync: vi.fn(),
     persistSettlementLogoCommissionInvoiceRequestSnapshot: vi.fn(),
     previewLogoOutgoingInvoiceSync: vi.fn(),
@@ -310,7 +314,9 @@ function linkedList(vendorId: string, ...fixtures: ReturnType<typeof linkedFixtu
 
 function DeepLinkNavigationProbe() {
   const navigate = useNavigate();
+  const location = useLocation();
   return <>
+    <output aria-label="Current settlement URL">{location.pathname}{location.search}</output>
     <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=link-x')}>Link X</button>
     <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=link-y')}>Link Y</button>
     <button onClick={() => navigate('/admin/finance/settlement-approvals?approvalId=link-foreign')}>Foreign link</button>
@@ -581,6 +587,254 @@ describe('Settlement Review queue cleanup', () => {
     expect(getCurrentVendorContext().vendorId).toBe('yalispor');
   });
 
+  it.each(['latest-20', 'empty'] as const)('keeps off-list X read-only with an %s list instead of selecting first-row Y (F01)', async (mode) => {
+    const x = linkedFixture('yalispor', 'historical-x', 8765432, 6543210, 'draft');
+    const others = Array.from({ length: 20 }, (_, i) => linkedFixture('yalispor', `recent-y-${i}`, 11111 + i, 7777 + i));
+    x.detail.scheduledCycleKey = 'Historical-X-Reference';
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', ...(mode === 'empty' ? [] : others)));
+    getSettlementApprovalMock.mockResolvedValue(x.detail);
+    renderPage('/admin/finance/settlement-approvals?approvalId=historical-x');
+    const panel = await screen.findByLabelText('Settlement review detail panel');
+    await waitFor(() => expect(panel).toHaveTextContent('87,654.32'));
+    expect(panel).toHaveTextContent('65,432.10');
+    expect(panel).toHaveTextContent('historical-x');
+    expect(panel).toHaveTextContent('Historical-X-Reference');
+    expect(panel).toHaveTextContent('DRAFT');
+    expect(panel).not.toHaveTextContent('111.11');
+    expect(panel).not.toHaveTextContent('77.77');
+    expect(panel).not.toHaveTextContent('recent-y-0');
+    expect(panel).toHaveTextContent(/temporarily unavailable.*current loaded Vendor list/);
+    expect(within(panel).queryByRole('button', { name: /Approve Settlement|Cancel Settlement/ })).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each(['Search', 'Status', 'Settlement Period', 'High Value', 'Workflow'] as const)(
+    'retains explicit in-list X and its guarded action when %s hides it, without falling back to Y', async (filter) => {
+      const x = linkedFixture('yalispor', 'link-x', 65432, 32100, 'draft');
+      const y = linkedFixture('yalispor', 'link-y', 9999999, 8888888, 'approved');
+      listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', y, x));
+      getSettlementApprovalMock.mockImplementation(async (id) => id === 'link-x' ? x.detail : y.detail);
+      renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+      const user = userEvent.setup();
+      const panel = await screen.findByLabelText('Settlement review detail panel');
+      await waitFor(() => expect(panel).toHaveTextContent('654.32'));
+      await user.click(within(panel).getByRole('button', { name: 'Approve Settlement' }));
+      expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+      if (filter === 'Search') await user.type(screen.getByLabelText('Search'), 'link-y');
+      if (filter === 'Status') await user.selectOptions(screen.getByLabelText('Status', { selector: 'select' }), 'approved');
+      if (filter === 'Settlement Period') await user.selectOptions(screen.getByLabelText('Settlement Period'), y.summary.scheduledCycleKey!);
+      if (filter === 'High Value') await user.click(screen.getByLabelText('High Value only'));
+      if (filter === 'Workflow') await user.click(within(screen.getByLabelText('Settlement review workflow tabs')).getByRole('button', { name: /^Approved/ }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(panel).toHaveTextContent('link-x');
+      expect(panel).toHaveTextContent('654.32');
+      expect(panel).toHaveTextContent('321.00');
+      expect(panel).not.toHaveTextContent('88,888.88');
+      expect(panel).toHaveTextContent(/outside the currently displayed results/);
+      await user.click(within(panel).getByRole('button', { name: 'Approve Settlement' }));
+      expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+      expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+      expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+    });
+
+  it('keeps verified in-list X visible and actionable when Search returns zero rows', async () => {
+    const x = linkedFixture('yalispor', 'link-x', 65432, 32100, 'draft');
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', x));
+    getSettlementApprovalMock.mockResolvedValue(x.detail);
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00'));
+    await userEvent.setup().type(screen.getByLabelText('Search'), 'no-matching-record');
+    expect(screen.getByText('No settlements match the selected workflow and filters.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('link-x');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['list-first', 'detail-first'] as const)('does not substitute a target during %s loading', async (order) => {
+    const x = linkedFixture('yalispor', 'link-x', 65432, 32100, 'draft');
+    const y = linkedFixture('yalispor', 'link-y', 99999, 88888, 'draft');
+    const list = deferred<SettlementApprovalListResponse>(); const detail = deferred<SettlementApproval>();
+    listSettlementApprovalsMock.mockReturnValue(list.promise);
+    getSettlementApprovalMock.mockReturnValue(detail.promise);
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    if (order === 'list-first') {
+      await act(async () => list.resolve(linkedList('yalispor', y, x)));
+      expect(screen.getByLabelText('Settlement review detail panel')).not.toHaveTextContent('888.88');
+      expect(screen.queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+      await act(async () => detail.resolve(x.detail));
+    } else {
+      await act(async () => detail.resolve(x.detail));
+      expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00');
+      expect(screen.queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+      await act(async () => list.resolve(linkedList('yalispor', y, x)));
+    }
+    expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('link-x');
+    expect(screen.getByLabelText('Settlement review detail panel')).not.toHaveTextContent('888.88');
+    expect(screen.getByRole('button', { name: 'Approve Settlement' })).toBeInTheDocument();
+  });
+
+  it.each(['verified', 'pending'] as const)('manual Y replaces a %s X link, removes its URL and rejects late X', async (state) => {
+    const x = linkedFixture('yalispor', 'link-x', 65432, 32100, 'draft');
+    const y = linkedFixture('yalispor', 'link-y', 99999, 88888, 'draft');
+    const old = deferred<SettlementApproval>();
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', x, y));
+    getSettlementApprovalMock.mockImplementation((id) => id === 'link-x'
+      ? state === 'pending' ? old.promise : Promise.resolve(x.detail) : Promise.resolve(y.detail));
+    render(<MemoryRouter initialEntries={['/admin/finance/settlement-approvals?approvalId=link-x&keep=value']}>
+      <DeepLinkNavigationProbe /><AdminSettlementApprovalsPage />
+    </MemoryRouter>);
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    const user = userEvent.setup();
+    if (state === 'verified') {
+      await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00'));
+      await user.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+      expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+    }
+    await user.click(getQueueRows(queue)[1]);
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('888.88'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Current settlement URL')).toHaveTextContent('/admin/finance/settlement-approvals?keep=value');
+    expect(screen.getByLabelText('Current settlement URL')).not.toHaveTextContent('approvalId');
+    await act(async () => old.resolve(x.detail));
+    expect(screen.getByLabelText('Settlement review detail panel')).not.toHaveTextContent('321.00');
+    await user.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Settlement: link-y');
+    approveSettlementApprovalMock.mockResolvedValue({ ...y.detail, status: 'approved' });
+    await user.click(within(dialog).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledExactlyOnceWith('link-y'));
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['retain X', 'select Y'] as const)('preserves exact selection after a list refresh removes X: %s', async (selection) => {
+    const x = linkedFixture('yalispor', 'link-x', 65432, 32100, 'draft');
+    const y = linkedFixture('yalispor', 'link-y', 99999, 88888);
+    const refreshed = deferred<SettlementApproval>();
+    let calls = 0;
+    getSettlementApprovalMock.mockImplementation(async (id) => id === 'link-y' ? y.detail :
+      ++calls === 3 ? refreshed.promise : x.detail);
+    listSettlementApprovalsMock.mockResolvedValueOnce(linkedList('yalispor', x, y))
+      .mockResolvedValue(linkedList('yalispor', y));
+    approveSettlementApprovalMock.mockResolvedValue({ ...x.detail, status: 'approved' });
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00'));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(calls).toBe(3));
+    expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('link-x');
+    expect(screen.queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    if (selection === 'select Y') {
+      await user.click(getQueueRows(screen.getByLabelText('Settlement review queue'))[0]);
+      await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('888.88'));
+    }
+    await act(async () => refreshed.resolve({ ...x.detail, status: 'approved' }));
+    const panel = screen.getByLabelText('Settlement review detail panel');
+    if (selection === 'select Y') {
+      expect(panel).toHaveTextContent('link-y');
+      expect(panel).not.toHaveTextContent('321.00');
+    } else {
+      expect(panel).toHaveTextContent('link-x');
+      expect(panel).toHaveTextContent('321.00');
+      expect(panel).toHaveTextContent(/temporarily unavailable/);
+      expect(within(panel).queryByRole('button', { name: /Approve Settlement|Cancel Settlement/ })).not.toBeInTheDocument();
+      expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
+    }
+    expect(approveSettlementApprovalMock).toHaveBeenCalledExactlyOnceWith('link-x');
+  });
+
+  it.each(['approve', 'cancel'] as const)('rejects changed canonical status before an exact-target %s POST', async (action) => {
+    const x = linkedFixture('yalispor', 'link-x', 65432, 32100, 'draft');
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', x));
+    getSettlementApprovalMock.mockResolvedValueOnce(x.detail)
+      .mockResolvedValue({ ...x.detail, status: action === 'approve' ? 'approved' : 'cancelled' });
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00'));
+    const title = action === 'approve' ? 'Approve Settlement' : 'Cancel Settlement';
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: title }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: title }));
+    expect(await screen.findByText('Settlement target changed. Select the settlement action again.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a pending canonical GET from authorizing X after manual selection of Y', async () => {
+    const x = linkedFixture('yalispor', 'link-x', 65432, 32100, 'draft');
+    const y = linkedFixture('yalispor', 'link-y', 99999, 88888, 'draft');
+    const canonical = deferred<SettlementApproval>(); let xReads = 0;
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', x, y));
+    getSettlementApprovalMock.mockImplementation((id) => id === 'link-y' ? Promise.resolve(y.detail) :
+      ++xReads === 1 ? Promise.resolve(x.detail) : canonical.promise);
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00'));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve Settlement' }));
+    await waitFor(() => expect(xReads).toBe(2));
+    await user.click(getQueueRows(screen.getByLabelText('Settlement review queue'))[1]);
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('888.88'));
+    await act(async () => canonical.resolve(x.detail));
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('link-y');
+  });
+
+  it.each(['approve', 'cancel'] as const)('does not apply a late %s POST response to newly selected Y', async (action) => {
+    const x = linkedFixture('yalispor', 'link-x', 65432, 32100, action === 'approve' ? 'draft' : 'approved');
+    const y = linkedFixture('yalispor', 'link-y', 99999, 88888, 'draft');
+    const post = deferred<SettlementApproval>();
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', x, y));
+    getSettlementApprovalMock.mockImplementation(async (id) => id === 'link-x' ? x.detail : y.detail);
+    const mutation = action === 'approve' ? approveSettlementApprovalMock : cancelSettlementApprovalMock;
+    mutation.mockReturnValue(post.promise);
+    renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00'));
+    const user = userEvent.setup(); const title = action === 'approve' ? 'Approve Settlement' : 'Cancel Settlement';
+    await user.click(screen.getByRole('button', { name: title }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: title }));
+    await waitFor(() => expect(mutation).toHaveBeenCalledExactlyOnceWith('link-x'));
+    await user.click(getQueueRows(screen.getByLabelText('Settlement review queue'))[1]);
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('888.88'));
+    await act(async () => post.resolve({ ...x.detail, status: action === 'approve' ? 'approved' : 'cancelled' }));
+    expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('link-y');
+    expect(screen.getByLabelText('Settlement review detail panel')).not.toHaveTextContent('321.00');
+    expect(screen.queryByText(action === 'approve' ? 'Settlement approved.' : 'Settlement cancelled.')).not.toBeInTheDocument();
+    expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(1);
+    expect(mutation).toHaveBeenCalledExactlyOnceWith('link-x');
+  });
+
+  it('opens the exact off-list settlement from the real embedded History link', async () => {
+    const x = linkedFixture('yalispor', 'old-history-x', 8765432, 6543210, 'draft');
+    const y = linkedFixture('yalispor', 'recent-y', 11111, 7777);
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', y));
+    getSettlementApprovalMock.mockResolvedValue(x.detail);
+    vi.mocked(listAutoApprovalAttempts).mockResolvedValue({ ok: true, writesPerformed: false,
+      attempts: [{ id: 'historic-attempt-x', settlementApprovalId: x.detail.id,
+        vendorId: 'yalispor', vendorName: 'Yalispor', actorId: 'system:settlement_auto_approval',
+        outcome: 'BLOCKED', reasonCode: 'SOURCE_BLOCKED', createdAt: x.detail.createdAt,
+        completedAt: x.detail.createdAt, currentSettlementStatus: 'DRAFT', exactSuccessfulAttempt: false,
+        latestEvent: null, eventCount: 0 }], nextCursor: null });
+    vi.mocked(listAutoApprovalOperationalErrors).mockResolvedValue({ ok: true, writesPerformed: false,
+      operationalErrors: [], nextCursor: null });
+    renderPage();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Review automatic approval history' }));
+    const link = await screen.findByRole('link', { name: 'old-history-x' });
+    await userEvent.setup().click(link);
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('87,654.32'));
+    expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('old-history-x');
+    expect(screen.getByLabelText('Settlement review detail panel')).not.toHaveTextContent('77.77');
+    expect(screen.queryByRole('button', { name: /Approve Settlement|Cancel Settlement/ })).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
   it('rejects a foreign deep link with a mismatch message while preserving the active financial list and actions', async () => {
     fixedWorkspaceVendors();
     const own = linkedFixture('yalispor', 'own-record', 11111, 7777);
@@ -592,8 +846,11 @@ describe('Settlement Review queue cleanup', () => {
     const queue = screen.getByLabelText('Settlement review queue');
     await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
     expect(queue).toHaveTextContent('111.11');
+    expect(within(queue).queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    expect(within(queue).getByLabelText('Settlement review detail panel')).not.toHaveTextContent('77.77');
+    await userEvent.setup().click(getQueueRows(queue)[0]);
     const panel = within(queue).getByLabelText('Settlement review detail panel');
-    expect(panel).toHaveTextContent('77.77');
+    await waitFor(() => expect(panel).toHaveTextContent('77.77'));
     expect(panel).toHaveTextContent('Own-Recordreference');
     expect(document.body).not.toHaveTextContent('9,876.54');
     expect(document.body).not.toHaveTextContent('7,654.32');
@@ -733,8 +990,8 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(1));
     const queue = screen.getByLabelText('Settlement review queue');
     await waitFor(() => expect(getQueueRows(queue)).toHaveLength(1));
-    await userEvent.setup().click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
+    expect(within(queue).queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     act(() => setCurrentVendorId('sporjinal'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
