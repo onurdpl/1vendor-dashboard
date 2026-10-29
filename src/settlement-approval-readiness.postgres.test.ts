@@ -1989,4 +1989,53 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     expect(await snapshot()).toEqual(before);
   });
 
+  it('searches complete historical IDs case-insensitively before paging, with all filters and unchanged financial rows', async () => {
+    const before = await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+    const collect = async (query: Record<string, unknown>) => {
+      const ids: string[] = []; let cursor: string | null = null;
+      do {
+        const result = await page(workflowVendor, { limit: 7, ...query, ...(cursor ? { cursor } : {}) });
+        expect(result.approvals.every(row => row.vendorId === workflowVendor)).toBe(true);
+        ids.push(...result.approvals.map(row => row.id)); cursor = result.nextCursor;
+        if (ids.length > workflowOrdered.length) throw new Error('Unbounded search');
+      } while (cursor);
+      return ids;
+    };
+    const term = `${prefix}-workflow-`;
+    expect(await collect({ searchId: `  ${term.toUpperCase()}  ` })).toEqual(workflowOrdered.map(row => row.id));
+    for (const position of [20, 100, 500])
+      expect((await collect({ searchId: workflowOrdered[position].id })).includes(workflowOrdered[position].id)).toBe(true);
+    for (const filters of [{ status: 'draft' }, { periodKey: '2025-01' }, { highValueOnly: true },
+      { workflow: 'ready_for_approval' }, { status: 'draft', periodKey: '2025-01', highValueOnly: true, workflow: 'ready_for_approval' }]) {
+      const expected = workflowOrdered.filter(row => (!filters.status || row.status === 'DRAFT') &&
+        (!filters.periodKey || row.createdAt.toISOString().slice(0, 7) === filters.periodKey) &&
+        (!filters.highValueOnly || Math.abs(row.netPayableMinor) >= 100000) &&
+        (!filters.workflow || matchesWorkflow(row, filters.workflow)));
+      expect(await collect({ searchId: term, ...filters })).toEqual(expected.map(row => row.id));
+    }
+    expect(await collect({ searchId: 'no-such-id' })).toEqual([]);
+    expect(await collect({ searchId: term, workflow: 'approved', status: 'cancelled' })).toEqual([]);
+    const query = { searchId: term, limit: 2 };
+    const first = await page(workflowVendor, query);
+    await expect(page(workflowVendor, { ...query, searchId: 'other', cursor: first.nextCursor })).rejects.toThrow('cursor');
+    await expect(page(workflowForeign, { ...query, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    for (const base of [{}, { status: 'draft' }, { workflow: 'ready_for_approval' }]) {
+      const old = await page(workflowVendor, { ...base, limit: 2 });
+      await expect(page(workflowVendor, { ...base, limit: 2, searchId: '   ', cursor: old.nextCursor })).resolves.toBeDefined();
+      await expect(page(workflowVendor, { ...base, limit: 2, searchId: term, cursor: old.nextCursor })).rejects.toThrow('cursor');
+    }
+    expect(await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(before);
+  });
+
+  it('treats SQL percent, underscore and backslash literally in real PostgreSQL ID search', async () => {
+    const vendorId = `${prefix}-wildcards`;
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    const ids = [`${prefix}-A%B`, `${prefix}-A_B`, `${prefix}-A\\B`, `${prefix}-AxB`];
+    await db.settlementApproval.createMany({ data: ids.map(id => ({ ...fixtures[0], id, vendorId })) });
+    for (const [searchId, expected] of [['%', ids[0]], ['_', ids[1]], ['\\', ids[2]]] as const) {
+      const result = await page(vendorId, { searchId });
+      expect(result.approvals.map(row => row.id)).toEqual([expected]);
+    }
+  });
+
 });

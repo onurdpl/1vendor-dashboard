@@ -380,21 +380,26 @@ const settlementHistoryWorkflows = [
 ] as const;
 type SettlementHistoryWorkflow = typeof settlementHistoryWorkflows[number];
 type SettlementHistoryCursor = {
-  v: 1 | 2 | 3;
+  v: 1 | 2 | 3 | 4;
   vendorId: string;
   createdAt: string;
   id: string;
   limit: number;
   filters?: SettlementHistoryFilters;
-  workflow?: SettlementHistoryWorkflow;
+  workflow?: SettlementHistoryWorkflow | null;
+  searchId?: string;
 };
 
 // Opt-in history filters affect loading only, never financial action eligibility.
 function parseSettlementHistoryQuery(vendorId: string, query: SettlementApprovalListQueryDto) {
   if (query.pagination !== 'cursor') throw new Error('pagination must be cursor.');
-  if (Object.keys(query).some((key) => !['vendorId', 'pagination', 'limit', 'cursor', 'status', 'periodKey', 'highValueOnly', 'workflow'].includes(key))) {
+  if (Object.keys(query).some((key) => !['vendorId', 'pagination', 'limit', 'cursor', 'status', 'periodKey', 'highValueOnly', 'workflow', 'searchId'].includes(key))) {
     throw new Error('Unsupported settlement history query parameter; Search is not supported.');
   }
+  if (query.searchId !== undefined && (typeof query.searchId !== 'string' || query.searchId.length > 512)) {
+    throw new Error('searchId must be a string of at most 512 characters.');
+  }
+  const searchId = typeof query.searchId === 'string' ? query.searchId.trim().toLowerCase() : '';
   if (query.workflow !== undefined && query.workflow !== 'all' &&
     !(typeof query.workflow === 'string' && settlementHistoryWorkflows.includes(query.workflow as SettlementHistoryWorkflow))) {
     throw new Error('workflow must be all, ready_for_approval, needs_review, vendor_hold, approved, refund_review or paid.');
@@ -426,7 +431,7 @@ function parseSettlementHistoryQuery(vendorId: string, query: SettlementApproval
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
     throw new Error('limit must be an integer between 1 and 100.');
   }
-  if (query.cursor === undefined) return { limit, filters, filtered, workflow, cursor: null };
+  if (query.cursor === undefined) return { limit, filters, filtered, workflow, searchId, cursor: null };
   const invalid = () => new Error('Invalid settlement history cursor or Vendor/limit/filter mismatch.');
   if (typeof query.cursor !== 'string' || !query.cursor || query.cursor.length > 16_384 ||
     !/^[A-Za-z0-9_-]+$/.test(query.cursor)) throw invalid();
@@ -436,22 +441,23 @@ function parseSettlementHistoryQuery(vendorId: string, query: SettlementApproval
     const value: unknown = JSON.parse(decoded);
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid();
     const cursor = value as Record<string, unknown>;
-    const keys = workflow ? 'createdAt,filters,id,limit,v,vendorId,workflow' :
+    const keys = searchId ? 'createdAt,filters,id,limit,searchId,v,vendorId,workflow' : workflow ? 'createdAt,filters,id,limit,v,vendorId,workflow' :
       filtered ? 'createdAt,filters,id,limit,v,vendorId' : 'createdAt,id,limit,v,vendorId';
-    if (Object.keys(cursor).sort().join(',') !== keys || cursor.v !== (workflow ? 3 : filtered ? 2 : 1) ||
+    if (Object.keys(cursor).sort().join(',') !== keys || cursor.v !== (searchId ? 4 : workflow ? 3 : filtered ? 2 : 1) ||
       cursor.vendorId !== vendorId || cursor.limit !== limit ||
       typeof cursor.id !== 'string' || !cursor.id.trim() || cursor.id !== cursor.id.trim() || cursor.id.length > 512 ||
       typeof cursor.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(cursor.createdAt) ||
       new Date(cursor.createdAt).toISOString() !== cursor.createdAt) throw invalid();
-    if (workflow && cursor.workflow !== workflow) throw invalid();
-    if (filtered || workflow) {
+    if ((workflow || searchId) && cursor.workflow !== workflow) throw invalid();
+    if (searchId && cursor.searchId !== searchId) throw invalid();
+    if (filtered || workflow || searchId) {
       const bound = cursor.filters as Record<string, unknown> | null;
       if (!bound || typeof bound !== 'object' || Array.isArray(bound) ||
         Object.keys(bound).sort().join(',') !== 'highValueOnly,periodKey,status' ||
         bound.status !== filters.status || bound.periodKey !== filters.periodKey ||
         bound.highValueOnly !== filters.highValueOnly) throw invalid();
     }
-    return { limit, filters, filtered, workflow, cursor: cursor as SettlementHistoryCursor };
+    return { limit, filters, filtered, workflow, searchId, cursor: cursor as SettlementHistoryCursor };
   } catch {
     throw invalid();
   }
@@ -3457,8 +3463,10 @@ export async function listSettlementApprovalsForVendor(
   }
 
   if (query.pagination !== undefined) {
-    const { limit, cursor, filters, filtered, workflow } = parseSettlementHistoryQuery(vendorId, query);
+    const { limit, cursor, filters, filtered, workflow, searchId } = parseSettlementHistoryQuery(vendorId, query);
     const conditions = settlementHistoryFilterWhere(filters, workflow);
+    // Prisma contains uses LIKE/ILIKE: escape its pattern metacharacters literally.
+    if (searchId) conditions.push({ id: { contains: searchId.replace(/[\\%_]/g, '\\$&'), mode: 'insensitive' } });
     // Value-tuple continuation needs no surviving anchor row. It is a live traversal,
     // not a frozen snapshot: newer inserts appear when the first page is refreshed.
     const rows = await prisma.settlementApproval.findMany({
@@ -3480,9 +3488,10 @@ export async function listSettlementApprovalsForVendor(
     return {
       ok: true, writesPerformed: false, vendorId, approvals: page.map(mapApprovalSummary), hasMore,
       nextCursor: hasMore && last ? Buffer.from(JSON.stringify({
-        v: workflow ? 3 : filtered ? 2 : 1, vendorId, createdAt: last.createdAt.toISOString(), id: last.id, limit,
-        ...(filtered || workflow ? { filters } : {}),
-        ...(workflow ? { workflow } : {}),
+        v: searchId ? 4 : workflow ? 3 : filtered ? 2 : 1, vendorId, createdAt: last.createdAt.toISOString(), id: last.id, limit,
+        ...(filtered || workflow || searchId ? { filters } : {}),
+        ...(workflow || searchId ? { workflow } : {}),
+        ...(searchId ? { searchId } : {}),
       } satisfies SettlementHistoryCursor)).toString('base64url') : null,
     };
   }

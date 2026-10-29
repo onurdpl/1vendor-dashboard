@@ -136,7 +136,7 @@ describe('finance event backfill route', () => {
     expect(await route.handler({ authUser: { role: 'admin' }, query: { vendorId: 'vendor-a' } }, reply)).toEqual(recent);
     expect(listSettlementApprovalsForVendorMock).toHaveBeenLastCalledWith('vendor-a');
     const query = { vendorId: 'vendor-a', pagination: 'cursor', limit: '20', cursor: 'opaque',
-      status: 'draft', periodKey: '2026-10', highValueOnly: 'true', workflow: 'ready_for_approval' };
+      status: 'draft', periodKey: '2026-10', highValueOnly: 'true', workflow: 'ready_for_approval', searchId: 'record' };
     const page = { ...recent, hasMore: false, nextCursor: null };
     listSettlementApprovalsForVendorMock.mockResolvedValue(page);
     expect(await route.handler({ authUser: { role: 'admin' }, query }, reply)).toEqual(page);
@@ -159,7 +159,7 @@ describe('finance event backfill route', () => {
     for (const filters of [{ status: 'PAID' }, { status: ['draft', 'approved'] }, { periodKey: '' },
       { periodKey: ['x'] }, { highValueOnly: '1' }, { highValueOnly: ['true'] }, { search: 'x' },
       { searchTimeZone: 'UTC' }, { workflow: 'ready' }, { workflow: '' }, { workflow: ['approved'] },
-      { workflow: 'PAID' }, { cursor: 'invalid!' }]) {
+      { workflow: 'PAID' }, { searchId: ['x'] }, { searchId: 'x'.repeat(513) }, { cursor: 'invalid!' }]) {
       expect(await handler({ authUser: { role: 'admin' }, query: {
         vendorId: 'vendor-a', pagination: 'cursor', ...filters,
       } }, reply)).toMatchObject({ status: 400, body: { message: expect.any(String) } });

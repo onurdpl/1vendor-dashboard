@@ -1673,6 +1673,27 @@ describe('settlement approval foundation', () => {
     }
   });
 
+  it.each([null, 1, ['x'], {}, 'x'.repeat(513)])('rejects invalid searchId %j', async (searchId) => {
+    await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', searchId })).rejects.toThrow('searchId');
+    expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+  });
+  it('escapes literal pattern characters and binds normalized search cursors to all query conditions', async () => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue(Array.from({ length: 3 }, (_, i) => ({
+      ...buildApproval({ id: `search-${i}`, status: 'DRAFT' }), _count: { lines: 0 },
+    })));
+    const query = { pagination: 'cursor', limit: 2, searchId: '  A%_  ', workflow: 'ready_for_approval', status: 'draft' };
+    const first = await listSettlementApprovalsForVendor('vendor-a', query);
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      vendorId: 'vendor-a', AND: expect.arrayContaining([{ id: { contains: 'a\\%\\_', mode: 'insensitive' } }]),
+    }) }));
+    if (!('nextCursor' in first)) throw new Error('Cursor expected');
+    expect(JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString())).toMatchObject({ v: 4, searchId: 'a%_' });
+    await expect(listSettlementApprovalsForVendor('vendor-a', { ...query, searchId: 'a%_', cursor: first.nextCursor })).resolves.toBeDefined();
+    for (const override of [{ searchId: 'different' }, { searchId: '' }, { status: 'approved' }, { workflow: 'all' },
+      { periodKey: '2025-01' }, { highValueOnly: true }, { limit: 3 }])
+      await expect(listSettlementApprovalsForVendor('vendor-a', { ...query, ...override, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    await expect(listSettlementApprovalsForVendor('vendor-b', { ...query, cursor: first.nextCursor })).rejects.toThrow('cursor');
+  });
   it('lists recent settlement approvals for a vendor newest first without writes', async () => {
     prismaMock.settlementApproval.findMany.mockResolvedValue([
       {
