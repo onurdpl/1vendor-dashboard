@@ -157,7 +157,7 @@ describe('finance event backfill route', () => {
     const handler = gets.get('/admin/finance/settlement-approvals')!;
     const reply = { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) };
     for (const filters of [{ status: 'PAID' }, { status: ['draft', 'approved'] }, { periodKey: '' },
-      { periodKey: ['x'] }, { highValueOnly: '1' }, { highValueOnly: ['true'] }, { search: 'x' },
+      { periodKey: ['x'] }, { highValueOnly: '1' }, { highValueOnly: ['true'] }, { search: ['x'] },
       { searchTimeZone: 'UTC' }, { workflow: 'ready' }, { workflow: '' }, { workflow: ['approved'] },
       { workflow: 'PAID' }, { searchId: ['x'] }, { searchId: 'x'.repeat(513) }, { cursor: 'invalid!' }]) {
       expect(await handler({ authUser: { role: 'admin' }, query: {

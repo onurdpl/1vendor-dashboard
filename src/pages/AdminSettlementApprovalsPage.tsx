@@ -1,3 +1,4 @@
+import { formatSettlementDateUtc, settlementSummaryPeriodLabel } from '../../backend/src/modules/finance/settlement-search-presentation';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -244,7 +245,7 @@ function formatNumber(value: number | null | undefined) {
 }
 
 function formatDate(value: string | null | undefined) {
-  return formatDateTime(value, undefined, 'Not set');
+  return formatSettlementDateUtc(value);
 }
 
 function formatQueueTimelineDate(value: string | null | undefined) {
@@ -476,16 +477,7 @@ function isVendorScopedSettlementList(response: SettlementApprovalListResponse, 
 }
 
 function getSettlementSummaryPeriodLabel(summary: SettlementApprovalSummary) {
-  if (summary.scheduledCycleKey) {
-    return safeStatusLabel(summary.scheduledCycleKey);
-  }
-  if (summary.scheduledPeriodEnd) {
-    return `Through ${formatDate(summary.scheduledPeriodEnd)}`;
-  }
-  if (summary.scheduledRunDate) {
-    return `Run ${formatDate(summary.scheduledRunDate)}`;
-  }
-  return `Created ${formatDate(summary.createdAt)}`;
+  return settlementSummaryPeriodLabel(summary);
 }
 
 function getSettlementPeriodLabel(summary: SettlementApprovalSummary, detail: SettlementApproval | null) {

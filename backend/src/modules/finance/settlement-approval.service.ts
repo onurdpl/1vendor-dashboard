@@ -1,3 +1,4 @@
+import { matchesSettlementSearch } from './settlement-search-presentation.js';
 import {
   Prisma,
   SettlementApprovalLineType,
@@ -366,6 +367,13 @@ export type SettlementApprovalListDto = {
 export type SettlementApprovalCursorListDto = SettlementApprovalListDto & {
   hasMore: boolean;
   nextCursor: string | null;
+};
+
+export type SettlementApprovalSearchListDto = Omit<SettlementApprovalCursorListDto, 'hasMore'> & {
+  hasMore: boolean | null;
+  searchState: 'EXHAUSTED' | 'MORE_CANDIDATES' | 'MORE_MATCHES';
+  candidatesScanned: number;
+  candidateBatchCount: number;
 };
 
 export type SettlementApprovalListQueryDto = Record<string, unknown>;
@@ -3452,15 +3460,79 @@ export async function getSettlementApproval(id: string): Promise<SettlementAppro
   return approval ? mapApproval(approval, false) : null;
 }
 
+// Full Search is a separately opted-in bounded scan. null hasMore means unknown;
+// clients MUST follow nextCursor through MORE_CANDIDATES, including empty pages.
+async function searchSettlementHistory(vendorId: string, query: SettlementApprovalListQueryDto): Promise<SettlementApprovalSearchListDto> {
+  const { search, searchVendorName, cursor, ...base } = query;
+  if (typeof search !== 'string' || search.length > 512 ||
+    (searchVendorName !== undefined && (typeof searchVendorName !== 'string' || searchVendorName.length > 512))) {
+    throw new Error('search and optional searchVendorName must be strings of at most 512 characters.');
+  }
+  const term = search.trim().toLowerCase();
+  const name = typeof searchVendorName === 'string' ? searchVendorName : '';
+  const parsed = parseSettlementHistoryQuery(vendorId, base);
+  const binding = { vendorId, search: term, searchVendorName: name, filters: parsed.filters,
+    workflow: parsed.workflow, searchId: parsed.searchId, limit: parsed.limit };
+  let boundary: SettlementHistoryCursor | null = null;
+  if (cursor !== undefined) {
+    try {
+      if (typeof cursor !== 'string' || cursor.length > 32768 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error();
+      const raw = Buffer.from(cursor, 'base64url').toString('utf8');
+      if (Buffer.from(raw).toString('base64url') !== cursor) throw new Error();
+      const token = JSON.parse(raw);
+      if (Object.keys(token).sort().join(',') !== 'binding,position,v' || token.v !== 5 ||
+        JSON.stringify(token.binding) !== JSON.stringify(binding) ||
+        Object.keys(token.position).sort().join(',') !== 'createdAt,id') throw new Error();
+      const legacy = { v: parsed.searchId ? 4 : parsed.workflow ? 3 : parsed.filtered ? 2 : 1,
+        vendorId, limit: parsed.limit, ...token.position,
+        ...(parsed.filtered || parsed.workflow || parsed.searchId ? { filters: parsed.filters } : {}),
+        ...(parsed.workflow || parsed.searchId ? { workflow: parsed.workflow } : {}),
+        ...(parsed.searchId ? { searchId: parsed.searchId } : {}) };
+      boundary = parseSettlementHistoryQuery(vendorId, { ...base,
+        cursor: Buffer.from(JSON.stringify(legacy)).toString('base64url') }).cursor;
+    } catch { throw new Error('Invalid full Search cursor or query/context mismatch.'); }
+  }
+  const conditions = settlementHistoryFilterWhere(parsed.filters, parsed.workflow);
+  if (parsed.searchId) conditions.push({ id: { contains: parsed.searchId.replace(/[\\%_]/g, '\\$&'), mode: 'insensitive' } });
+  const rows = await prisma.settlementApproval.findMany({ where: { vendorId,
+    ...(conditions.length ? { AND: conditions } : {}),
+    ...(boundary ? { OR: [{ createdAt: { lt: new Date(boundary.createdAt) } },
+      { createdAt: new Date(boundary.createdAt), id: { lt: boundary.id } }] } : {}),
+  }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 201,
+    include: { _count: { select: { lines: true, correctionCreditLines: true, correctionDeductionLines: true } } } });
+  const approvals: SettlementApprovalSummaryDto[] = [];
+  let scanned = 0, lastScanned: typeof rows[number] | undefined;
+  let moreMatches = false;
+  for (const row of rows.slice(0, 200)) {
+    scanned++; lastScanned = row;
+    const summary = mapApprovalSummary(row);
+    if (!matchesSettlementSearch(summary, term, name)) continue;
+    if (approvals.length === parsed.limit) { moreMatches = true; break; }
+    approvals.push(summary);
+  }
+  const moreCandidates = moreMatches || rows.length > 200;
+  // Revisit the unreturned lookahead match; never advance beyond a known result.
+  const position = moreMatches ? approvals.at(-1)! : lastScanned;
+  const nextCursor = moreCandidates && position ? Buffer.from(JSON.stringify({ v: 5, binding,
+    position: { id: position.id, createdAt: typeof position.createdAt === 'string' ? position.createdAt : position.createdAt.toISOString() },
+  })).toString('base64url') : null;
+  return { ok: true, writesPerformed: false, vendorId, approvals,
+    hasMore: moreMatches ? true : moreCandidates ? null : false, nextCursor,
+    searchState: moreMatches ? 'MORE_MATCHES' : moreCandidates ? 'MORE_CANDIDATES' : 'EXHAUSTED',
+    candidatesScanned: scanned, candidateBatchCount: 1 };
+}
+
 export function listSettlementApprovalsForVendor(vendorId: string): Promise<SettlementApprovalListDto>;
 export function listSettlementApprovalsForVendor(vendorId: string, query: SettlementApprovalListQueryDto):
-  Promise<SettlementApprovalListDto | SettlementApprovalCursorListDto>;
+  Promise<SettlementApprovalListDto | SettlementApprovalCursorListDto | SettlementApprovalSearchListDto>;
 export async function listSettlementApprovalsForVendor(
   vendorId: string, query: SettlementApprovalListQueryDto = {},
-): Promise<SettlementApprovalListDto | SettlementApprovalCursorListDto> {
+): Promise<SettlementApprovalListDto | SettlementApprovalCursorListDto | SettlementApprovalSearchListDto> {
   if (!vendorId?.trim()) {
     throw new Error('vendorId is required.');
   }
+
+  if (query.search !== undefined && query.pagination !== undefined) return searchSettlementHistory(vendorId, query);
 
   if (query.pagination !== undefined) {
     const { limit, cursor, filters, filtered, workflow, searchId } = parseSettlementHistoryQuery(vendorId, query);

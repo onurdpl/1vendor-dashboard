@@ -1756,7 +1756,7 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     for (const cursor of ['bad!', Buffer.from(JSON.stringify({ v: 99 })).toString('base64url')])
       await expect(page(vendorA, { cursor })).rejects.toThrow('cursor');
     for (const limit of [0, -1, 1.5, 101]) await expect(page(vendorA, { limit })).rejects.toThrow('limit');
-    for (const key of ['search', 'period', 'searchTimeZone'])
+    for (const key of ['period', 'searchTimeZone'])
       await expect(page(vendorA, { [key]: 'value' })).rejects.toThrow('Unsupported');
     await expect(page('')).rejects.toThrow('vendorId');
   });
@@ -2035,6 +2035,80 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     for (const [searchId, expected] of [['%', ids[0]], ['_', ids[1]], ['\\', ids[2]]] as const) {
       const result = await page(vendorId, { searchId });
       expect(result.approvals.map(row => row.id)).toEqual([expected]);
+    }
+  });
+
+  it('scans full Search in bounded batches with exact JS semantics, sparse continuation and query binding', async () => {
+    const searchPage = async (query: Record<string, unknown>) => {
+      const result = await list(workflowVendor, { pagination: 'cursor', ...query });
+      if (!('searchState' in result)) throw new Error('Full Search response required');
+      expect(result.candidatesScanned).toBeLessThanOrEqual(200);
+      expect(result.candidateBatchCount).toBe(1);
+      return result;
+    };
+    const collect = async (query: Record<string, unknown>) => {
+      const ids: string[] = []; let cursor: string | null = null; let batches = 0, scanned = 0;
+      do {
+        const result = await searchPage({ ...query, ...(cursor ? { cursor } : {}) });
+        ids.push(...result.approvals.map(row => row.id)); batches++; scanned += result.candidatesScanned;
+        expect(result.approvals.every(row => row.vendorId === workflowVendor)).toBe(true);
+        if (result.searchState === 'MORE_CANDIDATES') expect(result.hasMore).toBeNull();
+        if (result.searchState === 'EXHAUSTED') expect(result.nextCursor).toBeNull();
+        cursor = result.nextCursor;
+        if (batches > 100) throw new Error('Unbounded continuation');
+      } while (cursor);
+      expect(new Set(ids).size).toBe(ids.length);
+      return { ids, batches, scanned };
+    };
+    const before = await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+    const all = await collect({ search: '', limit: 100 });
+    expect(all.ids).toEqual(workflowOrdered.map(row => row.id));
+    const sparse = await collect({ search: workflowOrdered.at(-1)!.id, limit: 20 });
+    expect(sparse.ids).toEqual([workflowOrdered.at(-1)!.id]);
+    expect(sparse.batches).toBe(4); expect(sparse.scanned).toBe(605);
+    console.info('Full Search measured sparse scan', sparse.batches, sparse.scanned);
+    expect((await collect({ search: 'No Such Match' })).ids).toEqual([]);
+    expect((await collect({ search: '  WORKSPACE İ_ΟΣ  ', searchVendorName: 'Workspace İ_ΟΣ', limit: 100 })).ids).toEqual(workflowOrdered.map(row => row.id));
+    expect((await collect({ search: workflowVendor.toUpperCase(), limit: 100 })).ids).toEqual(workflowOrdered.map(row => row.id));
+    const drafts = workflowOrdered.filter(row => row.status === 'APPROVED');
+    expect((await collect({ search: 'app', limit: 100 })).ids).toEqual(drafts.map(row => row.id));
+    expect((await collect({ search: 'app', status: 'draft' })).ids).toEqual([]);
+    expect((await collect({ search: '1', status: 'draft', periodKey: '2025-01', highValueOnly: true, workflow: 'ready_for_approval', limit: 100 })).ids)
+      .toEqual(workflowOrdered.filter(row => row.status === 'DRAFT' && row.createdAt.getUTCFullYear() === 2025 && Math.abs(row.netPayableMinor) >= 100000 && matchesWorkflow(row, 'ready_for_approval')).map(row => row.id));
+    const initial = await searchPage({ search: '', limit: 2 });
+    for (const change of [{ search: 'x' }, { searchVendorName: 'different' }, { status: 'draft' }, { periodKey: '2025-01' },
+      { highValueOnly: true }, { workflow: 'approved' }, { limit: 3 }])
+      await expect(searchPage({ search: '', limit: 2, ...change, cursor: initial.nextCursor })).rejects.toThrow('cursor');
+    await expect(list(workflowForeign, { pagination: 'cursor', search: '', limit: 2, cursor: initial.nextCursor })).rejects.toThrow('cursor');
+    for (const query of [{ search: null }, { search: ['x'] }, { search: 'x'.repeat(513) }, { search: 'x', searchVendorName: 1 }])
+      await expect(list(workflowVendor, { pagination: 'cursor', ...query })).rejects.toThrow();
+    expect(await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(before);
+  });
+
+  it('matches Unicode, literal patterns, actual UTC labels and decimal line-count substrings on PostgreSQL', async () => {
+    const { settlementSummaryPeriodLabel } = await import('../backend/src/modules/finance/settlement-search-presentation.js');
+    const literalPrefix = prefix.replace(/[0-9]/g, 'x');
+    const vendorId = `${literalPrefix}-full-exact`;
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    const rows = [
+      { ...fixtures[0], id: `${literalPrefix}-İ_ΟΣ%\\`, vendorId, scheduledCycleKey: 'İ_ΟΣ%\\', createdAt: new Date('2026-12-31T23:59:00Z') },
+      { ...fixtures[0], id: `${literalPrefix}-utc-end`, vendorId, scheduledPeriodEnd: new Date('2027-01-01T00:00:00Z') },
+      { ...fixtures[0], id: `${literalPrefix}-utc-run`, vendorId, scheduledRunDate: new Date('2024-02-29T00:00:00Z') },
+    ];
+    await db.settlementApproval.createMany({ data: rows });
+    await db.financeLedgerEntry.createMany({ data: Array.from({ length: 101 }, (_, i) => ({ id: `${vendorId}-ledger-${i}`, vendorId, entryType: 'sale', amount: '1' })) });
+    await db.settlementApprovalLine.createMany({ data: Array.from({ length: 101 }, (_, i) => ({
+      settlementApprovalId: rows[0].id, financeLedgerEntryId: `${vendorId}-ledger-${i}`, lineType: 'SALE' as const,
+      amountMinor: 100, commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: 100, sourceSnapshotJson: {},
+    })) });
+    for (const search of ['i̇', 'ος', '%', '\\', '01']) {
+      const result = await list(vendorId, { pagination: 'cursor', search });
+      expect(result.approvals.some(row => row.id === rows[0].id)).toBe(true);
+    }
+    for (const row of rows.slice(1)) {
+      const label = settlementSummaryPeriodLabel({ createdAt: row.createdAt.toISOString(),
+        scheduledPeriodEnd: row.scheduledPeriodEnd?.toISOString(), scheduledRunDate: row.scheduledRunDate?.toISOString() });
+      expect((await list(vendorId, { pagination: 'cursor', search: label })).approvals.map(item => item.id)).toEqual([row.id]);
     }
   });
 

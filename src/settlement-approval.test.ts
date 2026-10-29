@@ -1493,7 +1493,7 @@ describe('settlement approval foundation', () => {
       expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
     });
 
-  it.each(['search', 'searchTimeZone', 'period', 'unexpected'])(
+  it.each(['searchTimeZone', 'period', 'unexpected'])(
     'rejects unsupported cursor-mode parameter %s rather than pretending to filter history', async (key) => {
       await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', [key]: 'value' })).rejects.toThrow('Unsupported');
       expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
