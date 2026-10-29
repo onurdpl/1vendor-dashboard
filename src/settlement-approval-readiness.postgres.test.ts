@@ -1533,6 +1533,30 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
   const rawPeriod = (row: typeof filterFixtures[number]) => row.scheduledCycleKey ||
     row.scheduledPeriodEnd?.toISOString().slice(0, 10) || row.scheduledRunDate?.toISOString().slice(0, 10) ||
     row.createdAt.toISOString().slice(0, 7);
+  const workflowVendor = `${prefix}-workflow`, workflowForeign = `${prefix}-workflow-foreign`;
+  const workflowFixtures = Array.from({ length: 603 }, (_, index) => ({
+    ...fixtures[index % fixtures.length], id: `${prefix}-workflow-${String(index).padStart(4, '0')}`,
+    vendorId: workflowVendor, createdAt: new Date(Date.UTC(2025, 0, 1, 0, 0, Math.floor(index / 7))),
+    status: (['DRAFT', 'APPROVED', 'CANCELLED'] as const)[index % 3],
+    netPayableMinor: [0, -100000, 100000, 100001, -1, 1][Math.floor(index / 3) % 6],
+    hasLine: index % 4 !== 0,
+  }));
+  const correctionWorkflowFixtures = ['credit', 'deduction'].map(kind => ({
+    ...fixtures[0], id: `${prefix}-workflow-${kind}`, vendorId: workflowVendor, netPayableMinor: 0, hasLine: true,
+  }));
+  const workflowOrdered = [...workflowFixtures, ...correctionWorkflowFixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  // Independent oracle follows the existing frontend summary-level matcher.
+  const matchesWorkflow = (row: typeof workflowFixtures[number], workflow: string) => {
+    const hold = row.status === 'CANCELLED' || (row.netPayableMinor <= 0 && row.hasLine);
+    const ready = row.status === 'DRAFT' && !hold;
+    if (workflow === 'all') return true;
+    if (workflow === 'ready_for_approval') return ready;
+    if (workflow === 'needs_review') return row.status === 'DRAFT' && !ready;
+    if (workflow === 'vendor_hold') return hold;
+    if (workflow === 'approved') return row.status === 'APPROVED';
+    return false; // Summary never generates Refund and has no PAID status.
+  };
   const ordered = [...fixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
     (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 
@@ -1581,16 +1605,106 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     expect(serviceIdentity).toEqual(identity);
     list = service.listSettlementApprovalsForVendor;
     expect(await db.vendor.count({ where: { id: { in: [vendorA, vendorB, emptyVendor] } } })).toBe(0);
-    await db.vendor.createMany({ data: [vendorA, vendorB, emptyVendor, filterVendor, filterForeignVendor].map(id => ({ id, name: id })) });
+    await db.vendor.createMany({ data: [vendorA, vendorB, emptyVendor, filterVendor, filterForeignVendor, workflowVendor, workflowForeign].map(id => ({ id, name: id })) });
     await db.settlementApproval.createMany({ data: [
       ...fixtures,
       ...fixtures.slice(0, 27).map(row => ({ ...row, id: `${row.id}-foreign`, vendorId: vendorB })),
       ...filterFixtures,
+      ...workflowFixtures.map(({ hasLine: _hasLine, ...row }) => row),
+      ...workflowFixtures.slice(0, 27).map(({ hasLine: _hasLine, ...row }) => ({
+        ...row, id: `${row.id}-foreign`, vendorId: workflowForeign,
+      })),
       ...filterFixtures.slice(0, 24).map(row => ({ ...row, id: `${row.id}-foreign`, vendorId: filterForeignVendor,
         scheduledCycleKey: null })),
     ] });
+    await db.financeLedgerEntry.createMany({ data: [workflowVendor, workflowForeign].map(vendorId => ({
+      id: `${vendorId}-ledger`, vendorId, entryType: 'sale', amount: '1.00',
+    })) });
+    await db.settlementApprovalLine.createMany({ data: [
+      ...workflowFixtures.filter(row => row.hasLine).map(row => ({
+        id: `${row.id}-line`, settlementApprovalId: row.id, financeLedgerEntryId: `${workflowVendor}-ledger`,
+        lineType: 'SALE' as const, amountMinor: 100, commissionMinor: 0, commissionVatMinor: 0,
+        payableImpactMinor: 100, sourceSnapshotJson: { fixture: 'workflow-summary-only' },
+      })),
+      ...workflowFixtures.slice(0, 27).filter(row => row.hasLine).map(row => ({
+        id: `${row.id}-foreign-line`, settlementApprovalId: `${row.id}-foreign`, financeLedgerEntryId: `${workflowForeign}-ledger`,
+        lineType: 'SALE' as const, amountMinor: 100, commissionMinor: 0, commissionVatMinor: 0,
+        payableImpactMinor: 100, sourceSnapshotJson: { fixture: 'workflow-summary-only' },
+      })),
+    ] });
+    const payoutActor = await seedCorrectionOnlyWorkflowRows();
+    const eftExecutedAt = new Date('2025-01-01T00:00:00Z');
+    const payoutCompletedAt = new Date();
+    await db.payoutBatch.createMany({ data: (['DRAFT', 'REVIEW', 'PAID'] as const).map(status => ({
+      id: `${prefix}-workflow-payout-${status}`, vendorId: workflowVendor, status,
+      grossAmount: '123.45', netAmount: '123.45',
+      ...(status === 'PAID' ? { paidAt: payoutCompletedAt, paidByUserId: payoutActor, eftAmountMinor: null,
+        eftExecutedAt, eftDeclaredAt: eftExecutedAt.toISOString(),
+        eftAttestedAt: payoutCompletedAt, eftAttestedByUserId: payoutActor, paymentReference: 'disposable-fixture' } : {}),
+    })) });
   });
   afterAll(async () => { await db?.$disconnect(); });
+
+  async function seedCorrectionOnlyWorkflowRows() {
+    // Relational fixtures exercise all Summary.lineCount sources, not financial mutation services.
+    const actor = `${prefix}-workflow-actor`;
+    await db.user.create({ data: { id: actor, name: 'Workflow Fixture', email: `${actor}@example.test`,
+      role: 'ADMIN', passwordHash: 'non-login-test-fixture' } });
+    for (const kind of ['credit', 'deduction'] as const) {
+      const id = `${prefix}-workflow-${kind}`, vendorId = workflowVendor;
+      const common = { sourceShopifyRefundId: `${id}-refund`, sourceShopifyOrderId: `${id}-order`, vendorAllocationId: `${id}-allocation` };
+      await db.shopifyOrder.create({ data: { id: common.sourceShopifyOrderId,
+        sourceShopifyOrderId: common.sourceShopifyOrderId, sourceShopifyOrderNumber: `#${id}` } });
+      await db.vendorAllocation.create({ data: { id: common.vendorAllocationId,
+        sourceShopifyOrderId: common.sourceShopifyOrderId, sourceShopifyOrderNumber: `#${id}`,
+        originalVendorId: vendorId, assignedVendorId: vendorId } });
+      await db.financeLedgerEntry.createMany({ data: ['sale', 'refund'].map(entryType => ({
+        id: `${id}-${entryType}-ledger`, vendorId, vendorAllocationId: common.vendorAllocationId, entryType, amount: '1.00',
+      })) });
+      await db.refundRecord.create({ data: { id: `${id}-record`, ...common, sourceShopifyOrderNumber: `#${id}`, status: 'COMPLETED', amount: '1.00' } });
+      const evidence = { ...common, historicalSaleFinanceLedgerEntryId: `${id}-sale-ledger`, currency: 'TRY',
+        refundTotalAmount: '1.00', evidenceHash: `${id}-accepted`, hashAlgorithm: 'SHA-256', evidenceVersion: 1, normalizationVersion: 1 };
+      await db.refundEvidenceSnapshot.create({ data: { id: `${id}-snapshot`, ...evidence,
+        refundRecordId: `${id}-record`, refundFinanceLedgerEntryId: `${id}-refund-ledger`, historicalEconomicVendorId: vendorId,
+        monetaryClassification: 'MONETARY_REFUND', normalizedTransactionsJson: [], normalizedRefundLinesJson: [],
+        normalizedOwnershipJson: {}, normalizedEvidenceJson: {}, supersededSaleLedgerIdsJson: [],
+        evidenceSource: 'workflow-relational-fixture', capturedAt: new Date('2025-01-01T00:00:00Z') } });
+      await db.refundTerminalEvidenceReview.create({ data: { id: `${id}-review`, ...common,
+        terminalRefundFinanceLedgerEntryId: `${id}-refund-ledger`, refundRecordId: `${id}-record`, economicVendorId: vendorId,
+        storedEvidenceSnapshotId: `${id}-snapshot`, dedupeKey: id, conflictCategory: 'AMOUNT_MISMATCH', conflictSummaryJson: {},
+        status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' } });
+      await db.refundTerminalConflictEvidence.create({ data: { id: `${id}-incoming`, ...evidence,
+        evidenceHash: `${id}-incoming`, reviewId: `${id}-review`, economicVendorId: vendorId,
+        supersededSaleLedgerIdsJson: [], normalizedEvidenceJson: {} } });
+      await db.refundTerminalEvidenceReviewEvent.create({ data: { id: `${id}-event`, reviewId: `${id}-review`,
+        eventType: 'RESOLVED', actorUserId: actor, resolutionOutcome: 'CORRECTION_REQUIRED' } });
+      const delta = kind === 'credit' ? -100 : 100;
+      await db.financialCorrectionAuthority.create({ data: { id: `${id}-authority`, ...common, vendorId,
+        reviewId: `${id}-review`, resolvedReviewEventId: `${id}-event`, acceptedEvidenceSnapshotId: `${id}-snapshot`,
+        incomingConflictEvidenceId: `${id}-incoming`, historicalSaleFinanceLedgerEntryId: `${id}-sale-ledger`,
+        acceptedRefundFinanceLedgerEntryId: `${id}-refund-ledger`, acceptedEvidenceHash: evidence.evidenceHash,
+        incomingEvidenceHash: `${id}-incoming`, acceptedEvidenceVersion: 1, acceptedNormalizationVersion: 1,
+        incomingEvidenceVersion: 1, incomingNormalizationVersion: 1, commissionPercent: '0', commissionVatPercent: '0', currency: 'TRY',
+        acceptedRefundAmountMinor: 200, acceptedCommissionReversalMinor: 0, acceptedCommissionVatReversalMinor: 0,
+        acceptedVendorPayableReversalMinor: 200, correctedRefundAmountMinor: 200 + delta, correctedCommissionReversalMinor: 0,
+        correctedCommissionVatReversalMinor: 0, correctedVendorPayableReversalMinor: 200 + delta,
+        refundDifferenceMinor: delta, commissionDifferenceMinor: 0, commissionVatDifferenceMinor: 0, vendorPayableDifferenceMinor: delta,
+        economicDirection: kind === 'credit' ? 'VENDOR_CREDIT' : 'VENDOR_DEDUCTION', previewFingerprint: id,
+        applicationRoute: kind === 'credit' ? 'BEFORE_SETTLEMENT_VENDOR_CREDIT' : 'BEFORE_SETTLEMENT_VENDOR_DEDUCTION',
+        authorizedByUserId: actor, reason: 'Disposable workflow relation fixture' } });
+      await db.settlementApproval.create({ data: { ...fixtures[0], id, vendorId, netPayableMinor: 0 } });
+      if (kind === 'credit') {
+        await db.financialCorrectionCredit.create({ data: { id: `${id}-source`, authorityId: `${id}-authority`, vendorId, amountMinor: 100 } });
+        // Cancelled lines are still counted by the existing Summary DTO.
+        await db.financialCorrectionCreditSettlementLine.create({ data: { creditId: `${id}-source`, settlementApprovalId: id,
+          amountMinor: 100, status: 'CANCELLED', cancelledAt: new Date('2025-01-01T00:00:00Z') } });
+      } else {
+        await db.financialCorrectionDeduction.create({ data: { id: `${id}-source`, authorityId: `${id}-authority`, vendorId, amountMinor: 100 } });
+        await db.financialCorrectionDeductionSettlementLine.create({ data: { deductionId: `${id}-source`, settlementApprovalId: id, amountMinor: 100 } });
+      }
+    }
+    return actor;
+  }
 
   async function page(vendorId: string, query: Record<string, unknown> = {}) {
     const result = await list(vendorId, { pagination: 'cursor', ...query });
@@ -1642,7 +1756,7 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     for (const cursor of ['bad!', Buffer.from(JSON.stringify({ v: 99 })).toString('base64url')])
       await expect(page(vendorA, { cursor })).rejects.toThrow('cursor');
     for (const limit of [0, -1, 1.5, 101]) await expect(page(vendorA, { limit })).rejects.toThrow('limit');
-    for (const key of ['search', 'period', 'workflow', 'searchTimeZone'])
+    for (const key of ['search', 'period', 'searchTimeZone'])
       await expect(page(vendorA, { [key]: 'value' })).rejects.toThrow('Unsupported');
     await expect(page('')).rejects.toThrow('vendorId');
   });
@@ -1768,6 +1882,111 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     expect(await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } })).toEqual(before);
     expect(await db.financeLedgerEntry.findMany({ where, orderBy: { id: 'asc' } })).toEqual(ledgers);
     expect(await db.payoutBatch.findMany({ where, orderBy: { id: 'asc' } })).toEqual(payouts);
+  });
+
+  async function traverseWorkflow(query: Record<string, unknown>) {
+    const expected = workflowOrdered.filter(row => matchesWorkflow(row, String(query.workflow ?? 'all')) &&
+      (!query.status || query.status === 'all' || row.status.toLowerCase() === String(query.status).toLowerCase()) &&
+      (!query.periodKey || row.createdAt.toISOString().slice(0, 7) === query.periodKey) &&
+      (!query.highValueOnly || Math.abs(row.netPayableMinor) >= 100000));
+    const ids: string[] = []; let cursor: string | null = null;
+    do {
+      const result = await page(workflowVendor, { limit: 7, ...query, ...(cursor ? { cursor } : {}) });
+      expect(result.approvals).toHaveLength(Math.min(7, expected.length - ids.length));
+      for (const summary of result.approvals) {
+        const raw = expected.find(row => row.id === summary.id)!;
+        expect(raw).toBeDefined();
+        expect(summary).toMatchObject({ vendorId: workflowVendor, status: raw.status.toLowerCase(),
+          netPayableMinor: raw.netPayableMinor, lineCount: raw.hasLine ? 1 : 0 });
+      }
+      ids.push(...result.approvals.map(row => row.id));
+      expect(result.hasMore).toBe(result.nextCursor !== null);
+      cursor = result.nextCursor;
+      if (ids.length > workflowOrdered.length) throw new Error('Unbounded/duplicate workflow traversal');
+    } while (cursor);
+    expect(ids).toEqual(expected.map(row => row.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    return expected;
+  }
+
+  it.each(['all', 'ready_for_approval', 'needs_review', 'vendor_hold', 'approved', 'refund_review', 'paid'])(
+    'matches existing summary workflow %s over complete history before paging', async (workflow) => {
+      const matching = await traverseWorkflow({ workflow });
+      if (workflow === 'refund_review' || workflow === 'paid') expect(matching).toEqual([]);
+      else {
+        expect(matching.length).toBeGreaterThan(20);
+        for (const position of [20, 100, 500]) {
+          expect(matching.some(row => workflowOrdered.indexOf(row) > position)).toBe(true);
+        }
+      }
+    });
+
+  it('includes credit-only and deduction-only lines in Hold, even cancelled credit lines counted by Summary', async () => {
+    for (const row of correctionWorkflowFixtures) {
+      const held = await page(workflowVendor, { workflow: 'needs_review', limit: 2 });
+      expect(held.approvals).toContainEqual(expect.objectContaining({ id: row.id, lineCount: 1, netPayableMinor: 0 }));
+      const ready = await page(workflowVendor, { workflow: 'ready_for_approval', limit: 100 });
+      expect(ready.approvals.some(summary => summary.id === row.id)).toBe(false);
+    }
+    // Zero/negative empty summaries remain Ready; positive rows remain Ready even with lines.
+    const ready = await traverseWorkflow({ workflow: 'ready_for_approval' });
+    expect(ready.some(row => row.netPayableMinor <= 0 && !row.hasLine)).toBe(true);
+    expect(ready.some(row => row.netPayableMinor > 0 && row.hasLine)).toBe(true);
+    const held = await traverseWorkflow({ workflow: 'vendor_hold' });
+    expect(held.some(row => row.status === 'APPROVED' && row.netPayableMinor <= 0 && row.hasLine)).toBe(true);
+    expect(held.some(row => row.status === 'CANCELLED' && row.netPayableMinor > 0 && !row.hasLine)).toBe(true);
+  });
+
+  it.each([
+    { workflow: 'ready_for_approval', status: 'draft' },
+    { workflow: 'approved', status: 'cancelled' },
+    { workflow: 'vendor_hold', highValueOnly: true },
+    { workflow: 'needs_review', periodKey: '2025-01' },
+    { workflow: 'ready_for_approval', status: 'draft', periodKey: '2025-01', highValueOnly: true },
+  ])('combines workflow with all existing filters before pagination: %j', async (query) => {
+    const rows = await traverseWorkflow(query);
+    if (query.workflow === 'approved') expect(rows).toEqual([]);
+    else expect(rows.length).toBeGreaterThan(7);
+  });
+
+  it('preserves v1/v2 cursors for all workflow while binding active workflow to a new v3 sequence', async () => {
+    for (const filters of [{}, { status: 'draft', periodKey: '2025-01', highValueOnly: true }]) {
+      const query = { ...filters, limit: 2 };
+      const old = await page(workflowVendor, query);
+      expect(JSON.parse(Buffer.from(old.nextCursor!, 'base64url').toString()).v).toBe(filters.status ? 2 : 1);
+      const compatible = await page(workflowVendor, { ...query, workflow: 'all', cursor: old.nextCursor });
+      expect(compatible.approvals.map(row => row.id)).toEqual((await page(workflowVendor, { ...query, cursor: old.nextCursor })).approvals.map(row => row.id));
+      const active = { ...query, workflow: 'ready_for_approval' };
+      await expect(page(workflowVendor, { ...active, cursor: old.nextCursor })).rejects.toThrow('cursor');
+      const first = await page(workflowVendor, active);
+      const decoded = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString());
+      expect(decoded).toMatchObject({ v: 3, workflow: 'ready_for_approval' });
+      await expect(page(workflowVendor, { ...active, cursor: first.nextCursor })).resolves.toBeDefined();
+      for (const changes of [{ workflow: 'needs_review' }, { workflow: 'all' }, { workflow: undefined },
+        { status: 'cancelled' }, { periodKey: '2026-10' }, { highValueOnly: !filters.highValueOnly }, { limit: 3 }])
+        await expect(page(workflowVendor, { ...active, ...changes, cursor: first.nextCursor })).rejects.toThrow('cursor');
+      await expect(page(workflowForeign, { ...active, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    }
+    const foreign = await page(workflowForeign, { workflow: 'approved', limit: 2 });
+    expect(foreign.approvals.every(row => row.vendorId === workflowForeign)).toBe(true);
+    await expect(page(workflowVendor, { workflow: 'approved', limit: 2, cursor: foreign.nextCursor })).rejects.toThrow('cursor');
+    for (const workflow of ['', 'PAID', null, ['approved'], 'unknown'])
+      await expect(page(workflowVendor, { workflow })).rejects.toThrow('workflow');
+  });
+
+  it('does not modify any settlement, line, ledger or payout fields while filtering workflows', async () => {
+    const where = { vendorId: { in: [workflowVendor, workflowForeign] } };
+    const snapshot = async () => ({
+      settlements: await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' }, include: {
+        lines: { orderBy: { id: 'asc' } }, correctionCreditLines: { orderBy: { id: 'asc' } }, correctionDeductionLines: { orderBy: { id: 'asc' } },
+      } }),
+      ledger: await db.financeLedgerEntry.findMany({ where, orderBy: { id: 'asc' } }),
+      payouts: await db.payoutBatch.findMany({ where, orderBy: { id: 'asc' } }),
+    });
+    const before = await snapshot();
+    for (const workflow of ['all', 'ready_for_approval', 'needs_review', 'vendor_hold', 'approved', 'refund_review', 'paid'])
+      await page(workflowVendor, { workflow, highValueOnly: true });
+    expect(await snapshot()).toEqual(before);
   });
 
 });

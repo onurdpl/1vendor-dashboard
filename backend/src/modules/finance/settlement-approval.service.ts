@@ -375,21 +375,31 @@ type SettlementHistoryFilters = {
   periodKey: string | null;
   highValueOnly: boolean;
 };
+const settlementHistoryWorkflows = [
+  'ready_for_approval', 'needs_review', 'vendor_hold', 'approved', 'refund_review', 'paid',
+] as const;
+type SettlementHistoryWorkflow = typeof settlementHistoryWorkflows[number];
 type SettlementHistoryCursor = {
-  v: 1 | 2;
+  v: 1 | 2 | 3;
   vendorId: string;
   createdAt: string;
   id: string;
   limit: number;
   filters?: SettlementHistoryFilters;
+  workflow?: SettlementHistoryWorkflow;
 };
 
 // Opt-in history filters affect loading only, never financial action eligibility.
 function parseSettlementHistoryQuery(vendorId: string, query: SettlementApprovalListQueryDto) {
   if (query.pagination !== 'cursor') throw new Error('pagination must be cursor.');
-  if (Object.keys(query).some((key) => !['vendorId', 'pagination', 'limit', 'cursor', 'status', 'periodKey', 'highValueOnly'].includes(key))) {
-    throw new Error('Unsupported settlement history query parameter; Search and workflow filters are not supported.');
+  if (Object.keys(query).some((key) => !['vendorId', 'pagination', 'limit', 'cursor', 'status', 'periodKey', 'highValueOnly', 'workflow'].includes(key))) {
+    throw new Error('Unsupported settlement history query parameter; Search is not supported.');
   }
+  if (query.workflow !== undefined && query.workflow !== 'all' &&
+    !(typeof query.workflow === 'string' && settlementHistoryWorkflows.includes(query.workflow as SettlementHistoryWorkflow))) {
+    throw new Error('workflow must be all, ready_for_approval, needs_review, vendor_hold, approved, refund_review or paid.');
+  }
+  const workflow = query.workflow === undefined || query.workflow === 'all' ? null : query.workflow as SettlementHistoryWorkflow;
   const status = typeof query.status === 'string' ? query.status.toUpperCase() : query.status;
   if (status !== undefined && status !== 'ALL' &&
     !Object.values(SettlementApprovalStatus).includes(status as SettlementApprovalStatus)) {
@@ -416,7 +426,7 @@ function parseSettlementHistoryQuery(vendorId: string, query: SettlementApproval
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
     throw new Error('limit must be an integer between 1 and 100.');
   }
-  if (query.cursor === undefined) return { limit, filters, filtered, cursor: null };
+  if (query.cursor === undefined) return { limit, filters, filtered, workflow, cursor: null };
   const invalid = () => new Error('Invalid settlement history cursor or Vendor/limit/filter mismatch.');
   if (typeof query.cursor !== 'string' || !query.cursor || query.cursor.length > 16_384 ||
     !/^[A-Za-z0-9_-]+$/.test(query.cursor)) throw invalid();
@@ -426,26 +436,30 @@ function parseSettlementHistoryQuery(vendorId: string, query: SettlementApproval
     const value: unknown = JSON.parse(decoded);
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid();
     const cursor = value as Record<string, unknown>;
-    const keys = filtered ? 'createdAt,filters,id,limit,v,vendorId' : 'createdAt,id,limit,v,vendorId';
-    if (Object.keys(cursor).sort().join(',') !== keys || cursor.v !== (filtered ? 2 : 1) ||
+    const keys = workflow ? 'createdAt,filters,id,limit,v,vendorId,workflow' :
+      filtered ? 'createdAt,filters,id,limit,v,vendorId' : 'createdAt,id,limit,v,vendorId';
+    if (Object.keys(cursor).sort().join(',') !== keys || cursor.v !== (workflow ? 3 : filtered ? 2 : 1) ||
       cursor.vendorId !== vendorId || cursor.limit !== limit ||
       typeof cursor.id !== 'string' || !cursor.id.trim() || cursor.id !== cursor.id.trim() || cursor.id.length > 512 ||
       typeof cursor.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(cursor.createdAt) ||
       new Date(cursor.createdAt).toISOString() !== cursor.createdAt) throw invalid();
-    if (filtered) {
+    if (workflow && cursor.workflow !== workflow) throw invalid();
+    if (filtered || workflow) {
       const bound = cursor.filters as Record<string, unknown> | null;
       if (!bound || typeof bound !== 'object' || Array.isArray(bound) ||
         Object.keys(bound).sort().join(',') !== 'highValueOnly,periodKey,status' ||
         bound.status !== filters.status || bound.periodKey !== filters.periodKey ||
         bound.highValueOnly !== filters.highValueOnly) throw invalid();
     }
-    return { limit, filters, filtered, cursor: cursor as SettlementHistoryCursor };
+    return { limit, filters, filtered, workflow, cursor: cursor as SettlementHistoryCursor };
   } catch {
     throw invalid();
   }
 }
 
-function settlementHistoryFilterWhere(filters: SettlementHistoryFilters): Prisma.SettlementApprovalWhereInput[] {
+function settlementHistoryFilterWhere(
+  filters: SettlementHistoryFilters, workflow: SettlementHistoryWorkflow | null,
+): Prisma.SettlementApprovalWhereInput[] {
   const conditions: Prisma.SettlementApprovalWhereInput[] = [];
   if (filters.status) conditions.push({ status: filters.status });
   if (filters.highValueOnly) conditions.push({ OR: [
@@ -476,6 +490,25 @@ function settlementHistoryFilterWhere(filters: SettlementHistoryFilters): Prisma
     }
     conditions.push({ OR: alternatives });
   }
+  // Summary.lineCount counts all three relations, including cancelled correction lines.
+  // This mirrors the existing UI classification; it is not approval/readiness authority.
+  const anyLine: Prisma.SettlementApprovalWhereInput = { OR: [
+    { lines: { some: {} } }, { correctionCreditLines: { some: {} } }, { correctionDeductionLines: { some: {} } },
+  ] };
+  if (workflow === 'ready_for_approval') conditions.push({ status: SettlementApprovalStatus.DRAFT,
+    OR: [{ netPayableMinor: { gt: 0 } }, {
+      lines: { none: {} }, correctionCreditLines: { none: {} }, correctionDeductionLines: { none: {} },
+    }],
+  });
+  if (workflow === 'needs_review') conditions.push({ status: SettlementApprovalStatus.DRAFT,
+    netPayableMinor: { lte: 0 }, ...anyLine,
+  });
+  if (workflow === 'vendor_hold') conditions.push({ OR: [
+    { status: SettlementApprovalStatus.CANCELLED }, { netPayableMinor: { lte: 0 }, ...anyLine },
+  ] });
+  if (workflow === 'approved') conditions.push({ status: SettlementApprovalStatus.APPROVED });
+  // The current summary matcher generates no Refund issue and has no PAID status.
+  if (workflow === 'refund_review' || workflow === 'paid') conditions.push({ id: { in: [] } });
   return conditions;
 }
 
@@ -3424,8 +3457,8 @@ export async function listSettlementApprovalsForVendor(
   }
 
   if (query.pagination !== undefined) {
-    const { limit, cursor, filters, filtered } = parseSettlementHistoryQuery(vendorId, query);
-    const conditions = settlementHistoryFilterWhere(filters);
+    const { limit, cursor, filters, filtered, workflow } = parseSettlementHistoryQuery(vendorId, query);
+    const conditions = settlementHistoryFilterWhere(filters, workflow);
     // Value-tuple continuation needs no surviving anchor row. It is a live traversal,
     // not a frozen snapshot: newer inserts appear when the first page is refreshed.
     const rows = await prisma.settlementApproval.findMany({
@@ -3447,8 +3480,9 @@ export async function listSettlementApprovalsForVendor(
     return {
       ok: true, writesPerformed: false, vendorId, approvals: page.map(mapApprovalSummary), hasMore,
       nextCursor: hasMore && last ? Buffer.from(JSON.stringify({
-        v: filtered ? 2 : 1, vendorId, createdAt: last.createdAt.toISOString(), id: last.id, limit,
-        ...(filtered ? { filters } : {}),
+        v: workflow ? 3 : filtered ? 2 : 1, vendorId, createdAt: last.createdAt.toISOString(), id: last.id, limit,
+        ...(filtered || workflow ? { filters } : {}),
+        ...(workflow ? { workflow } : {}),
       } satisfies SettlementHistoryCursor)).toString('base64url') : null,
     };
   }

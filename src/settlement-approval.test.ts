@@ -1493,7 +1493,7 @@ describe('settlement approval foundation', () => {
       expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
     });
 
-  it.each(['search', 'searchTimeZone', 'period', 'workflow', 'unexpected'])(
+  it.each(['search', 'searchTimeZone', 'period', 'unexpected'])(
     'rejects unsupported cursor-mode parameter %s rather than pretending to filter history', async (key) => {
       await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', [key]: 'value' })).rejects.toThrow('Unsupported');
       expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
@@ -1605,6 +1605,72 @@ describe('settlement approval foundation', () => {
     }
     for (const filters of [{ status: 'draft' }, { periodKey: '2026-10' }, { highValueOnly: true }])
       await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', cursor, ...filters })).rejects.toThrow('cursor');
+  });
+
+  it.each(['', 'ALL', 'PAID', 'unknown', ' ready_for_approval ', null, ['approved'], 1])(
+    'rejects invalid workflow %j before querying', async (workflow) => {
+      await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', workflow })).rejects.toThrow('workflow');
+      expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+    });
+
+  it.each([
+    ['ready_for_approval', { status: 'DRAFT', OR: [{ netPayableMinor: { gt: 0 } }, {
+      lines: { none: {} }, correctionCreditLines: { none: {} }, correctionDeductionLines: { none: {} },
+    }] }],
+    ['needs_review', { status: 'DRAFT', netPayableMinor: { lte: 0 }, OR: [
+      { lines: { some: {} } }, { correctionCreditLines: { some: {} } }, { correctionDeductionLines: { some: {} } },
+    ] }],
+    ['vendor_hold', { OR: [{ status: 'CANCELLED' }, { netPayableMinor: { lte: 0 }, OR: [
+      { lines: { some: {} } }, { correctionCreditLines: { some: {} } }, { correctionDeductionLines: { some: {} } },
+    ] }] }],
+    ['approved', { status: 'APPROVED' }],
+    ['refund_review', { id: { in: [] } }],
+    ['paid', { id: { in: [] } }],
+  ])('pushes exact summary workflow %s into the bounded Vendor query', async (workflow, predicate) => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue([]);
+    await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', workflow });
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { vendorId: 'vendor-a', AND: [predicate] }, take: 21,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    }));
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('binds workflow v3 cursors without changing existing v1/v2 payloads or all normalization', async () => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue(Array.from({ length: 3 }, (_, i) => ({
+      ...buildApproval({ id: `workflow-${i}`, status: 'DRAFT' }), _count: { lines: 0 },
+    })));
+    const base = { pagination: 'cursor', limit: 2 };
+    for (const filters of [{}, { status: 'draft', periodKey: '2026-10', highValueOnly: true }]) {
+      const unscoped = await listSettlementApprovalsForVendor('vendor-a', filters.status ? { ...base, ...filters } : base);
+      if (!('nextCursor' in unscoped)) throw new Error('Cursor response expected');
+      const oldCursor = JSON.parse(Buffer.from(unscoped.nextCursor!, 'base64url').toString());
+      expect(oldCursor.v).toBe(filters.status ? 2 : 1);
+      await expect(listSettlementApprovalsForVendor('vendor-a', { ...base, ...filters, workflow: 'all', cursor: unscoped.nextCursor }))
+        .resolves.toBeDefined();
+      await expect(listSettlementApprovalsForVendor('vendor-a', { ...base, ...filters, workflow: 'ready_for_approval', cursor: unscoped.nextCursor }))
+        .rejects.toThrow('cursor');
+      const query = { ...base, ...filters, workflow: 'ready_for_approval' };
+      const first = await listSettlementApprovalsForVendor('vendor-a', query);
+      if (!('nextCursor' in first)) throw new Error('Cursor response expected');
+      const decoded = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString());
+      expect(decoded).toMatchObject({ v: 3, workflow: 'ready_for_approval', filters: {
+        status: filters.status ? 'DRAFT' : null, periodKey: filters.periodKey ?? null, highValueOnly: filters.highValueOnly ?? false,
+      } });
+      await expect(listSettlementApprovalsForVendor('vendor-a', { ...query, cursor: first.nextCursor })).resolves.toBeDefined();
+      for (const override of [{ workflow: 'needs_review' }, { workflow: 'all' }, { workflow: undefined },
+        { status: 'approved' }, { periodKey: 'different' }, { highValueOnly: !filters.highValueOnly }, { limit: 3 }]) {
+        prismaMock.settlementApproval.findMany.mockClear();
+        await expect(listSettlementApprovalsForVendor('vendor-a', { ...query, ...override, cursor: first.nextCursor })).rejects.toThrow('cursor');
+        expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+      }
+      await expect(listSettlementApprovalsForVendor('vendor-b', { ...query, cursor: first.nextCursor })).rejects.toThrow('cursor');
+      for (const tamper of [{ v: 2 }, { workflow: null }, { workflow: 'approved' }, { filters: null },
+        { filters: { ...decoded.filters, workflow: 'ready_for_approval' } }]) {
+        await expect(listSettlementApprovalsForVendor('vendor-a', { ...query,
+          cursor: Buffer.from(JSON.stringify({ ...decoded, ...tamper })).toString('base64url') })).rejects.toThrow('cursor');
+      }
+    }
   });
 
   it('lists recent settlement approvals for a vendor newest first without writes', async () => {
