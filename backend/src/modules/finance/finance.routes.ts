@@ -1317,7 +1317,10 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         if (!vendorId) {
           return reply.code(400).send({ message: 'vendorId is required.' });
         }
-        return await listSettlementApprovalsForVendor(vendorId);
+        const query = request.query as Record<string, unknown>;
+        return query.pagination === undefined
+          ? await listSettlementApprovalsForVendor(vendorId)
+          : await listSettlementApprovalsForVendor(vendorId, query);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement approvals could not be loaded.';
         return reply.code(400).send({ message });

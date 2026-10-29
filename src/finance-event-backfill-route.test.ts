@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
 const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
+const listSettlementApprovalsForVendorMock = vi.hoisted(() => vi.fn());
 const approveSettlementApprovalMock = vi.hoisted(() => vi.fn());
 const assessSettlementApprovalReadinessMock = vi.hoisted(() => vi.fn());
 const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
@@ -33,6 +34,7 @@ vi.mock('../backend/src/modules/finance/finance-event-relink.service.js', () => 
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => ({
+  listSettlementApprovalsForVendor: listSettlementApprovalsForVendorMock,
   assessSettlementApprovalReadiness: assessSettlementApprovalReadinessMock,
   approveSettlementApproval: approveSettlementApprovalMock,
   cancelSettlementApproval: vi.fn(),
@@ -99,6 +101,7 @@ const { registerFinanceRoutes } = await import('../backend/src/modules/finance/f
 
 describe('finance event backfill route', () => {
   beforeEach(() => {
+    listSettlementApprovalsForVendorMock.mockReset();
     getFinanceEventBackfillPlanMock.mockReset();
     getFinanceEventRelinkPlanMock.mockReset();
     relinkExistingFinanceEventsMock.mockReset();
@@ -112,6 +115,35 @@ describe('finance event backfill route', () => {
     executeSettlementLogoCommissionInvoiceCreateMock.mockReset();
     previewSettlementLogoOutgoingInvoiceSyncMock.mockReset();
     persistSettlementLogoSalesInvoiceSyncMock.mockReset();
+  });
+
+  it('preserves the legacy settlement list call and exposes cursor mode only through Admin GET', async () => {
+    const gets = new Map<string, { options: { preHandler: unknown[] }; handler: (req: unknown, reply: unknown) => Promise<unknown> }>();
+    const app = { get: vi.fn((path, options, handler) => gets.set(path, { options, handler })), put: vi.fn(), post: vi.fn() };
+    registerFinanceRoutes(app as never, {} as never);
+    const route = gets.get('/admin/finance/settlement-approvals')!;
+    const reply = { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) };
+    const recent = { ok: true, writesPerformed: false, vendorId: 'vendor-a', approvals: [] };
+    listSettlementApprovalsForVendorMock.mockResolvedValue(recent);
+    expect(route.options.preHandler).toHaveLength(1);
+    for (const role of ['vendor', 'support', 'finance', undefined]) {
+      expect(await route.handler({ authUser: { role }, query: { vendorId: 'vendor-a', pagination: 'cursor' } }, reply))
+        .toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    }
+    expect(listSettlementApprovalsForVendorMock).not.toHaveBeenCalled();
+    expect(await route.handler({ authUser: { role: 'admin' }, query: {} }, reply))
+      .toEqual({ status: 400, body: { message: 'vendorId is required.' } });
+    expect(await route.handler({ authUser: { role: 'admin' }, query: { vendorId: 'vendor-a' } }, reply)).toEqual(recent);
+    expect(listSettlementApprovalsForVendorMock).toHaveBeenLastCalledWith('vendor-a');
+    const query = { vendorId: 'vendor-a', pagination: 'cursor', limit: '20', cursor: 'opaque' };
+    const page = { ...recent, hasMore: false, nextCursor: null };
+    listSettlementApprovalsForVendorMock.mockResolvedValue(page);
+    expect(await route.handler({ authUser: { role: 'admin' }, query }, reply)).toEqual(page);
+    expect(listSettlementApprovalsForVendorMock).toHaveBeenLastCalledWith('vendor-a', query);
+    listSettlementApprovalsForVendorMock.mockRejectedValue(new Error('Invalid settlement history cursor or Vendor/limit mismatch.'));
+    expect(await route.handler({ authUser: { role: 'admin' }, query }, reply))
+      .toEqual({ status: 400, body: { message: 'Invalid settlement history cursor or Vendor/limit mismatch.' } });
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {

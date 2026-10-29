@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -1483,5 +1483,164 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
       .toBe('UNKNOWN');
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
     expect(await db.payoutBatch.count({ where: { vendorId: approval.vendorId } })).toBe(0);
+  });
+});
+
+
+// Shares only the already CI-registered disposable database, not readiness fixtures or mutations.
+describeWithPostgres('Vendor settlement history cursor pagination on disposable PostgreSQL', () => {
+  let db: PrismaClient;
+  let list: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['listSettlementApprovalsForVendor'];
+  const prefix = `history-b1-${process.pid}-${Date.now()}`;
+  const vendorA = `${prefix}-a`, vendorB = `${prefix}-b`, emptyVendor = `${prefix}-empty`;
+  const fixtures = Array.from({ length: 503 }, (_, index) => ({
+    id: `${prefix}-record-${String(index).padStart(4, '0')}`,
+    vendorId: vendorA, createdAt: new Date(Date.UTC(2026, 9, 1, 0, 0, Math.floor(index / 7))),
+    status: (['DRAFT', 'APPROVED', 'CANCELLED'] as const)[index % 3], currency: 'TRY',
+    grossSalesMinor: 100_000 + index, refundTotalMinor: index, commissionMinor: 10_000,
+    commissionVatMinor: 2_000, netPayableMinor: 88_000,
+    sourceSnapshotJson: { fixture: 'history-b1', index },
+  }));
+  const ordered = [...fixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+
+  beforeAll(async () => {
+    const target = new URL(databaseUrl!);
+    const local = process.env.CI !== 'true' && process.env.GITHUB_ACTIONS !== 'true' &&
+      target.username === 'onur' && !target.password && target.port === '5432' &&
+      /^[a-f0-9]{64}$/.test(process.env.FIN03_B1_TEST_DB_PROOF ?? '');
+    const ci = process.env.CI === 'true' && process.env.GITHUB_ACTIONS === 'true' &&
+      target.username === 'postgres' && target.password === 'postgres' && target.port === '5432';
+    if (process.env.SETTLEMENT_APPROVAL_READINESS_TEST_DATABASE_ISOLATED !== '1' ||
+      target.protocol !== 'postgresql:' || target.hostname !== '127.0.0.1' ||
+      target.pathname !== '/settlement_approval_readiness_validation' || target.search !== '?schema=public' ||
+      !(local || ci)) throw new Error('History pagination refuses any unverified database target.');
+    const identitySql = `SELECT current_database() AS database, current_user AS owner,
+      pg_get_userbyid(d.datdba) AS "databaseOwner", inet_server_port() AS port,
+      current_schema() AS schema, current_setting('server_version_num') AS version,
+      current_setting('data_directory') AS directory, (pg_control_system()).system_identifier::text AS "systemId",
+      shobj_description(d.oid, 'pg_database') AS comment
+      FROM pg_database d WHERE d.datname = current_database()`;
+    process.env.DATABASE_URL = databaseUrl;
+    db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    const maintenanceUrl = new URL(target); maintenanceUrl.pathname = '/postgres';
+    const maintenance = new PrismaClient({ datasources: { db: { url: maintenanceUrl.toString() } } });
+    type Identity = { database: string; owner: string; databaseOwner: string; port: number; schema: string;
+      version: string; directory: string; systemId: string; comment: string | null };
+    const [identity] = await db.$queryRawUnsafe<Identity[]>(identitySql);
+    try {
+      const [cluster] = await maintenance.$queryRawUnsafe<Identity[]>(identitySql);
+      expect(identity.systemId).toBe(cluster.systemId);
+      expect(identity.directory).toBe(cluster.directory);
+      expect(identity.version).toBe(cluster.version);
+    } finally { await maintenance.$disconnect(); }
+    expect(identity).toMatchObject({ database: 'settlement_approval_readiness_validation', owner: target.username,
+      databaseOwner: target.username, port: 5432, schema: 'public' });
+    if (local) {
+      expect(identity).toMatchObject({ version: '180003', directory: '/opt/homebrew/var/postgresql@18',
+        systemId: '7637676237569338936', comment: `fin03-b1-local:${process.env.FIN03_B1_TEST_DB_PROOF}` });
+    } else {
+      // The existing finance suite runs on both isolated CI services (16 and 18).
+      expect([16, 18]).toContain(Math.floor(Number(identity.version) / 10000));
+    }
+    const service = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const { prisma } = await import('../backend/src/db/prisma.js');
+    const [serviceIdentity] = await prisma.$queryRawUnsafe<Identity[]>(identitySql);
+    expect(serviceIdentity).toEqual(identity);
+    list = service.listSettlementApprovalsForVendor;
+    expect(await db.vendor.count({ where: { id: { in: [vendorA, vendorB, emptyVendor] } } })).toBe(0);
+    await db.vendor.createMany({ data: [vendorA, vendorB, emptyVendor].map(id => ({ id, name: id })) });
+    await db.settlementApproval.createMany({ data: [
+      ...fixtures,
+      ...fixtures.slice(0, 27).map(row => ({ ...row, id: `${row.id}-foreign`, vendorId: vendorB })),
+    ] });
+  });
+  afterAll(async () => { await db?.$disconnect(); });
+
+  async function page(vendorId: string, query: Record<string, unknown> = {}) {
+    const result = await list(vendorId, { pagination: 'cursor', ...query });
+    if (!('nextCursor' in result)) throw new Error('Cursor mode response required');
+    return result;
+  }
+
+  it('preserves the legacy recent response and summary schema without pagination metadata', async () => {
+    const result = await list(vendorA);
+    expect(Object.keys(result).sort()).toEqual(['approvals', 'ok', 'vendorId', 'writesPerformed']);
+    expect(result.approvals).toHaveLength(20);
+    expect(result.approvals.every(row => row.vendorId === vendorA)).toBe(true);
+    const raw = fixtures.find(row => row.id === result.approvals[0].id)!;
+    expect(result.approvals[0]).toEqual({ id: raw.id, vendorId: vendorA, createdAt: raw.createdAt.toISOString(),
+      status: raw.status.toLowerCase(), currency: raw.currency, grossSalesMinor: raw.grossSalesMinor,
+      netPayableMinor: raw.netPayableMinor, approvedAt: null,
+      scheduledRunDate: null, scheduledPeriodEnd: null, scheduledCycleKey: null, lineCount: 0 });
+  });
+
+  it('traverses all 503 settlements in bounded default pages with equal-timestamp boundaries', async () => {
+    const ids: string[] = []; let cursor: string | null = null;
+    do {
+      const result = await page(vendorA, cursor ? { cursor } : {});
+      expect(result.approvals.length).toBeLessThanOrEqual(20);
+      expect(result.approvals.every(row => row.vendorId === vendorA)).toBe(true);
+      ids.push(...result.approvals.map(row => row.id));
+      expect(result.hasMore).toBe(result.nextCursor !== null);
+      cursor = result.nextCursor;
+      if (ids.length > 503) throw new Error('Duplicate/unbounded pagination');
+    } while (cursor);
+    expect(ids).toEqual(ordered.map(row => row.id));
+    expect(new Set(ids).size).toBe(503);
+    for (const position of [19, 20, 21, 25, 100, 500, 503]) expect(ids[position - 1]).toBe(ordered[position - 1].id);
+  });
+
+  it('returns the bounded maximum page and the correct final/empty envelopes', async () => {
+    const first = await page(vendorA, { limit: 100 });
+    expect(first.approvals).toHaveLength(100); expect(first.hasMore).toBe(true);
+    expect(await page(emptyVendor)).toEqual({ ok: true, writesPerformed: false,
+      vendorId: emptyVendor, approvals: [], hasMore: false, nextCursor: null });
+    const foreign = await page(vendorB, { limit: 100 });
+    expect(foreign.approvals).toHaveLength(27); expect(foreign.hasMore).toBe(false); expect(foreign.nextCursor).toBeNull();
+  });
+
+  it('rejects cross-Vendor cursors, limit changes, malformed/version boundaries and unsupported filters', async () => {
+    const first = await page(vendorA);
+    await expect(page(vendorB, { cursor: first.nextCursor })).rejects.toThrow('cursor');
+    await expect(page(vendorA, { cursor: first.nextCursor, limit: 21 })).rejects.toThrow('cursor');
+    for (const cursor of ['bad!', Buffer.from(JSON.stringify({ v: 99 })).toString('base64url')])
+      await expect(page(vendorA, { cursor })).rejects.toThrow('cursor');
+    for (const limit of [0, -1, 1.5, 101]) await expect(page(vendorA, { limit })).rejects.toThrow('limit');
+    for (const key of ['search', 'status', 'period', 'highValueOnly', 'workflow', 'searchTimeZone'])
+      await expect(page(vendorA, { [key]: 'value' })).rejects.toThrow('Unsupported');
+    await expect(page('')).rejects.toThrow('vendorId');
+  });
+
+  it('continues by tuple after deletion of a disposable cursor anchor', async () => {
+    const vendor = `${prefix}-deleted-anchor`;
+    await db.vendor.create({ data: { id: vendor, name: vendor } });
+    const rows = fixtures.slice(0, 6).map(row => ({ ...row, id: `${row.id}-anchor`, vendorId: vendor }));
+    await db.settlementApproval.createMany({ data: rows });
+    const first = await page(vendor, { limit: 2 });
+    await db.settlementApproval.delete({ where: { id: first.approvals[1].id } });
+    const second = await page(vendor, { limit: 2, cursor: first.nextCursor });
+    expect(second.approvals.map(row => row.id)).toEqual([...rows].reverse().slice(2, 4).map(row => row.id));
+    expect(second.approvals.some(row => first.approvals.some(old => old.id === row.id))).toBe(false);
+  });
+
+  it('keeps a newer concurrent insert above the continuation boundary without promising a snapshot', async () => {
+    const first = await page(vendorA);
+    const inserted = { ...fixtures[0], id: `${prefix}-newer`, createdAt: new Date('2027-01-01T00:00:00Z') };
+    await db.settlementApproval.create({ data: inserted });
+    const next = await page(vendorA, { cursor: first.nextCursor });
+    expect(next.approvals.map(row => row.id)).toEqual(ordered.slice(20, 40).map(row => row.id));
+    expect((await page(vendorA)).approvals[0].id).toBe(inserted.id);
+  });
+
+  it('does not change stored financial fields, status, ledger or payout data during list traversal', async () => {
+    const where = { vendorId: vendorB };
+    const before = await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } });
+    const ledgerCount = await db.financeLedgerEntry.count({ where });
+    const payoutCount = await db.payoutBatch.count({ where });
+    await page(vendorB, { limit: 7 }); await list(vendorB);
+    expect(await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } })).toEqual(before);
+    expect(await db.financeLedgerEntry.count({ where })).toBe(ledgerCount);
+    expect(await db.payoutBatch.count({ where })).toBe(payoutCount);
   });
 });

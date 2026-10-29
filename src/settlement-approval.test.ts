@@ -1458,6 +1458,81 @@ describe('settlement approval foundation', () => {
     ]);
   });
 
+  it('returns bounded cursor pages with unchanged summaries and a Vendor/limit-bound tuple cursor', async () => {
+    const rows = Array.from({ length: 21 }, (_, i) => ({ ...buildApproval({ id: `history-${i}`, status: 'DRAFT' }),
+      createdAt: new Date('2026-10-01T00:00:00.000Z'),
+      _count: { lines: 2, correctionCreditLines: 1, correctionDeductionLines: 1 } }));
+    prismaMock.settlementApproval.findMany.mockResolvedValueOnce(rows).mockResolvedValueOnce([]);
+    const first = await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor' });
+    expect(first).toMatchObject({ vendorId: 'vendor-a', writesPerformed: false, hasMore: true,
+      approvals: expect.arrayContaining([expect.objectContaining({ id: 'history-0', lineCount: 4 })]) });
+    expect(first.approvals).toHaveLength(20);
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenNthCalledWith(1, {
+      where: { vendorId: 'vendor-a' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 21,
+      include: { _count: { select: { lines: true, correctionCreditLines: true, correctionDeductionLines: true } } },
+    });
+    if (!('nextCursor' in first)) throw new Error('Expected a cursor-mode response');
+    expect(JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString())).toEqual({
+      v: 1, vendorId: 'vendor-a', createdAt: '2026-10-01T00:00:00.000Z', id: 'history-19', limit: 20,
+    });
+    const last = await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', cursor: first.nextCursor });
+    expect(last).toEqual({ ok: true, writesPerformed: false, vendorId: 'vendor-a', approvals: [], hasMore: false, nextCursor: null });
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: {
+      vendorId: 'vendor-a', OR: [
+        { createdAt: { lt: rows[0].createdAt } }, { createdAt: rows[0].createdAt, id: { lt: 'history-19' } },
+      ],
+    } }));
+    expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it.each([0, -1, 1.5, 101, NaN, Infinity, '', '0', '1.1', '101', ['20'], null])(
+    'rejects invalid cursor-mode limit %j before querying', async (limit) => {
+      await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', limit })).rejects.toThrow('limit');
+      expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+    });
+
+  it.each(['search', 'searchTimeZone', 'status', 'period', 'highValueOnly', 'workflow', 'unexpected'])(
+    'rejects unsupported cursor-mode parameter %s rather than pretending to filter history', async (key) => {
+      await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', [key]: 'value' })).rejects.toThrow('Unsupported');
+      expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+    });
+
+  it.each(['', 'offset', null, ['cursor']])('rejects unsupported pagination mode %j', async (pagination) => {
+    await expect(listSettlementApprovalsForVendor('vendor-a', { pagination })).rejects.toThrow('pagination');
+    expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['', ' ', '\t'])('rejects an empty Vendor %j without an unscoped query', async (id) => {
+    await expect(listSettlementApprovalsForVendor(id, { pagination: 'cursor' })).rejects.toThrow('vendorId');
+    expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { v: 2 }, { vendorId: 'vendor-b' }, { limit: 10 }, { id: '' }, { id: ' padded ' },
+    { createdAt: '2026-02-30T00:00:00.000Z' }, { createdAt: '2026-10-01' },
+    { createdAt: '2026-10-01T00:00:00.000+00:00' }, { extra: true },
+  ])('rejects invalid cursor boundary, version or query binding %j', async (override) => {
+    const cursor = Buffer.from(JSON.stringify({ v: 1, vendorId: 'vendor-a', limit: 20,
+      id: 'anchor', createdAt: '2026-10-01T00:00:00.000Z', ...override })).toString('base64url');
+    await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', cursor })).rejects.toThrow('cursor');
+    expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'bad!', 'e30=', 'e30', 'W10', 'bnVsbA', 42, ['e30'], 'a'.repeat(16_385)])(
+    'rejects malformed cursor case %# before querying', async (cursor) => {
+      await expect(listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', cursor })).rejects.toThrow('cursor');
+      expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+    });
+
+  it('accepts the bounded maximum page size and returns no cursor on the final page', async () => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue([]);
+    expect(await listSettlementApprovalsForVendor('vendor-a', { pagination: 'cursor', limit: '100' }))
+      .toMatchObject({ approvals: [], hasMore: false, nextCursor: null });
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 101 }));
+  });
+
   it('lists recent settlement approvals for a vendor newest first without writes', async () => {
     prismaMock.settlementApproval.findMany.mockResolvedValue([
       {
