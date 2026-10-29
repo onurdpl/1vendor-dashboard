@@ -25,6 +25,8 @@ import {
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
   listSettlementApprovals,
+  listSettlementHistory, listSettlementPeriods, getSettlementWorkflowCounts,
+  type SettlementHistoryQuery, type SettlementHistoryPage, type SettlementWorkflowCounts,
   persistLogoSalesInvoiceSync,
   persistSettlementLogoCommissionInvoiceRequestSnapshot,
   previewLogoOutgoingInvoiceSync,
@@ -1338,8 +1340,8 @@ function NextActionPanel({
 }
 
 function SettlementReviewQueue({
-  approvals,
-  loading,
+  approvals, authorityApprovals, periodOptions, workflowCounts,
+  loading, emptyMessage,
   onOpenApproval,
   onRequestSettlementAction,
   activeApprovalId,
@@ -1362,7 +1364,11 @@ function SettlementReviewQueue({
   onHighValueOnlyChange,
 }: {
   approvals: SettlementApprovalSummary[];
+  authorityApprovals: SettlementApprovalSummary[];
+  periodOptions: Array<{ value: string; label: string }>;
+  workflowCounts: SettlementWorkflowCounts | null;
   loading: boolean;
+  emptyMessage: string | null;
   onOpenApproval: (id: string) => void;
   onRequestSettlementAction: (action: SettlementQueueAction, approval: SettlementApprovalSummary) => void;
   activeApprovalId: string;
@@ -1379,45 +1385,15 @@ function SettlementReviewQueue({
   onSearchChange: (value: string) => void;
   statusFilter: SettlementStatusFilter;
   onStatusFilterChange: (value: SettlementStatusFilter) => void;
-  periodFilter: string;
-  onPeriodFilterChange: (value: string) => void;
+  periodFilter: string | null;
+  onPeriodFilterChange: (value: string | null) => void;
   highValueOnly: boolean;
   onHighValueOnlyChange: (value: boolean) => void;
 }) {
   const visibleApprovals = vendorId.trim()
     ? safeArray(approvals).filter((item) => item.vendorId === vendorId.trim())
     : [];
-  const periodOptions = Array.from(new Map(visibleApprovals.map((item) => [
-    getSettlementPeriodFilterValue(item),
-    getSettlementSummaryPeriodLabel(item),
-  ])).entries());
-  const filteredApprovals = visibleApprovals.filter((item) => {
-    if (!matchesSettlementWorkflowTab(item, workflowTab)) {
-      return false;
-    }
-    if (statusFilter !== 'all' && item.status !== statusFilter) {
-      return false;
-    }
-    if (periodFilter !== 'all' && getSettlementPeriodFilterValue(item) !== periodFilter) {
-      return false;
-    }
-    if (highValueOnly && Math.abs(item.netPayableMinor) < HIGH_VALUE_SETTLEMENT_MINOR) {
-      return false;
-    }
-    const searchTerm = search.trim().toLowerCase();
-    if (!searchTerm) {
-      return true;
-    }
-    const periodLabel = getSettlementSummaryPeriodLabel(item);
-    return [
-      item.id,
-      item.vendorId,
-      vendorName,
-      item.status,
-      periodLabel,
-      String(item.lineCount),
-    ].some((value) => value.toLowerCase().includes(searchTerm));
-  });
+  const filteredApprovals = visibleApprovals;
   const listedTarget = visibleApprovals.find((item) => item.id === activeApprovalId);
   const exactDetail = explicitTargetVerified && selectedApprovalDetail?.id === activeApprovalId &&
     selectedApprovalDetail.vendorId === vendorId ? selectedApprovalDetail : null;
@@ -1438,7 +1414,7 @@ function SettlementReviewQueue({
     : filteredApprovals[0] ?? null;
   renderedSelectionId.current = selectedQueueApproval?.id ?? '';
   const hasActionAuthority = actionListCurrent && !loading && Boolean(selectedQueueApproval &&
-    visibleApprovals.some((item) => item.id === selectedQueueApproval.id &&
+    authorityApprovals.some((item) => item.id === selectedQueueApproval.id &&
       item.vendorId === vendorId && item.status === selectedQueueApproval.status));
   const outsideResults = Boolean(selectedQueueApproval && activeApprovalId &&
     !filteredApprovals.some((item) => item.id === activeApprovalId));
@@ -1483,18 +1459,7 @@ function SettlementReviewQueue({
     hasActionAuthority && selectedQueueApproval &&
     selectedQueueApproval.status !== 'cancelled',
   );
-  const workflowCounts = SETTLEMENT_REVIEW_WORKFLOW_TABS.reduce<Record<SettlementReviewWorkflowTab, number>>((counts, tab) => {
-    counts[tab.id] = visibleApprovals.filter((item) => matchesSettlementWorkflowTab(item, tab.id)).length;
-    return counts;
-  }, {
-    all: 0,
-    needs_review: 0,
-    ready_for_approval: 0,
-    refund_review: 0,
-    vendor_hold: 0,
-    approved: 0,
-    paid: 0,
-  });
+
 
   return (
     <section className="settlement-review-queue" aria-label="Settlement review queue">
@@ -1507,7 +1472,7 @@ function SettlementReviewQueue({
             onClick={() => onWorkflowTabChange(tab.id)}
           >
             <span>{tab.label}</span>
-            <strong>{workflowCounts[tab.id]}</strong>
+            <strong>{workflowCounts?.[tab.id] ?? '—'}</strong>
           </button>
         ))}
       </div>
@@ -1532,10 +1497,10 @@ function SettlementReviewQueue({
         </label>
         <label>
           <span>Settlement Period</span>
-          <select value={periodFilter} onChange={(event) => onPeriodFilterChange(event.target.value)}>
-            <option value="all">All periods</option>
-            {periodOptions.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
+          <select value={periodFilter === null ? 'all-periods' : JSON.stringify([periodFilter])} onChange={(event) => onPeriodFilterChange(event.target.value === 'all-periods' ? null : JSON.parse(event.target.value)[0])}>
+            <option value="all-periods">All periods</option>
+            {periodOptions.map(({value, label}) => (
+              <option key={value} value={JSON.stringify([value])}>{label}</option>
             ))}
           </select>
         </label>
@@ -1549,10 +1514,7 @@ function SettlementReviewQueue({
         </label>
       </div>
       {loading ? <p className="page-description">Loading recent approvals...</p> : null}
-      {!loading && visibleApprovals.length === 0 ? <p className="settlement-compact-empty">No settlement approvals found.</p> : null}
-      {!loading && visibleApprovals.length > 0 && filteredApprovals.length === 0 ? (
-        <p className="settlement-compact-empty">No settlements match the selected workflow and filters.</p>
-      ) : null}
+      {!loading && visibleApprovals.length === 0 && emptyMessage ? <p className="settlement-compact-empty">{emptyMessage}</p> : null}
       {filteredApprovals.length || activeApprovalId ? (
         <div className="settlement-review-layout">
           {filteredApprovals.length ? <OperationalTable
@@ -1985,6 +1947,111 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
   );
 }
 
+type HistoryFilters = { search: string; status: SettlementStatusFilter; period: string | null;
+  workflow: SettlementReviewWorkflowTab; highValue: boolean };
+function useSettlementHistory(vendorId: string, generation: number, vendorName: string, filters: HistoryFilters, refresh: number) {
+  const [term, setTerm] = useState(filters.search.trim().toLowerCase());
+  const rawTerm = filters.search.trim().toLowerCase();
+  useEffect(() => { const timer = window.setTimeout(() => setTerm(rawTerm), 300); return () => window.clearTimeout(timer); }, [rawTerm]);
+  const scope = JSON.stringify([vendorId, generation, refresh]);
+  const key = JSON.stringify([scope, rawTerm, vendorName, filters.status, filters.period, filters.workflow, filters.highValue]);
+  // Query and Vendor generations invalidate rendering before passive effects run.
+  const live = useRef({ key, scope }); live.current = { key, scope };
+  // Independent channels must not invalidate one another when they finish out of order.
+  const requests = useRef({ rows: 0, periods: 0, counts: 0 });
+  const pending = useRef({ rows: false, periods: false });
+  const [rows, setRows] = useState<{ key: string; data: SettlementHistoryPage | null; loading: boolean; error: string | null;
+    cursor?: string; previous: Array<{ cursor?: string; page: number }>; page: number }>({ key: '', data: null, loading: false, error: null, previous: [], page: 1 });
+  const [periods, setPeriods] = useState<{ scope: string; options: Array<{ value: string; label: string }>; cursor: string | null;
+    loading: boolean; error: string | null }>({ scope: '', options: [], cursor: null, loading: false, error: null });
+  const [counts, setCounts] = useState<{ scope: string; data: SettlementWorkflowCounts | null; loading: boolean; error: string | null }>(
+    { scope: '', data: null, loading: false, error: null });
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  const periodsRef = useRef(periods); periodsRef.current = periods;
+  const requestedPage = useRef<{key: string; cursor?: string; previous: Array<{cursor?: string; page: number}>; page: number} | null>(null);
+  const authorized = () => Boolean(vendorId && getCurrentVendorContext().vendorId.trim() === vendorId);
+  const invalidate = () => { requests.current.rows++; requests.current.periods++; requests.current.counts++;
+    pending.current.rows = false; pending.current.periods = false; };
+  async function loadRows(cursor?: string, previous: Array<{ cursor?: string; page: number }> = [], page = 1, signal?: AbortSignal) {
+    if (!authorized() || pending.current.rows || rawTerm !== term) return;
+    const version = ++requests.current.rows; pending.current.rows = true;
+    requestedPage.current = { key, cursor, previous, page };
+    const current = () => authorized() && live.current.key === key && requests.current.rows === version;
+    setRows(old => ({ ...(old.key === key ? old : { key, data: null, previous: [], page: 1 }), loading: true, error: null }));
+    const query: SettlementHistoryQuery = { limit: 20, ...(cursor ? { cursor } : {}), status: filters.status,
+      workflow: filters.workflow, highValueOnly: filters.highValue,
+      ...(filters.period !== null ? { periodKey: filters.period } : {}),
+      ...(term ? { search: term, searchVendorName: vendorName } : {}) };
+    try {
+      const data = await listSettlementHistory(vendorId, query, signal);
+      if (!current()) return;
+      if (!isVendorScopedSettlementList(data, vendorId) || data.approvals.some(row => !row.id?.trim()) ||
+        new Set(data.approvals.map(row => row.id)).size !== data.approvals.length ||
+        !(data.nextCursor === null || typeof data.nextCursor === 'string') ||
+        (term ? !(['MORE_MATCHES', 'MORE_CANDIDATES', 'EXHAUSTED'] as const).includes(data.searchState!) ||
+          data.hasMore !== (data.searchState === 'MORE_MATCHES' ? true : data.searchState === 'MORE_CANDIDATES' ? null : false) : typeof data.hasMore !== 'boolean') ||
+        ((data.hasMore !== false) !== Boolean(data.nextCursor))) throw new Error('Settlement history response identity or continuation did not match.');
+      const shownPage = data.searchState === 'MORE_CANDIDATES' && data.approvals.length === 0
+        ? previous.at(-1)?.page ?? 1 : page;
+      setRows({ key, data, cursor, previous, page: shownPage, loading: false, error: null });
+    } catch (error) { if (current()) setRows(old => ({ ...old, loading: false, error: getErrorMessage(error) })); }
+    finally { if (current()) pending.current.rows = false; }
+  }
+  async function loadPeriods(cursor?: string, signal?: AbortSignal) {
+    if (!authorized() || pending.current.periods) return;
+    const version = ++requests.current.periods; pending.current.periods = true;
+    const current = () => authorized() && live.current.scope === scope && requests.current.periods === version;
+    setPeriods(old => ({ ...(old.scope === scope ? old : { scope, options: [], cursor: null }), loading: true, error: null }));
+    try {
+      const data = await listSettlementPeriods(vendorId, { limit: 20, ...(cursor ? { cursor } : {}) }, signal);
+      if (!current()) return;
+      if (data.ok !== true || data.writesPerformed !== false || data.vendorId !== vendorId ||
+        !(data.nextCursor === null || typeof data.nextCursor === 'string') || !Array.isArray(data.periods) || data.periods.some(row => typeof row.value !== 'string' || typeof row.label !== 'string') ||
+        typeof data.hasMore !== 'boolean' || data.hasMore !== Boolean(data.nextCursor)) throw new Error('Period metadata Vendor or continuation mismatch.');
+      setPeriods(old => ({ scope, options: [...new Map([...(cursor && old.scope === scope ? old.options : []), ...data.periods].map(row => [row.value, row])).values()],
+        cursor: data.nextCursor, loading: false, error: null }));
+    } catch (error) { if (current()) setPeriods(old => ({ ...old, loading: false, error: getErrorMessage(error) })); }
+    finally { if (current()) pending.current.periods = false; }
+  }
+  async function loadCounts(signal?: AbortSignal) {
+    const version = ++requests.current.counts;
+    const current = () => authorized() && live.current.scope === scope && requests.current.counts === version;
+    if (!authorized()) return;
+    setCounts({ scope, data: null, loading: true, error: null });
+    try {
+      const data = await getSettlementWorkflowCounts(vendorId, signal);
+      if (!current()) return;
+      if (data.ok !== true || data.writesPerformed !== false || data.vendorId !== vendorId || SETTLEMENT_REVIEW_WORKFLOW_TABS.some(tab => !Number.isSafeInteger(data.counts?.[tab.id]) || data.counts[tab.id] < 0))
+        throw new Error('Workflow counts Vendor or value mismatch.');
+      setCounts({ scope, data: data.counts, loading: false, error: null });
+    } catch (error) { if (current()) setCounts({ scope, data: null, loading: false, error: getErrorMessage(error) }); }
+  }
+  useEffect(() => {
+    requests.current.rows++; pending.current.rows = false;
+    const controller = new AbortController();
+    if (rawTerm === term) void loadRows(undefined, [], 1, controller.signal);
+    return () => { requests.current.rows++; pending.current.rows = false; controller.abort(); };
+  }, [key, term]);
+  useEffect(() => {
+    requests.current.periods++; requests.current.counts++; pending.current.periods = false;
+    const controller = new AbortController();
+    void loadPeriods(undefined, controller.signal); void loadCounts(controller.signal);
+    return () => { requests.current.periods++; requests.current.counts++; pending.current.periods = false; controller.abort(); };
+  }, [scope]);
+  const currentRows = authorized() && rows.key === key && rawTerm === term;
+  return { rows: currentRows ? rows.data?.approvals ?? [] : [], loading: Boolean(vendorId) && (!currentRows || rows.loading),
+    error: currentRows ? rows.error : null, data: currentRows ? rows.data : null, page: currentRows ? rows.page : 1,
+    canPrevious: currentRows && rows.previous.length > 0,
+    previous: () => { const old = rowsRef.current; const target = old.previous.at(-1); if (old.key === key && target) void loadRows(target.cursor, old.previous.slice(0, -1), target.page); },
+    next: () => { const old = rowsRef.current; if (old.key === key && old.data?.nextCursor) void loadRows(old.data.nextCursor, [...old.previous, { cursor: old.cursor, page: old.page }], old.page + 1); },
+    retry: () => { const target = requestedPage.current; if (target?.key === key) void loadRows(target.cursor, target.previous, target.page); },
+    periods: authorized() && periods.scope === scope ? periods : { scope, options: [], cursor: null, loading: Boolean(vendorId), error: null },
+    morePeriods: () => { const old = periodsRef.current; if (old.scope === scope && old.cursor) void loadPeriods(old.cursor); },
+    retryPeriods: () => void loadPeriods(periodsRef.current.scope === scope ? periodsRef.current.cursor ?? undefined : undefined),
+    counts: authorized() && counts.scope === scope ? counts : { scope, data: null, loading: Boolean(vendorId), error: null },
+    retryCounts: () => void loadCounts(), invalidate };
+}
+
 export function AdminSettlementApprovalsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedApprovalId = searchParams.get('approvalId')?.trim() ?? '';
@@ -2048,7 +2115,8 @@ export function AdminSettlementApprovalsPage() {
   const [settlementWorkflowTab, setSettlementWorkflowTab] = useState<SettlementReviewWorkflowTab>('all');
   const [settlementQueueSearch, setSettlementQueueSearch] = useState('');
   const [settlementQueueStatusFilter, setSettlementQueueStatusFilter] = useState<SettlementStatusFilter>('all');
-  const [settlementQueuePeriodFilter, setSettlementQueuePeriodFilter] = useState('all');
+  const [settlementQueuePeriodFilter, setSettlementQueuePeriodFilter] = useState<string | null>(null);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const [settlementHighValueOnly, setSettlementHighValueOnly] = useState(false);
   const [settlementActionConfirmation, setSettlementActionConfirmation] = useState<SettlementActionConfirmation | null>(null);
   const [logoCreateConfirmations, setLogoCreateConfirmations] = useState<Record<string, boolean>>({});
@@ -2068,6 +2136,8 @@ export function AdminSettlementApprovalsPage() {
   }
 
   function selectVendorId(nextVendorId: string) {
+    history.invalidate();
+    setSettlementQueuePeriodFilter(null);
     const hadConfirmation = settlementActionConfirmationRef.current !== null;
     if (hadConfirmation) clearSettlementActionConfirmation();
     selectedQueueApprovalIdRef.current = '';
@@ -2257,6 +2327,9 @@ export function AdminSettlementApprovalsPage() {
   const visibleRecentApprovals = canonicalContextReady && recentApprovalsState.vendorId === canonicalVendorId
     ? recentApprovalsState.approvals.filter((item) => item.vendorId === vendorId.trim())
     : [];
+  const history = useSettlementHistory(canonicalContextReady ? canonicalVendorId : '', vendorGeneration,
+    appReadiness.currentVendor.vendorName, { search: settlementQueueSearch, status: settlementQueueStatusFilter,
+      period: settlementQueuePeriodFilter, workflow: settlementWorkflowTab, highValue: settlementHighValueOnly }, historyRefresh);
   const currentSelection = canonicalContextReady && queueSelection?.vendorId === canonicalVendorId &&
     queueSelection.contextVersion === vendorContextVersionRef.current && queueSelection.urlId === linkedApprovalId
     ? queueSelection : null;
@@ -2800,6 +2873,7 @@ export function AdminSettlementApprovalsPage() {
       getCurrentVendorContext().vendorId.trim() === nextVendorId &&
       vendorContextRef.current === nextVendorId;
     if (nextVendorId && isCurrent()) {
+      setHistoryRefresh(value => value + 1);
       const requestVersion = ++listRequestVersionRef.current;
       const isCurrentList = () => isCurrent() && requestVersion === listRequestVersionRef.current;
       setRecentApprovalsLoading(true);
@@ -3076,8 +3150,7 @@ export function AdminSettlementApprovalsPage() {
   async function handleOpenRecentApproval(id: string) {
     const currentVendorId = getCurrentVendorContext().vendorId.trim();
     if (!currentVendorId || currentVendorId !== vendorContextRef.current ||
-      recentApprovalsStateRef.current.vendorId !== currentVendorId ||
-      !recentApprovalsStateRef.current.approvals.some((row) => row.id === id && row.vendorId === currentVendorId)) return;
+      ![...history.rows, ...recentApprovalsStateRef.current.approvals].some((row) => row.id === id && row.vendorId === currentVendorId)) return;
     const selection: SettlementQueueSelection = { id, vendorId: currentVendorId,
       contextVersion: vendorContextVersionRef.current, urlId: '', source: 'manual', state: 'pending' };
     updateQueueSelection(selection);
@@ -3322,6 +3395,13 @@ export function AdminSettlementApprovalsPage() {
     }
   }
 
+  function changeBrowsing(action: () => void) {
+    const selected = selectedQueueApprovalIdRef.current;
+    if (!queueSelectionRef.current && selected) void handleOpenRecentApproval(selected);
+    invalidateSettlementQueueSelection();
+    action();
+  }
+
   const showSettlementDetailTools = false;
 
   return (
@@ -3345,12 +3425,20 @@ export function AdminSettlementApprovalsPage() {
       {canonicalContextReady && success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
       <SettlementReviewQueue
-        approvals={visibleRecentApprovals}
-        loading={Boolean(canonicalVendorId) && (!canonicalContextReady || recentApprovalsState.vendorId !== canonicalVendorId || recentApprovalsLoading)}
+        emptyMessage={history.error ? null : history.data?.searchState === 'MORE_CANDIDATES'
+          ? 'No matches in this candidate batch. Continue Search to examine more history.'
+          : settlementQueueSearch.trim() || settlementQueueStatusFilter !== 'all' || settlementQueuePeriodFilter !== null || settlementHighValueOnly || settlementWorkflowTab !== 'all'
+            ? 'No settlements match the selected workflow and filters.' : 'No settlement approvals found.'}
+        approvals={history.rows}
+        authorityApprovals={visibleRecentApprovals}
+        periodOptions={history.periods.options}
+        workflowCounts={history.counts.data}
+        loading={history.loading}
+
         activeApprovalId={selectedApprovalId}
         selectedApprovalDetail={visibleApproval}
         explicitTargetVerified={currentSelection?.state === 'verified'}
-        actionListCurrent={listAuthorityVersionRef.current === listRequestVersionRef.current}
+        actionListCurrent={!history.error && !recentApprovalsLoading && listAuthorityVersionRef.current === listRequestVersionRef.current}
         renderedSelectionId={selectedQueueApprovalIdRef}
         pendingSettlementAction={
           settlementPostInFlight
@@ -3360,18 +3448,32 @@ export function AdminSettlementApprovalsPage() {
         vendorId={canonicalVendorId}
         vendorName={appReadiness.currentVendor.vendorName}
         workflowTab={settlementWorkflowTab}
-        onWorkflowTabChange={(value) => { invalidateSettlementQueueSelection(); setSettlementWorkflowTab(value); }}
+        onWorkflowTabChange={(value) => { changeBrowsing(() => setSettlementWorkflowTab(value)); }}
         search={settlementQueueSearch}
-        onSearchChange={(value) => { invalidateSettlementQueueSelection(); setSettlementQueueSearch(value); }}
+        onSearchChange={(value) => { changeBrowsing(() => setSettlementQueueSearch(value)); }}
         statusFilter={settlementQueueStatusFilter}
-        onStatusFilterChange={(value) => { invalidateSettlementQueueSelection(); setSettlementQueueStatusFilter(value); }}
+        onStatusFilterChange={(value) => { changeBrowsing(() => setSettlementQueueStatusFilter(value)); }}
         periodFilter={settlementQueuePeriodFilter}
-        onPeriodFilterChange={(value) => { invalidateSettlementQueueSelection(); setSettlementQueuePeriodFilter(value); }}
+        onPeriodFilterChange={(value) => { changeBrowsing(() => setSettlementQueuePeriodFilter(value)); }}
         highValueOnly={settlementHighValueOnly}
-        onHighValueOnlyChange={(value) => { invalidateSettlementQueueSelection(); setSettlementHighValueOnly(value); }}
+        onHighValueOnlyChange={(value) => { changeBrowsing(() => setSettlementHighValueOnly(value)); }}
         onOpenApproval={(id) => void handleOpenRecentApproval(id)}
         onRequestSettlementAction={handleRequestSettlementAction}
       />
+
+      {canonicalContextReady ? <div className="settlement-review-queue" aria-label="Settlement history navigation">
+        <span>Page {history.page}</span>
+        <button type="button" disabled={history.loading || !history.canPrevious} onClick={() => changeBrowsing(history.previous)}>Previous</button>
+        <button type="button" disabled={history.loading || !history.data?.nextCursor} onClick={() => changeBrowsing(history.next)}>
+          {history.data?.searchState === 'MORE_CANDIDATES' ? 'Continue Search' : 'Next'}</button>
+        {history.data?.searchState === 'MORE_CANDIDATES' ? <p>Search scan incomplete. More candidates remain; continue to check the next batch.</p> : null}
+        {history.error ? <div role="alert">{history.error}<button onClick={() => changeBrowsing(history.retry)}>Retry history</button></div> : null}
+        {history.periods.loading ? <p>Loading settlement periods...</p> : null}
+        {history.periods.error ? <div role="alert">{history.periods.error}<button onClick={history.retryPeriods}>Retry periods</button></div> : null}
+        {history.periods.cursor ? <button disabled={history.periods.loading} onClick={history.morePeriods}>Load More Periods</button> : null}
+        {history.counts.loading ? <p>Loading workflow counts...</p> : null}
+        {history.counts.error ? <div role="alert">{history.counts.error}<button onClick={history.retryCounts}>Retry counts</button></div> : null}
+      </div> : null}
 
       {canonicalContextReady ? <SettlementAutoApprovalHistory key={`${canonicalVendorId}:${vendorGeneration}`} vendorId={canonicalVendorId} /> : null}
 

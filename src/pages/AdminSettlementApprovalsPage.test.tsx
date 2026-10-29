@@ -1,3 +1,4 @@
+import { matchesSettlementSearch, settlementSummaryPeriodLabel } from '../../backend/src/modules/finance/settlement-search-presentation';
 import { useLayoutEffect } from 'react';
 import * as readiness from '../lib/appReadiness';
 import { readFileSync } from 'node:fs';
@@ -15,7 +16,8 @@ import {
   getSettlementApprovalReadiness,
   listAutoApprovalAttempts,
   listAutoApprovalOperationalErrors,
-  listSettlementApprovals,
+  listSettlementApprovals, listSettlementHistory, listSettlementPeriods, getSettlementWorkflowCounts,
+  type SettlementHistoryPage, type SettlementHistoryQuery, type SettlementWorkflowCounts,
   previewSettlementApproval,
   type SettlementApproval,
   type SettlementApprovalLine,
@@ -39,7 +41,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     getSettlementApprovalAudit: vi.fn(),
     getSettlementCommissionInvoiceDiagnostics: vi.fn(),
     getSettlementCommissionInvoiceRecords: vi.fn(),
-    listSettlementApprovals: vi.fn(),
+    listSettlementApprovals: vi.fn(), listSettlementHistory: vi.fn(), listSettlementPeriods: vi.fn(), getSettlementWorkflowCounts: vi.fn(),
     listAutoApprovalAttempts: vi.fn(),
     listAutoApprovalOperationalErrors: vi.fn(),
     persistLogoSalesInvoiceSync: vi.fn(),
@@ -57,6 +59,22 @@ const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
 const approveSettlementApprovalMock = vi.mocked(approveSettlementApproval);
 const cancelSettlementApprovalMock = vi.mocked(cancelSettlementApproval);
+const historyMock = vi.mocked(listSettlementHistory);
+const periodsMock = vi.mocked(listSettlementPeriods);
+const countsMock = vi.mocked(getSettlementWorkflowCounts);
+// Existing legacy safety fixtures also provide the default browsing response. New
+// integration cases override these independently to prove the authority boundary.
+async function legacyFixture(vendorId: string) {
+  let index = listSettlementApprovalsMock.mock.calls.length - 1;
+  while (index >= 0 && listSettlementApprovalsMock.mock.calls[index][0] !== vendorId) index--;
+  return await listSettlementApprovalsMock.mock.results[index]?.value as SettlementApprovalListResponse;
+}
+const periodKey = (row: SettlementApprovalListResponse['approvals'][number]) => row.scheduledCycleKey || row.scheduledPeriodEnd?.slice(0,10) || row.scheduledRunDate?.slice(0,10) || row.createdAt.slice(0,7);
+function workflowMatch(row: SettlementApprovalListResponse['approvals'][number], workflow: string) {
+  const hold = row.status === 'cancelled' || row.netPayableMinor <= 0 && row.lineCount > 0;
+  return workflow === 'all' || workflow === 'approved' && row.status === 'approved' || workflow === 'vendor_hold' && hold ||
+    workflow === 'needs_review' && row.status === 'draft' && hold || workflow === 'ready_for_approval' && row.status === 'draft' && !hold;
+}
 const rawSettlementApprovalId = '11111111-1111-1111-1111-111111111111';
 
 const blockedReadiness: SettlementApprovalReadiness = {
@@ -362,6 +380,26 @@ describe('Settlement Review queue cleanup', () => {
     );
     getSettlementApprovalReadinessMock.mockResolvedValue(blockedReadiness);
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
+    historyMock.mockImplementation(async (vendor, query = {}) => {
+      const response = await legacyFixture(vendor);
+      return { ...response, approvals: response.approvals.filter(row =>
+        (!query.search || matchesSettlementSearch(row, query.search, query.searchVendorName ?? '')) &&
+        (!query.status || query.status === 'all' || row.status === query.status) &&
+        (query.periodKey === undefined || periodKey(row) === query.periodKey) &&
+        (!query.highValueOnly || Math.abs(row.netPayableMinor) >= 100000) && workflowMatch(row, query.workflow ?? 'all')),
+        hasMore: false, nextCursor: null, ...(query.search ? { searchState: 'EXHAUSTED' as const } : {}) };
+    });
+    periodsMock.mockImplementation(async vendor => {
+      const response = await legacyFixture(vendor);
+      return { ok: true, writesPerformed: false, vendorId: vendor, periods: [...new Map(response.approvals.map(row =>
+        [periodKey(row), { value: periodKey(row), label: settlementSummaryPeriodLabel(row) }])).values()], hasMore: false, nextCursor: null };
+    });
+    countsMock.mockImplementation(async vendor => {
+      const response = await legacyFixture(vendor);
+      const counts = Object.fromEntries(['all','needs_review','ready_for_approval','refund_review','vendor_hold','approved','paid'].map(key =>
+        [key, response.approvals.filter(row => workflowMatch(row, key)).length])) as SettlementWorkflowCounts;
+      return { ok: true, writesPerformed: false, vendorId: vendor, counts };
+    });
     previewSettlementApprovalMock.mockRejectedValue(new Error('Preview should not run on the queue page.'));
   });
 
@@ -370,6 +408,357 @@ describe('Settlement Review queue cleanup', () => {
     window.localStorage.clear();
     vi.clearAllMocks();
     vi.restoreAllMocks();
+  });
+
+  function historyPage(vendor: string, items: ReturnType<typeof linkedFixture>[], nextCursor: string | null = null): SettlementHistoryPage {
+    return { ...linkedList(vendor, ...items), hasMore: Boolean(nextCursor), nextCursor };
+  }
+  const fullCounts = { all: 73, needs_review: 3, ready_for_approval: 40, refund_review: 0, vendor_hold: 9, approved: 30, paid: 0 };
+
+  it('replaces pages across more than 20 records, returns to page 1, and never expands action authority', async () => {
+    const fixtures = Array.from({ length: 25 }, (_, i) => linkedFixture('yalispor', `history-${i}`, (i + 1) * 11111, 7777, 'draft'));
+    historyMock.mockImplementation(async (_, query) => historyPage('yalispor', query?.cursor ? fixtures.slice(20) : fixtures.slice(0,20), query?.cursor ? null : 'page2'));
+    countsMock.mockResolvedValue({ ok:true, writesPerformed:false, vendorId:'yalispor', counts:fullCounts });
+    getSettlementApprovalMock.mockImplementation(async id => fixtures.find(item => item.detail.id === id)!.detail);
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(20));
+    expect(historyMock).toHaveBeenLastCalledWith('yalispor', { limit:20, status:'all', workflow:'all', highValueOnly:false }, expect.any(AbortSignal));
+    expect(screen.getByRole('button', {name:'Previous'})).toBeDisabled();
+    await userEvent.setup().click(screen.getByRole('button', {name:'Next'}));
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(5));
+    expect(getQueueRows(queue)[0]).toHaveTextContent('2,333.31');
+    expect(screen.getByText('Page 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name:'Next'})).toBeDisabled();
+    await userEvent.setup().click(getQueueRows(queue)[0]);
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('history-20'));
+    expect(screen.queryByRole('button', {name:'Approve Settlement'})).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', {name:'Previous'}));
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(20));
+    expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('history-20');
+    expect(countsMock).toHaveBeenCalledTimes(1);
+    expect(periodsMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', {name:/All73/})).toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['settlement-unique', 'yalispor', 'yalıspor', 'pprov', 'special period', '17'])(
+    'sends normalized full-history Search for the %s field without client-side page filtering', async term => {
+      fixedWorkspaceVendors();
+      const record = linkedFixture('yalispor', 'settlement-unique', 1234567, 123456);
+      record.summary.scheduledCycleKey = 'special_period'; record.summary.lineCount = 17;
+      historyMock.mockImplementation(async (_, query) => ({ ...historyPage('yalispor', [record]),
+        ...(query?.search ? {searchState:'EXHAUSTED' as const} : {}) }));
+      renderPage();
+      await screen.findByText('Gross TRY 12,345.67');
+      await userEvent.setup().type(screen.getByLabelText('Search'), ` ${term.toUpperCase()} `);
+      await waitFor(() => expect(historyMock).toHaveBeenLastCalledWith('yalispor', expect.objectContaining({search:term.toUpperCase().toLowerCase(), searchVendorName:'Yalıspor'}), expect.any(AbortSignal)));
+      expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
+      expect(getQueueRows(screen.getByLabelText('Settlement review queue'))[0]).toHaveTextContent('12,345.67');
+      expect(historyMock).toHaveBeenCalledTimes(2);
+      expect(periodsMock).toHaveBeenCalledTimes(1); expect(countsMock).toHaveBeenCalledTimes(1);
+    });
+
+  it('handles empty MORE_CANDIDATES manually, retries the failed cursor, then replaces with matches and stops at EXHAUSTED', async () => {
+    const match = linkedFixture('yalispor','matching-old-record',7654321,654321);
+    historyMock.mockImplementation(async (_, query) => {
+      if (!query?.search) return historyPage('yalispor', []);
+      if (!query.cursor) return {...historyPage('yalispor', [], 'scan1'), hasMore:null, searchState:'MORE_CANDIDATES'};
+      if (query.cursor === 'scan1') return {...historyPage('yalispor',[match],'matches2'), searchState:'MORE_MATCHES'};
+      return {...historyPage('yalispor',[]),searchState:'EXHAUSTED'};
+    });
+    renderPage();
+    await userEvent.setup().type(screen.getByLabelText('Search'),'matching');
+    await screen.findByText(/Search scan incomplete/);
+    expect(screen.getByText('Page 1')).toBeInTheDocument();
+    expect(screen.queryByText('No settlements match the selected workflow and filters.')).not.toBeInTheDocument();
+    expect(historyMock).toHaveBeenCalledTimes(2);
+    historyMock.mockRejectedValueOnce(new Error('continuation unavailable'));
+    await userEvent.setup().click(screen.getByRole('button',{name:'Continue Search'}));
+    await screen.findByText('continuation unavailable');
+    await userEvent.setup().click(screen.getByRole('button',{name:'Retry history'}));
+    await screen.findByText('Gross TRY 76,543.21');
+    expect(historyMock.mock.calls.at(-1)?.[1]?.cursor).toBe('scan1');
+    expect(screen.getByText('Page 2')).toBeInTheDocument();
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
+    await userEvent.setup().click(screen.getByRole('button',{name:'Next'}));
+    await screen.findByText('No settlements match the selected workflow and filters.');
+    expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
+    await userEvent.setup().click(screen.getByRole('button',{name:'Previous'}));
+    await screen.findByText('Gross TRY 76,543.21');
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
+  });
+
+  it('loads periods separately, preserves raw all and special keys, and combines server filters with cursor reset', async () => {
+    const record = linkedFixture('yalispor','history-filtered',45678,34567);
+    historyMock.mockResolvedValue(historyPage('yalispor',[record],'more'));
+    periodsMock.mockImplementation(async (vendor, query) => ({ok:true,writesPerformed:false,vendorId:vendor,
+      periods:query?.cursor ? [{value:'all',label:'Real All Cycle'},{value:'raw_%[key]',label:'Raw Cycle'}] : [{value:'all',label:'Real All Cycle'}],
+      hasMore: !query?.cursor, nextCursor:query?.cursor ? null : 'period2'}));
+    renderPage();
+    await screen.findByText('Real All Cycle');
+    expect(periodsMock).toHaveBeenCalledTimes(1);
+    await userEvent.setup().click(screen.getByRole('button',{name:'Load More Periods'}));
+    await screen.findByText('Raw Cycle');
+    expect(screen.getAllByRole('option',{name:'Real All Cycle'})).toHaveLength(1);
+    await userEvent.setup().click(screen.getByRole('button',{name:'Next'}));
+    await screen.findByText('Page 2');
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Settlement Period'),JSON.stringify(['all']));
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({periodKey:'all'})));
+    expect(historyMock.mock.calls.at(-1)?.[1]?.cursor).toBeUndefined();
+    expect(screen.getByText('Page 1')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Status',{selector:'select'}),'approved');
+    await user.click(screen.getByLabelText('High Value only'));
+    await user.click(screen.getByRole('button',{name:/^Approved/}));
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]).toEqual({limit:20,status:'approved',workflow:'approved',highValueOnly:true,periodKey:'all'}));
+    await user.selectOptions(screen.getByLabelText('Settlement Period'),JSON.stringify(['raw_%[key]']));
+    expect(historyMock.mock.calls.at(-1)?.[1]?.periodKey).toBe('raw_%[key]');
+    await user.selectOptions(screen.getByLabelText('Settlement Period'),'all-periods');
+    expect(historyMock.mock.calls.at(-1)?.[1]?.periodKey).toBeUndefined();
+    expect(countsMock).toHaveBeenCalledTimes(1); expect(periodsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows counts failure as unknown instead of zero and supports scoped retry', async () => {
+    countsMock.mockRejectedValueOnce(new Error('counts unavailable')).mockResolvedValue({ok:true,writesPerformed:false,vendorId:'yalispor',counts:fullCounts});
+    renderPage();
+    await screen.findByText('counts unavailable');
+    expect(screen.getByRole('button',{name:'All—'})).toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'All0'})).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button',{name:'Retry counts'}));
+    await screen.findByRole('button',{name:'All73'});
+    expect(screen.getByRole('button',{name:'Paid0'})).toBeInTheDocument();
+  });
+
+  it.each([false,true])('rejects stale browsing, period and count results through Vendor A→B%s', async returnToA => {
+    fixedWorkspaceVendors();
+    const oldRows = deferred<SettlementHistoryPage>();
+    const oldPeriods = deferred<Awaited<ReturnType<typeof listSettlementPeriods>>>();
+    const oldCounts = deferred<Awaited<ReturnType<typeof getSettlementWorkflowCounts>>>();
+    historyMock.mockReturnValueOnce(oldRows.promise).mockImplementation(async vendor => historyPage(vendor,[linkedFixture(vendor,`${vendor}-new`,12345,9876)]));
+    periodsMock.mockReturnValueOnce(oldPeriods.promise).mockImplementation(async vendor => ({ok:true,writesPerformed:false,vendorId:vendor,periods:[{value:`${vendor}-new-period`,label:`${vendor} New Period`}],hasMore:false,nextCursor:null}));
+    countsMock.mockReturnValueOnce(oldCounts.promise).mockImplementation(async vendor => ({ok:true,writesPerformed:false,vendorId:vendor,counts:fullCounts}));
+    renderPage();
+    await waitFor(() => expect(historyMock).toHaveBeenCalledTimes(1));
+    act(() => setCurrentVendorId('sporjinal'));
+    await screen.findByText('Gross TRY 123.45');
+    if (returnToA) { act(() => setCurrentVendorId('yalispor')); await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[0]).toBe('yalispor')); }
+    await act(async () => {
+      oldRows.resolve(historyPage('yalispor',[linkedFixture('yalispor','old-unsafe',9876543,8765432)],'old-cursor'));
+      oldPeriods.resolve({ok:true,writesPerformed:false,vendorId:'yalispor',periods:[{value:'old-period',label:'Old Unsafe Period'}],hasMore:true,nextCursor:'old-period-cursor'});
+      oldCounts.resolve({ok:true,writesPerformed:false,vendorId:'yalispor',counts:{...fullCounts,all:99999}});
+    });
+    const queue = screen.getByLabelText('Settlement review queue');
+    expect(queue).not.toHaveTextContent('98,765.43'); expect(screen.queryByText('Old Unsafe Period')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'All99999'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
+    expect(getQueueRows(queue)).toHaveLength(1);
+    expect(getQueueRows(queue)[0]).toHaveTextContent(returnToA ? 'Yalıspor' : 'Sporjinal');
+  });
+
+  it('invalidates a pending Search and cursor chain when the query changes, including old errors/finally', async () => {
+    const stale = deferred<SettlementHistoryPage>(); const fresh = deferred<SettlementHistoryPage>();
+    historyMock.mockImplementation(async (_, query) => {
+      if (query?.search === 'old') return stale.promise;
+      if (query?.search === 'new') return fresh.promise;
+      return historyPage('yalispor',[],'old-normal-cursor');
+    });
+    renderPage();
+    const input = screen.getByLabelText('Search');
+    fireEvent.change(input,{target:{value:'old'}});
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]?.search).toBe('old'));
+    fireEvent.change(input,{target:{value:'new'}});
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]?.search).toBe('new'));
+    expect(historyMock.mock.calls.at(-1)?.[1]?.cursor).toBeUndefined();
+    await act(async () => stale.reject(new Error('stale search error')));
+    expect(screen.queryByText('stale search error')).not.toBeInTheDocument();
+    expect(screen.getByText('Loading recent approvals...')).toBeInTheDocument();
+    await act(async () => fresh.resolve({...historyPage('yalispor',[linkedFixture('yalispor','fresh-result',12345,9876)]),searchState:'EXHAUSTED'}));
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
+    expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
+  });
+
+  it('invalidates confirmation on page navigation without redirecting its target', async () => {
+    const x = linkedFixture('yalispor','action-x',12345,9876,'draft');
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor',x));
+    historyMock.mockImplementation(async (_, query) => historyPage('yalispor',query?.cursor ? [] : [x],query?.cursor ? null : 'second'));
+    getSettlementApprovalMock.mockResolvedValue(x.detail);
+    renderPage();
+    await screen.findByRole('button',{name:'Approve Settlement'});
+    await userEvent.setup().click(screen.getByRole('button',{name:'Approve Settlement'}));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: action-x');
+    await userEvent.setup().click(screen.getByRole('button',{name:'Next'}));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await screen.findByText('Page 2');
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps explicit historical detail when the independent browsing list fails', async () => {
+    const x = linkedFixture('yalispor','history-list-failure',654321,432100,'draft');
+    historyMock.mockRejectedValue(new Error('history unavailable'));
+    getSettlementApprovalMock.mockResolvedValue(x.detail);
+    renderPage('/admin/finance/settlement-approvals?approvalId=history-list-failure');
+    await screen.findByText('history unavailable');
+    const panel = await screen.findByLabelText('Settlement review detail panel');
+    expect(panel).toHaveTextContent('6,543.21'); expect(panel).toHaveTextContent('history-list-failure');
+    expect(within(panel).queryByRole('button',{name:/Approve Settlement|Cancel Settlement/})).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled(); expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('opens browsing detail independently while the legacy authority request is pending', async () => {
+    const old = linkedFixture('yalispor','independent-history',7654321,654321,'draft');
+    listSettlementApprovalsMock.mockReturnValue(new Promise(() => {}));
+    periodsMock.mockResolvedValue({ok:true,writesPerformed:false,vendorId:'yalispor',periods:[],hasMore:false,nextCursor:null});
+    countsMock.mockResolvedValue({ok:true,writesPerformed:false,vendorId:'yalispor',counts:fullCounts});
+    historyMock.mockResolvedValue(historyPage('yalispor',[old])); getSettlementApprovalMock.mockResolvedValue(old.detail);
+    renderPage();
+    await screen.findByText('Gross TRY 76,543.21');
+    await userEvent.setup().click(getQueueRows(screen.getByLabelText('Settlement review queue'))[0]);
+    await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('independent-history'));
+    expect(screen.queryByRole('button',{name:'Approve Settlement'})).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['storage','session reset'] as const)('clears browsing and metadata authority on %s', async event => {
+    fixedWorkspaceVendors();
+    const late = deferred<SettlementHistoryPage>();
+    historyMock.mockResolvedValueOnce(historyPage('yalispor',[linkedFixture('yalispor','visible-old',9876543,8765432)],'old-page'))
+      .mockReturnValueOnce(late.promise);
+    renderPage();
+    await screen.findByText('Gross TRY 98,765.43');
+    if (event === 'storage') {
+      act(() => {window.localStorage.setItem('vendor-dashboard.current-vendor-id','sporjinal');
+        window.dispatchEvent(new StorageEvent('storage',{key:'vendor-dashboard.current-vendor-id',newValue:'sporjinal'}));});
+      expect(historyMock.mock.calls.at(-1)?.[0]).toBe('sporjinal');
+    } else {
+      act(() => { setCurrentUser(null); setToken(null); });
+    }
+    expect(screen.getByLabelText('Settlement review queue')).not.toHaveTextContent('98,765.43');
+    await act(async () => late.resolve(historyPage('yalispor',[linkedFixture('yalispor','late-old',9876543,8765432)],'late-old-cursor')));
+    expect(screen.getByLabelText('Settlement review queue')).not.toHaveTextContent('98,765.43');
+    expect(historyMock.mock.calls.some(([vendor]) => !vendor)).toBe(false);
+    expect(periodsMock.mock.calls.some(([vendor]) => !vendor)).toBe(false);
+    expect(countsMock.mock.calls.some(([vendor]) => !vendor)).toBe(false);
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale successful pagination after a filter change and resets to the first page', async () => {
+    const late = deferred<SettlementHistoryPage>();
+    const first = linkedFixture('yalispor','first-page',12345,9876);
+    const filtered = linkedFixture('yalispor','filtered-current',45678,34567,'draft');
+    historyMock.mockImplementation(async (_, query) => query?.cursor ? late.promise : historyPage('yalispor', query?.status === 'draft' ? [filtered] : [first],query?.status === 'draft' ? null : 'old-next'));
+    renderPage();
+    await screen.findByText('Gross TRY 123.45');
+    await userEvent.setup().click(screen.getByRole('button',{name:'Next'}));
+    await userEvent.setup().selectOptions(screen.getByLabelText('Status',{selector:'select'}),'draft');
+    await screen.findByText('Gross TRY 456.78');
+    await act(async () => late.resolve(historyPage('yalispor',[linkedFixture('yalispor','stale-next',9876543,8765432)],'old-next2')));
+    const rows = getQueueRows(screen.getByLabelText('Settlement review queue'));
+    expect(rows).toHaveLength(1); expect(rows[0]).toHaveTextContent('456.78'); expect(rows[0]).not.toHaveTextContent('98,765.43');
+    expect(screen.getByText('Page 1')).toBeInTheDocument(); expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
+  });
+
+  it('refreshes browsing at cursor zero, periods and counts after an authorized mutation', async () => {
+    const x = linkedFixture('yalispor','mutation-x',12345,9876,'draft');
+    const approved = {...x.detail,status:'approved' as const};
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor',x));
+    historyMock.mockImplementation(async (_, query) => historyPage('yalispor',[x],query?.cursor ? null : 'next'));
+    getSettlementApprovalMock.mockResolvedValue(x.detail); approveSettlementApprovalMock.mockResolvedValue(approved);
+    renderPage();
+    await screen.findByRole('button',{name:'Approve Settlement'});
+    await userEvent.setup().click(screen.getByRole('button',{name:'Next'}));
+    await screen.findByText('Page 2');
+    await userEvent.setup().click(screen.getByRole('button',{name:'Approve Settlement'}));
+    await userEvent.setup().click(within(screen.getByRole('dialog')).getByRole('button',{name:'Approve Settlement'}));
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledWith('mutation-x'));
+    await waitFor(() => expect(historyMock).toHaveBeenCalledTimes(3));
+    expect(historyMock.mock.calls.at(-1)?.[1]?.cursor).toBeUndefined();
+    expect(screen.getByText('Page 1')).toBeInTheDocument();
+    expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2);
+    expect(periodsMock).toHaveBeenCalledTimes(2); expect(countsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let stale metadata/count/list errors or finally clear a new Vendor loading state', async () => {
+    fixedWorkspaceVendors();
+    const oldRows = deferred<SettlementHistoryPage>(), newRows = deferred<SettlementHistoryPage>();
+    const oldPeriods = deferred<Awaited<ReturnType<typeof listSettlementPeriods>>>(), newPeriods = deferred<Awaited<ReturnType<typeof listSettlementPeriods>>>();
+    const oldCounts = deferred<Awaited<ReturnType<typeof getSettlementWorkflowCounts>>>(), newCounts = deferred<Awaited<ReturnType<typeof getSettlementWorkflowCounts>>>();
+    historyMock.mockReturnValueOnce(oldRows.promise).mockReturnValueOnce(newRows.promise);
+    periodsMock.mockReturnValueOnce(oldPeriods.promise).mockReturnValueOnce(newPeriods.promise);
+    countsMock.mockReturnValueOnce(oldCounts.promise).mockReturnValueOnce(newCounts.promise);
+    renderPage();
+    await waitFor(() => expect(historyMock).toHaveBeenCalledTimes(1));
+    act(() => setCurrentVendorId('sporjinal'));
+    await waitFor(() => expect(historyMock).toHaveBeenCalledTimes(2));
+    await act(async () => {oldRows.reject(new Error('old list failure')); oldPeriods.reject(new Error('old period failure')); oldCounts.reject(new Error('old counts failure'));});
+    expect(screen.queryByText(/old (list|period|counts) failure/)).not.toBeInTheDocument();
+    expect(screen.getByText('Loading recent approvals...')).toBeInTheDocument();
+    expect(screen.getByText('Loading settlement periods...')).toBeInTheDocument();
+    expect(screen.getByText('Loading workflow counts...')).toBeInTheDocument();
+    await act(async () => {
+      newRows.resolve(historyPage('sporjinal',[linkedFixture('sporjinal','current-only',7654321,654321)]));
+      newPeriods.resolve({ok:true,writesPerformed:false,vendorId:'sporjinal',periods:[{value:'new-period',label:'Current Period'}],hasMore:false,nextCursor:null});
+      newCounts.resolve({ok:true,writesPerformed:false,vendorId:'sporjinal',counts:fullCounts});
+    });
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))[0]).toHaveTextContent('Sporjinal');
+    expect(screen.getByText('Current Period')).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'All73'})).toBeInTheDocument();
+  });
+
+  it('rejects stale successful Search results and returns to normal cursor mode when Search is cleared', async () => {
+    const old = deferred<SettlementHistoryPage>();
+    historyMock.mockImplementation(async (_,query) => query?.search === 'old' ? old.promise : {
+      ...historyPage('yalispor',[linkedFixture('yalispor','new-result',12345,9876)]),...(query?.search ? {searchState:'EXHAUSTED' as const} : {})});
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Search'),{target:{value:'old'}});
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]?.search).toBe('old'));
+    fireEvent.change(screen.getByLabelText('Search'),{target:{value:'new'}});
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]?.search).toBe('new'));
+    await screen.findByText('Gross TRY 123.45');
+    await act(async () => old.resolve({...historyPage('yalispor',[linkedFixture('yalispor','old-result',9876543,8765432)],'old-search-cursor'),searchState:'MORE_MATCHES'}));
+    expect(getQueueRows(screen.getByLabelText('Settlement review queue'))[0]).toHaveTextContent('123.45');
+    expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Search'),{target:{value:'   '}});
+    await waitFor(() => expect(historyMock.mock.calls.at(-1)?.[1]?.search).toBeUndefined());
+    expect(historyMock.mock.calls.at(-1)?.[1]?.searchVendorName).toBeUndefined();
+    expect(historyMock.mock.calls.at(-1)?.[1]?.cursor).toBeUndefined();
+  });
+
+  it('rejects the first A query after rapid Status A→B→A changes', async () => {
+    const first = deferred<SettlementHistoryPage>();
+    historyMock.mockReturnValueOnce(first.promise).mockResolvedValue(historyPage('yalispor',[linkedFixture('yalispor','latest-query',12345,9876)]));
+    renderPage();
+    await waitFor(() => expect(historyMock).toHaveBeenCalledTimes(1));
+    const status = screen.getByLabelText('Status',{selector:'select'});
+    act(() => {
+      fireEvent.change(status,{target:{value:'draft'}});
+      fireEvent.change(status,{target:{value:'all'}});
+    });
+    await waitFor(() => expect(historyMock).toHaveBeenCalledTimes(3));
+    await act(async () => first.resolve(historyPage('yalispor',[linkedFixture('yalispor','stale-query',9876543,8765432)],'stale-cursor')));
+    const rows = getQueueRows(screen.getByLabelText('Settlement review queue'));
+    expect(rows).toHaveLength(1); expect(rows[0]).toHaveTextContent('123.45'); expect(rows[0]).not.toHaveTextContent('98,765.43');
+    expect(screen.getByRole('button',{name:'Next'})).toBeDisabled();
+  });
+
+  it('opens a full-history row without adding it to legacy financial action authority', async () => {
+    const old = linkedFixture('yalispor', 'historical-browse-only', 8765432, 6543210, 'draft');
+    const current = linkedFixture('yalispor', 'current-authority', 11111, 7777, 'draft');
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', current));
+    historyMock.mockResolvedValue({ ...linkedList('yalispor', old), hasMore: false, nextCursor: null });
+    getSettlementApprovalMock.mockResolvedValue(old.detail);
+    renderPage();
+    await waitFor(() => expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1));
+    await userEvent.setup().click(getQueueRows(screen.getByLabelText('Settlement review queue'))[0]);
+    const panel = screen.getByLabelText('Settlement review detail panel');
+    await waitFor(() => expect(panel).toHaveTextContent('historical-browse-only'));
+    expect(panel).toHaveTextContent('87,654.32');
+    expect(panel).not.toHaveTextContent('current-authority');
+    expect(within(panel).queryByRole('button', { name: /Approve Settlement|Cancel Settlement/ })).not.toBeInTheDocument();
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
   it.each([['yalispor', 'sporjinal', '111.11', '77.77', /YaliReference/i],
@@ -493,10 +882,10 @@ describe('Settlement Review queue cleanup', () => {
     expect(getQueueRows(queue)).toHaveLength(1);
     expect(getQueueRows(queue)[0]).toHaveTextContent('7,598.00');
     await user.selectOptions(within(queue).getByLabelText('Status'), 'all');
-    await user.selectOptions(within(queue).getByLabelText('Settlement Period'), 'approved-cycle');
+    await user.selectOptions(within(queue).getByLabelText('Settlement Period'), JSON.stringify(['approved-cycle']));
     expect(getQueueRows(queue)).toHaveLength(1);
     expect(getQueueRows(queue)[0]).toHaveTextContent('2,200.00');
-    await user.selectOptions(within(queue).getByLabelText('Settlement Period'), 'all');
+    await user.selectOptions(within(queue).getByLabelText('Settlement Period'), 'all-periods');
     await user.click(within(queue).getByLabelText('High Value only'));
     expect(getQueueRows(queue)).toHaveLength(1);
     await user.click(getQueueRows(queue)[0]);
@@ -620,11 +1009,11 @@ describe('Settlement Review queue cleanup', () => {
       const user = userEvent.setup();
       const panel = await screen.findByLabelText('Settlement review detail panel');
       await waitFor(() => expect(panel).toHaveTextContent('654.32'));
-      await user.click(within(panel).getByRole('button', { name: 'Approve Settlement' }));
+      await user.click(await within(panel).findByRole('button', { name: 'Approve Settlement' }));
       expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
       if (filter === 'Search') await user.type(screen.getByLabelText('Search'), 'link-y');
       if (filter === 'Status') await user.selectOptions(screen.getByLabelText('Status', { selector: 'select' }), 'approved');
-      if (filter === 'Settlement Period') await user.selectOptions(screen.getByLabelText('Settlement Period'), y.summary.scheduledCycleKey!);
+      if (filter === 'Settlement Period') await user.selectOptions(screen.getByLabelText('Settlement Period'), JSON.stringify([y.summary.scheduledCycleKey!]));
       if (filter === 'High Value') await user.click(screen.getByLabelText('High Value only'));
       if (filter === 'Workflow') await user.click(within(screen.getByLabelText('Settlement review workflow tabs')).getByRole('button', { name: /^Approved/ }));
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -633,7 +1022,7 @@ describe('Settlement Review queue cleanup', () => {
       expect(panel).toHaveTextContent('321.00');
       expect(panel).not.toHaveTextContent('88,888.88');
       expect(panel).toHaveTextContent(/outside the currently displayed results/);
-      await user.click(within(panel).getByRole('button', { name: 'Approve Settlement' }));
+      await user.click(await within(panel).findByRole('button', { name: 'Approve Settlement' }));
       expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
       expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
       expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
@@ -646,7 +1035,7 @@ describe('Settlement Review queue cleanup', () => {
     renderPage('/admin/finance/settlement-approvals?approvalId=link-x');
     await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('321.00'));
     await userEvent.setup().type(screen.getByLabelText('Search'), 'no-matching-record');
-    expect(screen.getByText('No settlements match the selected workflow and filters.')).toBeInTheDocument();
+    expect(await screen.findByText('No settlements match the selected workflow and filters.')).toBeInTheDocument();
     expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('link-x');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Approve Settlement' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Settlement: link-x');
@@ -1071,7 +1460,8 @@ describe('Settlement Review queue cleanup', () => {
     expect(within(queue).getByText('Loading recent approvals...')).toBeInTheDocument();
 
     await act(async () => vendorB.reject(new Error('Vendor B unavailable')));
-    expect(within(queue).getByText('No settlement approvals found.')).toBeInTheDocument();
+    expect(screen.getAllByText('Vendor B unavailable').length).toBeGreaterThan(0);
+    expect(within(queue).queryByText('No settlement approvals found.')).not.toBeInTheDocument();
     expect(getQueueRows(queue)).toHaveLength(0);
     selectQueueVendor('');
     expect(getQueueRows(queue)).toHaveLength(0);

@@ -720,6 +720,34 @@ export function listSettlementApprovals(vendorId: string) {
   );
 }
 
+export type SettlementHistoryQuery = {
+  limit?: number; cursor?: string; status?: SettlementApprovalStatus | 'all'; periodKey?: string;
+  highValueOnly?: boolean; workflow?: 'all' | 'needs_review' | 'ready_for_approval' | 'refund_review' | 'vendor_hold' | 'approved' | 'paid';
+  search?: string; searchVendorName?: string;
+};
+export type SettlementHistoryPage = SettlementApprovalListResponse & {
+  hasMore: boolean | null; nextCursor: string | null;
+  searchState?: 'MORE_MATCHES' | 'MORE_CANDIDATES' | 'EXHAUSTED';
+  candidatesScanned?: number; candidateBatchCount?: number;
+};
+export type SettlementPeriodPage = { ok: true; writesPerformed: false; vendorId: string;
+  periods: Array<{ value: string; label: string }>; hasMore: boolean; nextCursor: string | null };
+export type SettlementWorkflowCounts = Record<NonNullable<SettlementHistoryQuery['workflow']>, number>;
+export type SettlementWorkflowCountsResponse = { ok: true; writesPerformed: false; vendorId: string; counts: SettlementWorkflowCounts };
+export function listSettlementHistory(vendorId: string, filters: SettlementHistoryQuery = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams({ vendorId, pagination: 'cursor' });
+  for (const [key, value] of Object.entries(filters)) if (value !== undefined) query.set(key, String(value));
+  return apiClient.get<SettlementHistoryPage>(`/admin/finance/settlement-approvals?${query}`, { signal });
+}
+export function listSettlementPeriods(vendorId: string, filters: { limit?: number; cursor?: string } = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams({ vendorId });
+  for (const [key, value] of Object.entries(filters)) if (value !== undefined) query.set(key, String(value));
+  return apiClient.get<SettlementPeriodPage>(`/admin/finance/settlement-approvals/periods?${query}`, { signal });
+}
+export function getSettlementWorkflowCounts(vendorId: string, signal?: AbortSignal) {
+  return apiClient.get<SettlementWorkflowCountsResponse>(`/admin/finance/settlement-approvals/workflow-counts?${new URLSearchParams({ vendorId })}`, { signal });
+}
+
 export function getSettlementApproval(id: string) {
   return apiClient.get<SettlementApproval>(`/admin/finance/settlement-approvals/${encodeURIComponent(id)}`);
 }
