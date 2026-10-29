@@ -3460,6 +3460,25 @@ export async function getSettlementApproval(id: string): Promise<SettlementAppro
   return approval ? mapApproval(approval, false) : null;
 }
 
+export async function getSettlementWorkflowCounts(
+  vendorId: string, query: Record<string, unknown> = {}, client: typeof prisma = prisma,
+) {
+  if (!vendorId?.trim()) throw new Error('vendorId is required.');
+  if (Object.keys(query).some(key => key !== 'vendorId')) throw new Error('Unsupported workflow counts query parameter.');
+  const workflows = ['all', ...settlementHistoryWorkflows] as const;
+  const counts = await client.$transaction(async tx => {
+    const result = {} as Record<typeof workflows[number], number>;
+    for (const workflow of workflows) {
+      result[workflow] = await tx.settlementApproval.count({ where: { vendorId,
+        AND: settlementHistoryFilterWhere({ status: null, periodKey: null, highValueOnly: false },
+          workflow === 'all' ? null : workflow),
+      } });
+    }
+    return result;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  return { ok: true, writesPerformed: false, vendorId, counts };
+}
+
 type PeriodMetadataBoundary = { createdAt: string; id: string };
 export function buildSettlementPeriodMetadataQuery(vendorId: string, limit: number, boundary: PeriodMetadataBoundary | null = null) {
   // DateTime columns are UTC timestamp(3) WITHOUT time zone: to_char has no session timezone conversion.

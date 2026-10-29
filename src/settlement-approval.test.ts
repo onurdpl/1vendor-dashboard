@@ -8,6 +8,7 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
   },
   settlementApproval: {
+    count: vi.fn(),
     create: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
@@ -75,6 +76,7 @@ const {
   createDraftApproval,
   getSettlementApprovalAudit,
   listSettlementApprovalsForVendor,
+  getSettlementWorkflowCounts,
   previewApproval,
   SettlementApprovalRevalidationError,
   __settlementApprovalTesting,
@@ -334,6 +336,7 @@ describe('settlement approval foundation', () => {
     prismaMock.financeLedgerEntry.findUnique.mockReset();
     prismaMock.settlementApproval.create.mockReset();
     prismaMock.settlementApproval.findMany.mockReset();
+    prismaMock.settlementApproval.count.mockReset();
     prismaMock.settlementApproval.findUnique.mockReset();
     prismaMock.settlementApproval.update.mockReset();
     prismaMock.settlementApprovalLine.count.mockReset();
@@ -1693,6 +1696,25 @@ describe('settlement approval foundation', () => {
       { periodKey: '2025-01' }, { highValueOnly: true }, { limit: 3 }])
       await expect(listSettlementApprovalsForVendor('vendor-a', { ...query, ...override, cursor: first.nextCursor })).rejects.toThrow('cursor');
     await expect(listSettlementApprovalsForVendor('vendor-b', { ...query, cursor: first.nextCursor })).rejects.toThrow('cursor');
+  });
+  it('returns seven independent aggregate counts from one consistent snapshot without list loading or writes', async () => {
+    prismaMock.settlementApproval.count.mockResolvedValue(3);
+    const result = await getSettlementWorkflowCounts('vendor-a');
+    expect(result).toEqual({ ok: true, writesPerformed: false, vendorId: 'vendor-a', counts: {
+      all: 3, ready_for_approval: 3, needs_review: 3, vendor_hold: 3, approved: 3, refund_review: 3, paid: 3,
+    } });
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'RepeatableRead' });
+    expect(prismaMock.settlementApproval.count).toHaveBeenCalledTimes(7);
+    for (const [query] of prismaMock.settlementApproval.count.mock.calls) expect(query.where.vendorId).toBe('vendor-a');
+    expect(prismaMock.settlementApproval.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+    expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
+  });
+  it('rejects empty Vendor and unsupported count filters before querying', async () => {
+    await expect(getSettlementWorkflowCounts(' ')).rejects.toThrow('vendorId');
+    for (const key of ['search', 'status', 'periodKey', 'highValueOnly', 'workflow', 'cursor', 'limit'])
+      await expect(getSettlementWorkflowCounts('vendor-a', { [key]: 'x' })).rejects.toThrow('Unsupported');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
   it('lists recent settlement approvals for a vendor newest first without writes', async () => {
     prismaMock.settlementApproval.findMany.mockResolvedValue([

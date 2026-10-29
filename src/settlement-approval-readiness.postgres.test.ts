@@ -2184,4 +2184,74 @@ describeWithPostgres('Vendor settlement history cursor pagination on disposable 
     expect(await db.settlementApproval.findMany({ where: { vendorId }, orderBy: { id: 'asc' } })).toEqual(before);
   });
 
+  it('counts independent full-history workflows with constant aggregate queries and no financial writes', async () => {
+    const { getSettlementWorkflowCounts: count } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const observed = new PrismaClient({ datasources: { db: { url: databaseUrl } }, log: [{ emit: 'event', level: 'query' }] });
+    const events: Array<{ query: string; duration: number }> = [];
+    observed.$on('query', event => events.push({ query: event.query, duration: event.duration }));
+    try {
+      const [identity] = await observed.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
+      expect(identity.name).toBe('settlement_approval_readiness_validation');
+      const workflows = ['all', 'needs_review', 'ready_for_approval', 'refund_review', 'vendor_hold', 'approved', 'paid'] as const;
+      const before = await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' }, include: {
+        lines: { orderBy: { id: 'asc' } }, correctionCreditLines: { orderBy: { id: 'asc' } }, correctionDeductionLines: { orderBy: { id: 'asc' } },
+      } });
+      const beforePayouts = await db.payoutBatch.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+      const beforeLedger = await db.financeLedgerEntry.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+      for (const target of [emptyVendor, workflowVendor, workflowForeign]) {
+        const raw = await db.settlementApproval.findMany({ where: { vendorId: target }, include: { _count: {
+          select: { lines: true, correctionCreditLines: true, correctionDeductionLines: true },
+        } } });
+        const reference = (workflow: string) => raw.filter(row => {
+          const lineCount = row._count.lines + row._count.correctionCreditLines + row._count.correctionDeductionLines;
+          const issues = row.status === 'CANCELLED' || (row.netPayableMinor <= 0 && lineCount > 0) ? ['Hold'] : ['Ready'];
+          const ready = row.status === 'DRAFT' && issues.every(issue => issue === 'Ready');
+          if (workflow === 'all') return true;
+          if (workflow === 'needs_review') return row.status === 'DRAFT' && !ready;
+          if (workflow === 'ready_for_approval') return ready;
+          if (workflow === 'vendor_hold') return issues.includes('Hold');
+          if (workflow === 'approved') return row.status === 'APPROVED';
+          return false;
+        }).length;
+        events.length = 0;
+        const start = performance.now();
+        const result = await count(target, {}, observed);
+        const elapsed = performance.now() - start;
+        expect(Object.keys(result.counts).sort()).toEqual([...workflows].sort());
+        for (const workflow of workflows) expect(result.counts[workflow]).toBe(reference(workflow));
+        const aggregates = events.filter(event => /^SELECT/i.test(event.query) && /COUNT/i.test(event.query));
+        expect(aggregates).toHaveLength(7);
+        expect(events.some(event => /^(INSERT|UPDATE|DELETE)/i.test(event.query))).toBe(false);
+        console.info('Workflow count measured', target === workflowVendor ? '605 rows' : `${raw.length} rows`,
+          'aggregate queries', aggregates.length, 'all statements', events.length, 'elapsed ms', elapsed);
+        if (target === workflowVendor) {
+          expect(result.counts.all).toBe(605);
+          expect(result.counts.needs_review).toBeGreaterThan(20);
+          expect(result.counts.vendor_hold + result.counts.approved + result.counts.ready_for_approval).toBeGreaterThan(result.counts.all);
+        }
+        for (const workflow of workflows) {
+          const ids: string[] = []; let cursor: string | null = null;
+          do {
+            const result = await page(target, { workflow, limit: 100, ...(cursor ? { cursor } : {}) });
+            ids.push(...result.approvals.map(row => row.id)); cursor = result.nextCursor;
+          } while (cursor);
+          expect(ids.length).toBe(result.counts[workflow]);
+        }
+      }
+      const singleVendor = `${prefix}-single-count`;
+      await db.vendor.create({ data: { id: singleVendor, name: singleVendor } });
+      await db.settlementApproval.create({ data: { ...fixtures[0], id: singleVendor, vendorId: singleVendor } });
+      expect((await count(singleVendor)).counts).toEqual({ all: 1, ready_for_approval: 1, needs_review: 0,
+        vendor_hold: 0, approved: 0, refund_review: 0, paid: 0 });
+      for (const key of ['search', 'status', 'periodKey', 'highValueOnly', 'workflow', 'cursor', 'limit'])
+        await expect(count(workflowVendor, { [key]: 'x' })).rejects.toThrow('Unsupported');
+      await expect(count('')).rejects.toThrow('vendorId');
+      expect(await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' }, include: {
+        lines: { orderBy: { id: 'asc' } }, correctionCreditLines: { orderBy: { id: 'asc' } }, correctionDeductionLines: { orderBy: { id: 'asc' } },
+      } })).toEqual(before);
+      expect(await db.payoutBatch.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(beforePayouts);
+      expect(await db.financeLedgerEntry.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(beforeLedger);
+    } finally { await observed.$disconnect(); }
+  });
+
 });
