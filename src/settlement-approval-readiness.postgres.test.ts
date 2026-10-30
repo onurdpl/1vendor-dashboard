@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma, PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -1484,4 +1484,774 @@ describeWithPostgres('settlement approval readiness on isolated PostgreSQL', () 
     expect((await db.settlementApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('DRAFT');
     expect(await db.payoutBatch.count({ where: { vendorId: approval.vendorId } })).toBe(0);
   });
+});
+
+
+// Shares only the already CI-registered disposable database, not readiness fixtures or mutations.
+describeWithPostgres('Vendor settlement history cursor pagination on disposable PostgreSQL', () => {
+  let db: PrismaClient;
+  let list: typeof import('../backend/src/modules/finance/settlement-approval.service.js')['listSettlementApprovalsForVendor'];
+  const prefix = `history-b1-${process.pid}-${Date.now()}`;
+  const vendorA = `${prefix}-a`, vendorB = `${prefix}-b`, emptyVendor = `${prefix}-empty`;
+  const fixtures = Array.from({ length: 503 }, (_, index) => ({
+    id: `${prefix}-record-${String(index).padStart(4, '0')}`,
+    vendorId: vendorA, createdAt: new Date(Date.UTC(2026, 9, 1, 0, 0, Math.floor(index / 7))),
+    status: (['DRAFT', 'APPROVED', 'CANCELLED'] as const)[index % 3], currency: 'TRY',
+    grossSalesMinor: 100_000 + index, refundTotalMinor: index, commissionMinor: 10_000,
+    commissionVatMinor: 2_000, netPayableMinor: 88_000,
+    sourceSnapshotJson: { fixture: 'history-b1', index },
+  }));
+  const filterVendor = `${prefix}-filters`, filterForeignVendor = `${prefix}-filters-foreign`;
+  const filterFixtures = Array.from({ length: 132 }, (_, index) => {
+    const kind = index % 6;
+    return { ...fixtures[index], id: `${prefix}-filter-${String(index).padStart(4, '0')}`, vendorId: filterVendor,
+      createdAt: new Date(Date.UTC(2026, kind === 3 || kind === 5 ? 8 : 9, 1, 0, 0, Math.floor(index / 12))),
+      scheduledCycleKey: kind === 0 ? `${prefix}-cycle-${index}` : null,
+      scheduledPeriodEnd: kind === 0 || kind === 1 || kind === 4 ? new Date('2026-08-31T23:59:59.999Z') : null,
+      scheduledRunDate: kind <= 2 ? new Date('2026-07-01T00:00:00.000Z') : null,
+      netPayableMinor: [99999, 100000, 100001, -99999, -100000, -100001, 0, -2147483648][index % 8],
+      currency: index % 2 ? 'USD' : 'TRY',
+    };
+  });
+  // Literal cycle keys override even date-like/month-like values. Empty string alone falls back.
+  filterFixtures.push(...['', 'all', ' ', '2026-02-30', '2026-08-31', '2026-09'].map((key, index) => ({
+    ...filterFixtures[0], id: `${prefix}-literal-${index}`, scheduledCycleKey: key,
+    scheduledPeriodEnd: new Date('2026-08-31T00:00:00.000Z'),
+  })));
+  filterFixtures.push(...[
+    { scheduledPeriodEnd: new Date('2026-08-30T23:59:59.999Z') },
+    { scheduledPeriodEnd: new Date('2026-09-01T00:00:00.000Z') },
+    { createdAt: new Date('2026-09-30T23:59:59.999Z') },
+    { createdAt: new Date('2026-10-01T00:00:00.000Z') },
+    { scheduledRunDate: new Date('2026-06-30T23:59:59.999Z') },
+    { scheduledRunDate: new Date('2026-07-02T00:00:00.000Z') },
+    { scheduledPeriodEnd: new Date('2024-02-29T23:59:59.999Z') },
+  ].map((dates, index) => ({ ...filterFixtures[0], id: `${prefix}-boundary-${index}`,
+    scheduledCycleKey: null, scheduledPeriodEnd: null, scheduledRunDate: null, ...dates })));
+  const filterOrdered = [...filterFixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  const rawPeriod = (row: typeof filterFixtures[number]) => row.scheduledCycleKey ||
+    row.scheduledPeriodEnd?.toISOString().slice(0, 10) || row.scheduledRunDate?.toISOString().slice(0, 10) ||
+    row.createdAt.toISOString().slice(0, 7);
+  const workflowVendor = `${prefix}-workflow`, workflowForeign = `${prefix}-workflow-foreign`;
+  const workflowFixtures = Array.from({ length: 603 }, (_, index) => ({
+    ...fixtures[index % fixtures.length], id: `${prefix}-workflow-${String(index).padStart(4, '0')}`,
+    vendorId: workflowVendor, createdAt: new Date(Date.UTC(2025, 0, 1, 0, 0, Math.floor(index / 7))),
+    status: (['DRAFT', 'APPROVED', 'CANCELLED'] as const)[index % 3],
+    netPayableMinor: [0, -100000, 100000, 100001, -1, 1][Math.floor(index / 3) % 6],
+    hasLine: index % 4 !== 0,
+  }));
+  const correctionWorkflowFixtures = ['credit', 'deduction'].map(kind => ({
+    ...fixtures[0], id: `${prefix}-workflow-${kind}`, vendorId: workflowVendor, netPayableMinor: 0, hasLine: true,
+  }));
+  const workflowOrdered = [...workflowFixtures, ...correctionWorkflowFixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  // Independent oracle follows the existing frontend summary-level matcher.
+  const matchesWorkflow = (row: typeof workflowFixtures[number], workflow: string) => {
+    const hold = row.status === 'CANCELLED' || (row.netPayableMinor <= 0 && row.hasLine);
+    const ready = row.status === 'DRAFT' && !hold;
+    if (workflow === 'all') return true;
+    if (workflow === 'ready_for_approval') return ready;
+    if (workflow === 'needs_review') return row.status === 'DRAFT' && !ready;
+    if (workflow === 'vendor_hold') return hold;
+    if (workflow === 'approved') return row.status === 'APPROVED';
+    return false; // Summary never generates Refund and has no PAID status.
+  };
+  const ordered = [...fixtures].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+
+  beforeAll(async () => {
+    const target = new URL(databaseUrl!);
+    const local = process.env.CI !== 'true' && process.env.GITHUB_ACTIONS !== 'true' &&
+      target.username === 'onur' && !target.password && target.port === '5432' &&
+      /^[a-f0-9]{64}$/.test(process.env.FIN03_B1_TEST_DB_PROOF ?? '');
+    const ci = process.env.CI === 'true' && process.env.GITHUB_ACTIONS === 'true' &&
+      target.username === 'postgres' && target.password === 'postgres' && target.port === '5432';
+    if (process.env.SETTLEMENT_APPROVAL_READINESS_TEST_DATABASE_ISOLATED !== '1' ||
+      target.protocol !== 'postgresql:' || target.hostname !== '127.0.0.1' ||
+      target.pathname !== '/settlement_approval_readiness_validation' || target.search !== '?schema=public' ||
+      !(local || ci)) throw new Error('History pagination refuses any unverified database target.');
+    const identitySql = `SELECT current_database() AS database, current_user AS owner,
+      pg_get_userbyid(d.datdba) AS "databaseOwner", inet_server_port() AS port,
+      current_schema() AS schema, current_setting('server_version_num') AS version,
+      current_setting('data_directory') AS directory, (pg_control_system()).system_identifier::text AS "systemId",
+      shobj_description(d.oid, 'pg_database') AS comment
+      FROM pg_database d WHERE d.datname = current_database()`;
+    process.env.DATABASE_URL = databaseUrl;
+    db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    const maintenanceUrl = new URL(target); maintenanceUrl.pathname = '/postgres';
+    const maintenance = new PrismaClient({ datasources: { db: { url: maintenanceUrl.toString() } } });
+    type Identity = { database: string; owner: string; databaseOwner: string; port: number; schema: string;
+      version: string; directory: string; systemId: string; comment: string | null };
+    const [identity] = await db.$queryRawUnsafe<Identity[]>(identitySql);
+    try {
+      const [cluster] = await maintenance.$queryRawUnsafe<Identity[]>(identitySql);
+      expect(identity.systemId).toBe(cluster.systemId);
+      expect(identity.directory).toBe(cluster.directory);
+      expect(identity.version).toBe(cluster.version);
+    } finally { await maintenance.$disconnect(); }
+    expect(identity).toMatchObject({ database: 'settlement_approval_readiness_validation', owner: target.username,
+      databaseOwner: target.username, port: 5432, schema: 'public' });
+    if (local) {
+      expect(identity).toMatchObject({ version: '180003', directory: '/opt/homebrew/var/postgresql@18',
+        systemId: '7637676237569338936', comment: `fin03-b1-local:${process.env.FIN03_B1_TEST_DB_PROOF}` });
+    } else {
+      // The existing finance suite runs on both isolated CI services (16 and 18).
+      expect([16, 18]).toContain(Math.floor(Number(identity.version) / 10000));
+    }
+    const service = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const { prisma } = await import('../backend/src/db/prisma.js');
+    const [serviceIdentity] = await prisma.$queryRawUnsafe<Identity[]>(identitySql);
+    expect(serviceIdentity).toEqual(identity);
+    list = service.listSettlementApprovalsForVendor;
+    expect(await db.vendor.count({ where: { id: { in: [vendorA, vendorB, emptyVendor] } } })).toBe(0);
+    await db.vendor.createMany({ data: [vendorA, vendorB, emptyVendor, filterVendor, filterForeignVendor, workflowVendor, workflowForeign].map(id => ({ id, name: id })) });
+    await db.settlementApproval.createMany({ data: [
+      ...fixtures,
+      ...fixtures.slice(0, 27).map(row => ({ ...row, id: `${row.id}-foreign`, vendorId: vendorB })),
+      ...filterFixtures,
+      ...workflowFixtures.map(({ hasLine: _hasLine, ...row }) => row),
+      ...workflowFixtures.slice(0, 27).map(({ hasLine: _hasLine, ...row }) => ({
+        ...row, id: `${row.id}-foreign`, vendorId: workflowForeign,
+      })),
+      ...filterFixtures.slice(0, 24).map(row => ({ ...row, id: `${row.id}-foreign`, vendorId: filterForeignVendor,
+        scheduledCycleKey: null })),
+    ] });
+    await db.financeLedgerEntry.createMany({ data: [workflowVendor, workflowForeign].map(vendorId => ({
+      id: `${vendorId}-ledger`, vendorId, entryType: 'sale', amount: '1.00',
+    })) });
+    await db.settlementApprovalLine.createMany({ data: [
+      ...workflowFixtures.filter(row => row.hasLine).map(row => ({
+        id: `${row.id}-line`, settlementApprovalId: row.id, financeLedgerEntryId: `${workflowVendor}-ledger`,
+        lineType: 'SALE' as const, amountMinor: 100, commissionMinor: 0, commissionVatMinor: 0,
+        payableImpactMinor: 100, sourceSnapshotJson: { fixture: 'workflow-summary-only' },
+      })),
+      ...workflowFixtures.slice(0, 27).filter(row => row.hasLine).map(row => ({
+        id: `${row.id}-foreign-line`, settlementApprovalId: `${row.id}-foreign`, financeLedgerEntryId: `${workflowForeign}-ledger`,
+        lineType: 'SALE' as const, amountMinor: 100, commissionMinor: 0, commissionVatMinor: 0,
+        payableImpactMinor: 100, sourceSnapshotJson: { fixture: 'workflow-summary-only' },
+      })),
+    ] });
+    const payoutActor = await seedCorrectionOnlyWorkflowRows();
+    const eftExecutedAt = new Date('2025-01-01T00:00:00Z');
+    const payoutCompletedAt = new Date();
+    await db.payoutBatch.createMany({ data: (['DRAFT', 'REVIEW', 'PAID'] as const).map(status => ({
+      id: `${prefix}-workflow-payout-${status}`, vendorId: workflowVendor, status,
+      grossAmount: '123.45', netAmount: '123.45',
+      ...(status === 'PAID' ? { paidAt: payoutCompletedAt, paidByUserId: payoutActor, eftAmountMinor: null,
+        eftExecutedAt, eftDeclaredAt: eftExecutedAt.toISOString(),
+        eftAttestedAt: payoutCompletedAt, eftAttestedByUserId: payoutActor, paymentReference: 'disposable-fixture' } : {}),
+    })) });
+  });
+  afterAll(async () => { await db?.$disconnect(); });
+
+  async function seedCorrectionOnlyWorkflowRows() {
+    // Relational fixtures exercise all Summary.lineCount sources, not financial mutation services.
+    const actor = `${prefix}-workflow-actor`;
+    await db.user.create({ data: { id: actor, name: 'Workflow Fixture', email: `${actor}@example.test`,
+      role: 'ADMIN', passwordHash: 'non-login-test-fixture' } });
+    for (const kind of ['credit', 'deduction'] as const) {
+      const id = `${prefix}-workflow-${kind}`, vendorId = workflowVendor;
+      const common = { sourceShopifyRefundId: `${id}-refund`, sourceShopifyOrderId: `${id}-order`, vendorAllocationId: `${id}-allocation` };
+      await db.shopifyOrder.create({ data: { id: common.sourceShopifyOrderId,
+        sourceShopifyOrderId: common.sourceShopifyOrderId, sourceShopifyOrderNumber: `#${id}` } });
+      await db.vendorAllocation.create({ data: { id: common.vendorAllocationId,
+        sourceShopifyOrderId: common.sourceShopifyOrderId, sourceShopifyOrderNumber: `#${id}`,
+        originalVendorId: vendorId, assignedVendorId: vendorId } });
+      await db.financeLedgerEntry.createMany({ data: ['sale', 'refund'].map(entryType => ({
+        id: `${id}-${entryType}-ledger`, vendorId, vendorAllocationId: common.vendorAllocationId, entryType, amount: '1.00',
+      })) });
+      await db.refundRecord.create({ data: { id: `${id}-record`, ...common, sourceShopifyOrderNumber: `#${id}`, status: 'COMPLETED', amount: '1.00' } });
+      const evidence = { ...common, historicalSaleFinanceLedgerEntryId: `${id}-sale-ledger`, currency: 'TRY',
+        refundTotalAmount: '1.00', evidenceHash: `${id}-accepted`, hashAlgorithm: 'SHA-256', evidenceVersion: 1, normalizationVersion: 1 };
+      await db.refundEvidenceSnapshot.create({ data: { id: `${id}-snapshot`, ...evidence,
+        refundRecordId: `${id}-record`, refundFinanceLedgerEntryId: `${id}-refund-ledger`, historicalEconomicVendorId: vendorId,
+        monetaryClassification: 'MONETARY_REFUND', normalizedTransactionsJson: [], normalizedRefundLinesJson: [],
+        normalizedOwnershipJson: {}, normalizedEvidenceJson: {}, supersededSaleLedgerIdsJson: [],
+        evidenceSource: 'workflow-relational-fixture', capturedAt: new Date('2025-01-01T00:00:00Z') } });
+      await db.refundTerminalEvidenceReview.create({ data: { id: `${id}-review`, ...common,
+        terminalRefundFinanceLedgerEntryId: `${id}-refund-ledger`, refundRecordId: `${id}-record`, economicVendorId: vendorId,
+        storedEvidenceSnapshotId: `${id}-snapshot`, dedupeKey: id, conflictCategory: 'AMOUNT_MISMATCH', conflictSummaryJson: {},
+        status: 'RESOLVED', resolutionOutcome: 'CORRECTION_REQUIRED' } });
+      await db.refundTerminalConflictEvidence.create({ data: { id: `${id}-incoming`, ...evidence,
+        evidenceHash: `${id}-incoming`, reviewId: `${id}-review`, economicVendorId: vendorId,
+        supersededSaleLedgerIdsJson: [], normalizedEvidenceJson: {} } });
+      await db.refundTerminalEvidenceReviewEvent.create({ data: { id: `${id}-event`, reviewId: `${id}-review`,
+        eventType: 'RESOLVED', actorUserId: actor, resolutionOutcome: 'CORRECTION_REQUIRED' } });
+      const delta = kind === 'credit' ? -100 : 100;
+      await db.financialCorrectionAuthority.create({ data: { id: `${id}-authority`, ...common, vendorId,
+        reviewId: `${id}-review`, resolvedReviewEventId: `${id}-event`, acceptedEvidenceSnapshotId: `${id}-snapshot`,
+        incomingConflictEvidenceId: `${id}-incoming`, historicalSaleFinanceLedgerEntryId: `${id}-sale-ledger`,
+        acceptedRefundFinanceLedgerEntryId: `${id}-refund-ledger`, acceptedEvidenceHash: evidence.evidenceHash,
+        incomingEvidenceHash: `${id}-incoming`, acceptedEvidenceVersion: 1, acceptedNormalizationVersion: 1,
+        incomingEvidenceVersion: 1, incomingNormalizationVersion: 1, commissionPercent: '0', commissionVatPercent: '0', currency: 'TRY',
+        acceptedRefundAmountMinor: 200, acceptedCommissionReversalMinor: 0, acceptedCommissionVatReversalMinor: 0,
+        acceptedVendorPayableReversalMinor: 200, correctedRefundAmountMinor: 200 + delta, correctedCommissionReversalMinor: 0,
+        correctedCommissionVatReversalMinor: 0, correctedVendorPayableReversalMinor: 200 + delta,
+        refundDifferenceMinor: delta, commissionDifferenceMinor: 0, commissionVatDifferenceMinor: 0, vendorPayableDifferenceMinor: delta,
+        economicDirection: kind === 'credit' ? 'VENDOR_CREDIT' : 'VENDOR_DEDUCTION', previewFingerprint: id,
+        applicationRoute: kind === 'credit' ? 'BEFORE_SETTLEMENT_VENDOR_CREDIT' : 'BEFORE_SETTLEMENT_VENDOR_DEDUCTION',
+        authorizedByUserId: actor, reason: 'Disposable workflow relation fixture' } });
+      await db.settlementApproval.create({ data: { ...fixtures[0], id, vendorId, netPayableMinor: 0 } });
+      if (kind === 'credit') {
+        await db.financialCorrectionCredit.create({ data: { id: `${id}-source`, authorityId: `${id}-authority`, vendorId, amountMinor: 100 } });
+        // Cancelled lines are still counted by the existing Summary DTO.
+        await db.financialCorrectionCreditSettlementLine.create({ data: { creditId: `${id}-source`, settlementApprovalId: id,
+          amountMinor: 100, status: 'CANCELLED', cancelledAt: new Date('2025-01-01T00:00:00Z') } });
+      } else {
+        await db.financialCorrectionDeduction.create({ data: { id: `${id}-source`, authorityId: `${id}-authority`, vendorId, amountMinor: 100 } });
+        await db.financialCorrectionDeductionSettlementLine.create({ data: { deductionId: `${id}-source`, settlementApprovalId: id, amountMinor: 100 } });
+      }
+    }
+    return actor;
+  }
+
+  async function page(vendorId: string, query: Record<string, unknown> = {}) {
+    const result = await list(vendorId, { pagination: 'cursor', ...query });
+    if (!('nextCursor' in result)) throw new Error('Cursor mode response required');
+    return result;
+  }
+
+  it('preserves the legacy recent response and summary schema without pagination metadata', async () => {
+    const result = await list(vendorA);
+    expect(Object.keys(result).sort()).toEqual(['approvals', 'ok', 'vendorId', 'writesPerformed']);
+    expect(result.approvals).toHaveLength(20);
+    expect(result.approvals.every(row => row.vendorId === vendorA)).toBe(true);
+    const raw = fixtures.find(row => row.id === result.approvals[0].id)!;
+    expect(result.approvals[0]).toEqual({ id: raw.id, vendorId: vendorA, createdAt: raw.createdAt.toISOString(),
+      status: raw.status.toLowerCase(), currency: raw.currency, grossSalesMinor: raw.grossSalesMinor,
+      netPayableMinor: raw.netPayableMinor, approvedAt: null,
+      scheduledRunDate: null, scheduledPeriodEnd: null, scheduledCycleKey: null, lineCount: 0 });
+  });
+
+  it('traverses all 503 settlements in bounded default pages with equal-timestamp boundaries', async () => {
+    const ids: string[] = []; let cursor: string | null = null;
+    do {
+      const result = await page(vendorA, cursor ? { cursor } : {});
+      expect(result.approvals.length).toBeLessThanOrEqual(20);
+      expect(result.approvals.every(row => row.vendorId === vendorA)).toBe(true);
+      ids.push(...result.approvals.map(row => row.id));
+      expect(result.hasMore).toBe(result.nextCursor !== null);
+      cursor = result.nextCursor;
+      if (ids.length > 503) throw new Error('Duplicate/unbounded pagination');
+    } while (cursor);
+    expect(ids).toEqual(ordered.map(row => row.id));
+    expect(new Set(ids).size).toBe(503);
+    for (const position of [19, 20, 21, 25, 100, 500, 503]) expect(ids[position - 1]).toBe(ordered[position - 1].id);
+  });
+
+  it('returns the bounded maximum page and the correct final/empty envelopes', async () => {
+    const first = await page(vendorA, { limit: 100 });
+    expect(first.approvals).toHaveLength(100); expect(first.hasMore).toBe(true);
+    expect(await page(emptyVendor)).toEqual({ ok: true, writesPerformed: false,
+      vendorId: emptyVendor, approvals: [], hasMore: false, nextCursor: null });
+    const foreign = await page(vendorB, { limit: 100 });
+    expect(foreign.approvals).toHaveLength(27); expect(foreign.hasMore).toBe(false); expect(foreign.nextCursor).toBeNull();
+  });
+
+  it('rejects cross-Vendor cursors, limit changes, malformed/version boundaries and unsupported filters', async () => {
+    const first = await page(vendorA);
+    await expect(page(vendorB, { cursor: first.nextCursor })).rejects.toThrow('cursor');
+    await expect(page(vendorA, { cursor: first.nextCursor, limit: 21 })).rejects.toThrow('cursor');
+    for (const cursor of ['bad!', Buffer.from(JSON.stringify({ v: 99 })).toString('base64url')])
+      await expect(page(vendorA, { cursor })).rejects.toThrow('cursor');
+    for (const limit of [0, -1, 1.5, 101]) await expect(page(vendorA, { limit })).rejects.toThrow('limit');
+    for (const key of ['period', 'searchTimeZone'])
+      await expect(page(vendorA, { [key]: 'value' })).rejects.toThrow('Unsupported');
+    await expect(page('')).rejects.toThrow('vendorId');
+  });
+
+  it('continues by tuple after deletion of a disposable cursor anchor', async () => {
+    const vendor = `${prefix}-deleted-anchor`;
+    await db.vendor.create({ data: { id: vendor, name: vendor } });
+    const rows = fixtures.slice(0, 6).map(row => ({ ...row, id: `${row.id}-anchor`, vendorId: vendor }));
+    await db.settlementApproval.createMany({ data: rows });
+    const first = await page(vendor, { limit: 2 });
+    await db.settlementApproval.delete({ where: { id: first.approvals[1].id } });
+    const second = await page(vendor, { limit: 2, cursor: first.nextCursor });
+    expect(second.approvals.map(row => row.id)).toEqual([...rows].reverse().slice(2, 4).map(row => row.id));
+    expect(second.approvals.some(row => first.approvals.some(old => old.id === row.id))).toBe(false);
+  });
+
+  it('keeps a newer concurrent insert above the continuation boundary without promising a snapshot', async () => {
+    const first = await page(vendorA);
+    const inserted = { ...fixtures[0], id: `${prefix}-newer`, createdAt: new Date('2027-01-01T00:00:00Z') };
+    await db.settlementApproval.create({ data: inserted });
+    const next = await page(vendorA, { cursor: first.nextCursor });
+    expect(next.approvals.map(row => row.id)).toEqual(ordered.slice(20, 40).map(row => row.id));
+    expect((await page(vendorA)).approvals[0].id).toBe(inserted.id);
+  });
+
+  it('does not change stored financial fields, status, ledger or payout data during list traversal', async () => {
+    const where = { vendorId: vendorB };
+    const before = await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } });
+    const ledgerCount = await db.financeLedgerEntry.count({ where });
+    const payoutCount = await db.payoutBatch.count({ where });
+    await page(vendorB, { limit: 7 }); await list(vendorB);
+    expect(await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } })).toEqual(before);
+    expect(await db.financeLedgerEntry.count({ where })).toBe(ledgerCount);
+    expect(await db.payoutBatch.count({ where })).toBe(payoutCount);
+  });
+  async function traverseFilters(query: Record<string, unknown>, expected = filterOrdered) {
+    const ids: string[] = []; let cursor: string | null = null;
+    do {
+      const result = await page(filterVendor, { limit: 7, ...query, ...(cursor ? { cursor } : {}) });
+      expect(result.approvals.length).toBeLessThanOrEqual(7);
+      expect(result.approvals.every(row => row.vendorId === filterVendor)).toBe(true);
+      ids.push(...result.approvals.map(row => row.id));
+      expect(result.hasMore).toBe(result.nextCursor !== null);
+      cursor = result.nextCursor;
+      if (ids.length > filterFixtures.length) throw new Error('Unbounded or duplicate filtered traversal');
+    } while (cursor);
+    expect(ids).toEqual(expected.map(row => row.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    return ids;
+  }
+
+  it.each(['DRAFT', 'APPROVED', 'CANCELLED'])('traverses every %s row across pages and equal timestamps', async (status) => {
+    const expected = filterOrdered.filter(row => row.status === status);
+    expect(expected.length).toBeGreaterThan(20);
+    await traverseFilters({ status: status.toLowerCase() }, expected);
+  });
+
+  it.each(['2026-08-31', '2026-07-01', '2026-09', '2024-02-29', 'all', ' ', '2026-02-30']) (
+    'matches literal period %j with every precedence/fallback across complete history', async (periodKey) => {
+      const expected = filterOrdered.filter(row => rawPeriod(row) === periodKey);
+      expect(expected.length).toBeGreaterThan(0);
+      await traverseFilters({ periodKey }, expected);
+    });
+
+  it('filters an old unique cycle outside the first 20 and does not substitute its lower-priority dates', async () => {
+    const target = filterOrdered.filter(row => row.scheduledCycleKey?.startsWith(`${prefix}-cycle`)).at(-1)!;
+    expect(filterOrdered.indexOf(target)).toBeGreaterThan(20);
+    await traverseFilters({ periodKey: target.scheduledCycleKey }, [target]);
+    expect(rawPeriod(target)).not.toBe(target.scheduledPeriodEnd?.toISOString().slice(0, 10));
+  });
+
+  it('applies inclusive absolute high-value filtering including negative Int minimum, zero and currency independence', async () => {
+    const expected = filterOrdered.filter(row => Math.abs(row.netPayableMinor) >= 100000);
+    for (const amount of [100000, 100001, -100000, -100001, -2147483648])
+      expect(expected.some(row => row.netPayableMinor === amount)).toBe(true);
+    for (const amount of [99999, -99999, 0]) expect(expected.some(row => row.netPayableMinor === amount)).toBe(false);
+    expect(new Set(expected.map(row => row.currency))).toEqual(new Set(['TRY', 'USD']));
+    await traverseFilters({ highValueOnly: true }, expected);
+    await traverseFilters({ status: 'all', highValueOnly: 'false' });
+  });
+
+  it.each([
+    { status: 'draft', periodKey: '2026-09' },
+    { status: 'approved', highValueOnly: true },
+    { periodKey: '2026-08-31', highValueOnly: true },
+    { status: 'draft', periodKey: '2026-09', highValueOnly: true },
+  ])('ANDs all filters before bounded pagination: %j', async (query) => {
+    const expected = filterOrdered.filter(row => (!query.status || row.status.toLowerCase() === query.status) &&
+      (!query.periodKey || rawPeriod(row) === query.periodKey) &&
+      (!query.highValueOnly || Math.abs(row.netPayableMinor) >= 100000));
+    expect(expected.length).toBeGreaterThan(7);
+    await traverseFilters(query, expected);
+  });
+
+  it('binds filtered cursors to Vendor, status, raw period and value, preserving unfiltered v1 continuation', async () => {
+    const query = { status: 'draft', periodKey: '2026-09', highValueOnly: true, limit: 2 };
+    const first = await page(filterVendor, query);
+    expect(first.nextCursor).not.toBeNull();
+    const cursor = first.nextCursor!;
+    await expect(page(filterVendor, { ...query, status: 'DRAFT', highValueOnly: 'true', cursor }))
+      .resolves.toMatchObject({ vendorId: filterVendor });
+    for (const override of [{ status: 'approved' }, { status: 'all' }, { periodKey: '2026-08-31' },
+      { periodKey: undefined }, { highValueOnly: false }, { limit: 3 }])
+      await expect(page(filterVendor, { ...query, ...override, cursor })).rejects.toThrow('cursor');
+    await expect(page(filterForeignVendor, { ...query, cursor })).rejects.toThrow('cursor');
+    const old = await page(filterVendor, { limit: 2 });
+    expect(JSON.parse(Buffer.from(old.nextCursor!, 'base64url').toString()).v).toBe(1);
+    await expect(page(filterVendor, { limit: 2, status: 'all', highValueOnly: false, cursor: old.nextCursor })).resolves.toBeDefined();
+    await expect(page(filterVendor, { ...query, cursor: old.nextCursor })).rejects.toThrow('cursor');
+    expect(await page(filterVendor, { periodKey: 'no-such-cycle' })).toEqual({
+      ok: true, writesPerformed: false, vendorId: filterVendor, approvals: [], hasMore: false, nextCursor: null,
+    });
+  });
+
+  it('preserves every stored settlement field, ledger and payout while applying filters', async () => {
+    const where = { vendorId: { in: [filterVendor, filterForeignVendor] } };
+    const before = await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } });
+    const ledgers = await db.financeLedgerEntry.findMany({ where, orderBy: { id: 'asc' } });
+    const payouts = await db.payoutBatch.findMany({ where, orderBy: { id: 'asc' } });
+    await traverseFilters({ status: 'draft', periodKey: '2026-09', highValueOnly: true },
+      filterOrdered.filter(row => row.status === 'DRAFT' && rawPeriod(row) === '2026-09' && Math.abs(row.netPayableMinor) >= 100000));
+    await page(filterForeignVendor, { highValueOnly: true, periodKey: '2026-08-31' });
+    expect(await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' } })).toEqual(before);
+    expect(await db.financeLedgerEntry.findMany({ where, orderBy: { id: 'asc' } })).toEqual(ledgers);
+    expect(await db.payoutBatch.findMany({ where, orderBy: { id: 'asc' } })).toEqual(payouts);
+  });
+
+  async function traverseWorkflow(query: Record<string, unknown>) {
+    const expected = workflowOrdered.filter(row => matchesWorkflow(row, String(query.workflow ?? 'all')) &&
+      (!query.status || query.status === 'all' || row.status.toLowerCase() === String(query.status).toLowerCase()) &&
+      (!query.periodKey || row.createdAt.toISOString().slice(0, 7) === query.periodKey) &&
+      (!query.highValueOnly || Math.abs(row.netPayableMinor) >= 100000));
+    const ids: string[] = []; let cursor: string | null = null;
+    do {
+      const result = await page(workflowVendor, { limit: 7, ...query, ...(cursor ? { cursor } : {}) });
+      expect(result.approvals).toHaveLength(Math.min(7, expected.length - ids.length));
+      for (const summary of result.approvals) {
+        const raw = expected.find(row => row.id === summary.id)!;
+        expect(raw).toBeDefined();
+        expect(summary).toMatchObject({ vendorId: workflowVendor, status: raw.status.toLowerCase(),
+          netPayableMinor: raw.netPayableMinor, lineCount: raw.hasLine ? 1 : 0 });
+      }
+      ids.push(...result.approvals.map(row => row.id));
+      expect(result.hasMore).toBe(result.nextCursor !== null);
+      cursor = result.nextCursor;
+      if (ids.length > workflowOrdered.length) throw new Error('Unbounded/duplicate workflow traversal');
+    } while (cursor);
+    expect(ids).toEqual(expected.map(row => row.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    return expected;
+  }
+
+  it.each(['all', 'ready_for_approval', 'needs_review', 'vendor_hold', 'approved', 'refund_review', 'paid'])(
+    'matches existing summary workflow %s over complete history before paging', async (workflow) => {
+      const matching = await traverseWorkflow({ workflow });
+      if (workflow === 'refund_review' || workflow === 'paid') expect(matching).toEqual([]);
+      else {
+        expect(matching.length).toBeGreaterThan(20);
+        for (const position of [20, 100, 500]) {
+          expect(matching.some(row => workflowOrdered.indexOf(row) > position)).toBe(true);
+        }
+      }
+    });
+
+  it('includes credit-only and deduction-only lines in Hold, even cancelled credit lines counted by Summary', async () => {
+    for (const row of correctionWorkflowFixtures) {
+      const held = await page(workflowVendor, { workflow: 'needs_review', limit: 2 });
+      expect(held.approvals).toContainEqual(expect.objectContaining({ id: row.id, lineCount: 1, netPayableMinor: 0 }));
+      const ready = await page(workflowVendor, { workflow: 'ready_for_approval', limit: 100 });
+      expect(ready.approvals.some(summary => summary.id === row.id)).toBe(false);
+    }
+    // Zero/negative empty summaries remain Ready; positive rows remain Ready even with lines.
+    const ready = await traverseWorkflow({ workflow: 'ready_for_approval' });
+    expect(ready.some(row => row.netPayableMinor <= 0 && !row.hasLine)).toBe(true);
+    expect(ready.some(row => row.netPayableMinor > 0 && row.hasLine)).toBe(true);
+    const held = await traverseWorkflow({ workflow: 'vendor_hold' });
+    expect(held.some(row => row.status === 'APPROVED' && row.netPayableMinor <= 0 && row.hasLine)).toBe(true);
+    expect(held.some(row => row.status === 'CANCELLED' && row.netPayableMinor > 0 && !row.hasLine)).toBe(true);
+  });
+
+  it.each([
+    { workflow: 'ready_for_approval', status: 'draft' },
+    { workflow: 'approved', status: 'cancelled' },
+    { workflow: 'vendor_hold', highValueOnly: true },
+    { workflow: 'needs_review', periodKey: '2025-01' },
+    { workflow: 'ready_for_approval', status: 'draft', periodKey: '2025-01', highValueOnly: true },
+  ])('combines workflow with all existing filters before pagination: %j', async (query) => {
+    const rows = await traverseWorkflow(query);
+    if (query.workflow === 'approved') expect(rows).toEqual([]);
+    else expect(rows.length).toBeGreaterThan(7);
+  });
+
+  it('preserves v1/v2 cursors for all workflow while binding active workflow to a new v3 sequence', async () => {
+    for (const filters of [{}, { status: 'draft', periodKey: '2025-01', highValueOnly: true }]) {
+      const query = { ...filters, limit: 2 };
+      const old = await page(workflowVendor, query);
+      expect(JSON.parse(Buffer.from(old.nextCursor!, 'base64url').toString()).v).toBe(filters.status ? 2 : 1);
+      const compatible = await page(workflowVendor, { ...query, workflow: 'all', cursor: old.nextCursor });
+      expect(compatible.approvals.map(row => row.id)).toEqual((await page(workflowVendor, { ...query, cursor: old.nextCursor })).approvals.map(row => row.id));
+      const active = { ...query, workflow: 'ready_for_approval' };
+      await expect(page(workflowVendor, { ...active, cursor: old.nextCursor })).rejects.toThrow('cursor');
+      const first = await page(workflowVendor, active);
+      const decoded = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString());
+      expect(decoded).toMatchObject({ v: 3, workflow: 'ready_for_approval' });
+      await expect(page(workflowVendor, { ...active, cursor: first.nextCursor })).resolves.toBeDefined();
+      for (const changes of [{ workflow: 'needs_review' }, { workflow: 'all' }, { workflow: undefined },
+        { status: 'cancelled' }, { periodKey: '2026-10' }, { highValueOnly: !filters.highValueOnly }, { limit: 3 }])
+        await expect(page(workflowVendor, { ...active, ...changes, cursor: first.nextCursor })).rejects.toThrow('cursor');
+      await expect(page(workflowForeign, { ...active, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    }
+    const foreign = await page(workflowForeign, { workflow: 'approved', limit: 2 });
+    expect(foreign.approvals.every(row => row.vendorId === workflowForeign)).toBe(true);
+    await expect(page(workflowVendor, { workflow: 'approved', limit: 2, cursor: foreign.nextCursor })).rejects.toThrow('cursor');
+    for (const workflow of ['', 'PAID', null, ['approved'], 'unknown'])
+      await expect(page(workflowVendor, { workflow })).rejects.toThrow('workflow');
+  });
+
+  it('does not modify any settlement, line, ledger or payout fields while filtering workflows', async () => {
+    const where = { vendorId: { in: [workflowVendor, workflowForeign] } };
+    const snapshot = async () => ({
+      settlements: await db.settlementApproval.findMany({ where, orderBy: { id: 'asc' }, include: {
+        lines: { orderBy: { id: 'asc' } }, correctionCreditLines: { orderBy: { id: 'asc' } }, correctionDeductionLines: { orderBy: { id: 'asc' } },
+      } }),
+      ledger: await db.financeLedgerEntry.findMany({ where, orderBy: { id: 'asc' } }),
+      payouts: await db.payoutBatch.findMany({ where, orderBy: { id: 'asc' } }),
+    });
+    const before = await snapshot();
+    for (const workflow of ['all', 'ready_for_approval', 'needs_review', 'vendor_hold', 'approved', 'refund_review', 'paid'])
+      await page(workflowVendor, { workflow, highValueOnly: true });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('searches complete historical IDs case-insensitively before paging, with all filters and unchanged financial rows', async () => {
+    const before = await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+    const collect = async (query: Record<string, unknown>) => {
+      const ids: string[] = []; let cursor: string | null = null;
+      do {
+        const result = await page(workflowVendor, { limit: 7, ...query, ...(cursor ? { cursor } : {}) });
+        expect(result.approvals.every(row => row.vendorId === workflowVendor)).toBe(true);
+        ids.push(...result.approvals.map(row => row.id)); cursor = result.nextCursor;
+        if (ids.length > workflowOrdered.length) throw new Error('Unbounded search');
+      } while (cursor);
+      return ids;
+    };
+    const term = `${prefix}-workflow-`;
+    expect(await collect({ searchId: `  ${term.toUpperCase()}  ` })).toEqual(workflowOrdered.map(row => row.id));
+    for (const position of [20, 100, 500])
+      expect((await collect({ searchId: workflowOrdered[position].id })).includes(workflowOrdered[position].id)).toBe(true);
+    for (const filters of [{ status: 'draft' }, { periodKey: '2025-01' }, { highValueOnly: true },
+      { workflow: 'ready_for_approval' }, { status: 'draft', periodKey: '2025-01', highValueOnly: true, workflow: 'ready_for_approval' }]) {
+      const expected = workflowOrdered.filter(row => (!filters.status || row.status === 'DRAFT') &&
+        (!filters.periodKey || row.createdAt.toISOString().slice(0, 7) === filters.periodKey) &&
+        (!filters.highValueOnly || Math.abs(row.netPayableMinor) >= 100000) &&
+        (!filters.workflow || matchesWorkflow(row, filters.workflow)));
+      expect(await collect({ searchId: term, ...filters })).toEqual(expected.map(row => row.id));
+    }
+    expect(await collect({ searchId: 'no-such-id' })).toEqual([]);
+    expect(await collect({ searchId: term, workflow: 'approved', status: 'cancelled' })).toEqual([]);
+    const query = { searchId: term, limit: 2 };
+    const first = await page(workflowVendor, query);
+    await expect(page(workflowVendor, { ...query, searchId: 'other', cursor: first.nextCursor })).rejects.toThrow('cursor');
+    await expect(page(workflowForeign, { ...query, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    for (const base of [{}, { status: 'draft' }, { workflow: 'ready_for_approval' }]) {
+      const old = await page(workflowVendor, { ...base, limit: 2 });
+      await expect(page(workflowVendor, { ...base, limit: 2, searchId: '   ', cursor: old.nextCursor })).resolves.toBeDefined();
+      await expect(page(workflowVendor, { ...base, limit: 2, searchId: term, cursor: old.nextCursor })).rejects.toThrow('cursor');
+    }
+    expect(await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(before);
+  });
+
+  it('treats SQL percent, underscore and backslash literally in real PostgreSQL ID search', async () => {
+    const vendorId = `${prefix}-wildcards`;
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    const ids = [`${prefix}-A%B`, `${prefix}-A_B`, `${prefix}-A\\B`, `${prefix}-AxB`];
+    await db.settlementApproval.createMany({ data: ids.map(id => ({ ...fixtures[0], id, vendorId })) });
+    for (const [searchId, expected] of [['%', ids[0]], ['_', ids[1]], ['\\', ids[2]]] as const) {
+      const result = await page(vendorId, { searchId });
+      expect(result.approvals.map(row => row.id)).toEqual([expected]);
+    }
+  });
+
+  it('scans full Search in bounded batches with exact JS semantics, sparse continuation and query binding', async () => {
+    const searchPage = async (query: Record<string, unknown>) => {
+      const result = await list(workflowVendor, { pagination: 'cursor', ...query });
+      if (!('searchState' in result)) throw new Error('Full Search response required');
+      expect(result.candidatesScanned).toBeLessThanOrEqual(200);
+      expect(result.candidateBatchCount).toBe(1);
+      return result;
+    };
+    const collect = async (query: Record<string, unknown>) => {
+      const ids: string[] = []; let cursor: string | null = null; let batches = 0, scanned = 0;
+      do {
+        const result = await searchPage({ ...query, ...(cursor ? { cursor } : {}) });
+        ids.push(...result.approvals.map(row => row.id)); batches++; scanned += result.candidatesScanned;
+        expect(result.approvals.every(row => row.vendorId === workflowVendor)).toBe(true);
+        if (result.searchState === 'MORE_CANDIDATES') expect(result.hasMore).toBeNull();
+        if (result.searchState === 'EXHAUSTED') expect(result.nextCursor).toBeNull();
+        cursor = result.nextCursor;
+        if (batches > 100) throw new Error('Unbounded continuation');
+      } while (cursor);
+      expect(new Set(ids).size).toBe(ids.length);
+      return { ids, batches, scanned };
+    };
+    const before = await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+    const all = await collect({ search: '', limit: 100 });
+    expect(all.ids).toEqual(workflowOrdered.map(row => row.id));
+    const sparse = await collect({ search: workflowOrdered.at(-1)!.id, limit: 20 });
+    expect(sparse.ids).toEqual([workflowOrdered.at(-1)!.id]);
+    expect(sparse.batches).toBe(4); expect(sparse.scanned).toBe(605);
+    console.info('Full Search measured sparse scan', sparse.batches, sparse.scanned);
+    expect((await collect({ search: 'No Such Match' })).ids).toEqual([]);
+    expect((await collect({ search: '  WORKSPACE İ_ΟΣ  ', searchVendorName: 'Workspace İ_ΟΣ', limit: 100 })).ids).toEqual(workflowOrdered.map(row => row.id));
+    expect((await collect({ search: workflowVendor.toUpperCase(), limit: 100 })).ids).toEqual(workflowOrdered.map(row => row.id));
+    const drafts = workflowOrdered.filter(row => row.status === 'APPROVED');
+    expect((await collect({ search: 'app', limit: 100 })).ids).toEqual(drafts.map(row => row.id));
+    expect((await collect({ search: 'app', status: 'draft' })).ids).toEqual([]);
+    expect((await collect({ search: '1', status: 'draft', periodKey: '2025-01', highValueOnly: true, workflow: 'ready_for_approval', limit: 100 })).ids)
+      .toEqual(workflowOrdered.filter(row => row.status === 'DRAFT' && row.createdAt.getUTCFullYear() === 2025 && Math.abs(row.netPayableMinor) >= 100000 && matchesWorkflow(row, 'ready_for_approval')).map(row => row.id));
+    const initial = await searchPage({ search: '', limit: 2 });
+    for (const change of [{ search: 'x' }, { searchVendorName: 'different' }, { status: 'draft' }, { periodKey: '2025-01' },
+      { highValueOnly: true }, { workflow: 'approved' }, { limit: 3 }])
+      await expect(searchPage({ search: '', limit: 2, ...change, cursor: initial.nextCursor })).rejects.toThrow('cursor');
+    await expect(list(workflowForeign, { pagination: 'cursor', search: '', limit: 2, cursor: initial.nextCursor })).rejects.toThrow('cursor');
+    for (const query of [{ search: null }, { search: ['x'] }, { search: 'x'.repeat(513) }, { search: 'x', searchVendorName: 1 }])
+      await expect(list(workflowVendor, { pagination: 'cursor', ...query })).rejects.toThrow();
+    expect(await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(before);
+  });
+
+  it('matches Unicode, literal patterns, actual UTC labels and decimal line-count substrings on PostgreSQL', async () => {
+    const { settlementSummaryPeriodLabel } = await import('../backend/src/modules/finance/settlement-search-presentation.js');
+    const literalPrefix = prefix.replace(/[0-9]/g, 'x');
+    const vendorId = `${literalPrefix}-full-exact`;
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    const rows = [
+      { ...fixtures[0], id: `${literalPrefix}-İ_ΟΣ%\\`, vendorId, scheduledCycleKey: 'İ_ΟΣ%\\', createdAt: new Date('2026-12-31T23:59:00Z') },
+      { ...fixtures[0], id: `${literalPrefix}-utc-end`, vendorId, scheduledPeriodEnd: new Date('2027-01-01T00:00:00Z') },
+      { ...fixtures[0], id: `${literalPrefix}-utc-run`, vendorId, scheduledRunDate: new Date('2024-02-29T00:00:00Z') },
+    ];
+    await db.settlementApproval.createMany({ data: rows });
+    await db.financeLedgerEntry.createMany({ data: Array.from({ length: 101 }, (_, i) => ({ id: `${vendorId}-ledger-${i}`, vendorId, entryType: 'sale', amount: '1' })) });
+    await db.settlementApprovalLine.createMany({ data: Array.from({ length: 101 }, (_, i) => ({
+      settlementApprovalId: rows[0].id, financeLedgerEntryId: `${vendorId}-ledger-${i}`, lineType: 'SALE' as const,
+      amountMinor: 100, commissionMinor: 0, commissionVatMinor: 0, payableImpactMinor: 100, sourceSnapshotJson: {},
+    })) });
+    for (const search of ['i̇', 'ος', '%', '\\', '01']) {
+      const result = await list(vendorId, { pagination: 'cursor', search });
+      expect(result.approvals.some(row => row.id === rows[0].id)).toBe(true);
+    }
+    for (const row of rows.slice(1)) {
+      const label = settlementSummaryPeriodLabel({ createdAt: row.createdAt.toISOString(),
+        scheduledPeriodEnd: row.scheduledPeriodEnd?.toISOString(), scheduledRunDate: row.scheduledRunDate?.toISOString() });
+      expect((await list(vendorId, { pagination: 'cursor', search: label })).approvals.map(item => item.id)).toEqual([row.id]);
+    }
+  });
+
+  it('pages complete distinct period metadata with Map-compatible representatives and round-trip filtering', async () => {
+    const { listSettlementPeriodMetadata: metadata, buildSettlementPeriodMetadataQuery } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const { settlementSummaryPeriodLabel } = await import('../backend/src/modules/finance/settlement-search-presentation.js');
+    const vendorId = `${prefix}-metadata`;
+    await db.vendor.create({ data: { id: vendorId, name: vendorId } });
+    await db.settlementApproval.createMany({ data: Array.from({ length: 601 }, (_, i) => ({
+      ...fixtures[0], id: `${vendorId}-${String(i).padStart(4, '0')}`, vendorId,
+      createdAt: new Date(Date.UTC(2030, 0, 1, 0, 0, Math.floor(i / 7))),
+      scheduledPeriodEnd: new Date(Date.UTC(2029, 0, 1 + Math.floor(i / 10), 0, i % 10)),
+    })) });
+    const verify = async (target: string, limit: number) => {
+      const raw = await db.settlementApproval.findMany({ where: { vendorId: target }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      const expected = new Map<string, string>();
+      for (const row of raw) {
+        const key = row.scheduledCycleKey || row.scheduledPeriodEnd?.toISOString().slice(0, 10) ||
+          row.scheduledRunDate?.toISOString().slice(0, 10) || row.createdAt.toISOString().slice(0, 7);
+        expected.set(key, settlementSummaryPeriodLabel({ ...row, createdAt: row.createdAt.toISOString(),
+          scheduledPeriodEnd: row.scheduledPeriodEnd?.toISOString(), scheduledRunDate: row.scheduledRunDate?.toISOString() }));
+      }
+      const actual: Array<{ value: string; label: string }> = []; let cursor: string | null = null; let pages = 0;
+      do {
+        const result = await metadata(target, { limit, ...(cursor ? { cursor } : {}) });
+        expect(result.periods.length).toBeLessThanOrEqual(limit);
+        expect(result.vendorId).toBe(target); expect(result.writesPerformed).toBe(false);
+        actual.push(...result.periods); pages++; cursor = result.nextCursor;
+        expect(result.hasMore).toBe(cursor !== null);
+        if (pages > 100) throw new Error('Unbounded metadata traversal');
+      } while (cursor);
+      expect(actual).toEqual([...expected].map(([value, label]) => ({ value, label })));
+      expect(new Set(actual.map(row => row.value)).size).toBe(actual.length);
+      for (const { value } of actual) {
+        const ids: string[] = []; let next: string | null = null;
+        do {
+          const result = await page(target, { periodKey: value, limit: 100, ...(next ? { cursor: next } : {}) });
+          ids.push(...result.approvals.map(row => row.id)); next = result.nextCursor;
+        } while (next);
+        expect(ids).toEqual(raw.filter(row => (row.scheduledCycleKey || row.scheduledPeriodEnd?.toISOString().slice(0, 10) ||
+          row.scheduledRunDate?.toISOString().slice(0, 10) || row.createdAt.toISOString().slice(0, 7)) === value).map(row => row.id));
+      }
+      return { actual, pages };
+    };
+    const before = await db.settlementApproval.findMany({ where: { vendorId }, orderBy: { id: 'asc' } });
+    const result = await verify(vendorId, 7);
+    expect(result.actual).toHaveLength(61); expect(result.pages).toBe(9);
+    const literal = await verify(filterVendor, 3);
+    expect(literal.actual.some(row => row.value === 'all')).toBe(true);
+    expect(literal.actual.some(row => row.value === ' ')).toBe(true);
+    expect((await verify(emptyVendor, 20)).actual).toEqual([]);
+    const one = `${prefix}-metadata-one`;
+    await db.vendor.create({ data: { id: one, name: one } });
+    await db.settlementApproval.create({ data: { ...fixtures[0], id: one, vendorId: one } });
+    expect((await verify(one, 20)).actual).toHaveLength(1);
+    const first = await metadata(vendorId, { limit: 7 });
+    await expect(metadata(filterVendor, { limit: 7, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    await expect(metadata(vendorId, { limit: 8, cursor: first.nextCursor })).rejects.toThrow('cursor');
+    for (const cursor of ['bad!', '', 'x'.repeat(16385), Buffer.from(JSON.stringify({ v: 1 })).toString('base64url')])
+      await expect(metadata(vendorId, { cursor })).rejects.toThrow('cursor');
+    for (const limit of [0, 101, -1, '1.2', ['20'], null]) await expect(metadata(vendorId, { limit })).rejects.toThrow('limit');
+    await expect(metadata(vendorId, { workflow: 'all' })).rejects.toThrow('Unsupported');
+    const plan = await db.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${buildSettlementPeriodMetadataQuery(vendorId, 7)}`);
+    console.info('Period metadata measured', JSON.stringify(plan), 'pages', result.pages, 'keys', result.actual.length);
+    const token = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString());
+    const continuation = { createdAt: token.createdAt, id: token.id };
+    const zoned = await db.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Honolulu'`;
+      return tx.$queryRaw(buildSettlementPeriodMetadataQuery(vendorId, 7, continuation));
+    });
+    const utc = await db.$queryRaw(buildSettlementPeriodMetadataQuery(vendorId, 7, continuation));
+    expect(zoned).toEqual(utc);
+    expect(await db.settlementApproval.findMany({ where: { vendorId }, orderBy: { id: 'asc' } })).toEqual(before);
+  });
+
+  it('counts independent full-history workflows with constant aggregate queries and no financial writes', async () => {
+    const { getSettlementWorkflowCounts: count } = await import('../backend/src/modules/finance/settlement-approval.service.js');
+    const observed = new PrismaClient({ datasources: { db: { url: databaseUrl } }, log: [{ emit: 'event', level: 'query' }] });
+    const events: Array<{ query: string; duration: number }> = [];
+    observed.$on('query', event => events.push({ query: event.query, duration: event.duration }));
+    try {
+      const [identity] = await observed.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
+      expect(identity.name).toBe('settlement_approval_readiness_validation');
+      const workflows = ['all', 'needs_review', 'ready_for_approval', 'refund_review', 'vendor_hold', 'approved', 'paid'] as const;
+      const before = await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' }, include: {
+        lines: { orderBy: { id: 'asc' } }, correctionCreditLines: { orderBy: { id: 'asc' } }, correctionDeductionLines: { orderBy: { id: 'asc' } },
+      } });
+      const beforePayouts = await db.payoutBatch.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+      const beforeLedger = await db.financeLedgerEntry.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } });
+      for (const target of [emptyVendor, workflowVendor, workflowForeign]) {
+        const raw = await db.settlementApproval.findMany({ where: { vendorId: target }, include: { _count: {
+          select: { lines: true, correctionCreditLines: true, correctionDeductionLines: true },
+        } } });
+        const reference = (workflow: string) => raw.filter(row => {
+          const lineCount = row._count.lines + row._count.correctionCreditLines + row._count.correctionDeductionLines;
+          const issues = row.status === 'CANCELLED' || (row.netPayableMinor <= 0 && lineCount > 0) ? ['Hold'] : ['Ready'];
+          const ready = row.status === 'DRAFT' && issues.every(issue => issue === 'Ready');
+          if (workflow === 'all') return true;
+          if (workflow === 'needs_review') return row.status === 'DRAFT' && !ready;
+          if (workflow === 'ready_for_approval') return ready;
+          if (workflow === 'vendor_hold') return issues.includes('Hold');
+          if (workflow === 'approved') return row.status === 'APPROVED';
+          return false;
+        }).length;
+        events.length = 0;
+        const start = performance.now();
+        const result = await count(target, {}, observed);
+        const elapsed = performance.now() - start;
+        expect(Object.keys(result.counts).sort()).toEqual([...workflows].sort());
+        for (const workflow of workflows) expect(result.counts[workflow]).toBe(reference(workflow));
+        const aggregates = events.filter(event => /^SELECT/i.test(event.query) && /COUNT/i.test(event.query));
+        expect(aggregates).toHaveLength(7);
+        expect(events.some(event => /^(INSERT|UPDATE|DELETE)/i.test(event.query))).toBe(false);
+        console.info('Workflow count measured', target === workflowVendor ? '605 rows' : `${raw.length} rows`,
+          'aggregate queries', aggregates.length, 'all statements', events.length, 'elapsed ms', elapsed);
+        if (target === workflowVendor) {
+          expect(result.counts.all).toBe(605);
+          expect(result.counts.needs_review).toBeGreaterThan(20);
+          expect(result.counts.vendor_hold + result.counts.approved + result.counts.ready_for_approval).toBeGreaterThan(result.counts.all);
+        }
+        for (const workflow of workflows) {
+          const ids: string[] = []; let cursor: string | null = null;
+          do {
+            const result = await page(target, { workflow, limit: 100, ...(cursor ? { cursor } : {}) });
+            ids.push(...result.approvals.map(row => row.id)); cursor = result.nextCursor;
+          } while (cursor);
+          expect(ids.length).toBe(result.counts[workflow]);
+        }
+      }
+      const singleVendor = `${prefix}-single-count`;
+      await db.vendor.create({ data: { id: singleVendor, name: singleVendor } });
+      await db.settlementApproval.create({ data: { ...fixtures[0], id: singleVendor, vendorId: singleVendor } });
+      expect((await count(singleVendor)).counts).toEqual({ all: 1, ready_for_approval: 1, needs_review: 0,
+        vendor_hold: 0, approved: 0, refund_review: 0, paid: 0 });
+      for (const key of ['search', 'status', 'periodKey', 'highValueOnly', 'workflow', 'cursor', 'limit'])
+        await expect(count(workflowVendor, { [key]: 'x' })).rejects.toThrow('Unsupported');
+      await expect(count('')).rejects.toThrow('vendorId');
+      expect(await db.settlementApproval.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' }, include: {
+        lines: { orderBy: { id: 'asc' } }, correctionCreditLines: { orderBy: { id: 'asc' } }, correctionDeductionLines: { orderBy: { id: 'asc' } },
+      } })).toEqual(before);
+      expect(await db.payoutBatch.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(beforePayouts);
+      expect(await db.financeLedgerEntry.findMany({ where: { vendorId: workflowVendor }, orderBy: { id: 'asc' } })).toEqual(beforeLedger);
+    } finally { await observed.$disconnect(); }
+  });
+
 });

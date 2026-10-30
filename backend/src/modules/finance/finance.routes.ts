@@ -77,6 +77,8 @@ import {
   getSettlementApproval,
   getSettlementApprovalAudit,
   listSettlementApprovalsForVendor,
+  listSettlementPeriodMetadata,
+  getSettlementWorkflowCounts,
   previewApproval,
   SettlementApprovalRevalidationError,
 } from './settlement-approval.service.js';
@@ -1302,6 +1304,32 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
+  app.get('/admin/finance/settlement-approvals/workflow-counts', {
+    preHandler: [authMiddleware.authenticateRequest],
+  }, async (request, reply) => {
+    if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+    try {
+      const vendorId = readOptionalQueryString(request.query, 'vendorId');
+      if (!vendorId) return reply.code(400).send({ message: 'vendorId is required.' });
+      return await getSettlementWorkflowCounts(vendorId, request.query as Record<string, unknown>);
+    } catch (error) {
+      return reply.code(400).send({ message: error instanceof Error ? error.message : 'Workflow counts could not be loaded.' });
+    }
+  });
+
+  app.get('/admin/finance/settlement-approvals/periods', {
+    preHandler: [authMiddleware.authenticateRequest],
+  }, async (request, reply) => {
+    if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+    try {
+      const vendorId = readOptionalQueryString(request.query, 'vendorId');
+      if (!vendorId) return reply.code(400).send({ message: 'vendorId is required.' });
+      return await listSettlementPeriodMetadata(vendorId, request.query as Record<string, unknown>);
+    } catch (error) {
+      return reply.code(400).send({ message: error instanceof Error ? error.message : 'Period metadata could not be loaded.' });
+    }
+  });
+
   app.get(
     '/admin/finance/settlement-approvals',
     {
@@ -1317,7 +1345,10 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         if (!vendorId) {
           return reply.code(400).send({ message: 'vendorId is required.' });
         }
-        return await listSettlementApprovalsForVendor(vendorId);
+        const query = request.query as Record<string, unknown>;
+        return query.pagination === undefined
+          ? await listSettlementApprovalsForVendor(vendorId)
+          : await listSettlementApprovalsForVendor(vendorId, query);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement approvals could not be loaded.';
         return reply.code(400).send({ message });

@@ -1,8 +1,10 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { connect } from 'node:net';
 import { userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nodeEgressGuard = path.join(root, 'scripts/test-node-egress-guard.mjs');
@@ -14,6 +16,9 @@ if (process.env.BROWSER_SMOKE_ALLOW_LOCAL_DB !== '1' || adminUrl.hostname !== 'l
 }
 
 const scenarios = [
+  { name: 'fin03-history', explicitOnly: true,
+    fixture: 'tests/e2e/fixtures/fin03-settlement-history.ts', reviewId: 'fin03-history',
+    spec: 'fin03-settlement-history.real.spec.ts', verify: 'tests/e2e/fixtures/verify-fin03-settlement-history.ts' },
   {
     name: 'review-credit',
     fixture: 'tests/e2e/fixtures/review-credit.ts',
@@ -58,12 +63,12 @@ const scenarios = [
   },
 ];
 const requested = process.argv.slice(2);
-if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement)$/.test(requested[0]))) {
+if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement|fin03-history)$/.test(requested[0]))) {
   throw new Error('Use no arguments for all smokes, or --scenario=review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement.');
 }
 const selectedScenarios = requested.length
   ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])
-  : scenarios;
+  : scenarios.filter(scenario => !scenario.explicitOnly);
 const localBackend = 'http://localhost:4000';
 const localFrontend = 'http://localhost:5173';
 const baseEnv = {
@@ -151,7 +156,30 @@ async function runScenario(scenario) {
   const targetUrl = new URL(adminUrl);
   targetUrl.pathname = `/${databaseName}`;
   targetUrl.searchParams.set('schema', 'public');
-  const databaseEnv = { ...baseEnv, DATABASE_URL: targetUrl.toString(), BROWSER_SMOKE_ALLOW_LOCAL_DB: '1' };
+  const fin03 = scenario.name === 'fin03-history';
+  const proof = fin03 ? randomBytes(32).toString('hex') : '';
+  const evidencePath = path.join(process.env.TMPDIR || '/tmp', `${databaseName}.fin03.json`);
+  function inspect(database = 'postgres') {
+    const url = new URL(adminUrl); url.pathname = `/${database}`;
+    return JSON.parse(execFileSync('psql', ['-XAt', `--dbname=${url}`, '-v', 'ON_ERROR_STOP=1', '-c',
+      "SELECT json_build_object('major',current_setting('server_version_num')::int/10000,'owner',current_user,'databaseOwner',pg_get_userbyid(d.datdba),'systemId',(pg_control_system()).system_identifier::text,'directory',current_setting('data_directory'),'port',inet_server_port(),'comment',shobj_description(d.oid,'pg_database')) FROM pg_database d WHERE datname=current_database()"], { env: baseEnv, encoding: 'utf8' }));
+  }
+  const cluster = fin03 ? inspect() : null;
+  const recovery = fin03 && process.env.FIN03_RECOVERY_SMOKE === '1';
+  if (recovery) {
+    if (cluster.major !== 18 || cluster.systemId !== process.env.FIN03_RECOVERY_CLUSTER_ID ||
+        cluster.directory !== process.env.FIN03_RECOVERY_CLUSTER_DIRECTORY ||
+        !/^\/private\/tmp\/fin03-reg16c-[A-Za-z0-9_-]+\/data$/.test(cluster.directory) ||
+        cluster.port !== Number(process.env.FIN03_RECOVERY_CLUSTER_PORT) || cluster.port <= 1024 ||
+        cluster.port === 5432 || cluster.owner !== 'postgres' || cluster.databaseOwner !== 'postgres' ||
+        !/^[a-f0-9]{64}$/.test(process.env.FIN03_RECOVERY_CLUSTER_PROOF || '') ||
+        cluster.comment !== `fin03-reg16c:${process.env.FIN03_RECOVERY_CLUSTER_PROOF}`)
+      throw new Error('FIN03 recovery requires a separately owned, proved temporary PG18 cluster.');
+  } else if (fin03 && (cluster.major !== 18 || adminUrl.password || adminUrl.port !== '5432'))
+    throw new Error('FIN03 requires verified local PostgreSQL18 without inherited credentials.');
+  const databaseEnv = { ...baseEnv, DATABASE_URL: targetUrl.toString(), BROWSER_SMOKE_ALLOW_LOCAL_DB: '1',
+    ...(fin03 ? { PGPASSWORD: undefined, FIN03_DB_PROOF: proof, FIN03_CLUSTER_ID: cluster.systemId,
+      BROWSER_SMOKE_EVIDENCE_PATH: evidencePath, ...(recovery ? { FIN03_RECOVERY_SMOKE: '1', ...(process.env.FIN03_SCOPED_CLOSURE === '1' ? { FIN03_SCOPED_CLOSURE: '1' } : {}) } : {}), NODE_OPTIONS: `--import=${nodeEgressGuard}` } : {}) };
   const backendEnv = { ...databaseEnv, ...backendDefaults };
   const fixtureDate = new Date();
   const nextWednesday = new Date(Date.UTC(fixtureDate.getUTCFullYear(), fixtureDate.getUTCMonth(), fixtureDate.getUTCDate()));
@@ -159,11 +187,24 @@ async function runScenario(scenario) {
   const replacementRunDate = nextWednesday.toISOString().slice(0, 10);
   const processes = [];
   let databaseCreated = false;
+  let browserSucceeded = false;
   console.log(`Running real browser scenario ${scenario.name}.`);
   try {
     await run('createdb', [`--maintenance-db=${adminUrl.toString()}`, databaseName]);
     databaseCreated = true;
     console.log(`Created disposable database ${databaseName}.`);
+    if (fin03) {
+      execFileSync('psql', [`--dbname=${adminUrl}`, '-v', 'ON_ERROR_STOP=1', '-c',
+        `COMMENT ON DATABASE "${databaseName}" IS 'fin03-history:${proof}'`], { env: baseEnv });
+      const target = inspect(databaseName);
+      if (target.major !== 18 || target.systemId !== cluster.systemId || target.owner !== cluster.owner ||
+        target.databaseOwner !== cluster.owner || target.comment !== `fin03-history:${proof}`)
+        throw new Error('FIN03 database identity mismatch.');
+      await mkdir(path.dirname(evidencePath), { recursive: true });
+      Object.assign(backendEnv, { SETTLEMENT_AUTO_APPROVAL_SCHEDULER_ENABLED: 'false',
+        SETTLEMENT_AUTO_DRAFT_SCHEDULER_ENABLED: 'false', SETTLEMENT_AUTO_DRAFT_WRITE_SCHEDULER_ENABLED: 'false' });
+      console.log(`FIN03 PostgreSQL ${target.major}, isolated cluster/owner/proof verified.`);
+    }
     await run('npm', ['run', 'backend:db:generate'], databaseEnv);
     await run('npm', ['run', 'backend:db:bootstrap:fresh'], databaseEnv);
     await run('node_modules/.bin/tsx', [scenario.fixture], { ...databaseEnv, BROWSER_SMOKE_RUN_DATE: replacementRunDate });
@@ -182,14 +223,27 @@ async function runScenario(scenario) {
     await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts'], {
       ...baseEnv, BROWSER_SMOKE_REVIEW_ID: scenario.reviewId, BROWSER_SMOKE_REAL_SPEC: scenario.spec,
       BROWSER_SMOKE_RUN_DATE: replacementRunDate,
+      ...(fin03 ? { BROWSER_SMOKE_EVIDENCE_PATH: evidencePath, ...(recovery ? { FIN03_RECOVERY_SMOKE: '1', ...(process.env.FIN03_SCOPED_CLOSURE === '1' ? { FIN03_SCOPED_CLOSURE: '1' } : {}) } : {}), NODE_OPTIONS: `--import=${nodeEgressGuard}` } : {}),
     });
-    await run('node_modules/.bin/tsx', [scenario.verify], databaseEnv);
-    console.log(`Real browser scenario ${scenario.name} passed browser and DB post-check.`);
+    browserSucceeded = true;
+    if (!fin03) {
+      await run('node_modules/.bin/tsx', [scenario.verify], databaseEnv);
+      console.log(`Real browser scenario ${scenario.name} passed browser and DB post-check.`);
+    }
   } finally {
     await stopServers(processes);
+    try {
+      if (fin03 && databaseCreated) await run('node_modules/.bin/tsx', [scenario.verify], { ...databaseEnv, FIN03_BROWSER_PASSED: browserSucceeded ? '1' : '0' });
+    } finally {
     if (databaseCreated) {
+      if (fin03) {
+        const target = inspect(databaseName);
+        if (target.systemId !== cluster.systemId || target.databaseOwner !== cluster.owner || target.comment !== `fin03-history:${proof}`)
+          throw new Error('FIN03 cleanup ownership/proof mismatch; refusing destructive cleanup.');
+      }
       await run('dropdb', ['--force', `--maintenance-db=${adminUrl.toString()}`, databaseName]);
       console.log(`Disposed database ${databaseName}.`);
+    }
     }
   }
 }
