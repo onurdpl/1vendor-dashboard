@@ -11,6 +11,7 @@ import {
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { useAppReadiness } from '../lib/appReadiness';
+import { ApiError } from '../lib/api/errors';
 import { getCurrentVendorContext, onSessionReset, onVendorChange } from '../lib/auth';
 import { SettlementAutoApprovalHistory } from './SettlementAutoApprovalHistory';
 import {
@@ -21,6 +22,7 @@ import {
   getDatabaseHealth,
   getSettlementApproval,
   getSettlementApprovalReadiness,
+  getSettlementCancellationEligibility,
   getSettlementApprovalAudit,
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
@@ -35,6 +37,8 @@ import {
   type DatabaseHealthResponse,
   type SettlementApproval,
   type SettlementApprovalReadiness,
+  type SettlementCancellationEligibility,
+  type SettlementCancellationReason,
   type SettlementApprovalAudit,
   type SettlementApprovalLine,
   type SettlementApprovalStatus,
@@ -88,6 +92,48 @@ type SettlementReviewPanelAction = 'Review for approval' | 'Investigate' | 'View
 type SettlementReviewIssue = 'Refund' | 'Debt' | 'Shipping' | 'Support' | 'Hold' | 'Ready';
 type SettlementStatusFilter = 'all' | SettlementApprovalStatus;
 type SettlementQueueAction = 'approve' | 'cancel';
+
+type CancellationAssessment =
+  | { key: string; phase: 'loading' }
+  | { key: string; phase: 'resolved'; value: SettlementCancellationEligibility }
+  | { key: string; phase: 'error'; message: string; retryable: boolean; requestId: string | null };
+
+const CANCELLATION_REASON_TEXT: Record<SettlementCancellationReason, string> = {
+  ALREADY_CANCELLED: 'Settlement already cancelled.',
+  ACTIVE_DEDUCTION_COVERAGE: 'Cancellation unavailable: active financial deduction coverage exists.',
+  ACTIVE_COMMISSION_INVOICE: 'Cancellation unavailable: an active commission invoice exists.',
+  PAID_PAYOUT: 'Cancellation unavailable: a linked payout has already been paid.',
+  CASHLESS_COMPLETED: 'Cancellation unavailable: the linked cashless payout is complete.',
+  LEGACY_LINEAGE_AMBIGUOUS: 'Cancellation cannot be verified because historical payout records require financial review.',
+  LEGACY_LINEAGE_INCONSISTENT: 'Cancellation cannot be verified because historical payout records require financial review.',
+  ACTIVE_CORRECTION_CREDIT_PAYOUT: 'Cancel the related correction-credit payout before cancelling this settlement.',
+  ACTIVE_CORRECTION_DEDUCTION_PAYOUT: 'Cancel the related correction-deduction payout before cancelling this settlement.',
+};
+
+function isCancellationAssessment(value: unknown, id: string, vendorId: string, status: SettlementApprovalStatus):
+  value is SettlementCancellationEligibility {
+  if (!value || typeof value !== 'object') return false;
+  const result = value as Partial<SettlementCancellationEligibility>;
+  if (result.ok !== true || result.writesPerformed !== false || result.settlementApprovalId !== id ||
+      result.vendorId !== vendorId || result.settlementStatus !== status ||
+      typeof result.assessedAt !== 'string' || !Number.isFinite(Date.parse(result.assessedAt))) return false;
+  if (result.state === 'eligible') return result.reason === null;
+  if (result.state !== 'blocked' && result.state !== 'unknown') return false;
+  return typeof result.reason === 'string' &&
+    Object.prototype.hasOwnProperty.call(CANCELLATION_REASON_TEXT, result.reason);
+}
+
+function cancellationRequestError(error: unknown) {
+  const status = error instanceof ApiError ? error.status : undefined;
+  const requestId = error instanceof ApiError ? error.diagnostics?.requestId ?? null : null;
+  if (status === 401 || status === 403) {
+    return { message: 'Cancellation eligibility requires an authorized Admin session.', retryable: false, requestId };
+  }
+  if (status === 400 || status === 404) {
+    return { message: 'Cancellation eligibility could not be verified for this settlement and Vendor.', retryable: false, requestId };
+  }
+  return { message: 'Cancellation eligibility could not be verified. No cancellation was performed.', retryable: true, requestId };
+}
 
 type SettlementQueueSelection = {
   id: string;
@@ -1350,6 +1396,8 @@ function SettlementReviewQueue({
   actionListCurrent,
   renderedSelectionId,
   pendingSettlementAction,
+  cancellationAssessment,
+  onRetryCancellationAssessment,
   vendorId,
   vendorName,
   workflowTab,
@@ -1377,6 +1425,8 @@ function SettlementReviewQueue({
   actionListCurrent: boolean;
   renderedSelectionId: RefObject<string>;
   pendingSettlementAction: SettlementQueueAction | null;
+  cancellationAssessment: CancellationAssessment | null;
+  onRetryCancellationAssessment: () => void;
   vendorId: string;
   vendorName: string;
   workflowTab: SettlementReviewWorkflowTab;
@@ -1455,10 +1505,12 @@ function SettlementReviewQueue({
     selectedQueueApproval.status === 'draft' &&
     isReadyForSettlementApproval(selectedQueueApproval),
   );
-  const canCancelSelectedSettlement = Boolean(
+  const canShowCancelSelectedSettlement = Boolean(
     hasActionAuthority && selectedQueueApproval &&
     selectedQueueApproval.status !== 'cancelled',
   );
+  const canCancelSelectedSettlement = canShowCancelSelectedSettlement &&
+    cancellationAssessment?.phase === 'resolved' && cancellationAssessment.value.state === 'eligible';
 
 
   return (
@@ -1610,7 +1662,24 @@ function SettlementReviewQueue({
                 ) : null}
                 <MetadataGroup title="Next Action">
                   <MetadataRow label="Action" value={selectedPanelAction} />
-                  {canApproveSelectedSettlement || canCancelSelectedSettlement ? (
+                  {canShowCancelSelectedSettlement ? (
+                    <div aria-live="polite" aria-label="Cancellation eligibility">
+                      {!cancellationAssessment || cancellationAssessment.phase === 'loading'
+                        ? <p>Checking cancellation eligibility…</p> : null}
+                      {cancellationAssessment?.phase === 'resolved' ? (
+                        <p>{cancellationAssessment.value.state === 'eligible'
+                          ? 'Cancellation is currently available. The final action will revalidate financial records.'
+                          : CANCELLATION_REASON_TEXT[cancellationAssessment.value.reason!]}</p>
+                      ) : null}
+                      {cancellationAssessment?.phase === 'error' ? (
+                        <SectionErrorRetry title="Cancellation eligibility unavailable"
+                          description={`${cancellationAssessment.message}${cancellationAssessment.requestId
+                            ? ` Request ID: ${cancellationAssessment.requestId}` : ''}`}
+                          onRetry={cancellationAssessment.retryable ? onRetryCancellationAssessment : undefined} />
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {canApproveSelectedSettlement || canShowCancelSelectedSettlement ? (
                     <div className="settlement-panel-actions">
                       {canApproveSelectedSettlement ? (
                         <button
@@ -1622,12 +1691,12 @@ function SettlementReviewQueue({
                           Approve Settlement
                         </button>
                       ) : null}
-                      {canCancelSelectedSettlement ? (
+                      {canShowCancelSelectedSettlement ? (
                         <button
                           type="button"
                           className="button button-secondary"
                           onClick={() => onRequestSettlementAction('cancel', selectedQueueApproval)}
-                          disabled={pendingSettlementAction !== null}
+                          disabled={pendingSettlementAction !== null || !canCancelSelectedSettlement}
                         >
                           Cancel Settlement
                         </button>
@@ -2082,6 +2151,9 @@ export function AdminSettlementApprovalsPage() {
     setQueueSelection(selection);
   }
   const settlementPostInFlightRef = useRef(false);
+  const cancellationRequestVersionRef = useRef(0);
+  const cancellationKeyRef = useRef('');
+  const cancellationAssessmentRef = useRef<CancellationAssessment | null>(null);
   const settlementActionConfirmationRef = useRef<SettlementActionConfirmation | null>(null);
   const [approvalId, setApprovalId] = useState('');
   const [periodStart, setPeriodStart] = useState('');
@@ -2112,6 +2184,8 @@ export function AdminSettlementApprovalsPage() {
   const [outgoingInvoiceSyncPreviews, setOutgoingInvoiceSyncPreviews] = useState<Record<string, LogoOutgoingInvoiceSyncPreview>>({});
   const [busyAction, setBusyAction] = useState<ActionName | null>(null);
   const [settlementPostInFlight, setSettlementPostInFlight] = useState(false);
+  const [cancellationAssessment, setCancellationAssessment] = useState<CancellationAssessment | null>(null);
+  const [cancellationRetry, setCancellationRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [draftFailureSummary, setDraftFailureSummary] = useState<DraftFailureSummary | null>(null);
   const [invoiceRecordsWarning, setInvoiceRecordsWarning] = useState<string | null>(null);
@@ -2144,6 +2218,10 @@ export function AdminSettlementApprovalsPage() {
   }
 
   function selectVendorId(nextVendorId: string) {
+    cancellationRequestVersionRef.current += 1;
+    cancellationKeyRef.current = '';
+    cancellationAssessmentRef.current = null;
+    setCancellationAssessment(null);
     history.invalidate();
     setSettlementQueuePeriodFilter(null);
     setSelectedPeriodOption(null);
@@ -2346,6 +2424,67 @@ export function AdminSettlementApprovalsPage() {
   const selectedApprovalId = canonicalContextReady ? currentSelection?.id || linkedApprovalId : '';
   const visibleApproval = canonicalContextReady && approval?.vendorId === canonicalVendorId &&
     currentSelection?.state === 'verified' && approval.id === selectedApprovalId ? approval : null;
+  const queueCandidate = selectedApprovalId
+    ? (visibleApproval && currentSelection?.state === 'verified' ? visibleApproval : null)
+    : history.rows[0] ?? null;
+  const actionListCurrent = !history.error && !recentApprovalsLoading &&
+    listAuthorityVersionRef.current === listRequestVersionRef.current;
+  const actionSummary = queueCandidate && actionListCurrent && !history.loading && canonicalContextReady
+    ? visibleRecentApprovals.find((item) => item.id === queueCandidate.id &&
+      item.vendorId === canonicalVendorId && item.status === queueCandidate.status) ?? null : null;
+  const cancellationTarget = actionSummary?.status !== 'cancelled' ? actionSummary : null;
+  const cancellationKey = cancellationTarget
+    ? [canonicalVendorId, cancellationTarget.id, cancellationTarget.status, vendorContextVersionRef.current,
+      detailRequestVersionRef.current, listRequestVersionRef.current, historyRefresh, cancellationRetry].join(':') : '';
+  cancellationKeyRef.current = cancellationKey;
+  const visibleCancellationAssessment: CancellationAssessment | null = cancellationKey
+    ? cancellationAssessment?.key === cancellationKey ? cancellationAssessment : { key: cancellationKey, phase: 'loading' }
+    : null;
+  cancellationAssessmentRef.current = visibleCancellationAssessment;
+  useEffect(() => {
+    const requestVersion = ++cancellationRequestVersionRef.current;
+    if (!cancellationKey || !cancellationTarget) {
+      setCancellationAssessment(null);
+      return;
+    }
+    const controller = new AbortController();
+    const contextVersion = vendorContextVersionRef.current;
+    const id = cancellationTarget.id;
+    const status = cancellationTarget.status;
+    const requestVendorId = canonicalVendorId;
+    const isCurrent = () => !controller.signal.aborted && requestVersion === cancellationRequestVersionRef.current &&
+      cancellationKeyRef.current === cancellationKey && contextVersion === vendorContextVersionRef.current &&
+      vendorContextRef.current === requestVendorId && getCurrentVendorContext().vendorId.trim() === requestVendorId;
+    setCancellationAssessment({ key: cancellationKey, phase: 'loading' });
+    void getSettlementCancellationEligibility(id, requestVendorId, controller.signal)
+      .then((value) => {
+        if (!isCurrent()) return;
+        const next: CancellationAssessment = isCancellationAssessment(value, id, requestVendorId, status)
+          ? { key: cancellationKey, phase: 'resolved', value }
+          : { key: cancellationKey, phase: 'error', message: 'Cancellation eligibility response did not match the selected settlement.',
+            retryable: true, requestId: null };
+        cancellationAssessmentRef.current = next;
+        setCancellationAssessment(next);
+      })
+      .catch((requestError) => {
+        if (!isCurrent()) return;
+        const next: CancellationAssessment = { key: cancellationKey, phase: 'error',
+          ...cancellationRequestError(requestError) };
+        cancellationAssessmentRef.current = next;
+        setCancellationAssessment(next);
+      });
+    return () => { controller.abort(); };
+  }, [cancellationKey, cancellationTarget?.id, cancellationTarget?.status, canonicalVendorId]);
+  function retryCancellationAssessment() {
+    if (cancellationKey && cancellationKeyRef.current === cancellationKey) setCancellationRetry((value) => value + 1);
+  }
+  function hasAcceptedCancellationEligibility(id: string, vendor: string, status: SettlementApprovalStatus) {
+    const current = cancellationAssessmentRef.current;
+    return Boolean(cancellationKeyRef.current && current?.key === cancellationKeyRef.current &&
+      current.phase === 'resolved' && current.value.state === 'eligible' &&
+      current.value.settlementApprovalId === id && current.value.vendorId === vendor &&
+      current.value.settlementStatus === status);
+  }
   const activeInvoiceRecords = useMemo(
     () => invoiceRecords.filter((record) => record.status.toLowerCase() !== 'cancelled'),
     [invoiceRecords],
@@ -2962,7 +3101,8 @@ export function AdminSettlementApprovalsPage() {
       selected.vendorId !== selectedVendorId || currentSummary.status !== selected.status ||
       (action === 'approve'
         ? currentSummary.status !== 'draft' || !isReadyForSettlementApproval(currentSummary)
-        : currentSummary.status === 'cancelled')) {
+        : currentSummary.status === 'cancelled' ||
+          !hasAcceptedCancellationEligibility(selected.id, selectedVendorId, currentSummary.status))) {
       clearSettlementActionConfirmation();
       setError('Settlement target no longer matches the selected vendor. Select the settlement action again.');
       return;
@@ -2997,6 +3137,7 @@ export function AdminSettlementApprovalsPage() {
     settlementPostInFlightRef.current = true;
     setSettlementPostInFlight(true);
     let targetInvalid = false;
+    let targetInvalidMessage = 'Settlement target changed. Select the settlement action again.';
     const isCurrent = () => isCurrentSettlementActionTarget(target);
     try {
       const result = await runAction(
@@ -3008,6 +3149,36 @@ export function AdminSettlementApprovalsPage() {
             targetInvalid = true;
             throw new Error('Settlement target changed. Select the settlement action again.');
           }
+          if (target.type === 'cancel') {
+            let latest: SettlementCancellationEligibility;
+            try {
+              latest = await getSettlementCancellationEligibility(target.approvalId, target.vendorId);
+            } catch (requestError) {
+              if (isCurrent()) {
+                const next: CancellationAssessment = { key: cancellationKeyRef.current, phase: 'error',
+                  ...cancellationRequestError(requestError) };
+                cancellationAssessmentRef.current = next;
+                setCancellationAssessment(next);
+              }
+              targetInvalid = true;
+              targetInvalidMessage = cancellationRequestError(requestError).message;
+              throw new Error(targetInvalidMessage);
+            }
+            if (!isCurrent() || !isCancellationAssessment(latest, target.approvalId, target.vendorId, target.status)) {
+              targetInvalid = true;
+              targetInvalidMessage = 'Cancellation eligibility could not be verified for this settlement. No cancellation was performed.';
+              throw new Error(targetInvalidMessage);
+            }
+            const key = cancellationKeyRef.current;
+            const next: CancellationAssessment = { key, phase: 'resolved', value: latest };
+            cancellationAssessmentRef.current = next;
+            setCancellationAssessment(next);
+            if (latest.state !== 'eligible') {
+              targetInvalid = true;
+              targetInvalidMessage = CANCELLATION_REASON_TEXT[latest.reason!];
+              throw new Error(targetInvalidMessage);
+            }
+          }
           return target.type === 'approve'
             ? approveSettlementApproval(target.approvalId)
             : cancelSettlementApproval(target.approvalId);
@@ -3018,9 +3189,12 @@ export function AdminSettlementApprovalsPage() {
 
       if (targetInvalid && settlementActionConfirmationRef.current === target) {
         clearSettlementActionConfirmation();
-        setError('Settlement target changed. Select the settlement action again.');
+        setError(targetInvalidMessage);
       }
-      if (!result) return;
+      if (!result) {
+        if (target.type === 'cancel' && !targetInvalid && isCurrent()) setCancellationRetry((value) => value + 1);
+        return;
+      }
       if (result.id !== target.approvalId || result.vendorId !== target.vendorId) {
         if (isCurrent()) {
           clearSettlementActionConfirmation();
@@ -3466,13 +3640,15 @@ export function AdminSettlementApprovalsPage() {
         activeApprovalId={selectedApprovalId}
         selectedApprovalDetail={visibleApproval}
         explicitTargetVerified={currentSelection?.state === 'verified'}
-        actionListCurrent={!history.error && !recentApprovalsLoading && listAuthorityVersionRef.current === listRequestVersionRef.current}
+        actionListCurrent={actionListCurrent}
         renderedSelectionId={selectedQueueApprovalIdRef}
         pendingSettlementAction={
           settlementPostInFlight
             ? settlementActionConfirmation?.type ?? 'approve'
             : (busyAction === 'approve' || busyAction === 'cancel' ? busyAction : null)
         }
+        cancellationAssessment={visibleCancellationAssessment}
+        onRetryCancellationAssessment={retryCancellationAssessment}
         vendorId={canonicalVendorId}
         vendorName={appReadiness.currentVendor.vendorName}
         workflowTab={settlementWorkflowTab}
