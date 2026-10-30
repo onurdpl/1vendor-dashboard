@@ -61,16 +61,39 @@ jobs:
       - name: Test isolated PostgreSQL 18 settlement provenance and finance authority
         run: |
           set -euo pipefail
+          cleanup005b() {
+            local outcome=$?
+            trap - EXIT
+            if [ "${created005b:-0}" = 1 ]; then
+              local identity
+              identity="$(PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -XAt -v ON_ERROR_STOP=1 -c "SELECT pg_get_userbyid(datdba) || '|' || (pg_control_system()).system_identifier::text || '|' || shobj_description(oid, 'pg_database') FROM pg_database WHERE datname='fin_paid_cancel_005b_validation'")" || exit 1
+              if [ "$identity" != "postgres|$cluster|fin-auto-ci:$proof" ]; then
+                echo '005B cleanup identity/proof mismatch; refusing deletion.'
+                exit 1
+              fi
+              PGPASSWORD=postgres dropdb -h 127.0.0.1 -U postgres fin_paid_cancel_005b_validation || exit 1
+              local remaining
+              remaining="$(PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='fin_paid_cancel_005b_validation'")" || exit 1
+              [ "$remaining" = 0 ] || exit 1
+              echo '005B cleanup verified: disposable database absent.'
+            fi
+            return "$outcome"
+          }
           while read -r db gate file; do
+            if [ "$db" = fin_paid_cancel_005b_validation ]; then
+              created005b=0
+              trap cleanup005b EXIT
+            fi
             PGPASSWORD=postgres createdb --host=127.0.0.1 --username=postgres \
               --template=vendor_dashboard_pg18_bootstrap "$db"
+            if [ "$db" = fin_paid_cancel_005b_validation ]; then created005b=1; fi
             url="postgresql://postgres:postgres@127.0.0.1:5432/$db?schema=public"
             report="$RUNNER_TEMP/$db-pg18-vitest.json"
             proof=""
             cluster=""
             a2Env=()
             case "$db" in
-              fin_auto_f03f04_ci_validation|fin_auto_f06_ci_validation|admin_password_reset_ci_validation|a2_vendor_directory_ci_validation)
+              fin_auto_f03f04_ci_validation|fin_auto_f06_ci_validation|admin_password_reset_ci_validation|a2_vendor_directory_ci_validation|fin_paid_cancel_005b_validation)
                 proof="$(openssl rand -hex 32)"
                 cluster="$(PGPASSWORD=postgres psql --host=127.0.0.1 --username=postgres --dbname=postgres --no-psqlrc --tuples-only --no-align --command='SELECT system_identifier FROM pg_control_system()')"
                 PGPASSWORD=postgres psql --host=127.0.0.1 --username=postgres --dbname=postgres --no-psqlrc --set=ON_ERROR_STOP=1 \
@@ -101,7 +124,18 @@ jobs:
                     assertions.length !== expected.length ||
                     !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
               }
+              if (file === "src/fin-paid-cancel-005b.postgres.test.ts") {
+                const assertions = r.testResults[0].assertionResults;
+                if (r.numTotalTests !== 25 || r.numPassedTests !== 25 ||
+                    !Array.isArray(assertions) || assertions.length !== 25 ||
+                    assertions.some((test) => test.status !== "passed")) process.exit(1);
+                console.log("005B verified: 25 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
+              }
             ' "$report" "$file"
+            if [ "$db" = fin_paid_cancel_005b_validation ]; then
+              cleanup005b
+              trap - EXIT
+            fi
           done <<'SUITES'
           settlement_utc_boundary_validation SETTLEMENT_UTC_BOUNDARY_TEST_DATABASE_ISOLATED src/settlement-schedule-utc-boundary.postgres.test.ts
           settlement_approval_readiness_validation SETTLEMENT_APPROVAL_READINESS_TEST_DATABASE_ISOLATED src/settlement-approval-readiness.postgres.test.ts
@@ -116,6 +150,7 @@ jobs:
           admin_password_reset_ci_validation ADMIN_PASSWORD_RESET_TEST_DATABASE_ISOLATED src/vendor-password-reset.postgres.test.ts
           r1_phase1_validation R1_PHASE1_TEST_DATABASE_ISOLATED src/r1-payout-offset-authority.postgres.test.ts
           a2_vendor_directory_ci_validation A2_DIRECTORY_PG_ISOLATED src/vendor-directory.postgres.test.ts
+          fin_paid_cancel_005b_validation FIN_PAID_CANCEL_005B_TEST_DATABASE_ISOLATED src/fin-paid-cancel-005b.postgres.test.ts
           SUITES
 
   build-and-test:

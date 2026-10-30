@@ -5,7 +5,8 @@ import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const url = process.env.TEST_DATABASE_URL?.trim();
 const databaseName = 'fin_paid_cancel_005b_validation';
-const suite = url || process.env.FIN_PAID_CANCEL_005B_TEST_DATABASE_ISOLATED === '1' ? describe : describe.skip;
+const isolated = process.env.FIN_PAID_CANCEL_005B_TEST_DATABASE_ISOLATED === '1';
+const suite = url || isolated ? describe : describe.skip;
 const expectedDirectory = process.env.FIN_PAID_CANCEL_005B_PG_DATA_DIRECTORY;
 const expectedSystemId = process.env.FIN_PAID_CANCEL_005B_PG_SYSTEM_ID;
 
@@ -26,22 +27,33 @@ suite('FIN-PAID-CANCEL-005B isolated PostgreSQL cancellation authority', () => {
   beforeAll(async () => {
     if (!url) throw new Error('005B requires TEST_DATABASE_URL when isolated test mode is enabled.');
     const target = new URL(url!);
+    const ciProof = process.env.FIN_AUTO_CI_DB_PROOF;
+    const ciClusterId = process.env.FIN_AUTO_CI_CLUSTER_ID;
+    const ciTarget = process.env.GITHUB_ACTIONS === 'true' && process.env.CI === 'true' &&
+      target.port === '5432' && target.username === 'postgres' && target.password === 'postgres' &&
+      process.env.FIN_AUTO_CI_PG_MAJOR === '18' && /^[a-f0-9]{64}$/.test(ciProof ?? '') &&
+      /^\d{15,25}$/.test(ciClusterId ?? '');
+    const localTarget = process.env.GITHUB_ACTIONS !== 'true' && process.env.CI !== 'true' &&
+      target.username === 'onur' && !target.password &&
+      expectedDirectory?.startsWith('/private/tmp/fin-paid-cancel-005b-pg18.') &&
+      /^\d{15,25}$/.test(expectedSystemId ?? '');
     if (process.env.FIN_PAID_CANCEL_005B_TEST_DATABASE_ISOLATED !== '1' ||
         target.protocol !== 'postgresql:' || target.hostname !== '127.0.0.1' ||
-        !target.port || target.username !== 'onur' || target.password ||
+        !target.port || target.hash ||
         target.pathname !== `/${databaseName}` || target.search !== '?schema=public' ||
-        !expectedDirectory?.startsWith('/private/tmp/fin-paid-cancel-005b-pg18.') ||
-        !/^\d{15,25}$/.test(expectedSystemId ?? '')) {
+        !(ciTarget || localTarget)) {
       throw new Error('005B refuses an unverified disposable local PostgreSQL target.');
     }
-    const serverPid = Number(readFileSync(`${expectedDirectory}/postmaster.pid`, 'utf8').split('\n')[0]);
-    const processCommand = execFileSync('ps', ['-p', String(serverPid), '-o', 'command='], { encoding: 'utf8' }).trim();
-    const listenerPids = execFileSync('lsof', ['-nP', '-t', `-iTCP:${target.port}`, '-sTCP:LISTEN'],
-      { encoding: 'utf8' }).trim().split('\n');
-    if (!Number.isInteger(serverPid) || !processCommand.includes('postgres -D ' + expectedDirectory) ||
-        !processCommand.includes(`-p ${target.port}`) || !processCommand.includes('-h 127.0.0.1') ||
-        !listenerPids.includes(String(serverPid))) {
-      throw new Error('005B refuses a localhost target without a matching local PostgreSQL server process.');
+    if (!ciTarget) {
+      const serverPid = Number(readFileSync(`${expectedDirectory}/postmaster.pid`, 'utf8').split('\n')[0]);
+      const processCommand = execFileSync('ps', ['-p', String(serverPid), '-o', 'command='], { encoding: 'utf8' }).trim();
+      const listenerPids = execFileSync('lsof', ['-nP', '-t', `-iTCP:${target.port}`, '-sTCP:LISTEN'],
+        { encoding: 'utf8' }).trim().split('\n');
+      if (!Number.isInteger(serverPid) || !processCommand.includes('postgres -D ' + expectedDirectory) ||
+          !processCommand.includes(`-p ${target.port}`) || !processCommand.includes('-h 127.0.0.1') ||
+          !listenerPids.includes(String(serverPid))) {
+        throw new Error('005B refuses a localhost target without a matching local PostgreSQL server process.');
+      }
     }
     const maintenanceUrl = new URL(url!);
     maintenanceUrl.pathname = '/postgres';
@@ -57,11 +69,21 @@ suite('FIN-PAID-CANCEL-005B isolated PostgreSQL cancellation authority', () => {
     const [local] = await db.$queryRawUnsafe<Array<{ database: string; username: string; address: string;
       port: number; directory: string; version: string; systemId: bigint }>>(identitySql);
     const [independent] = await maintenance.$queryRawUnsafe<Array<typeof local>>(identitySql);
-    expect({ ...local, systemId: String(local.systemId) }).toEqual({
-      database: databaseName, username: 'onur', address: '127.0.0.1',
-      port: Number(target.port), directory: expectedDirectory,
-      version: '180003', systemId: expectedSystemId,
-    });
+    if (ciTarget) {
+      expect(local).toMatchObject({ database: databaseName, username: 'postgres', port: 5432 });
+      expect(Math.floor(Number(local.version) / 10000)).toBe(18);
+      expect(String(local.systemId)).toBe(ciClusterId);
+      const [proof] = await db.$queryRawUnsafe<Array<{ owner: string; proof: string | null }>>(
+        `SELECT pg_get_userbyid(datdba) AS owner, shobj_description(oid, 'pg_database') AS proof
+         FROM pg_database WHERE datname = current_database()`);
+      expect(proof).toEqual({ owner: 'postgres', proof: `fin-auto-ci:${ciProof}` });
+    } else {
+      expect({ ...local, systemId: String(local.systemId) }).toEqual({
+        database: databaseName, username: 'onur', address: '127.0.0.1',
+        port: Number(target.port), directory: expectedDirectory,
+        version: '180003', systemId: expectedSystemId,
+      });
+    }
     expect({ ...independent, systemId: String(independent.systemId) }).toEqual({
       ...local, database: 'postgres', systemId: String(local.systemId),
     });
