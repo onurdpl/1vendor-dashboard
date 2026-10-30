@@ -4,6 +4,7 @@ const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
 const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
 const getSettlementWorkflowCountsMock = vi.hoisted(() => vi.fn());
+const assessSettlementCancellationEligibilityMock = vi.hoisted(() => vi.fn());
 const listSettlementPeriodMetadataMock = vi.hoisted(() => vi.fn());
 const listSettlementApprovalsForVendorMock = vi.hoisted(() => vi.fn());
 const approveSettlementApprovalMock = vi.hoisted(() => vi.fn());
@@ -36,6 +37,7 @@ vi.mock('../backend/src/modules/finance/finance-event-relink.service.js', () => 
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => ({
+  assessSettlementCancellationEligibility: assessSettlementCancellationEligibilityMock,
   listSettlementApprovalsForVendor: listSettlementApprovalsForVendorMock,
   listSettlementPeriodMetadata: listSettlementPeriodMetadataMock,
   getSettlementWorkflowCounts: getSettlementWorkflowCountsMock,
@@ -105,6 +107,7 @@ const { registerFinanceRoutes } = await import('../backend/src/modules/finance/f
 
 describe('finance event backfill route', () => {
   beforeEach(() => {
+    assessSettlementCancellationEligibilityMock.mockReset();
     listSettlementApprovalsForVendorMock.mockReset();
     listSettlementPeriodMetadataMock.mockReset();
     getSettlementWorkflowCountsMock.mockReset();
@@ -121,6 +124,38 @@ describe('finance event backfill route', () => {
     executeSettlementLogoCommissionInvoiceCreateMock.mockReset();
     previewSettlementLogoOutgoingInvoiceSyncMock.mockReset();
     persistSettlementLogoSalesInvoiceSyncMock.mockReset();
+  });
+
+  it('serves read-only cancellation eligibility only to Admin with an exact Vendor context', async () => {
+    const gets = new Map<string, { options: { preHandler: unknown[] }; handler: (req: unknown, reply: unknown) => Promise<unknown> }>();
+    const app = { get: vi.fn((path, options, handler) => gets.set(path, { options, handler })), put: vi.fn(), post: vi.fn() };
+    registerFinanceRoutes(app as never, {} as never);
+    const route = gets.get('/admin/finance/settlement-approvals/:id/cancellation-eligibility')!;
+    const reply = { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) };
+    expect(route.options.preHandler).toHaveLength(1);
+    for (const role of ['vendor', 'finance', 'support', undefined]) {
+      expect(await route.handler({ authUser: { role }, params: { id: 'approval-a' }, query: { vendorId: 'vendor-a' } }, reply))
+        .toMatchObject({ status: 403 });
+    }
+    expect(assessSettlementCancellationEligibilityMock).not.toHaveBeenCalled();
+    expect(await route.handler({ authUser: { role: 'admin' }, params: { id: 'approval-a' }, query: {} }, reply))
+      .toMatchObject({ status: 400 });
+    expect(await route.handler({ authUser: { role: 'admin' }, params: { id: ' ' }, query: { vendorId: 'vendor-a' } }, reply))
+      .toMatchObject({ status: 400 });
+    const blocked = { ok: true, writesPerformed: false, settlementApprovalId: 'approval-a',
+      vendorId: 'vendor-a', settlementStatus: 'approved', state: 'blocked', reason: 'PAID_PAYOUT',
+      assessedAt: '2026-10-30T00:00:00.000Z' };
+    assessSettlementCancellationEligibilityMock.mockResolvedValueOnce(blocked).mockResolvedValueOnce(null)
+      .mockRejectedValueOnce(new Error('database connection secret must not be exposed'));
+    expect(await route.handler({ authUser: { role: 'admin' }, params: { id: 'approval-a' },
+      query: { vendorId: 'vendor-a' } }, reply)).toEqual(blocked);
+    expect(assessSettlementCancellationEligibilityMock).toHaveBeenCalledWith('approval-a', 'vendor-a');
+    expect(await route.handler({ authUser: { role: 'admin' }, params: { id: 'approval-a' },
+      query: { vendorId: 'vendor-b' } }, reply)).toEqual({ status: 404,
+      body: { message: 'Settlement approval not found.' } });
+    expect(await route.handler({ authUser: { role: 'admin' }, params: { id: 'approval-a' },
+      query: { vendorId: 'vendor-a' } }, reply)).toEqual({ status: 503,
+      body: { message: 'Settlement cancellation eligibility could not be verified.' } });
   });
 
   it('serves workflow counts only to Admin with explicit Vendor and rejects table filters', async () => {

@@ -70,6 +70,7 @@ import {
 import { getFinanceEventBackfillPlan } from './finance-event-backfill-planner.service.js';
 import { getFinanceEventRelinkPlan, relinkExistingFinanceEvents } from './finance-event-relink.service.js';
 import {
+  assessSettlementCancellationEligibility,
   assessSettlementApprovalReadiness,
   approveSettlementApproval,
   cancelSettlementApproval,
@@ -1420,6 +1421,28 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           return reply.code(400).send({ message: error.message });
         }
         return reply.code(503).send({ message: 'Automatic approval history could not be loaded.' });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-approvals/:id/cancellation-eligibility',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+      const { id } = request.params as { id: string };
+      const vendorId = readOptionalQueryString(request.query, 'vendorId');
+      if (!id?.trim() || !vendorId) {
+        return reply.code(400).send({ message: 'Settlement ID and vendorId are required.' });
+      }
+      try {
+        const assessment = await assessSettlementCancellationEligibility(id, vendorId);
+        if (!assessment) return reply.code(404).send({ message: 'Settlement approval not found.' });
+        return assessment;
+      } catch {
+        return reply.code(503).send({ message: 'Settlement cancellation eligibility could not be verified.' });
       }
     },
   );

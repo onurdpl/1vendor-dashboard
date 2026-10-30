@@ -16,6 +16,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   settlementApprovalLine: {
     count: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
   },
   financialCorrectionCredit: {
@@ -70,6 +71,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const {
+  assessSettlementCancellationEligibility,
   assessSettlementApprovalReadiness,
   approveSettlementApproval,
   cancelSettlementApproval,
@@ -340,6 +342,7 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementApproval.findUnique.mockReset();
     prismaMock.settlementApproval.update.mockReset();
     prismaMock.settlementApprovalLine.count.mockReset();
+    prismaMock.settlementApprovalLine.findMany.mockReset();
     prismaMock.settlementApprovalLine.update.mockReset();
     prismaMock.financialCorrectionCredit.findMany.mockReset();
     prismaMock.financialCorrectionCredit.findMany.mockResolvedValue([]);
@@ -383,6 +386,131 @@ describe('settlement approval foundation', () => {
     prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
     prismaMock.financeIntegrityAlert.findMany.mockReset();
     prismaMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
+  });
+
+  describe('read-only cancellation eligibility', () => {
+    function noWrites() {
+      expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+      expect(prismaMock.financialCorrectionCreditSettlementLine.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.financialCorrectionDeductionSettlementLine.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.settlementRefundAdjustment.update).not.toHaveBeenCalled();
+      expect(prismaMock.settlementRefundAdjustmentApplication.update).not.toHaveBeenCalled();
+      expect(prismaMock.settlementRefundAdjustmentEvent.create).not.toHaveBeenCalled();
+    }
+    async function assess(status: 'DRAFT' | 'APPROVED' | 'CANCELLED' = 'APPROVED') {
+      prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status }));
+      const result = await assessSettlementCancellationEligibility('approval-1', 'vendor-a');
+      noWrites();
+      return result;
+    }
+
+    it.each(['DRAFT', 'APPROVED'] as const)('finds %s eligible when no guard applies', async (status) => {
+      expect(await assess(status)).toMatchObject({ ok: true, writesPerformed: false,
+        settlementApprovalId: 'approval-1', vendorId: 'vendor-a',
+        settlementStatus: status.toLowerCase(), state: 'eligible', reason: null });
+      expect(prismaMock.$transaction).toHaveBeenCalledWith(expect.any(Function),
+        { isolationLevel: 'RepeatableRead' });
+    });
+
+    it('blocks an already cancelled approval without payout reads', async () => {
+      expect(await assess('CANCELLED')).toMatchObject({ state: 'blocked', reason: 'ALREADY_CANCELLED' });
+      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [[{ id: 'paid', status: 'PAID', paidAt: new Date() }], 'PAID_PAYOUT'],
+      [[{ id: 'conflict', status: 'REVIEW', paidAt: new Date() }], 'PAID_PAYOUT'],
+      [[{ id: 'cashless', status: 'CASHLESS_COMPLETED', paidAt: null }], 'CASHLESS_COMPLETED'],
+      [[{ id: 'review', status: 'REVIEW', paidAt: null }, { id: 'paid', status: 'PAID', paidAt: null }], 'PAID_PAYOUT'],
+    ] as const)('blocks a direct terminal payout with reason %s', async (batches, reason) => {
+      prismaMock.$queryRaw.mockResolvedValueOnce(batches);
+      expect(await assess()).toMatchObject({ state: 'blocked', reason });
+    });
+
+    it.each(['DRAFT', 'REVIEW', 'CANCELLED', 'PAID_PLACEHOLDER'] as const)(
+      'does not infer payment from a %s payout without paidAt', async (status) => {
+        prismaMock.$queryRaw.mockResolvedValueOnce([{ id: 'unpaid', status, paidAt: null }]);
+        expect(await assess()).toMatchObject({ state: 'eligible', reason: null });
+      });
+
+    it('uses active deduction coverage before all later reasons', async () => {
+      prismaMock.financialCorrectionApprovedDeductionCoverage.findFirst.mockResolvedValueOnce({ id: 'coverage' });
+      prismaMock.$queryRaw.mockResolvedValueOnce([{ id: 'paid', status: 'PAID', paidAt: new Date() }]);
+      expect(await assess()).toMatchObject({ state: 'blocked', reason: 'ACTIVE_DEDUCTION_COVERAGE' });
+      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('uses the non-cancelled invoice guard before payout evidence', async () => {
+      prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1',
+        status: 'APPROVED', commissionInvoices: [{ id: 'invoice', status: 'PENDING' }] }));
+      expect(await assessSettlementCancellationEligibility('approval-1', 'vendor-a'))
+        .toMatchObject({ state: 'blocked', reason: 'ACTIVE_COMMISSION_INVOICE' });
+      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+      noWrites();
+    });
+
+    it.each([
+      ['correctionCreditLines', 'ACTIVE_CORRECTION_CREDIT_PAYOUT'],
+      ['correctionDeductionLines', 'ACTIVE_CORRECTION_DEDUCTION_PAYOUT'],
+    ] as const)('blocks an active %s payout', async (field, reason) => {
+      prismaMock.settlementApproval.findUnique.mockResolvedValue({ ...buildApproval({ id: 'approval-1', status: 'APPROVED' }),
+        [field]: [{ payoutLines: [{ status: 'ACTIVE', payoutBatch: { status: 'REVIEW' } }] }] });
+      expect(await assessSettlementCancellationEligibility('approval-1', 'vendor-a'))
+        .toMatchObject({ state: 'blocked', reason });
+      noWrites();
+    });
+
+    function legacyCandidate() {
+      return { settlementApprovalId: 'approval-1', lineType: 'SALE', financeLedgerEntryId: 'sale-1',
+        payableImpactMinor: 88000, settlementApproval: { status: 'APPROVED', vendorId: 'vendor-a', currency: 'TRY' },
+        financeLedgerEntry: { id: 'sale-1', vendorId: 'vendor-a', entryType: 'SALE' } };
+    }
+    function legacyPaid() {
+      prismaMock.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{
+        id: 'legacy-line', financeLedgerEntryId: 'sale-1', amountSnapshot: '880.00',
+        payoutVendorId: 'vendor-a', payoutCurrency: 'TRY', payoutStatus: 'PAID', paidAt: new Date(),
+      }]);
+    }
+    it('blocks a uniquely proven historical NULL-link PAID payout', async () => {
+      legacyPaid();
+      prismaMock.settlementApprovalLine.findMany.mockResolvedValueOnce([legacyCandidate()]);
+      expect(await assess()).toMatchObject({ state: 'blocked', reason: 'PAID_PAYOUT' });
+    });
+    it('identifies a uniquely proven historical NULL-link cashless completion', async () => {
+      prismaMock.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{
+        id: 'legacy-line', financeLedgerEntryId: 'sale-1', amountSnapshot: '880.00',
+        payoutVendorId: 'vendor-a', payoutCurrency: 'TRY', payoutStatus: 'CASHLESS_COMPLETED', paidAt: null,
+      }]);
+      prismaMock.settlementApprovalLine.findMany.mockResolvedValueOnce([legacyCandidate()]);
+      expect(await assess()).toMatchObject({ state: 'blocked', reason: 'CASHLESS_COMPLETED' });
+    });
+    it('reports ambiguous historical PAID lineage as unknown', async () => {
+      legacyPaid();
+      prismaMock.settlementApprovalLine.findMany.mockResolvedValueOnce([legacyCandidate(), legacyCandidate()]);
+      expect(await assess()).toMatchObject({ state: 'unknown', reason: 'LEGACY_LINEAGE_AMBIGUOUS' });
+    });
+    it('reports contradictory historical PAID amount as unknown', async () => {
+      legacyPaid();
+      prismaMock.settlementApprovalLine.findMany.mockResolvedValueOnce([{ ...legacyCandidate(), payableImpactMinor: 1 }]);
+      expect(await assess()).toMatchObject({ state: 'unknown', reason: 'LEGACY_LINEAGE_INCONSISTENT' });
+    });
+
+    it('returns no data for missing or other-Vendor settlement', async () => {
+      prismaMock.settlementApproval.findUnique.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(buildApproval({ id: 'approval-1', status: 'APPROVED' }));
+      expect(await assessSettlementCancellationEligibility('approval-1', 'vendor-a')).toBeNull();
+      expect(await assessSettlementCancellationEligibility('approval-1', 'vendor-b')).toBeNull();
+      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+      noWrites();
+    });
+
+    it('propagates a technical query failure rather than calling it PAID or eligible', async () => {
+      prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'APPROVED' }));
+      prismaMock.$queryRaw.mockRejectedValueOnce(new Error('database unavailable'));
+      await expect(assessSettlementCancellationEligibility('approval-1', 'vendor-a'))
+        .rejects.toThrow('database unavailable');
+      noWrites();
+    });
   });
 
   it('previews eligible settlement approval rows without writes', async () => {
