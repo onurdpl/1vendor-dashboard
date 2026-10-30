@@ -2314,20 +2314,45 @@ describe('Settlement Review queue cleanup', () => {
 
   it('shows cancel failures safely without closing the confirmation', async () => {
     const user = userEvent.setup();
+    const authority = deferred<SettlementApprovalListResponse>();
+    const browsing = deferred<SettlementHistoryPage>();
+    listSettlementApprovalsMock.mockReturnValue(authority.promise);
+    historyMock.mockReturnValue(browsing.promise);
     cancelSettlementApprovalMock.mockRejectedValue(new Error('Settlement approval cannot be cancelled because an active commission invoice record exists.'));
 
     renderPage();
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
     const queue = screen.getByLabelText('Settlement review queue');
-    await user.click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+    expect(within(queue).getByText('Loading recent approvals...')).toBeInTheDocument();
+    expect(within(queue).queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    // Calling the legacy loader does not establish browsing or action authority.
+    await act(async () => browsing.resolve({ ...recentApprovalsResponse, hasMore: false, nextCursor: null }));
+    await waitFor(() => expect(getQueueRows(queue)).toHaveLength(2));
+    expect(within(queue).queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    await act(async () => authority.resolve(recentApprovalsResponse));
+
+    const cancelButton = await within(queue).findByRole('button', { name: 'Cancel Settlement' });
+    expect(getQueueRows(queue)[0]).toHaveClass('op-row-selected');
+    expect(getQueueRows(queue)[0]).toHaveTextContent('Yalispor');
+    expect(getQueueRows(queue)[0]).toHaveTextContent('Gross TRY 2,200.00');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    await user.click(cancelButton);
 
     const dialog = screen.getByRole('dialog', { name: 'Cancel Settlement' });
+    expect(dialog).toHaveTextContent('Vendor: yalispor');
+    expect(dialog).toHaveTextContent(`Settlement: ${rawSettlementApprovalId}`);
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole('button', { name: 'Cancel Settlement' }));
 
-    await waitFor(() => expect(cancelSettlementApprovalMock).toHaveBeenCalledWith(rawSettlementApprovalId));
+    await waitFor(() => expect(cancelSettlementApprovalMock).toHaveBeenCalledExactlyOnceWith(rawSettlementApprovalId));
+    expect(getSettlementApprovalMock).toHaveBeenCalledExactlyOnceWith(rawSettlementApprovalId);
     expect(screen.getByText('Settlement approval cannot be cancelled because an active commission invoice record exists.')).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Cancel Settlement' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Cancel Settlement' })).toBe(dialog);
+    expect(dialog).toHaveTextContent('Vendor: yalispor');
+    expect(dialog).toHaveTextContent(`Settlement: ${rawSettlementApprovalId}`);
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    expect(approveSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
   it('disables settlement action buttons while a mutation is pending', async () => {
