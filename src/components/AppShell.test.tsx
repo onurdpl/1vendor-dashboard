@@ -7,6 +7,7 @@ import {
   clearAuthRestoreState,
   getAuthRestoreSnapshot,
   getCurrentUser,
+  getCurrentVendorContext,
   getToken,
   markAuthConfirmed,
   setCurrentVendorId,
@@ -150,6 +151,32 @@ afterEach(() => {
 });
 
 describe('AppShell workspace navigation', () => {
+  it('keeps Admin identity and full-width vendor controls after navigation in the intended order', async () => {
+    const user = userEvent.setup();
+    const longName = 'A long selected Vendor name that must remain within the Admin sidebar';
+    seedSession({ ...multiVendorAdminUser, vendorDetails: [
+      { vendorId: 'yalispor', vendorName: longName },
+      { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+    ] });
+    renderShell('/admin/operations');
+    const sidebar = screen.getByRole('navigation', { name: 'Admin tools' }).closest('aside')!;
+    const card = within(sidebar).getByText('Admin User').closest('.vendor-account-card')!;
+    expect(card.previousElementSibling).toBe(sidebar.querySelector('.nav-group'));
+    const vendor = within(sidebar).getByLabelText('Select vendor');
+    expect(vendor).toHaveClass('admin-workspace-select', 'admin-sidebar-vendor-select');
+    expect(within(vendor).getByRole('option', { name: longName })).toBeInTheDocument();
+    expect(vendor).toHaveValue('yalispor');
+    const workspace = within(sidebar).getByLabelText('Workspace');
+    const logout = within(sidebar).getByRole('button', { name: /Log out/i });
+    expect(vendor.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(workspace.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(sidebar).getAllByLabelText('Select vendor')).toHaveLength(1);
+    expect(within(sidebar).getAllByLabelText('Workspace')).toHaveLength(1);
+    expect(card.querySelector('.vendor-account-avatar')).toBeNull();
+    await user.selectOptions(vendor, 'demo-vendor-b');
+    expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-b');
+    expect(vendor).toHaveValue('demo-vendor-b');
+  });
   it.each(sharedWorkspaceRoles)('shows the canonical Support navigation for %s workspace users', (role) => {
     seedSession({
       ...vendorUser,

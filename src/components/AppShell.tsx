@@ -451,7 +451,25 @@ function ShellAccountCard({
 
   return (
     <div className="vendor-account-card shell-card">
-      {accountIdentity}
+      <div className="vendor-account-copy">
+        <strong>{context.currentUser?.name ?? accountLabel}</strong>
+        <span>{roleLabel}</span>
+      </div>
+      {showVendorSwitcher ? (
+        <label className="admin-workspace-select-label">
+          <span>Selected Vendor</span>
+          <select
+            className="admin-workspace-select admin-sidebar-vendor-select"
+            aria-label="Select vendor"
+            value={context.selectedVendorId}
+            onChange={(event) => context.handleVendorChange(event.target.value)}
+          >
+            {context.visibleVendors.map((vendor) => (
+              <option key={vendor.vendorId} value={vendor.vendorId}>{vendor.vendorName}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <AdminWorkspaceSwitcher context={context} />
       <button type="button" className="vendor-logout-button" onClick={context.handleLogout} disabled={context.logoutRequested}>
         <ShellIcon name="logout" />
