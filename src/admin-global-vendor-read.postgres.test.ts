@@ -169,6 +169,56 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     expect((await get('/orders?workflow=invalid', 'admin', vendorIds.a)).status).toBe(400);
   });
 
+  it('allows zero-membership Admin detail reads only for the explicitly assigned Vendor allocation', async () => {
+    expect(await db.userVendorAccess.count({ where: { userId: userIds.admin } })).toBe(0);
+    const a = await get('/orders/a2-test-allocation-a1', 'admin', vendorIds.a);
+    const b = await get('/orders/a2-test-allocation-b1', 'admin', vendorIds.b);
+    expect(a.status).toBe(200);
+    expect(a.body).toMatchObject({ id: 'a2-test-allocation-a1', vendorId: vendorIds.a, assignedVendorId: vendorIds.a });
+    expect(b.status).toBe(200);
+    expect(b.body).toMatchObject({ id: 'a2-test-allocation-b1', vendorId: vendorIds.b,
+      assignedVendorId: vendorIds.b, originalVendorId: vendorIds.a });
+    expect((await get('/orders/a2-test-allocation-b1', 'admin', vendorIds.a)).status).toBe(404);
+    expect((await get('/orders/a2-test-allocation-a1', 'admin', vendorIds.b)).status).toBe(404);
+    expect((await get('/orders/does-not-exist', 'admin', vendorIds.a)).status).toBe(404);
+    expect((await get('/orders/a2-test-allocation-a1', 'admin')).status).toBe(400);
+    expect((await get('/orders/a2-test-allocation-a1', 'admin', 'does-not-exist')).status).toBe(404);
+    expect((await get('/orders/a2-test-allocation-a1', 'vendorA', vendorIds.a)).status).toBe(200);
+    expect((await get('/orders/a2-test-allocation-b1', 'vendorA', vendorIds.a)).status).toBe(404);
+    expect((await get('/orders/a2-test-allocation-b1', 'vendorA', vendorIds.b)).status).toBe(403);
+  });
+
+  it('keeps two allocations of one Shopify order separate in Admin detail responses', async () => {
+    const orderId = 'a2-test-multi-vendor-order';
+    const allocationA = 'a2-test-multi-allocation-a';
+    const allocationB = 'a2-test-multi-allocation-b';
+    await db.shopifyOrder.create({ data: { id: orderId,
+      sourceShopifyOrderId: 'gid://shopify/Order/a2-multi', sourceShopifyOrderNumber: '#a2-multi' } });
+    try {
+      await db.vendorAllocation.createMany({ data: [
+        { id: allocationA, sourceShopifyOrderId: orderId, sourceShopifyOrderNumber: '#a2-multi',
+          originalVendorId: vendorIds.a, assignedVendorId: vendorIds.a, vendorInvoiceNumber: 'A-ONLY-INVOICE' },
+        { id: allocationB, sourceShopifyOrderId: orderId, sourceShopifyOrderNumber: '#a2-multi',
+          originalVendorId: vendorIds.b, assignedVendorId: vendorIds.b, vendorInvoiceNumber: 'B-ONLY-INVOICE' },
+      ] });
+      const a = await get(`/orders/${allocationA}`, 'admin', vendorIds.a);
+      const b = await get(`/orders/${allocationB}`, 'admin', vendorIds.b);
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      expect(a.body).toMatchObject({ id: allocationA, assignedVendorId: vendorIds.a,
+        orderSnapshot: { vendorInvoiceNumber: 'A-ONLY-INVOICE' } });
+      expect(b.body).toMatchObject({ id: allocationB, assignedVendorId: vendorIds.b,
+        orderSnapshot: { vendorInvoiceNumber: 'B-ONLY-INVOICE' } });
+      expect(JSON.stringify(a.body)).not.toContain('B-ONLY-INVOICE');
+      expect(JSON.stringify(b.body)).not.toContain('A-ONLY-INVOICE');
+      expect((await get(`/orders/${allocationB}`, 'admin', vendorIds.a)).status).toBe(404);
+      expect((await get(`/orders/${allocationA}`, 'admin', vendorIds.b)).status).toBe(404);
+    } finally {
+      await db.vendorAllocation.deleteMany({ where: { id: { in: [allocationA, allocationB] } } });
+      await db.shopifyOrder.delete({ where: { id: orderId } });
+    }
+  });
+
   it('VENDOR and scoped SUPPORT/FINANCE cannot obtain cross-Vendor Admin authority', async () => {
     for (const path of ['/dashboard/summary', '/orders', '/orders/workflow-summary']) {
       expect((await get(path, 'vendorA', vendorIds.a)).status).toBe(200);
