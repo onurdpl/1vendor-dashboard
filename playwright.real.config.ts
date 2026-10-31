@@ -9,6 +9,7 @@ const allowedSpecs = [
   'settlement-replacement.real.spec.ts',
   'r1-payout.real.spec.ts',
   'fin03-settlement-history.real.spec.ts',
+  'cancellation-eligibility.real.spec.ts',
 ];
 const selectedSpec = process.env.BROWSER_SMOKE_REAL_SPEC ?? allowedSpecs[0];
 if (!allowedSpecs.includes(selectedSpec)) {
