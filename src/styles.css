@@ -331,6 +331,20 @@ a:focus-visible {
   color: #f8fafc;
 }
 
+.admin-app-shell .sidebar .vendor-account-card {
+  margin-top: 0;
+  min-width: 0;
+}
+
+.admin-app-shell .sidebar > .nav-group {
+  margin-bottom: 0;
+}
+
+.admin-app-shell .sidebar .admin-sidebar-vendor-select {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .vendor-account-menu-root {
   position: relative;
   display: flex;
