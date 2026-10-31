@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -29,8 +29,10 @@ import {
   preparePayoutBatch,
 } from '../features/finance/api';
 import { useAppReadiness } from '../lib/appReadiness';
+import type { AppReadinessState } from '../lib/appReadiness';
+import { getCurrentVendorContext, onSessionReset, onVendorChange } from '../lib/auth';
 import { getPageReadinessState } from '../lib/pageReadiness';
-import type { FinanceDashboard, FinanceTransaction, SupportTicket, VendorDebtHistoryEvent } from '../lib/api/contracts';
+import type { FinanceDashboard, FinanceTransaction, SupportTicket, VendorDebtHistory, VendorDebtHistoryEvent } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
@@ -1622,31 +1624,79 @@ function VendorDebtDetailPanel({ event, currency, audience = 'admin' }: { event:
 }
 
 export function FinancePage() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
+  const [vendorGeneration, setVendorGeneration] = useState(0);
+  const vendorGenerationRef = useRef(0);
+
+  useEffect(() => {
+    const invalidate = () => {
+      vendorGenerationRef.current += 1;
+      setVendorGeneration(vendorGenerationRef.current);
+    };
+    const unsubscribeVendor = onVendorChange(invalidate);
+    const unsubscribeSession = onSessionReset(invalidate);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'vendor-dashboard.current-vendor-id' || event.key === null) invalidate();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      unsubscribeVendor();
+      unsubscribeSession();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  return <FinancePageContent
+    key={`${appReadiness.currentVendor.vendorId}:${vendorGeneration}`}
+    appReadiness={appReadiness}
+    vendorGeneration={vendorGeneration}
+    vendorGenerationRef={vendorGenerationRef}
+  />;
+}
+
+function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRef }: {
+  appReadiness: AppReadinessState;
+  vendorGeneration: number;
+  vendorGenerationRef: RefObject<number>;
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
   const pageReadiness = getPageReadinessState(appReadiness, {
     requiresVendorContext: true,
     currentVendorId: currentVendor.vendorId,
   });
-  const authContextReady = pageReadiness.ready;
-  const { data: finance, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
-    queryKeys.finance.summary(currentVendor.vendorId),
-    ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: authContextReady },
+  const isCurrentVendorContext = () =>
+    vendorGenerationRef.current === vendorGeneration &&
+    Boolean(currentVendor.vendorId) &&
+    getCurrentVendorContext().vendorId === currentVendor.vendorId;
+  const authContextReady = pageReadiness.ready && isCurrentVendorContext();
+  const financeResource = useQueryResource<FinanceDashboard>(
+    [...queryKeys.finance.summary(currentVendor.vendorId), vendorGeneration],
+    ({ signal }) => isCurrentVendorContext()
+      ? getFinanceDashboard({ vendorId: currentVendor.vendorId, signal })
+      : Promise.reject(new Error('Vendor context changed.')),
+    { enabled: authContextReady, placeholderData: () => undefined },
   );
+  const finance = isCurrentVendorContext() &&
+    (!financeResource.data?.profile?.vendorId || financeResource.data.profile.vendorId === currentVendor.vendorId)
+    ? financeResource.data : null;
+  const { isLoading, isError, error, diagnostics, refetch } = financeResource;
   const {
-    data: vendorDebtHistory,
+    data: debtHistoryData,
     isLoading: debtHistoryLoading,
     isError: debtHistoryError,
     error: debtHistoryErrorMessage,
     refetch: refetchVendorDebtHistory,
-  } = useQueryResource(
-    queryKeys.finance.vendorDebtHistory(currentVendor.vendorId),
-    ({ signal }) => getVendorDebtHistory({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: authContextReady },
+  } = useQueryResource<VendorDebtHistory>(
+    [...queryKeys.finance.vendorDebtHistory(currentVendor.vendorId), vendorGeneration],
+    ({ signal }) => isCurrentVendorContext()
+      ? getVendorDebtHistory({ vendorId: currentVendor.vendorId, signal })
+      : Promise.reject(new Error('Vendor context changed.')),
+    { enabled: authContextReady, placeholderData: () => undefined },
   );
+  const vendorDebtHistory = isCurrentVendorContext() && debtHistoryData?.vendorId === currentVendor.vendorId
+    ? debtHistoryData : null;
   const { data: supportTickets } = useQueryResource(
     currentUser?.role === 'admin' ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => (currentUser?.role === 'admin' ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
@@ -1654,11 +1704,15 @@ export function FinancePage() {
   );
   const latestR1Batch = finance?.payoutBatchSummary?.latestBatch;
   const hasR1Payment = latestR1Batch?.r1OffsetAmount && !isZeroCurrencyValue(latestR1Batch.r1OffsetAmount);
-  const { data: payoutOffsetObligations } = useQueryResource(
-    ['finance', 'payout-offset-obligations', currentVendor.vendorId],
-    ({ signal }) => getPayoutOffsetObligations({ signal }),
-    { enabled: authContextReady && Boolean(hasR1Payment) },
+  const { data: payoutOffsetObligationsData } = useQueryResource<Awaited<ReturnType<typeof getPayoutOffsetObligations>>>(
+    ['finance', 'payout-offset-obligations', currentVendor.vendorId, vendorGeneration],
+    ({ signal }) => isCurrentVendorContext()
+      ? getPayoutOffsetObligations({ signal })
+      : Promise.reject(new Error('Vendor context changed.')),
+    { enabled: authContextReady && Boolean(hasR1Payment), placeholderData: () => undefined },
   );
+  const payoutOffsetObligations = isCurrentVendorContext() && payoutOffsetObligationsData?.vendorId === currentVendor.vendorId
+    ? payoutOffsetObligationsData : null;
   const { message, tone, showFeedback } = useActionFeedback();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -1707,18 +1761,29 @@ export function FinancePage() {
   }
 
   const preparePayoutBatchMutation = useMutationAction(
-    () => preparePayoutBatch(currentVendor.vendorId),
+    () => {
+      if (!authContextReady || !isCurrentVendorContext() || !finance ||
+        ((finance.payoutBatchSummary?.eligibleRowCount ?? 0) === 0 &&
+          (finance.payoutBatchSummary?.eligibleCreditCount ?? 0) === 0)) {
+        return Promise.reject(new Error('Current vendor finance data is unavailable.'));
+      }
+      return preparePayoutBatch(currentVendor.vendorId);
+    },
     {
       invalidateQueryKeys: [
         queryKeys.finance.summary(currentVendor.vendorId),
         queryKeys.finance.vendorDebtHistory(currentVendor.vendorId),
       ],
       onSuccess: async (batch) => {
+        if (!isCurrentVendorContext()) return;
         await Promise.all([refetch(), refetchVendorDebtHistory()]);
+        if (!isCurrentVendorContext()) return;
         showFeedback(`Draft settlement payment review ${batch.id} prepared.`, 'success');
       },
-      onError: (mutationError) =>
-        showFeedback(mutationError instanceof Error ? mutationError.message : 'Draft review could not be prepared.', 'error'),
+      onError: (mutationError) => {
+        if (isCurrentVendorContext())
+          showFeedback(mutationError instanceof Error ? mutationError.message : 'Draft review could not be prepared.', 'error');
+      },
     },
   );
   const attachShippingCostMutation = useMutationAction(
@@ -1728,8 +1793,11 @@ export function FinancePage() {
       providerReference: string | null;
       shippingCost: number;
       shippingVatAmount: number | null;
-    }) =>
-      attachShippingCost({
+    }) => {
+      if (!authContextReady || !isCurrentVendorContext() || !finance?.transactions.some((record) => record.id === input.financeLedgerEntryId)) {
+        return Promise.reject(new Error('Current vendor finance record is unavailable.'));
+      }
+      return attachShippingCost({
         vendorId: currentVendor.vendorId,
         financeLedgerEntryId: input.financeLedgerEntryId,
         providerName: input.providerName,
@@ -1738,20 +1806,25 @@ export function FinancePage() {
         shippingVatAmount: input.shippingVatAmount,
         status: 'confirmed',
         sourceType: 'manual',
-      }),
+      });
+    },
     {
       invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async () => {
+        if (!isCurrentVendorContext()) return;
         await refetch();
+        if (!isCurrentVendorContext()) return;
         showFeedback('Shipping cost saved for future settlement context.', 'success');
       },
-      onError: (mutationError) =>
-        showFeedback(mutationError instanceof Error ? mutationError.message : 'Shipping cost could not be saved.', 'error'),
+      onError: (mutationError) => {
+        if (isCurrentVendorContext())
+          showFeedback(mutationError instanceof Error ? mutationError.message : 'Shipping cost could not be saved.', 'error');
+      },
     },
   );
   async function handleAttachShippingCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedRecord) {
+    if (!selectedRecord || !authContextReady || !isCurrentVendorContext()) {
       return;
     }
     const formData = new FormData(event.currentTarget);
@@ -2514,7 +2587,7 @@ export function FinancePage() {
                   <button
                     type="button"
                     className="button button-primary button-compact"
-                    disabled={preparePayoutBatchMutation.isPending || ((financeView.payoutBatchSummary?.eligibleRowCount ?? 0) === 0 && (financeView.payoutBatchSummary?.eligibleCreditCount ?? 0) === 0)}
+                    disabled={!authContextReady || !finance || preparePayoutBatchMutation.isPending || ((financeView.payoutBatchSummary?.eligibleRowCount ?? 0) === 0 && (financeView.payoutBatchSummary?.eligibleCreditCount ?? 0) === 0)}
                     onClick={() => preparePayoutBatchMutation.mutate(undefined)}
                   >
                     {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft review'}
