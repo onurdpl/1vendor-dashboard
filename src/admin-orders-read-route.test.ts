@@ -161,12 +161,56 @@ describe('Admin Orders read target isolation', () => {
     } finally { await app.close(); }
   });
 
-  it('leaves detail route on existing membership authorization', async () => {
+  it('allows a zero-membership Admin to read only the explicitly targeted Vendor allocation detail', async () => {
+    const app = appForTest();
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([]);
+    const details = [
+      { id: 'allocation-a', vendorId: vendorA.id, lineItems: [{ id: 'line-a' }] },
+      { id: 'allocation-b', vendorId: vendorB.id, lineItems: [{ id: 'line-b' }] },
+    ];
+    orderDetail.mockImplementation(async (vendorId: string, allocationId: string) =>
+      details.find(detail => detail.vendorId === vendorId && detail.id === allocationId) ?? null);
+    try {
+      for (const detail of details) {
+        const result = await app.inject({ method: 'GET', url: `/orders/${detail.id}`, headers: headers('admin', detail.vendorId) });
+        expect(result.statusCode).toBe(200);
+        expect(result.json()).toEqual(detail);
+        expect(orderDetail).toHaveBeenCalledWith(detail.vendorId, detail.id, {
+          includeShipmentProviderResponseSummary: true,
+          includeFinanceLedgerPreview: true,
+          includeAllocationFinanceSummary: true,
+        });
+      }
+      expect(prismaMock.userVendorAccess.findMany).not.toHaveBeenCalled();
+      expect((await app.inject({ method: 'GET', url: '/orders/allocation-b', headers: headers('admin', vendorA.id) })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'GET', url: '/orders/allocation-a', headers: headers('admin', vendorB.id) })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'GET', url: '/orders/missing', headers: headers('admin', vendorA.id) })).statusCode).toBe(404);
+    } finally { await app.close(); }
+  });
+
+  it('requires one valid explicit Admin Vendor target before reading order detail', async () => {
     const app = appForTest();
     try {
-      const result = await app.inject({ method: 'GET', url: '/orders/order-1', headers: headers('admin', vendorB.id) });
-      expect(result.statusCode).toBe(403);
+      for (const [target, status] of [[undefined, 400], ['', 400], ['vendor-a, vendor-b', 400], [['vendor-a', 'vendor-b'], 400], ['missing', 404]] as const) {
+        const result = await app.inject({ method: 'GET', url: '/orders/allocation-a', headers: headers('admin', target) });
+        expect(result.statusCode).toBe(status);
+      }
       expect(orderDetail).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it('preserves Vendor membership and scoped order detail access', async () => {
+    const app = appForTest();
+    orderDetail.mockImplementation(async (vendorId: string, allocationId: string) =>
+      vendorId === vendorA.id && allocationId === 'allocation-a' ? { id: allocationId, vendorId } : null);
+    try {
+      expect((await app.inject({ method: 'GET', url: '/orders/allocation-a', headers: headers('vendor', vendorA.id) })).json())
+        .toEqual({ id: 'allocation-a', vendorId: vendorA.id });
+      expect((await app.inject({ method: 'GET', url: '/orders/allocation-b', headers: headers('vendor', vendorA.id) })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'GET', url: '/orders/allocation-b', headers: headers('vendor', vendorB.id) })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'GET', url: '/orders/allocation-b', headers: headers('support', vendorB.id) })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'GET', url: '/orders/allocation-b', headers: headers('finance', vendorB.id) })).statusCode).toBe(403);
+      expect(prismaMock.vendor.findUnique).not.toHaveBeenCalled();
     } finally { await app.close(); }
   });
 });

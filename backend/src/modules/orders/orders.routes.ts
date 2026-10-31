@@ -154,7 +154,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   app.get<{ Params: { orderId: string } }>(
     '/orders/:orderId',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveOrdersReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
