@@ -1,16 +1,17 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from './FinancePage';
 import type { FinanceDashboard, FinanceTransaction, SupportTicket } from '../lib/api/contracts';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const getVendorDebtHistoryMock = vi.fn();
 const getPayoutOffsetObligationsMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
+const attachShippingCostMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
 
@@ -22,6 +23,7 @@ vi.mock('../features/finance/api', async () => {
     getVendorDebtHistory: (...args: unknown[]) => getVendorDebtHistoryMock(...args),
     getPayoutOffsetObligations: (...args: unknown[]) => getPayoutOffsetObligationsMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
+    attachShippingCost: (...args: unknown[]) => attachShippingCostMock(...args),
   };
 });
 
@@ -201,6 +203,30 @@ const emptyVendorDebtHistory = {
     lastDebtActivityAt: null,
   },
   events: [],
+};
+
+const financeDashboardB: FinanceDashboard = {
+  ...financeDashboard,
+  summary: {
+    ...financeDashboard.summary,
+    grossSales: '$8,888.00',
+    totalRevenue: '$8,888.00',
+    availableBalance: '$7,777.00',
+    payoutEstimate: '$7,777.00',
+  },
+  payoutBatchSummary: {
+    ...financeDashboard.payoutBatchSummary!,
+    eligibleNetAmount: '$7,777.00',
+    latestBatch: { ...financeDashboard.payoutBatchSummary!.latestBatch!, id: 'batch-demo-vendor-b', vendorId: 'demo-vendor-b', netAmount: '$7,777.00' },
+  },
+  profile: { ...financeDashboard.profile!, vendorId: 'demo-vendor-b' },
+  transactions: [{ ...financeDashboard.transactions[0], id: 'ledger-vendor-b', description: 'Vendor B sale', amount: '$8,888.00' }],
+};
+
+const vendorDebtHistoryB = {
+  ...emptyVendorDebtHistory,
+  vendorId: 'demo-vendor-b',
+  summary: { ...emptyVendorDebtHistory.summary, outstandingDebtMinor: 88800 },
 };
 
 const vendorDebtHistory = {
@@ -399,6 +425,11 @@ function renderFinanceOverviewPage(initialEntries = ['/finance']) {
   );
 }
 
+function showFinanceTransactions() {
+  const tab = screen.getByRole('tab', { name: 'Transactions' });
+  if (tab.getAttribute('aria-selected') !== 'true') fireEvent.click(tab);
+}
+
 function setVendorFinanceUser() {
   setCurrentUser({
     email: 'vendor@demo.com',
@@ -479,6 +510,7 @@ describe('FinancePage control center', () => {
       availableAfterReservationsRefundAmount: '0.00', availableAfterReservationsDebtAmount: '0.00',
       reasons: [], writesPerformed: false });
     preparePayoutBatchMock.mockReset();
+    attachShippingCostMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
     listVendorSupportTicketsMock.mockReset();
@@ -3508,6 +3540,170 @@ describe('FinancePage control center', () => {
     expect((await screen.findAllByText('-$125.00')).length).toBeGreaterThan(0);
     expect(screen.getByText('Salt okunur tahmini ödeme')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
+  });
+
+  it('hides A amounts, rows and debt while B loads, then displays only B', async () => {
+    const pendingB = deferred<FinanceDashboard>();
+    const pendingDebtB = deferred<typeof vendorDebtHistoryB>();
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => vendorId === 'demo-vendor-b' ? pendingB.promise : Promise.resolve(financeDashboard));
+    getVendorDebtHistoryMock.mockImplementation(({ vendorId }: { vendorId: string }) =>
+      vendorId === 'demo-vendor-b' ? pendingDebtB.promise : Promise.resolve(vendorDebtHistory));
+
+    const { container } = renderFinancePage();
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('$3,059.10'));
+    expect(screen.getAllByText('Debt Offset Applied').length).toBeGreaterThan(0);
+    expect(container.querySelector('.finance-op-table')).toHaveTextContent('$3,399.00');
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    showFinanceTransactions();
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-b' }));
+    expect(screen.getByLabelText('Settlement')).not.toHaveTextContent('$3,059.10');
+    expect(screen.queryByText('Debt Offset Applied')).not.toBeInTheDocument();
+    expect(screen.queryByText('$3,059.10')).not.toBeInTheDocument();
+    expect(container.querySelector('.finance-op-table')).not.toHaveTextContent('$3,399.00');
+    expect(container.querySelector('.op-side-panel')).not.toHaveTextContent('$3,399.00');
+    expect(preparePayoutBatchMock).not.toHaveBeenCalled();
+    expect(attachShippingCostMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingB.resolve(financeDashboardB);
+      pendingDebtB.resolve(vendorDebtHistoryB);
+    });
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('$7,777.00'));
+    expect(screen.getByLabelText('Settlement')).not.toHaveTextContent('$3,059.10');
+    expect(container.querySelector('.finance-op-table')).toHaveTextContent('$8,888.00');
+    expect(screen.queryByText('Debt Offset Applied')).not.toBeInTheDocument();
+  });
+
+  it('does not restore A data when B fails or returns empty finance data', async () => {
+    const pendingB = deferred<FinanceDashboard>();
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => vendorId === 'demo-vendor-b' ? pendingB.promise : Promise.resolve(financeDashboard));
+    renderFinancePage();
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('$3,059.10'));
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    showFinanceTransactions();
+    await act(async () => pendingB.reject(new Error('B request failed')));
+    expect(screen.getByLabelText('Settlement')).not.toHaveTextContent('$3,059.10');
+    expect(screen.queryByText('$3,059.10')).not.toBeInTheDocument();
+    expect(preparePayoutBatchMock).not.toHaveBeenCalled();
+
+    act(() => setCurrentVendorId('demo-vendor-a'));
+    showFinanceTransactions();
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('$3,059.10'));
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => Promise.resolve(vendorId === 'demo-vendor-b'
+      ? { ...financeDashboardB, transactions: [], payoutBatchSummary: { ...financeDashboardB.payoutBatchSummary!, eligibleRowCount: 0, eligibleCreditCount: 0, latestBatch: null } }
+      : financeDashboard));
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    showFinanceTransactions();
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).not.toHaveTextContent('$3,059.10'));
+    expect(screen.queryByText('$3,059.10')).not.toBeInTheDocument();
+  });
+
+  it('rejects a first-generation A response after A to B to A switching', async () => {
+    const firstA = deferred<FinanceDashboard>();
+    let aRequests = 0;
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => {
+      if (vendorId === 'demo-vendor-b') return Promise.resolve(financeDashboardB);
+      aRequests += 1;
+      return aRequests === 1 ? firstA.promise : Promise.resolve(financeDashboard);
+    });
+    renderFinancePage();
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    showFinanceTransactions();
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('$7,777.00'));
+    act(() => setCurrentVendorId('demo-vendor-a'));
+    showFinanceTransactions();
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('$3,059.10'));
+    await act(async () => firstA.resolve({ ...financeDashboard, summary: { ...financeDashboard.summary, availableBalance: '$999,999.00' } }));
+    expect(screen.queryByText('$999,999.00')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Settlement')).not.toHaveTextContent('$7,777.00');
+  });
+
+  it('keeps an in-flight A payout POST bound to A and hides its late feedback under B', async () => {
+    const pendingPost = deferred<{ id: string }>();
+    preparePayoutBatchMock.mockReturnValue(pendingPost.promise);
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => Promise.resolve(vendorId === 'demo-vendor-b' ? financeDashboardB : financeDashboard));
+    renderFinancePage();
+    await waitFor(() => expect(screen.getByRole('button', { name: /prepare draft review/i })).toBeEnabled());
+    await userEvent.click(screen.getByRole('button', { name: /prepare draft review/i }));
+    expect(preparePayoutBatchMock).toHaveBeenCalledWith('demo-vendor-a');
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await act(async () => pendingPost.resolve({ id: 'batch-demo-vendor-a' }));
+    expect(screen.queryByText(/batch-demo-vendor-a prepared/i)).not.toBeInTheDocument();
+    expect(preparePayoutBatchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose A finance data after the session loses its Vendor target', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    renderFinancePage();
+    await waitFor(() => expect(screen.getByLabelText('Settlement')).toHaveTextContent('$3,059.10'));
+    act(() => setCurrentUser({
+      email: 'restricted@demo.com', name: 'Restricted Vendor', role: 'vendor',
+      vendorAccess: [], vendorDetails: [], canSwitchVendors: false, defaultVendorId: '',
+    }));
+    expect(screen.queryByText('$3,059.10')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
+    expect(getFinanceDashboardMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('submits shipping cost against the selected A ledger and never retargets its pending POST to B', async () => {
+    const shippingA: FinanceDashboard = {
+      ...financeDashboard,
+      transactions: [{
+        ...financeDashboard.transactions[0],
+        payoutCalculation: {
+          ...financeDashboard.transactions[0].payoutCalculation!,
+          shippingDeduction: '$80.00', shippingDeductionSource: 'external_provider',
+          shippingCostStatus: 'pending_provider_cost', shippingMode: 'external_provider', shippingApplied: false,
+        },
+      }],
+    };
+    const pendingPost = deferred<unknown>();
+    attachShippingCostMock.mockReturnValue(pendingPost.promise);
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => Promise.resolve(vendorId === 'demo-vendor-b' ? financeDashboardB : shippingA));
+    renderFinancePage();
+    expect(await screen.findByText('Shipping cost review required')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Cost' }), { target: { value: '80' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Save shipping cost' }));
+    expect(attachShippingCostMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a', financeLedgerEntryId: 'ledger-sale-recorded', shippingCost: 80,
+    }));
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    expect(screen.queryByRole('button', { name: 'Save shipping cost' })).not.toBeInTheDocument();
+    await act(async () => pendingPost.resolve({}));
+    expect(screen.queryByText('Shipping cost saved for future settlement context.')).not.toBeInTheDocument();
+    expect(attachShippingCostMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides A payout obligations during B loading and rejects a mismatched B obligation response', async () => {
+    const withOffset = (dashboard: FinanceDashboard, vendorId: string): FinanceDashboard => ({
+      ...dashboard,
+      payoutBatchSummary: { ...dashboard.payoutBatchSummary!, latestBatch: {
+        ...dashboard.payoutBatchSummary!.latestBatch!, vendorId, r1ApprovedPayable: '440.00',
+        r1OffsetAmount: '440.00', r1RefundOffsetAmount: '440.00', r1DebtOffsetAmount: '0.00',
+      } },
+    });
+    const pendingB = deferred<FinanceDashboard>();
+    const pendingObligationsB = deferred<Awaited<ReturnType<typeof import('../features/finance/api').getPayoutOffsetObligations>>>();
+    const obligationsA = {
+      vendorId: 'demo-vendor-a', currency: 'TRY', status: 'VERIFIED' as const,
+      outstandingRefundAmount: '440.00', outstandingDebtAmount: '0.00',
+      reservedRefundAmount: '0.00', reservedDebtAmount: '0.00',
+      availableAfterReservationsRefundAmount: '440.00', availableAfterReservationsDebtAmount: '0.00',
+    };
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => vendorId === 'demo-vendor-b'
+      ? pendingB.promise : Promise.resolve(withOffset(financeDashboard, 'demo-vendor-a')));
+    getPayoutOffsetObligationsMock.mockResolvedValueOnce(obligationsA).mockReturnValueOnce(pendingObligationsB.promise);
+    renderFinancePage();
+    await waitFor(() => expect(screen.getAllByText('440.00 / 0.00').length).toBeGreaterThan(0));
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    showFinanceTransactions();
+    expect(screen.queryByText('440.00 / 0.00')).not.toBeInTheDocument();
+    await act(async () => pendingB.resolve(withOffset(financeDashboardB, 'demo-vendor-b')));
+    await act(async () => pendingObligationsB.resolve(obligationsA));
+    expect(screen.queryByText('440.00 / 0.00')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
   });
 
 });
