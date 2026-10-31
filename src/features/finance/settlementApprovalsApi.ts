@@ -83,6 +83,28 @@ export function listAutoApprovalOperationalErrors(filters: { vendorId?: string; 
 
 export type SettlementApprovalStatus = 'draft' | 'approved' | 'cancelled';
 
+export type SettlementCancellationReason =
+  | 'ALREADY_CANCELLED'
+  | 'ACTIVE_DEDUCTION_COVERAGE'
+  | 'ACTIVE_COMMISSION_INVOICE'
+  | 'PAID_PAYOUT'
+  | 'CASHLESS_COMPLETED'
+  | 'LEGACY_LINEAGE_AMBIGUOUS'
+  | 'LEGACY_LINEAGE_INCONSISTENT'
+  | 'ACTIVE_CORRECTION_CREDIT_PAYOUT'
+  | 'ACTIVE_CORRECTION_DEDUCTION_PAYOUT';
+
+export type SettlementCancellationEligibility = {
+  ok: true;
+  writesPerformed: false;
+  settlementApprovalId: string;
+  vendorId: string;
+  settlementStatus: SettlementApprovalStatus;
+  state: 'eligible' | 'blocked' | 'unknown';
+  reason: SettlementCancellationReason | null;
+  assessedAt: string;
+};
+
 export type DatabaseHealthResponse = {
   ok?: boolean;
   status?: string;
@@ -754,6 +776,14 @@ export function getSettlementApproval(id: string) {
 
 export function getSettlementApprovalReadiness(id: string) {
   return apiClient.get<SettlementApprovalReadiness>(`/admin/finance/settlement-approvals/${encodeURIComponent(id)}/readiness`);
+}
+
+export function getSettlementCancellationEligibility(id: string, vendorId: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ vendorId });
+  return apiClient.get<SettlementCancellationEligibility>(
+    `/admin/finance/settlement-approvals/${encodeURIComponent(id)}/cancellation-eligibility?${query}`,
+    { signal },
+  );
 }
 
 export function approveSettlementApproval(id: string) {

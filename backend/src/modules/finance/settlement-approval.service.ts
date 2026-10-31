@@ -342,6 +342,28 @@ export type SettlementApprovalDto = {
   correctionDeductionLines: Array<{ id: string; deductionId: string; amountMinor: number; status: string }>;
 };
 
+export type SettlementCancellationEligibilityDto = {
+  ok: true;
+  writesPerformed: false;
+  settlementApprovalId: string;
+  vendorId: string;
+  settlementStatus: SettlementApprovalDto['status'];
+  state: 'eligible' | 'blocked' | 'unknown';
+  reason: SettlementCancellationReason | null;
+  assessedAt: string;
+};
+
+export type SettlementCancellationReason =
+  | 'ALREADY_CANCELLED'
+  | 'ACTIVE_DEDUCTION_COVERAGE'
+  | 'ACTIVE_COMMISSION_INVOICE'
+  | 'PAID_PAYOUT'
+  | 'CASHLESS_COMPLETED'
+  | 'LEGACY_LINEAGE_AMBIGUOUS'
+  | 'LEGACY_LINEAGE_INCONSISTENT'
+  | 'ACTIVE_CORRECTION_CREDIT_PAYOUT'
+  | 'ACTIVE_CORRECTION_DEDUCTION_PAYOUT';
+
 export type SettlementApprovalSummaryDto = {
   id: string;
   createdAt: string;
@@ -3177,6 +3199,177 @@ async function executeCanonicalSettlementApproval(input: {
   );
 }
 
+type CancellationGuardApproval = {
+  commissionInvoices: Array<{ id: string }>;
+  correctionCreditLines: Array<{ payoutLines: Array<{ status: string; payoutBatch: { status: string } }> }>;
+  correctionDeductionLines: Array<{ payoutLines: Array<{ status: string; payoutBatch: { status: string } }> }>;
+};
+
+const cancellationApprovalInclude = {
+  commissionInvoices: {
+    where: { status: { not: SettlementCommissionInvoiceStatus.CANCELLED } },
+    select: { id: true },
+  },
+  lines: true,
+  correctionCreditLines: { include: { payoutLines: { include: { payoutBatch: true } } } },
+  correctionDeductionLines: { include: { payoutLines: { include: { payoutBatch: true } } } },
+} satisfies Prisma.SettlementApprovalInclude;
+
+type CancellationGuardResult = {
+  state: 'blocked' | 'unknown';
+  reason: SettlementCancellationReason;
+  message: string;
+};
+
+function cancellationBlocker(
+  reason: SettlementCancellationReason,
+  message: string,
+  state: CancellationGuardResult['state'] = 'blocked',
+): CancellationGuardResult {
+  return { state, reason, message };
+}
+
+// The writer calls this only after its existing Vendor and settlement locks.
+// The read-only assessment uses the same predicates without taking payout locks.
+async function findFirstCancellationGuard(
+  tx: Prisma.TransactionClient,
+  existing: CancellationGuardApproval,
+  id: string,
+  lockPayouts: boolean,
+): Promise<CancellationGuardResult | null> {
+  const activeDeductionCoverage = await tx.financialCorrectionApprovedDeductionCoverage.findFirst({
+    where: { settlementApprovalId: id, status: 'ACTIVE' }, select: { id: true },
+  });
+  if (activeDeductionCoverage) return cancellationBlocker('ACTIVE_DEDUCTION_COVERAGE', 'ORIGIN_SETTLEMENT_CANCELLATION_BLOCKED');
+  if (existing.commissionInvoices.length > 0) {
+    return cancellationBlocker('ACTIVE_COMMISSION_INVOICE', 'Settlement approval cannot be cancelled because an active commission invoice record exists.');
+  }
+
+  const linkedPayoutBatches = await tx.$queryRaw<Array<{
+    id: string;
+    status: string;
+    paidAt: Date | null;
+  }>>(Prisma.sql`
+    SELECT payout_batch."id", payout_batch."status"::text AS "status", payout_batch."paidAt"
+    FROM "PayoutBatch" AS payout_batch
+    INNER JOIN "PayoutBatchLine" AS payout_line
+      ON payout_line."payoutBatchId" = payout_batch."id"
+    INNER JOIN "SettlementApprovalLine" AS settlement_line
+      ON settlement_line."id" = payout_line."settlementApprovalLineId"
+    WHERE settlement_line."settlementApprovalId" = ${id}
+    ORDER BY payout_batch."id"
+    ${lockPayouts ? Prisma.sql`FOR UPDATE OF payout_batch` : Prisma.empty}
+  `);
+  if (linkedPayoutBatches.some((batch) => batch.status === 'PAID' || batch.paidAt)) {
+    return cancellationBlocker('PAID_PAYOUT', 'Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
+  }
+  if (linkedPayoutBatches.some((batch) => batch.status === 'CASHLESS_COMPLETED')) {
+    return cancellationBlocker('CASHLESS_COMPLETED', 'Settlement approval cannot be cancelled because it is linked to a cashless completed payout batch.');
+  }
+  // Modern direct links remain authoritative. The writer locks historical
+  // NULL-link batches, including unpaid ones, against a Mark Paid race.
+  const legacyPayoutLines = await tx.$queryRaw<Array<{
+    id: string;
+    financeLedgerEntryId: string;
+    amountSnapshot: Prisma.Decimal;
+    payoutVendorId: string;
+    payoutCurrency: string;
+    payoutStatus: string;
+    paidAt: Date | null;
+  }>>(Prisma.sql`
+    SELECT payout_line."id", payout_line."financeLedgerEntryId", payout_line."amountSnapshot",
+      payout_batch."vendorId" AS "payoutVendorId", payout_batch."currency" AS "payoutCurrency",
+      payout_batch."status"::text AS "payoutStatus", payout_batch."paidAt"
+    FROM "PayoutBatch" AS payout_batch
+    INNER JOIN "PayoutBatchLine" AS payout_line
+      ON payout_line."payoutBatchId" = payout_batch."id"
+    INNER JOIN "SettlementApprovalLine" AS settlement_line
+      ON settlement_line."financeLedgerEntryId" = payout_line."financeLedgerEntryId"
+    WHERE settlement_line."settlementApprovalId" = ${id}
+      AND payout_line."settlementApprovalLineId" IS NULL
+    ORDER BY payout_batch."id", payout_line."id"
+    ${lockPayouts ? Prisma.sql`FOR UPDATE OF payout_batch` : Prisma.empty}
+  `);
+  for (const payoutLine of legacyPayoutLines) {
+    if (payoutLine.payoutStatus !== 'PAID' &&
+        payoutLine.payoutStatus !== 'CASHLESS_COMPLETED' && !payoutLine.paidAt) continue;
+    // Match the transition resolver: count all settlement-line candidates,
+    // including DRAFT/CANCELLED parents, before considering validity.
+    const candidates = await tx.settlementApprovalLine.findMany({
+      where: { financeLedgerEntryId: payoutLine.financeLedgerEntryId },
+      take: 2,
+      include: {
+        settlementApproval: { select: { id: true, vendorId: true, status: true, currency: true } },
+        financeLedgerEntry: { select: { id: true, vendorId: true, entryType: true } },
+      },
+    });
+    if (candidates.length !== 1) {
+      return cancellationBlocker('LEGACY_LINEAGE_AMBIGUOUS', 'Settlement approval cannot be cancelled because paid historical payout lineage is ambiguous.', 'unknown');
+    }
+    const candidate = candidates[0];
+    const ledgerType = normalizeType(candidate.financeLedgerEntry.entryType);
+    const lineType = candidate.lineType.toUpperCase();
+    const amountSnapshot = Number(payoutLine.amountSnapshot);
+    if (candidate.settlementApprovalId !== id || candidate.settlementApproval.status !== 'APPROVED' ||
+        candidate.settlementApproval.vendorId !== payoutLine.payoutVendorId ||
+        candidate.settlementApproval.currency !== payoutLine.payoutCurrency ||
+        candidate.financeLedgerEntryId !== payoutLine.financeLedgerEntryId ||
+        candidate.financeLedgerEntry.vendorId !== payoutLine.payoutVendorId ||
+        !((ledgerType === 'sale' && lineType === 'SALE') ||
+          (ledgerType === 'refund' && ['REFUND', 'REFUND_ADJUSTMENT'].includes(lineType))) ||
+        !Number.isFinite(amountSnapshot) ||
+        toMinorUnits(amountSnapshot) !== candidate.payableImpactMinor) {
+      return cancellationBlocker('LEGACY_LINEAGE_INCONSISTENT', 'Settlement approval cannot be cancelled because paid historical payout lineage is inconsistent.', 'unknown');
+    }
+    return cancellationBlocker(
+      payoutLine.payoutStatus === 'CASHLESS_COMPLETED' && !payoutLine.paidAt ? 'CASHLESS_COMPLETED' : 'PAID_PAYOUT',
+      'Settlement approval cannot be cancelled because it is linked to a paid payout batch.',
+    );
+  }
+  if (existing.correctionCreditLines.some((line) => line.payoutLines.some((payoutLine) =>
+    payoutLine.status !== 'CANCELLED' && payoutLine.payoutBatch.status !== 'CANCELLED'))) {
+    return cancellationBlocker('ACTIVE_CORRECTION_CREDIT_PAYOUT', 'Cancel the unpaid correction-credit payout before cancelling its settlement.');
+  }
+  if (existing.correctionDeductionLines.some((line) => line.payoutLines.some((payoutLine) =>
+    payoutLine.status !== 'CANCELLED' && payoutLine.payoutBatch.status !== 'CANCELLED'))) {
+    return cancellationBlocker('ACTIVE_CORRECTION_DEDUCTION_PAYOUT', 'Cancel the unpaid correction-deduction payout before cancelling its settlement.');
+  }
+
+  return null;
+}
+
+export async function assessSettlementCancellationEligibility(
+  id: string,
+  requestedVendorId: string,
+): Promise<SettlementCancellationEligibilityDto | null> {
+  const vendorId = requestedVendorId.trim();
+  if (!id.trim() || !vendorId) throw new Error('Settlement ID and vendorId are required.');
+
+  // This transaction only issues reads. It has no lock or write authority;
+  // cancellation must revalidate under the writer's Serializable locks.
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.settlementApproval.findUnique({
+      where: { id },
+      include: cancellationApprovalInclude,
+    });
+    if (!existing || existing.vendorId !== vendorId) return null;
+
+    const guard = existing.status === SettlementApprovalStatus.CANCELLED
+      ? cancellationBlocker('ALREADY_CANCELLED', 'Settlement approval is already cancelled.')
+      : await findFirstCancellationGuard(tx, existing, id, false);
+    return {
+      ok: true,
+      writesPerformed: false,
+      settlementApprovalId: id,
+      vendorId: existing.vendorId,
+      settlementStatus: existing.status.toLowerCase() as SettlementApprovalDto['status'],
+      state: guard?.state ?? 'eligible',
+      reason: guard?.reason ?? null,
+      assessedAt: new Date().toISOString(),
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+}
+
 export async function cancelSettlementApproval(
   id: string,
   cancelledBy: string | null,
@@ -3202,21 +3395,7 @@ export async function cancelSettlementApproval(
         where: {
           id,
         },
-        include: {
-          commissionInvoices: {
-            where: {
-              status: {
-                not: SettlementCommissionInvoiceStatus.CANCELLED,
-              },
-            },
-            select: {
-              id: true,
-            },
-          },
-          lines: true,
-          correctionCreditLines: { include: { payoutLines: { include: { payoutBatch: true } } } },
-          correctionDeductionLines: { include: { payoutLines: { include: { payoutBatch: true } } } },
-        },
+        include: cancellationApprovalInclude,
       });
       if (!existing) {
         throw new Error('Settlement approval could not be found.');
@@ -3228,103 +3407,8 @@ export async function cancelSettlementApproval(
         throw new Error('Settlement approval is already cancelled.');
       }
       // All cancellation guards and cancelledFromStatus use this locked read.
-      const activeDeductionCoverage = await tx.financialCorrectionApprovedDeductionCoverage.findFirst({
-        where: { settlementApprovalId: id, status: 'ACTIVE' }, select: { id: true },
-      });
-      if (activeDeductionCoverage) throw new Error('ORIGIN_SETTLEMENT_CANCELLATION_BLOCKED');
-      const activeCommissionInvoices = (existing as typeof existing & { commissionInvoices: Array<{ id: string }> })
-        .commissionInvoices;
-      if (activeCommissionInvoices.length > 0) {
-        throw new Error('Settlement approval cannot be cancelled because an active commission invoice record exists.');
-      }
-
-      const linkedPayoutBatches = await tx.$queryRaw<Array<{
-        id: string;
-        status: string;
-        paidAt: Date | null;
-      }>>(Prisma.sql`
-        SELECT payout_batch."id", payout_batch."status"::text AS "status", payout_batch."paidAt"
-        FROM "PayoutBatch" AS payout_batch
-        INNER JOIN "PayoutBatchLine" AS payout_line
-          ON payout_line."payoutBatchId" = payout_batch."id"
-        INNER JOIN "SettlementApprovalLine" AS settlement_line
-          ON settlement_line."id" = payout_line."settlementApprovalLineId"
-        WHERE settlement_line."settlementApprovalId" = ${id}
-        ORDER BY payout_batch."id"
-        FOR UPDATE OF payout_batch
-      `);
-      if (linkedPayoutBatches.some((batch) => batch.status === 'PAID' || batch.paidAt)) {
-        throw new Error('Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
-      }
-      if (linkedPayoutBatches.some((batch) => batch.status === 'CASHLESS_COMPLETED')) {
-        throw new Error('Settlement approval cannot be cancelled because it is linked to a cashless completed payout batch.');
-      }
-      // The direct-link query above is authoritative for modern payout lines.
-      // Lock potential historical NULL-link batches too, including unpaid ones,
-      // so Mark Paid and settlement cancellation cannot pass each other.
-      const legacyPayoutLines = await tx.$queryRaw<Array<{
-        id: string;
-        financeLedgerEntryId: string;
-        amountSnapshot: Prisma.Decimal;
-        payoutVendorId: string;
-        payoutCurrency: string;
-        payoutStatus: string;
-        paidAt: Date | null;
-      }>>(Prisma.sql`
-        SELECT payout_line."id", payout_line."financeLedgerEntryId", payout_line."amountSnapshot",
-          payout_batch."vendorId" AS "payoutVendorId", payout_batch."currency" AS "payoutCurrency",
-          payout_batch."status"::text AS "payoutStatus", payout_batch."paidAt"
-        FROM "PayoutBatch" AS payout_batch
-        INNER JOIN "PayoutBatchLine" AS payout_line
-          ON payout_line."payoutBatchId" = payout_batch."id"
-        INNER JOIN "SettlementApprovalLine" AS settlement_line
-          ON settlement_line."financeLedgerEntryId" = payout_line."financeLedgerEntryId"
-        WHERE settlement_line."settlementApprovalId" = ${id}
-          AND payout_line."settlementApprovalLineId" IS NULL
-        ORDER BY payout_batch."id", payout_line."id"
-        FOR UPDATE OF payout_batch
-      `);
-      for (const payoutLine of legacyPayoutLines) {
-        if (payoutLine.payoutStatus !== 'PAID' &&
-            payoutLine.payoutStatus !== 'CASHLESS_COMPLETED' && !payoutLine.paidAt) continue;
-        // Match the transition resolver: count all settlement-line candidates,
-        // including DRAFT/CANCELLED parents, before considering validity.
-        const candidates = await tx.settlementApprovalLine.findMany({
-          where: { financeLedgerEntryId: payoutLine.financeLedgerEntryId },
-          take: 2,
-          include: {
-            settlementApproval: { select: { id: true, vendorId: true, status: true, currency: true } },
-            financeLedgerEntry: { select: { id: true, vendorId: true, entryType: true } },
-          },
-        });
-        if (candidates.length !== 1) {
-          throw new Error('Settlement approval cannot be cancelled because paid historical payout lineage is ambiguous.');
-        }
-        const candidate = candidates[0];
-        const ledgerType = normalizeType(candidate.financeLedgerEntry.entryType);
-        const lineType = candidate.lineType.toUpperCase();
-        const amountSnapshot = Number(payoutLine.amountSnapshot);
-        if (candidate.settlementApprovalId !== id || candidate.settlementApproval.status !== 'APPROVED' ||
-            candidate.settlementApproval.vendorId !== payoutLine.payoutVendorId ||
-            candidate.settlementApproval.currency !== payoutLine.payoutCurrency ||
-            candidate.financeLedgerEntryId !== payoutLine.financeLedgerEntryId ||
-            candidate.financeLedgerEntry.vendorId !== payoutLine.payoutVendorId ||
-            !((ledgerType === 'sale' && lineType === 'SALE') ||
-              (ledgerType === 'refund' && ['REFUND', 'REFUND_ADJUSTMENT'].includes(lineType))) ||
-            !Number.isFinite(amountSnapshot) ||
-            toMinorUnits(amountSnapshot) !== candidate.payableImpactMinor) {
-          throw new Error('Settlement approval cannot be cancelled because paid historical payout lineage is inconsistent.');
-        }
-        throw new Error('Settlement approval cannot be cancelled because it is linked to a paid payout batch.');
-      }
-      if (existing.correctionCreditLines.some((line) => line.payoutLines.some((payoutLine) =>
-        payoutLine.status !== 'CANCELLED' && payoutLine.payoutBatch.status !== 'CANCELLED'))) {
-        throw new Error('Cancel the unpaid correction-credit payout before cancelling its settlement.');
-      }
-      if (existing.correctionDeductionLines.some((line) => line.payoutLines.some((payoutLine) =>
-        payoutLine.status !== 'CANCELLED' && payoutLine.payoutBatch.status !== 'CANCELLED'))) {
-        throw new Error('Cancel the unpaid correction-deduction payout before cancelling its settlement.');
-      }
+      const guard = await findFirstCancellationGuard(tx, existing, id, true);
+      if (guard) throw new Error(guard.message);
 
       const cancelled = await tx.settlementApproval.update({
         where: {

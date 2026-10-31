@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentVendorContext, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { ApiError } from '../lib/api/errors';
 import { AdminSettlementApprovalsPage } from './AdminSettlementApprovalsPage';
 import {
   approveSettlementApproval,
@@ -14,6 +15,7 @@ import {
   getDatabaseHealth,
   getSettlementApproval,
   getSettlementApprovalReadiness,
+  getSettlementCancellationEligibility,
   listAutoApprovalAttempts,
   listAutoApprovalOperationalErrors,
   listSettlementApprovals, listSettlementHistory, listSettlementPeriods, getSettlementWorkflowCounts,
@@ -23,6 +25,8 @@ import {
   type SettlementApprovalLine,
   type SettlementApprovalListResponse,
   type SettlementApprovalReadiness,
+  type SettlementCancellationEligibility,
+  type SettlementCancellationReason,
 } from '../features/finance/settlementApprovalsApi';
 
 vi.mock('../features/finance/settlementApprovalsApi', async () => {
@@ -38,6 +42,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     getDatabaseHealth: vi.fn(),
     getSettlementApproval: vi.fn(),
     getSettlementApprovalReadiness: vi.fn(),
+    getSettlementCancellationEligibility: vi.fn(),
     getSettlementApprovalAudit: vi.fn(),
     getSettlementCommissionInvoiceDiagnostics: vi.fn(),
     getSettlementCommissionInvoiceRecords: vi.fn(),
@@ -55,6 +60,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
 const getDatabaseHealthMock = vi.mocked(getDatabaseHealth);
 const getSettlementApprovalMock = vi.mocked(getSettlementApproval);
 const getSettlementApprovalReadinessMock = vi.mocked(getSettlementApprovalReadiness);
+const getSettlementCancellationEligibilityMock = vi.mocked(getSettlementCancellationEligibility);
 const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
 const approveSettlementApprovalMock = vi.mocked(approveSettlementApproval);
@@ -326,6 +332,13 @@ function linkedFixture(vendorId: string, id: string, gross: number, net: number,
   return { detail, summary };
 }
 
+function cancellationResult(id: string, vendorId: string, status: SettlementApproval['status'],
+  state: SettlementCancellationEligibility['state'] = 'eligible', reason: SettlementCancellationReason | null = null):
+  SettlementCancellationEligibility {
+  return { ok: true, writesPerformed: false, settlementApprovalId: id, vendorId,
+    settlementStatus: status, state, reason, assessedAt: '2026-10-30T00:00:00.000Z' };
+}
+
 function linkedList(vendorId: string, ...fixtures: ReturnType<typeof linkedFixture>[]): SettlementApprovalListResponse {
   return { ...recentApprovalsResponse, vendorId, approvals: fixtures.map((fixture) => fixture.summary) };
 }
@@ -380,6 +393,13 @@ describe('Settlement Review queue cleanup', () => {
     );
     getSettlementApprovalReadinessMock.mockResolvedValue(blockedReadiness);
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
+    getSettlementCancellationEligibilityMock.mockImplementation(async (id, vendorId) => {
+      const response = await legacyFixture(vendorId);
+      const row = response.approvals.find((item) => item.id === id);
+      return { ok: true, writesPerformed: false, settlementApprovalId: id, vendorId,
+        settlementStatus: row?.status ?? 'draft', state: 'eligible', reason: null,
+        assessedAt: '2026-10-30T00:00:00.000Z' } satisfies SettlementCancellationEligibility;
+    });
     historyMock.mockImplementation(async (vendor, query = {}) => {
       const response = await legacyFixture(vendor);
       return { ...response, approvals: response.approvals.filter(row =>
@@ -2387,6 +2407,168 @@ describe('Settlement Review queue cleanup', () => {
 
     resolveApprove(approvedDraftRefundApproval);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument());
+  });
+
+  it.each([
+    ['PAID_PAYOUT', 'blocked', 'Cancellation unavailable: a linked payout has already been paid.'],
+    ['CASHLESS_COMPLETED', 'blocked', 'Cancellation unavailable: the linked cashless payout is complete.'],
+    ['ACTIVE_COMMISSION_INVOICE', 'blocked', 'Cancellation unavailable: an active commission invoice exists.'],
+    ['ACTIVE_DEDUCTION_COVERAGE', 'blocked', 'Cancellation unavailable: active financial deduction coverage exists.'],
+    ['ACTIVE_CORRECTION_CREDIT_PAYOUT', 'blocked', 'Cancel the related correction-credit payout before cancelling this settlement.'],
+    ['ACTIVE_CORRECTION_DEDUCTION_PAYOUT', 'blocked', 'Cancel the related correction-deduction payout before cancelling this settlement.'],
+    ['LEGACY_LINEAGE_AMBIGUOUS', 'unknown', 'Cancellation cannot be verified because historical payout records require financial review.'],
+    ['LEGACY_LINEAGE_INCONSISTENT', 'unknown', 'Cancellation cannot be verified because historical payout records require financial review.'],
+  ] as const)('shows first authoritative %s reason and disables Cancel', async (reason, state, message) => {
+    getSettlementCancellationEligibilityMock.mockResolvedValue(
+      cancellationResult(rawSettlementApprovalId, 'yalispor', 'approved', state, reason),
+    );
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    const cancelButton = await within(queue).findByRole('button', { name: 'Cancel Settlement' });
+    expect(cancelButton).toBeDisabled();
+    expect(await within(queue).findByText(message)).toBeInTheDocument();
+    expect(cancelButton).toBeDisabled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('checks only the selected actionable settlement and enables Cancel on accepted eligibility', async () => {
+    const first = deferred<SettlementCancellationEligibility>();
+    getSettlementCancellationEligibilityMock.mockReturnValue(first.promise);
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    const cancelButton = await within(queue).findByRole('button', { name: 'Cancel Settlement' });
+    expect(cancelButton).toBeDisabled();
+    expect(within(queue).getByText('Checking cancellation eligibility…')).toBeInTheDocument();
+    expect(getSettlementCancellationEligibilityMock.mock.calls.map(([id]) => id)).toEqual([rawSettlementApprovalId]);
+    await act(async () => first.resolve(cancellationResult(rawSettlementApprovalId, 'yalispor', 'approved')));
+    expect(await within(queue).findByText('Cancellation is currently available. The final action will revalidate financial records.'))
+      .toBeInTheDocument();
+    expect(cancelButton).toBeEnabled();
+  });
+
+  it.each([
+    new ApiError('raw internal SQL', 'server', { status: 503, diagnostics: {
+      endpoint: 'eligibility', status: 503, requestId: 'safe-request-005c', hasAuthHeader: true,
+      hasVendorHeader: true, selectedVendorPresent: true, readinessState: 'ready',
+    } }),
+    new ApiError('Network unavailable', 'network'),
+  ])('keeps Cancel disabled on technical failure and allows safe Retry', async (failure) => {
+    getSettlementCancellationEligibilityMock.mockRejectedValueOnce(failure)
+      .mockResolvedValue(cancellationResult(rawSettlementApprovalId, 'yalispor', 'approved'));
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    const cancelButton = await within(queue).findByRole('button', { name: 'Cancel Settlement' });
+    expect(await within(queue).findByText(/Cancellation eligibility could not be verified. No cancellation was performed./))
+      .toBeInTheDocument();
+    expect(queue).not.toHaveTextContent('raw internal SQL');
+    if (failure.diagnostics?.requestId) expect(queue).toHaveTextContent('Request ID: safe-request-005c');
+    expect(cancelButton).toBeDisabled();
+    await userEvent.setup().click(within(queue).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(cancelButton).toBeEnabled());
+  });
+
+  it.each([401, 403, 404] as const)('does not mistake HTTP %s for a payment blocker', async (status) => {
+    getSettlementCancellationEligibilityMock.mockRejectedValue(new ApiError('opaque response', 'server', { status }));
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    const button = await within(queue).findByRole('button', { name: 'Cancel Settlement' });
+    expect(await within(queue).findByText(status === 404
+      ? 'Cancellation eligibility could not be verified for this settlement and Vendor.'
+      : 'Cancellation eligibility requires an authorized Admin session.')).toBeInTheDocument();
+    expect(button).toBeDisabled();
+    expect(within(queue).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(queue).not.toHaveTextContent('has already been paid');
+  });
+
+  it.each([
+    { settlementApprovalId: 'different', vendorId: 'yalispor', reason: null },
+    { settlementApprovalId: rawSettlementApprovalId, vendorId: 'sporjinal', reason: null },
+    { settlementApprovalId: rawSettlementApprovalId, vendorId: 'yalispor', reason: 'UNRECOGNIZED' },
+  ])('fails closed on malformed or mismatched assessment %#', async (override) => {
+    getSettlementCancellationEligibilityMock.mockResolvedValue({
+      ...cancellationResult(rawSettlementApprovalId, 'yalispor', 'approved'), ...override,
+    } as SettlementCancellationEligibility);
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    const button = await within(queue).findByRole('button', { name: 'Cancel Settlement' });
+    expect(await within(queue).findByText('Cancellation eligibility response did not match the selected settlement.'))
+      .toBeInTheDocument();
+    expect(button).toBeDisabled();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('fresh confirm-time PAID blocker prevents the financial POST', async () => {
+    getSettlementCancellationEligibilityMock.mockResolvedValueOnce(
+      cancellationResult(rawSettlementApprovalId, 'yalispor', 'approved'),
+    ).mockResolvedValue(cancellationResult(rawSettlementApprovalId, 'yalispor', 'approved', 'blocked', 'PAID_PAYOUT'));
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    const button = await within(queue).findByRole('button', { name: 'Cancel Settlement' });
+    await waitFor(() => expect(button).toBeEnabled());
+    const user = userEvent.setup();
+    await user.click(button);
+    expect(screen.getByRole('dialog', { name: 'Cancel Settlement' })).toHaveTextContent(`Settlement: ${rawSettlementApprovalId}`);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel Settlement' }));
+    expect(await within(queue).findByText('Cancellation unavailable: a linked payout has already been paid.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it('a historical off-authority deep link remains read-only even if its assessment would be eligible', async () => {
+    const older = linkedFixture('yalispor', 'old-approval', 65432, 32100, 'approved');
+    listSettlementApprovalsMock.mockResolvedValue(linkedList('yalispor', linkedFixture('yalispor', 'recent', 99999, 88888)));
+    getSettlementApprovalMock.mockResolvedValue(older.detail);
+    renderPage('/admin/finance/settlement-approvals?approvalId=old-approval');
+    const panel = await screen.findByLabelText('Settlement review detail panel');
+    await waitFor(() => expect(panel).toHaveTextContent('old-approval'));
+    expect(panel).toHaveTextContent('This record is read-only under the current action-authority data.');
+    expect(within(panel).queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    expect(getSettlementCancellationEligibilityMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a late cancellation assessment after switching Vendors', async () => {
+    fixedWorkspaceVendors();
+    const yali = linkedFixture('yalispor', 'yali-cancel', 11111, 7777);
+    const spor = linkedFixture('sporjinal', 'spor-cancel', 99999, 88888);
+    const oldAssessment = deferred<SettlementCancellationEligibility>();
+    listSettlementApprovalsMock.mockImplementation(async (vendor) => linkedList(vendor, vendor === 'yalispor' ? yali : spor));
+    getSettlementCancellationEligibilityMock.mockImplementation((id, vendor) => vendor === 'yalispor'
+      ? oldAssessment.promise : Promise.resolve(cancellationResult(id, vendor, 'approved', 'blocked', 'PAID_PAYOUT')));
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getSettlementCancellationEligibilityMock).toHaveBeenCalledWith('yali-cancel', 'yalispor', expect.any(AbortSignal)));
+    act(() => setCurrentVendorId('sporjinal'));
+    expect(queue).not.toHaveTextContent('yali-cancel');
+    expect(await within(queue).findByText('Cancellation unavailable: a linked payout has already been paid.')).toBeInTheDocument();
+    await act(async () => oldAssessment.resolve(cancellationResult('yali-cancel', 'yalispor', 'approved')));
+    expect(queue).toHaveTextContent('Gross TRY 999.99');
+    expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).toBeDisabled();
+    expect(queue).not.toHaveTextContent('Cancellation is currently available.');
+  });
+
+  it('rejects the first A assessment after an A to B to A context generation change', async () => {
+    fixedWorkspaceVendors();
+    const yali = linkedFixture('yalispor', 'yali-cancel', 11111, 7777);
+    const oldAssessment = deferred<SettlementCancellationEligibility>();
+    const newAssessment = deferred<SettlementCancellationEligibility>();
+    listSettlementApprovalsMock.mockImplementation(async (vendor) => linkedList(vendor,
+      vendor === 'yalispor' ? yali : linkedFixture('sporjinal', 'spor-cancel', 99999, 88888)));
+    getSettlementCancellationEligibilityMock.mockImplementation((id, vendor) => vendor === 'sporjinal'
+      ? Promise.resolve(cancellationResult(id, vendor, 'approved', 'blocked', 'PAID_PAYOUT'))
+      : getSettlementCancellationEligibilityMock.mock.calls.filter(([, value]) => value === 'yalispor').length === 1
+        ? oldAssessment.promise : newAssessment.promise);
+    renderPage();
+    const queue = screen.getByLabelText('Settlement review queue');
+    await waitFor(() => expect(getSettlementCancellationEligibilityMock).toHaveBeenCalledTimes(1));
+    act(() => setCurrentVendorId('sporjinal'));
+    await waitFor(() => expect(getSettlementCancellationEligibilityMock).toHaveBeenCalledWith('spor-cancel', 'sporjinal', expect.any(AbortSignal)));
+    act(() => setCurrentVendorId('yalispor'));
+    await waitFor(() => expect(getSettlementCancellationEligibilityMock.mock.calls.filter(([, id]) => id === 'yalispor')).toHaveLength(2));
+    await act(async () => oldAssessment.resolve(cancellationResult('yali-cancel', 'yalispor', 'approved')));
+    expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).toBeDisabled();
+    await act(async () => newAssessment.resolve(cancellationResult('yali-cancel', 'yalispor', 'approved', 'blocked', 'PAID_PAYOUT')));
+    expect(await within(queue).findByText('Cancellation unavailable: a linked payout has already been paid.')).toBeInTheDocument();
+    expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).toBeDisabled();
   });
 
   it('uses stable settlement ids for queue row keys', () => {

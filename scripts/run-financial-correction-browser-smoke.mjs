@@ -16,6 +16,9 @@ if (process.env.BROWSER_SMOKE_ALLOW_LOCAL_DB !== '1' || adminUrl.hostname !== 'l
 }
 
 const scenarios = [
+  { name: 'cancellation-eligibility', explicitOnly: true,
+    fixture: 'tests/e2e/fixtures/cancellation-eligibility.ts', reviewId: '005c',
+    spec: 'cancellation-eligibility.real.spec.ts', verify: 'tests/e2e/fixtures/verify-cancellation-eligibility.ts' },
   { name: 'fin03-history', explicitOnly: true,
     fixture: 'tests/e2e/fixtures/fin03-settlement-history.ts', reviewId: 'fin03-history',
     spec: 'fin03-settlement-history.real.spec.ts', verify: 'tests/e2e/fixtures/verify-fin03-settlement-history.ts' },
@@ -63,8 +66,8 @@ const scenarios = [
   },
 ];
 const requested = process.argv.slice(2);
-if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement|fin03-history)$/.test(requested[0]))) {
-  throw new Error('Use no arguments for all smokes, or --scenario=review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement.');
+if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement|fin03-history|cancellation-eligibility)$/.test(requested[0]))) {
+  throw new Error('Use no arguments for default smokes, or --scenario=review-credit|draft-deduction|paid-deduction|zero-net|approved-no-payout-deduction|settlement-replacement|fin03-history|cancellation-eligibility.');
 }
 const selectedScenarios = requested.length
   ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])
@@ -156,7 +159,7 @@ async function runScenario(scenario) {
   const targetUrl = new URL(adminUrl);
   targetUrl.pathname = `/${databaseName}`;
   targetUrl.searchParams.set('schema', 'public');
-  const fin03 = scenario.name === 'fin03-history';
+  const fin03 = scenario.name === 'fin03-history' || scenario.name === 'cancellation-eligibility';
   const proof = fin03 ? randomBytes(32).toString('hex') : '';
   const evidencePath = path.join(process.env.TMPDIR || '/tmp', `${databaseName}.fin03.json`);
   function inspect(database = 'postgres') {
@@ -242,6 +245,12 @@ async function runScenario(scenario) {
           throw new Error('FIN03 cleanup ownership/proof mismatch; refusing destructive cleanup.');
       }
       await run('dropdb', ['--force', `--maintenance-db=${adminUrl.toString()}`, databaseName]);
+      if (scenario.name === 'cancellation-eligibility') {
+        const remaining = execFileSync('psql', [`--dbname=${adminUrl}`, '-XAt', '-v', 'ON_ERROR_STOP=1',
+          '-c', `SELECT count(*) FROM pg_database WHERE datname='${databaseName}'`], { env: baseEnv, encoding: 'utf8' }).trim();
+        if (remaining !== '0') throw new Error('005C disposable database cleanup not verified.');
+        console.log('005C cleanup verified: database absent.');
+      }
       console.log(`Disposed database ${databaseName}.`);
     }
     }
