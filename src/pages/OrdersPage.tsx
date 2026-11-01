@@ -469,12 +469,12 @@ export function OrdersPage() {
       offset: ORDERS_PAGE_OFFSET,
       signal,
     }),
-    { enabled: authContextReady && Boolean(currentVendor.vendorId) },
+    { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
   );
   const workflowSummaryQuery = useQueryResource(
     queryKeys.orders.workflowSummary(currentVendor.vendorId),
     ({ signal }) => getVendorOrdersWorkflowSummary({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: authContextReady && Boolean(currentVendor.vendorId) },
+    { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
   );
   const ordersMissingVendorContext = appReadiness.status === 'missing_vendor_context';
   const ordersWaitingForVendorContext = !ordersMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
@@ -483,16 +483,23 @@ export function OrdersPage() {
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
   const [shippingFilter, setShippingFilter] = useState('all');
   const [quickFilter, setQuickFilter] = useState<OrderQuickFilter>('all');
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedOrderTarget, setSelectedOrderTarget] = useState<{ vendorId: string; id: string } | null>(null);
   const [labelActionFeedback, setLabelActionFeedback] = useState<LabelActionFeedback | null>(null);
   const activeWorkflowFilter = useMemo(() => getOrdersWorkflowFilter(workflowParam), [workflowParam]);
   const requestedOrderTargets = useMemo(() => getRequestedOrderTargets(searchParams), [searchParams]);
   const hasRequestedOrderTarget = requestedOrderTargets.length > 0;
   const requestedOrderTargetKey = requestedOrderTargets.join('|');
+  const visibleOrders = useMemo(() => authContextReady && currentVendor.vendorId
+    ? safeArray(orders)
+    : [], [authContextReady, currentVendor.vendorId, orders]);
 
   useEffect(() => {
-    setSelectedOrderId(null);
+    setSelectedOrderTarget(null);
   }, [requestedOrderTargetKey]);
+
+  useEffect(() => {
+    setSelectedOrderTarget(null);
+  }, [currentVendor.vendorId]);
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
@@ -539,7 +546,7 @@ export function OrdersPage() {
       return 3;
     };
 
-    return safeArray(orders).sort((a, b) => {
+    return [...visibleOrders].sort((a, b) => {
       const rankDiff = rank(a) - rank(b);
       if (rankDiff !== 0) {
         return rankDiff;
@@ -547,7 +554,7 @@ export function OrdersPage() {
 
       return getSafeTimestamp(b.date, 0) - getSafeTimestamp(a.date, 0);
     });
-  }, [orders]);
+  }, [visibleOrders]);
 
   const filteredOrders = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -593,7 +600,8 @@ export function OrdersPage() {
   }, [activeWorkflowFilter, currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, searchTerm, serverFilteredForwardWorkflow, shippingFilter, statusFilter]);
 
   const selectedOrderSummary = useMemo(() => {
-    const selectedByClick = selectedOrderId ? filteredOrders.find((order) => order.id === selectedOrderId) : null;
+    const selectedByClick = selectedOrderTarget?.vendorId === currentVendor.vendorId
+      ? filteredOrders.find((order) => order.id === selectedOrderTarget.id) : null;
     if (selectedByClick) {
       return selectedByClick;
     }
@@ -607,7 +615,7 @@ export function OrdersPage() {
       return null;
     }
     return filteredOrders[0];
-  }, [filteredOrders, hasRequestedOrderTarget, rankedOrders, requestedOrderTargets, selectedOrderId]);
+  }, [currentVendor.vendorId, filteredOrders, hasRequestedOrderTarget, rankedOrders, requestedOrderTargets, selectedOrderTarget]);
 
   const orderDetailQuery = useQueryResource(
     selectedOrderSummary
@@ -619,10 +627,12 @@ export function OrdersPage() {
       }
       return getOrder(selectedOrderSummary.id, { vendorId: currentVendor.vendorId, signal });
     },
-    { enabled: authContextReady && Boolean(selectedOrderSummary) },
+    { enabled: authContextReady && Boolean(selectedOrderSummary), placeholderData: () => undefined },
   );
 
-  const selectedOrder = selectedOrderSummary ? orderDetailQuery.data ?? selectedOrderSummary : null;
+  const verifiedOrderDetail = selectedOrderSummary && orderDetailQuery.data?.id === selectedOrderSummary.id
+    && orderDetailQuery.data.assignedVendorId === currentVendor.vendorId ? orderDetailQuery.data : null;
+  const selectedOrder = selectedOrderSummary ? verifiedOrderDetail ?? selectedOrderSummary : null;
   const selectedOrderContextId = selectedOrderSummary?.id ?? null;
   const selectedOrderActionContextKey = selectedOrderSummary
     ? buildOrderActionContextKey({
@@ -678,17 +688,17 @@ export function OrdersPage() {
   const isLabelActionPending = isCreatingShipmentLabel || isRetryingShipmentLabel;
 
   const summary = useMemo(() => {
-    const source = safeArray(orders);
+    const source = visibleOrders;
     return {
       blocked: source.filter((order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked').length,
     };
-  }, [orders]);
+  }, [visibleOrders]);
 
-  const workflowSummary = workflowSummaryQuery.data;
+  const workflowSummary = authContextReady && currentVendor.vendorId ? workflowSummaryQuery.data : null;
   const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number | string }> = [
     { key: 'all', label: 'All orders', count: workflowSummary?.all ?? '—' },
     { key: 'tracking_missing', label: 'Tracking missing', count: workflowSummary?.trackingMissing ?? '—' },
-    { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
+    { key: 'high_value', label: 'High value', count: visibleOrders.filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
   ];
   const workflowTabs: Array<{
     key: OrderWorkflowTabKey;
@@ -997,7 +1007,7 @@ export function OrdersPage() {
                     <OperationalTableRow
                       key={order.id}
                       selected={selectedOrderSummary?.id === order.id}
-                      onSelect={() => setSelectedOrderId(order.id)}
+                      onSelect={() => setSelectedOrderTarget({ vendorId: currentVendor.vendorId, id: order.id })}
                     >
                       <span className="orders-table-order-cell">
                         <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>

@@ -143,6 +143,109 @@ test.describe('operational browser smoke', () => {
     await expect(page.getByRole('heading', { name: '#1002', exact: true })).toHaveCount(0);
   });
 
+  test('Orders list and embedded detail hide Vendor A while Vendor B is delayed', async ({ page }) => {
+    await login(page);
+    await page.goto('/orders');
+    const rows = page.locator('.orders-op-table .op-table-row');
+    await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View details' })).toHaveAttribute('href', /ORD-A-/);
+    await page.addScriptTag({ type: 'module', content: `
+      import { runtimeServices } from '/src/services/runtime-services.ts';
+      const original = runtimeServices.orders.list;
+      runtimeServices.orders.list = (...args) => args[0] === 'demo-vendor-b'
+        ? new Promise((resolve) => { window.__releaseBug001Orders = () => {
+            window.__releaseBug001Orders = null; original(...args).then(resolve);
+          }; })
+        : original(...args);
+      window.__bug001OrdersReady = true;
+    ` });
+    await page.waitForFunction(() => (window as Window & { __bug001OrdersReady?: boolean }).__bug001OrdersReady);
+    await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Orders?: () => void }).__releaseBug001Orders === 'function');
+    await expect(rows.filter({ hasText: '#1002' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'View details' })).toHaveCount(0);
+    await page.evaluate(() => (window as Window & { __releaseBug001Orders?: () => void }).__releaseBug001Orders?.());
+    await expect(rows.filter({ hasText: '#2001' })).toBeVisible();
+    await expect(rows.filter({ hasText: '#1002' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'View details' })).toHaveAttribute('href', /ORD-B-/);
+
+    if (!await page.getByRole('menu', { name: 'Account menu' }).isVisible()) {
+      await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
+    }
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await expect(rows.filter({ hasText: '#2001' })).toHaveCount(0);
+    await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Orders?: () => void }).__releaseBug001Orders === 'function');
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await expect(rows.filter({ hasText: '#2001' })).toHaveCount(0);
+    await page.evaluate(() => (window as Window & { __releaseBug001Orders?: () => void }).__releaseBug001Orders?.());
+    await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
+    await expect(rows.filter({ hasText: '#2001' })).toHaveCount(0);
+  });
+
+  test('Returns list and embedded detail hide Vendor A while Vendor B is delayed', async ({ page }) => {
+    await login(page);
+    await page.goto('/returns');
+    const rows = page.locator('.returns-op-table .op-table-row');
+    await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
+    await page.addScriptTag({ type: 'module', content: `
+      import { runtimeServices } from '/src/services/runtime-services.ts';
+      const original = runtimeServices.returns.list;
+      runtimeServices.returns.list = (...args) => args[0] === 'demo-vendor-b'
+        ? new Promise((resolve) => { window.__releaseBug001Returns = () => {
+            window.__releaseBug001Returns = null; original(...args).then(resolve);
+          }; })
+        : original(...args);
+      window.__bug001ReturnsReady = true;
+    ` });
+    await page.waitForFunction(() => (window as Window & { __bug001ReturnsReady?: boolean }).__bug001ReturnsReady);
+    await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Returns?: () => void }).__releaseBug001Returns === 'function');
+    await expect(rows.filter({ hasText: '#1002' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Review return' })).toHaveCount(0);
+    await page.evaluate(() => (window as Window & { __releaseBug001Returns?: () => void }).__releaseBug001Returns?.());
+    await expect(rows.filter({ hasText: '#2002' })).toBeVisible();
+    await expect(rows.filter({ hasText: '#1002' })).toHaveCount(0);
+    if (!await page.getByRole('menu', { name: 'Account menu' }).isVisible()) {
+      await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
+    }
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await expect(rows.filter({ hasText: '#2002' })).toHaveCount(0);
+    await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Returns?: () => void }).__releaseBug001Returns === 'function');
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await expect(rows.filter({ hasText: '#2002' })).toHaveCount(0);
+    await page.evaluate(() => (window as Window & { __releaseBug001Returns?: () => void }).__releaseBug001Returns?.());
+    await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
+    await expect(rows.filter({ hasText: '#2002' })).toHaveCount(0);
+  });
+
+  test('a Vendor change in one tab hides prior Orders and Returns rows in another tab', async ({ page, context }) => {
+    await login(page);
+    await page.goto('/orders');
+    const orderRows = page.locator('.orders-op-table .op-table-row');
+    await expect(orderRows.filter({ hasText: '#1002' })).toBeVisible();
+
+    const returnsTab = await context.newPage();
+    await returnsTab.goto('/returns');
+    const returnRows = returnsTab.locator('.returns-op-table .op-table-row');
+    await expect(returnRows.filter({ hasText: '#1002' })).toBeVisible();
+
+    await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+
+    await expect(orderRows.filter({ hasText: '#1002' })).toHaveCount(0);
+    await expect(returnRows.filter({ hasText: '#1002' })).toHaveCount(0);
+    await expect(orderRows.filter({ hasText: '#2001' })).toBeVisible();
+    await expect(returnRows.filter({ hasText: '#2002' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View details' })).toHaveAttribute('href', /ORD-B-/);
+    await expect(returnsTab.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', /RET-B-/);
+  });
+
   test('admin Settings discards unsaved finance policy across A to B to A', async ({ page }) => {
     await login(page);
     await page.goto('/vendor/profile');

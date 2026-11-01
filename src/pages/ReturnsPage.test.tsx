@@ -5,7 +5,7 @@ import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnsPage } from './ReturnsPage';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
-import { clearToken, setCurrentUser, setToken } from '../lib/auth';
+import { clearToken, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
 const listReturnsMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<ReturnSummary[]>>();
 const getReturnMock = vi.fn<(returnId: string, options?: { vendorId?: string | null }) => Promise<ReturnDetail>>();
@@ -1001,7 +1001,7 @@ describe('ReturnsPage control center', () => {
 
   it('resolves table item names from nested row product data without selecting the row', async () => {
     listReturnsMock.mockResolvedValue([toSummary(nestedProductReturn)]);
-    getReturnMock.mockResolvedValue(pendingReturn);
+    getReturnMock.mockResolvedValue({ ...pendingReturn, id: nestedProductReturn.id });
 
     renderReturnsPage();
 
@@ -1283,5 +1283,50 @@ describe('ReturnsPage control center', () => {
 
     await screen.findAllByRole('heading', { name: /return requests/i });
     expect(screen.queryByText('Return shipment')).not.toBeInTheDocument();
+  });
+
+  it('hides prior vendor returns, summary and counts while the next vendor is loading', async () => {
+    setCurrentVendorId('demo-vendor-a');
+    const bReturn: ReturnDetail = { ...pendingReturn, id: 'RET-B-REQUEST-2002',
+      originalVendorId: 'demo-vendor-b', assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b',
+      sourceShopifyOrderId: 'gid://shopify/Order/2002', sourceShopifyOrderNumber: 2002,
+      relatedOrderId: 'ORD-B-2002', customer: 'Vendor B Customer' };
+    const bList = deferred<ReturnSummary[]>();
+    listReturnsMock.mockImplementation((options) => options?.vendorId === 'demo-vendor-b'
+      ? bList.promise : Promise.resolve([toSummary(pendingReturn)]));
+    getReturnMock.mockImplementation((id) => Promise.resolve(id === bReturn.id ? bReturn : pendingReturn));
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+    await table.findByText('#1001');
+    expect(screen.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', '/returns/RET-A-REQUEST-1001');
+    expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /All/ })).toHaveTextContent('1');
+
+    await act(async () => setCurrentVendorId('demo-vendor-b'));
+    expect(table.queryByText('#1001')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Review return' })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /All/ })).not.toHaveTextContent('1');
+    await act(async () => bList.resolve([toSummary(bReturn)]));
+    await table.findByText('#2002');
+    expect(table.queryByText('#1001')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', '/returns/RET-B-REQUEST-2002');
+  });
+
+  it('does not restore prior vendor returns after the next vendor fails and retries empty', async () => {
+    setCurrentVendorId('demo-vendor-a');
+    let bCalls = 0;
+    listReturnsMock.mockImplementation((options) => options?.vendorId === 'demo-vendor-b'
+      ? ++bCalls === 1 ? Promise.reject(new Error('B returns unavailable.')) : Promise.resolve([])
+      : Promise.resolve([toSummary(pendingReturn)]));
+    getReturnMock.mockResolvedValue(pendingReturn);
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+    await table.findByText('#1001');
+    await act(async () => setCurrentVendorId('demo-vendor-b'));
+    expect(await screen.findByText('Returns unavailable')).toBeInTheDocument();
+    expect(table.queryByText('#1001')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Review return' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('No returns match this view')).toBeInTheDocument();
+    expect(table.queryByText('#1001')).not.toBeInTheDocument();
   });
 });

@@ -684,7 +684,7 @@ export function ReturnsPage() {
   const { data: returns, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: authContextReady && Boolean(currentVendor.vendorId) },
+    { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
   );
   const returnsMissingVendorContext = appReadiness.status === 'missing_vendor_context';
   const returnsWaitingForVendorContext = !returnsMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
@@ -692,8 +692,11 @@ export function ReturnsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [vendorFilter, setVendorFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState<ReturnSourceFilter>('all');
-  const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
-  const [supportOpen, setSupportOpen] = useState(false);
+  const [selectedReturnTarget, setSelectedReturnTarget] = useState<{ vendorId: string; id: string } | null>(null);
+  const [supportTarget, setSupportTarget] = useState<{ vendorId: string; id: string } | null>(null);
+  const visibleReturns = useMemo(() => authContextReady && currentVendor.vendorId
+    ? safeArray(returns)
+    : [], [authContextReady, currentVendor.vendorId, returns]);
   const activeWorkflowFilter = useMemo(() => getReturnsWorkflowFilter(searchParams.get('workflow')), [searchParams]);
   const isAdmin = currentUser?.role === 'admin';
   const requestedReturnTarget =
@@ -712,8 +715,13 @@ export function ReturnsPage() {
     searchParams.get('order');
 
   useEffect(() => {
-    setSelectedReturnId(null);
+    setSelectedReturnTarget(null);
   }, [requestedReturnTarget]);
+
+  useEffect(() => {
+    setSelectedReturnTarget(null);
+    setSupportTarget(null);
+  }, [currentVendor.vendorId]);
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
@@ -751,7 +759,7 @@ export function ReturnsPage() {
 
   const filteredReturns = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    return safeArray(returns).filter((item) => {
+    return visibleReturns.filter((item) => {
       const matchesQuery =
         query.length === 0 ||
         [
@@ -820,14 +828,15 @@ export function ReturnsPage() {
       const matchesWorkflow = activeWorkflowFilter?.matches(item) ?? true;
       return matchesQuery && matchesStatus && matchesVendor && matchesSource && matchesWorkflow;
     });
-  }, [activeWorkflowFilter, effectiveSourceFilter, returns, searchTerm, statusFilter, vendorFilter]);
+  }, [activeWorkflowFilter, effectiveSourceFilter, visibleReturns, searchTerm, statusFilter, vendorFilter]);
 
   const selectedReturn = useMemo(() => {
-    const returnList = safeArray(returns);
+    const returnList = visibleReturns;
     if (!returnList.length) {
       return null;
     }
-    const selectedByClick = selectedReturnId ? returnList.find((item) => item.id === selectedReturnId) : null;
+    const selectedByClick = selectedReturnTarget?.vendorId === currentVendor.vendorId
+      ? returnList.find((item) => item.id === selectedReturnTarget.id) : null;
     if (selectedByClick) {
       return selectedByClick;
     }
@@ -835,7 +844,7 @@ export function ReturnsPage() {
       return returnList.find((item) => returnMatchesTarget(item, requestedReturnTarget)) ?? null;
     }
     return filteredReturns[0] ?? null;
-  }, [filteredReturns, requestedReturnTarget, returns, selectedReturnId]);
+  }, [currentVendor.vendorId, filteredReturns, requestedReturnTarget, visibleReturns, selectedReturnTarget]);
 
   const detailQuery = useQueryResource(
     selectedReturn ? queryKeys.returns.detail(selectedReturn.id, currentVendor.vendorId) : ['returns', 'detail', currentVendor.vendorId, 'empty'],
@@ -848,11 +857,13 @@ export function ReturnsPage() {
     },
     {
       enabled: authContextReady && Boolean(selectedReturn),
+      placeholderData: () => undefined,
     },
   );
-  const selectedDetail = detailQuery.data;
+  const selectedDetail = selectedReturn && detailQuery.data?.id === selectedReturn.id
+    && detailQuery.data.assignedVendorId === currentVendor.vendorId ? detailQuery.data : null;
 
-  const returnRows = safeArray(returns);
+  const returnRows = visibleReturns;
   const requestedCount = returnRows.filter(isRequestedReturn).length;
   const approvedCount = returnRows.filter(isApprovedReturn).length;
   const processedCount = returnRows.filter(isRefundedReturn).length;
@@ -1069,7 +1080,7 @@ export function ReturnsPage() {
                   <OperationalTableRow
                     key={item.id}
                     selected={isSelected}
-                    onSelect={() => setSelectedReturnId(item.id)}
+                    onSelect={() => setSelectedReturnTarget({ vendorId: currentVendor.vendorId, id: item.id })}
                   >
                     <span className="returns-order-cell">
                       <strong>{formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}</strong>
@@ -1259,7 +1270,7 @@ export function ReturnsPage() {
                       Review return
                     </Link>
                   )}
-                  <button type="button" className="button button-secondary" onClick={() => setSupportOpen(true)}>
+                  <button type="button" className="button button-secondary" onClick={() => setSupportTarget({ vendorId: currentVendor.vendorId, id: selectedReturn.id })}>
                     Contact support
                   </button>
                 </OperationalActionGroup>
@@ -1281,12 +1292,12 @@ export function ReturnsPage() {
       </div>
       {selectedReturn ? (
         <SupportTicketModal
-          open={supportOpen}
+          open={supportTarget?.vendorId === currentVendor.vendorId && supportTarget.id === selectedReturn.id}
           contextType="return"
           contextId={selectedReturn.id}
           contextSnapshot={supportSnapshot}
           defaultSubject={`Help with return ${formatShopifyOrderNumber(selectedReturn.sourceShopifyOrderNumber)}`}
-          onClose={() => setSupportOpen(false)}
+          onClose={() => setSupportTarget(null)}
         />
       ) : null}
 
