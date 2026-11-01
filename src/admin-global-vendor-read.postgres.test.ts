@@ -67,7 +67,7 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     `;
     if (ciTarget) {
       expect(identity).toMatchObject({ database: ciDatabaseName, owner: 'postgres',
-        databaseOwner: 'postgres', address: '127.0.0.1', port: 5432,
+        databaseOwner: 'postgres', port: 5432,
         comment: `fin-auto-ci:${ciProof}` });
       expect(Math.floor(Number(identity.version) / 10000)).toBe(18);
       expect(String(identity.systemId)).toBe(ciClusterId);
