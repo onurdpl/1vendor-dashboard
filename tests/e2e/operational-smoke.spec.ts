@@ -143,6 +143,67 @@ test.describe('operational browser smoke', () => {
     await expect(page.getByRole('heading', { name: '#1002', exact: true })).toHaveCount(0);
   });
 
+  test('admin Settings discards unsaved finance policy across A to B to A', async ({ page }) => {
+    await login(page);
+    await page.goto('/vendor/profile');
+    await page.getByRole('button', { name: 'Edit finance policy' }).click();
+    await page.getByLabel('Commission %').fill('44');
+    await expect(page.getByLabel('Commission %')).toHaveValue('44');
+
+    await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await expect(page.getByRole('button', { name: /Demo Vendor B Admin view/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save finance policy' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit finance policy' }).click();
+    await expect(page.getByLabel('Commission %')).toHaveValue('10.00');
+
+    await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await expect(page.getByRole('button', { name: /Demo Vendor A Admin view/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save finance policy' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit finance policy' }).click();
+    await expect(page.getByLabel('Commission %')).toHaveValue('10.00');
+  });
+
+  test('admin Settings discards an unsaved billing edit without a mutation request', async ({ page }) => {
+    await login(page);
+    await page.addScriptTag({ type: 'module', content: `
+      import { runtimeServices } from '/src/services/runtime-services.ts';
+      window.__billingUpdateCalls = [];
+      runtimeServices.vendors.billingProfile = async (vendorId) => ({
+        id: 'browser-billing-' + vendorId,
+        vendorId,
+        legalCompanyName: vendorId === 'demo-vendor-a' ? 'Vendor A Ltd.' : 'Vendor B Ltd.',
+        taxNumber: '1234567890', taxOffice: 'Demo', billingAddress: 'Demo address',
+        billingCity: 'Vienna', billingDistrict: 'Center', billingEmail: 'billing@demo.com',
+      });
+      runtimeServices.vendors.updateBillingProfile = async (vendorId, input) => {
+        window.__billingUpdateCalls.push({ vendorId, input });
+        throw new Error('Browser test blocked a billing mutation');
+      };
+    ` });
+    await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Edit billing profile' }).click();
+    await page.getByLabel('Legal company name').fill('UNSAVED_VENDOR_A');
+
+    await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await expect(page.getByRole('button', { name: /Demo Vendor B Admin view/ })).toBeVisible();
+    await expect(page.getByText('UNSAVED_VENDOR_A')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Save billing profile' })).toHaveCount(0);
+    await expect(page.getByText('Vendor B Ltd.').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Edit billing profile' }).click();
+    await expect(page.getByLabel('Legal company name')).toHaveValue('Vendor B Ltd.');
+
+    await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
+    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await expect(page.getByRole('button', { name: /Demo Vendor A Admin view/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save billing profile' })).toHaveCount(0);
+    await expect(page.getByText('Vendor A Ltd.').first()).toBeVisible();
+    const calls = await page.evaluate(() => (window as Window & { __billingUpdateCalls?: unknown[] }).__billingUpdateCalls ?? []);
+    expect(calls).toEqual([]);
+  });
+
   test('expired session redirect preserves destination and message', async ({ page }) => {
     await login(page);
     await page.goto('/orders');

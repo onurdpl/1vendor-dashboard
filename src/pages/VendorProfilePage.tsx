@@ -75,7 +75,7 @@ import type {
 import { useAppReadiness } from '../lib/appReadiness';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import { formatShippingProviderName } from '../lib/shippingDisplay';
-import type { VendorContext } from '../lib/auth';
+import { getCurrentVendorContext, type VendorContext } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeServices } from '../services/runtime-services';
 import { safeArray, safeStatusLabel } from '../services/real/formatting';
@@ -1102,6 +1102,17 @@ function ReadinessSummaryCard({
 }
 
 export function VendorProfilePage() {
+  const { vendorId: routeVendorId } = useParams<{ vendorId?: string }>();
+  const appReadiness = useAppReadiness();
+  // A new component instance owns each editing session. The route ID, rather
+  // than session membership, remains authoritative on the Admin detail route.
+  const contextKey = routeVendorId?.trim()
+    ? `admin:${routeVendorId.trim()}`
+    : `workspace:${appReadiness.currentVendor.vendorId}`;
+  return <VendorProfilePageForContext key={`${appReadiness.currentUser?.email ?? ''}:${contextKey}`} />;
+}
+
+function VendorProfilePageForContext() {
   const navigate = useNavigate();
   const { vendorId: adminRouteVendorIdParam } = useParams<{ vendorId?: string }>();
   const auditHistoryRef = useRef<HTMLElement | null>(null);
@@ -1136,6 +1147,18 @@ export function VendorProfilePage() {
   const isFinance = currentUser?.role === 'finance';
   const usesSummarySettingsPresentation = isVendor || isSupport || isFinance;
   const canLoadProfile = pageReadiness.ready && (!isAdminVendorRoute || isAdmin);
+  const contextActiveRef = useRef(true);
+  useEffect(() => {
+    contextActiveRef.current = true;
+    return () => { contextActiveRef.current = false; };
+  }, []);
+  const isCurrentProfileTarget = () => {
+    if (!contextActiveRef.current || !canLoadProfile) return false;
+    if (!isAdminVendorRoute) return getCurrentVendorContext().vendorId === currentVendor.vendorId;
+    // Browser navigation changes the URL before an obsolete route instance can submit.
+    const path = typeof window === 'undefined' ? '' : window.location.pathname;
+    return !path.startsWith('/admin/vendors/') || path === `/admin/vendors/${encodeURIComponent(currentVendor.vendorId)}`;
+  };
   const { message, tone, showFeedback } = useActionFeedback();
   const [billingEditOpen, setBillingEditOpen] = useState(false);
   const [billingForm, setBillingForm] = useState<BillingProfileFormState>(EMPTY_BILLING_PROFILE_FORM);
@@ -1194,30 +1217,46 @@ export function VendorProfilePage() {
   );
   const financeQuery = useQueryResource(
     queryKeys.vendorProfile.financeProfile(currentVendor.vendorId, isAdmin ? 'admin' : 'vendor'),
-    ({ signal }) => isAdmin
-      ? getAdminVendorFinancialProfile(currentVendor.vendorId, { signal })
-      : getFinanceProfile({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: canLoadProfile },
+    async ({ signal }) => {
+      const profile = isAdmin
+        ? await getAdminVendorFinancialProfile(currentVendor.vendorId, { signal })
+        : await getFinanceProfile({ vendorId: currentVendor.vendorId, signal });
+      if (profile.vendorId !== currentVendor.vendorId) throw new Error('Financial profile vendor identity does not match the requested vendor.');
+      return profile;
+    },
+    { enabled: canLoadProfile, placeholderData: () => undefined },
   );
   const billingQuery = useQueryResource(
     queryKeys.vendorProfile.billingProfile(currentVendor.vendorId),
-    ({ signal }) => getVendorBillingProfile(currentVendor.vendorId, { signal }),
-    { enabled: canLoadProfile && isAdmin },
+    async ({ signal }) => {
+      const profile = await getVendorBillingProfile(currentVendor.vendorId, { signal });
+      if (profile && profile.vendorId !== currentVendor.vendorId) throw new Error('Billing profile vendor identity does not match the requested vendor.');
+      return profile;
+    },
+    { enabled: canLoadProfile && isAdmin, placeholderData: () => undefined },
   );
   const vendorBillingLegalQuery = useQueryResource(
     queryKeys.vendorProfile.billingLegalSelfView(currentVendor.vendorId),
     ({ signal }) => getVendorBillingLegalSelfView({ signal }),
-    { enabled: canLoadProfile && isVendor },
+    { enabled: canLoadProfile && isVendor, placeholderData: () => undefined },
   );
   const vendorStatusQuery = useQueryResource(
     queryKeys.vendorProfile.status(currentVendor.vendorId),
-    ({ signal }) => getVendorStatus(currentVendor.vendorId, { signal }),
-    { enabled: canLoadProfile && isAdmin },
+    async ({ signal }) => {
+      const status = await getVendorStatus(currentVendor.vendorId, { signal });
+      if (status.vendorId !== currentVendor.vendorId) throw new Error('Vendor status identity does not match the requested vendor.');
+      return status;
+    },
+    { enabled: canLoadProfile && isAdmin, placeholderData: () => undefined },
   );
   const auditLogQuery = useQueryResource(
     queryKeys.vendorProfile.auditLogs(currentVendor.vendorId),
-    ({ signal }) => listVendorProfileAuditLogs(currentVendor.vendorId, { signal, limit: 50 }),
-    { enabled: canLoadProfile && isAdmin },
+    async ({ signal }) => {
+      const logs = await listVendorProfileAuditLogs(currentVendor.vendorId, { signal, limit: 50 });
+      if (logs.some((log) => log.vendorId !== currentVendor.vendorId)) throw new Error('Profile audit log vendor identity does not match the requested vendor.');
+      return logs;
+    },
+    { enabled: canLoadProfile && isAdmin, placeholderData: () => undefined },
   );
   const supportQuery = useQueryResource(
     queryKeys.vendorProfile.supportTickets(currentVendor.vendorId),
@@ -1237,11 +1276,13 @@ export function VendorProfilePage() {
   const sopyoConfigured = savedSopyoConfiguredVendorId === currentVendor.vendorId || sopyoCredentialQuery.data?.configured === true;
 
   const shippingConfig = shippingQuery.data?.vendorId === currentVendor.vendorId ? shippingQuery.data : null;
-  const financeProfile = isAdmin && savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
-  const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
+  const financeProfile = isAdmin && savedFinanceProfile?.vendorId === currentVendor.vendorId
+    ? savedFinanceProfile : financeQuery.data?.vendorId === currentVendor.vendorId ? financeQuery.data : null;
+  const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId
+    ? savedBillingProfile : billingQuery.data?.vendorId === currentVendor.vendorId ? billingQuery.data : null;
   const vendorStatus = savedVendorStatus?.vendorId === currentVendor.vendorId
     ? savedVendorStatus
-    : vendorStatusQuery.data ?? {
+    : vendorStatusQuery.data?.vendorId === currentVendor.vendorId ? vendorStatusQuery.data : {
         vendorId: currentVendor.vendorId,
         vendorName: currentVendor.vendorName,
         status: currentVendor.status ?? 'active',
@@ -1261,7 +1302,8 @@ export function VendorProfilePage() {
     () => safeArray(supportQuery.data).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
     [currentVendor.vendorId, supportQuery.data],
   );
-  const profileAuditLogs = useMemo(() => safeArray<VendorProfileAuditLog>(auditLogQuery.data), [auditLogQuery.data]);
+  const profileAuditLogs = useMemo(() => safeArray<VendorProfileAuditLog>(auditLogQuery.data)
+    .filter((log) => log.vendorId === currentVendor.vendorId), [auditLogQuery.data, currentVendor.vendorId]);
   const integrationProviders = useMemo(() => {
     return safeArray<VendorIntegrationProviderSummary>(integrationProvidersQuery.data?.providers)
       .filter((provider) => provider.vendorIdentifier === currentVendor.vendorId)
@@ -1555,6 +1597,7 @@ export function VendorProfilePage() {
     (input: VendorBillingProfileInput) => updateVendorBillingProfile(currentVendor.vendorId, input),
     {
       onSuccess: async (savedProfile) => {
+        if (!isCurrentProfileTarget() || savedProfile.vendorId !== currentVendor.vendorId) return;
         queryClient.setQueryData(queryKeys.vendorProfile.billingProfile(currentVendor.vendorId), savedProfile);
         setSavedBillingProfile(savedProfile);
         void queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.auditLogs(currentVendor.vendorId) });
@@ -1564,6 +1607,7 @@ export function VendorProfilePage() {
         showFeedback('Billing profile saved.', 'success');
       },
       onError: (error) => {
+        if (!isCurrentProfileTarget()) return;
         setBillingFormError(error instanceof Error ? error.message : 'Unable to save billing profile.');
       },
     },
@@ -1573,6 +1617,7 @@ export function VendorProfilePage() {
     (input: ReturnType<typeof buildFinancePolicyInput>) => updateVendorFinancialProfile(currentVendor.vendorId, input),
     {
       onSuccess: async (savedProfile) => {
+        if (!isCurrentProfileTarget() || savedProfile.vendorId !== currentVendor.vendorId) return;
         queryClient.setQueryData(queryKeys.vendorProfile.financeProfile(currentVendor.vendorId, 'admin'), savedProfile);
         setSavedFinanceProfile(savedProfile);
         void queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.auditLogs(currentVendor.vendorId) });
@@ -1582,6 +1627,7 @@ export function VendorProfilePage() {
         showFeedback('Finance policy saved for future ledger rows.', 'success');
       },
       onError: (error) => {
+        if (!isCurrentProfileTarget()) return;
         setFinancePolicyFormError(error instanceof Error ? error.message : 'Unable to save finance policy.');
       },
     },
@@ -1591,6 +1637,7 @@ export function VendorProfilePage() {
     (input: VendorStatusInput) => updateVendorStatus(currentVendor.vendorId, input),
     {
       onSuccess: async (savedStatus) => {
+        if (!isCurrentProfileTarget() || savedStatus.vendorId !== currentVendor.vendorId) return;
         queryClient.setQueryData(queryKeys.vendorProfile.status(currentVendor.vendorId), savedStatus);
         setSavedVendorStatus(savedStatus);
         setVendorStatusForm({
@@ -1608,6 +1655,7 @@ export function VendorProfilePage() {
         );
       },
       onError: (error) => {
+        if (!isCurrentProfileTarget()) return;
         setVendorStatusFormError(error instanceof Error ? error.message : 'Unable to save vendor status.');
       },
     },
@@ -2059,6 +2107,7 @@ export function VendorProfilePage() {
   }
 
   function handleOpenBillingEdit() {
+    if (!isCurrentProfileTarget() || !billingProfile || billingProfile.vendorId !== currentVendor.vendorId) return;
     setBillingForm(buildBillingProfileFormState(billingProfile));
     setBillingFormError(null);
     setBillingEditOpen(true);
@@ -2080,6 +2129,7 @@ export function VendorProfilePage() {
 
   function handleBillingProfileSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isCurrentProfileTarget() || !billingEditOpen || !billingProfile || billingProfile.vendorId !== currentVendor.vendorId) return;
     const validationError = validateBillingProfileForm(billingForm);
     if (validationError) {
       setBillingFormError(validationError);
@@ -2089,6 +2139,7 @@ export function VendorProfilePage() {
   }
 
   function handleOpenFinancePolicyEdit() {
+    if (!isCurrentProfileTarget() || !financeProfile || financeProfile.vendorId !== currentVendor.vendorId) return;
     setFinancePolicyForm(buildFinancePolicyFormState(financeProfile));
     setFinancePolicyFormError(null);
     setFinancePolicyEditOpen(true);
@@ -2113,6 +2164,7 @@ export function VendorProfilePage() {
 
   function handleFinancePolicySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isCurrentProfileTarget() || !financePolicyEditOpen || !financeProfile || financeProfile.vendorId !== currentVendor.vendorId) return;
     const validationError = validateFinancePolicyForm(financePolicyForm);
     if (validationError) {
       setFinancePolicyFormError(validationError);
@@ -2139,6 +2191,8 @@ export function VendorProfilePage() {
 
   function handleVendorStatusSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isCurrentProfileTarget() || vendorStatus.vendorId !== currentVendor.vendorId
+      || (savedVendorStatus?.vendorId !== currentVendor.vendorId && vendorStatusQuery.data?.vendorId !== currentVendor.vendorId)) return;
     const reason = vendorStatusForm.reason.trim();
     if (vendorStatusForm.status !== 'active' && !reason) {
       setVendorStatusFormError('Status reason is required.');
@@ -2659,7 +2713,7 @@ export function VendorProfilePage() {
                 description={vendorStatusQuery.error ?? 'Unable to load the vendor account status.'}
                 onRetry={() => void vendorStatusQuery.refetch()}
               />
-            ) : vendorStatusQuery.isInitialLoading ? (
+            ) : vendorStatusQuery.isInitialLoading || (savedVendorStatus?.vendorId !== currentVendor.vendorId && vendorStatusQuery.data?.vendorId !== currentVendor.vendorId) ? (
               <SectionSkeleton title="Loading vendor status" description="Fetching account restriction state." />
             ) : (
               <>
