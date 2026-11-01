@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnDetailPage } from './ReturnDetailPage';
 import type { KargonomiReturnPreview, ReturnDetail } from '../features/returns/api';
-import { clearToken, setCurrentUser, setToken } from '../lib/auth';
+import { clearToken, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
 import type { ReturnFinanceRecordsResponse, SupportTicket, SupportTicketStatus } from '../lib/api/contracts';
 import { formatDateTime } from '../services/real/formatting';
@@ -29,11 +29,14 @@ vi.mock('../lib/appReadiness', async () => {
   const actual = await vi.importActual<typeof import('../lib/appReadiness')>('../lib/appReadiness');
   return {
     ...actual,
-    useAppReadiness: () => appReadinessOverride.value ?? actual.getAppReadinessSnapshot(),
+    useAppReadiness: () => {
+      const readiness = actual.useAppReadiness();
+      return appReadinessOverride.value ?? readiness;
+    },
   };
 });
 
-const getReturnMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
+const getReturnMock = vi.fn<(returnId: string, options?: { vendorId?: string | null }) => Promise<ReturnDetail>>();
 const markReturnReceivedMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const reviewReturnMock = vi.fn<
   (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) => Promise<ReturnDetail>
@@ -77,7 +80,7 @@ vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
   return {
     ...actual,
-    getReturn: (returnId: string) => getReturnMock(returnId),
+    getReturn: (returnId: string, options?: { vendorId?: string | null }) => getReturnMock(returnId, options),
     markReturnReceived: (returnId: string) => markReturnReceivedMock(returnId),
     reviewReturn: (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) =>
       reviewReturnMock(returnId, input),
@@ -1601,6 +1604,12 @@ describe('ReturnDetailPage vendor review screen', () => {
   });
 
   it('renders closed refunded returns as complete with no active review actions', async () => {
+    setCurrentUser({
+      email: 'vendor-b@example.com', name: 'Vendor B', role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false, defaultVendorId: 'sporjinal',
+    });
     getReturnMock.mockResolvedValue(closedRefundedReturnDetail);
     getReturnFinanceRecordsMock.mockResolvedValue({
       records: [
@@ -1684,6 +1693,12 @@ describe('ReturnDetailPage vendor review screen', () => {
   });
 
   it('renders refunded returns without vendor review as complete with no active review actions', async () => {
+    setCurrentUser({
+      email: 'vendor-b@example.com', name: 'Vendor B', role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false, defaultVendorId: 'sporjinal',
+    });
     getReturnMock.mockResolvedValue(refundedUnreviewedReturnDetail);
 
     renderPage();
@@ -1711,10 +1726,10 @@ describe('ReturnDetailPage vendor review screen', () => {
       email: 'admin@example.com',
       name: 'Admin User',
       role: 'admin',
-      vendorAccess: ['demo-vendor-a'],
-      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
       canSwitchVendors: true,
-      defaultVendorId: 'demo-vendor-a',
+      defaultVendorId: 'sporjinal',
     });
     getReturnMock.mockResolvedValue(closedRefundedReturnDetail);
     getReturnFinanceRecordsMock.mockResolvedValue({
@@ -1812,10 +1827,10 @@ describe('ReturnDetailPage vendor review screen', () => {
         email: 'admin@example.com',
         name: 'Admin User',
         role: 'admin',
-        vendorAccess: ['demo-vendor-a'],
-        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
         canSwitchVendors: true,
-        defaultVendorId: 'demo-vendor-a',
+        defaultVendorId: 'sporjinal',
       });
       getReturnMock.mockResolvedValue({
         ...closedRefundedReturnDetail,
@@ -2555,9 +2570,67 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Vendor review')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Return unavailable' })).toBeInTheDocument();
+    expect(screen.queryByText('Nike Air Force 1 07')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
+  });
+
+  it('hides a previous Vendor return and local review state during a Vendor switch', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    const nextReturn = deferred<ReturnDetail>();
+    getReturnMock.mockImplementation((_id, options) => options?.vendorId === 'demo-vendor-b'
+      ? nextReturn.promise : Promise.resolve(returnDetail));
+    renderPage();
+    expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    expect(screen.queryByText('Nike Air Force 1 07')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Return detail render frame')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
+    expect(getReturnMock).toHaveBeenCalledWith(returnDetail.id, expect.objectContaining({ vendorId: 'demo-vendor-b' }));
+    await act(async () => nextReturn.resolve({
+      ...returnDetail,
+      originalVendorId: 'demo-vendor-b', assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b',
+      sourceShopifyOrderNumber: 2099, amount: '$8,888.00', refundedItems: [], items: [],
+    }));
+    expect((await screen.findAllByText('Order #2099')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Nike Air Force 1 07')).not.toBeInTheDocument();
+  });
+
+  it('rejects a late previous-Vendor return response', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    const oldReturn = deferred<ReturnDetail>();
+    const nextReturn = deferred<ReturnDetail>();
+    getReturnMock.mockImplementation((_id, options) => options?.vendorId === 'demo-vendor-b'
+      ? nextReturn.promise : oldReturn.promise);
+    renderPage();
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await act(async () => oldReturn.resolve(returnDetail));
+    expect(screen.queryByText('Nike Air Force 1 07')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
+    await act(async () => nextReturn.resolve({
+      ...returnDetail,
+      originalVendorId: 'demo-vendor-b', assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b',
+      sourceShopifyOrderNumber: 2099, amount: '$8,888.00', refundedItems: [], items: [],
+    }));
+    expect((await screen.findAllByText('Order #2099')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Nike Air Force 1 07')).not.toBeInTheDocument();
   });
 });

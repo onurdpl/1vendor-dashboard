@@ -110,6 +110,29 @@ If local DB env is unreachable, explicitly document the reason and use determini
 
 ---
 
+## Codex Resource and Validation Budget
+
+- Select the required validation commands above according to the changed files and actual risk; unrelated checks are not mandatory.
+- Never repeat the same test unless a specific intermittent failure requires reproduction and the user explicitly approves repetition.
+- For small changes, run only directly affected tests, once.
+- Do not automatically run the full test suite for every task.
+- When only frontend files change, do not run backend builds, PostgreSQL suites or unrelated checks.
+- Do not start real-browser smoke tests, extended audits or additional validation packages without a concrete justification and user approval.
+- Do not continuously poll GitHub CI, Render or other external systems. One status check is sufficient unless further monitoring is explicitly requested.
+- Do not automatically create a PR, merge, deploy or monitor post-merge CI without explicit authorization for that release step.
+- Explain the purpose of an expensive operation and obtain approval before starting it.
+- If an operation is unexpectedly slow or blocked, stop instead of repeatedly retrying.
+- Never weaken financial safety, Vendor isolation, authorization or data-integrity assertions to save execution time.
+- Report unverified behavior as `UNKNOWN`.
+- One authorized development task includes its necessary GitHub workflow: local changes, commit, push, PR, and required CI and merge checks when the user authorizes end-to-end completion. Do not split local implementation and GitHub delivery into separate tasks unnecessarily.
+- Do not repeat already passing local tests without a relevant code change or failure; do not run unrelated full suites, backend checks, or browser suites locally.
+- Keep existing mandatory GitHub CI checks intact. Prefer GitHub's existing automation over continuous manual CI polling; do not launch duplicate runs.
+- Never enable repository settings or bypass required checks. Do not repeatedly poll GitHub or Render.
+- Stop on a genuine CI failure; do not automatically start an unrelated investigation.
+- Production financial or operational writes require specific authorization.
+
+---
+
 ## Deployment Notes
 
 Production:

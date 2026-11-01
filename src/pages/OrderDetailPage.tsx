@@ -41,7 +41,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatCurrency, formatDateTime, getSafeTimestamp, parseSafeDate, safeArray, safeStatusLabel, toTitleCaseLabel } from '../services/real/formatting';
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 import { SupportTicketModal } from '../components/SupportTicketModal';
-import { useAppReadiness } from '../lib/appReadiness';
+import { useAppReadiness, type AppReadinessState } from '../lib/appReadiness';
 import { isVendorContextRestricted, RESTRICTED_ACTION_MESSAGE } from '../lib/auth';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import { listReturns } from '../features/returns/api';
@@ -1432,9 +1432,14 @@ function getCreateShipmentErrorMessage(error: unknown) {
 
 export function OrderDetailPage() {
   const { orderId } = useParams();
+  const appReadiness = useAppReadiness();
+  return <OrderDetailContent key={`${appReadiness.currentVendor.vendorId}:${orderId ?? ''}`} appReadiness={appReadiness} />;
+}
+
+function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState }) {
+  const { orderId } = useParams();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -1489,7 +1494,7 @@ export function OrderDetailPage() {
     }
   }
 
-  const { data: order, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
+  const { data: queriedOrder, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     ({ signal }) => {
       if (!orderId) {
@@ -1500,8 +1505,12 @@ export function OrderDetailPage() {
     },
     {
       enabled: authContextReady && Boolean(orderId),
+      placeholderData: () => undefined,
     },
   );
+  const order = authContextReady && queriedOrder && orderId && queriedOrder.id === orderId && queriedOrder.assignedVendorId === currentVendor.vendorId
+    ? queriedOrder
+    : null;
   const shippingVendorId = order && order.id === orderId && order.assignedVendorId === currentVendor.vendorId
     ? order.assignedVendorId
     : null;
@@ -1530,6 +1539,7 @@ export function OrderDetailPage() {
     ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && Boolean(order),
+      placeholderData: () => undefined,
     },
   );
   const { data: relatedFinanceData } = useQueryResource(
@@ -1537,6 +1547,7 @@ export function OrderDetailPage() {
     ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && Boolean(order),
+      placeholderData: () => undefined,
     },
   );
   const { data: relatedSupportTicketsData } = useQueryResource(
@@ -1544,6 +1555,7 @@ export function OrderDetailPage() {
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     {
       enabled: authContextReady && Boolean(order),
+      placeholderData: () => undefined,
     },
   );
   const { mutateAsync: escalateSupportTicketMutation, isPending: isEscalatingSupportTicket } = useMutationAction(
