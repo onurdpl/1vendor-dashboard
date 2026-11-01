@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -131,6 +131,12 @@ function reviewResponse(overrides: Partial<AdminRefundReviewsResponse> = {}): Ad
     legacyCandidates: { error: null, count: 0, limit: 25, offset: 0, items: [] },
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
 }
 
 const adminUser: CurrentUser = {
@@ -1147,5 +1153,161 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.getByText('Loading legacy refund finance...')).toBeInTheDocument();
     expect(screen.queryByText('No refund evidence conflicts')).not.toBeInTheDocument();
     expect(screen.queryByText('No legacy refund finance')).not.toBeInTheDocument();
+  });
+
+  it('hides all three previous-Vendor finance areas and action drafts while the local filter changes', async () => {
+    const user = userEvent.setup();
+    const vendorAAdjustment = makeAdjustment({ id: 'adjustment-a' });
+    const vendorBAdjustment = makeAdjustment({
+      id: 'adjustment-b', vendorId: 'sporjinal', amountMinor: 89000,
+      references: { orderLabel: 'Order #2200', refundLabel: 'Refund #B-2200', originalSettlementLabel: null, originalCommissionInvoiceLabel: null },
+    });
+    const vendorATerminal = makeTerminalReview({ id: 'review-a', sourceShopifyRefundId: 'refund-a' });
+    const vendorBTerminal = makeTerminalReview({
+      id: 'review-b', sourceShopifyRefundId: 'refund-b', sourceShopifyOrderId: 'order-b',
+      economicVendorId: 'sporjinal', vendorName: 'Sporjinal',
+    });
+    const vendorALegacy = makeLegacyReview({ id: 'legacy-a', sourceShopifyRefundId: 'legacy-refund-a' });
+    const vendorBLegacy = makeLegacyReview({
+      id: 'legacy-b', sourceShopifyRefundId: 'legacy-refund-b', observedVendorId: 'sporjinal', vendorName: 'Sporjinal',
+    });
+    const vendorBAdjustments = deferred<RefundAdjustmentsListResponse>();
+    const vendorBReviews = deferred<AdminRefundReviewsResponse>();
+    listRefundAdjustmentsMock.mockImplementation((input) => input.vendorId === 'sporjinal'
+      ? vendorBAdjustments.promise
+      : Promise.resolve(response(input.vendorId ? [vendorAAdjustment] : [vendorAAdjustment, vendorBAdjustment])));
+    listAdminRefundReviewsMock.mockImplementation((input) => input.vendorId === 'sporjinal'
+      ? vendorBReviews.promise
+      : Promise.resolve(reviewResponse({
+        terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [vendorATerminal] },
+        legacyCandidates: { error: null, count: 1, limit: 25, offset: 0, items: [vendorALegacy] },
+      })));
+    getAdminRefundReviewMock.mockImplementation(async (id) => ({
+      ok: true,
+      review: makeTerminalDetail({
+        id, economicVendorId: id === 'review-b' ? 'sporjinal' : 'yalispor',
+        sourceShopifyRefundId: id === 'review-b' ? 'refund-b' : 'refund-a',
+      }),
+    }));
+    getAdminLegacyRefundReviewMock.mockImplementation(async (id) => ({
+      ok: true,
+      review: makeLegacyDetail({
+        id, sourceShopifyRefundId: id === 'legacy-b' ? 'legacy-refund-b' : 'legacy-refund-a',
+        observedVendorId: id === 'legacy-b' ? 'sporjinal' : 'yalispor',
+      }),
+    }));
+    renderPage();
+
+    const queue = screen.getByLabelText('Refund adjustments queue');
+    const conflicts = screen.getByLabelText('Refund evidence conflicts');
+    const legacy = screen.getByLabelText('Legacy refund finance');
+    await waitFor(() => {
+      expect(queue).toHaveTextContent('Order #1097');
+      expect(conflicts).toHaveTextContent('refund-a');
+      expect(legacy).toHaveTextContent('legacy-refund-a');
+      expect(within(conflicts).getByRole('textbox', { name: 'Optional note' })).toBeInTheDocument();
+      expect(within(legacy).getByRole('textbox', { name: 'Optional note' })).toBeInTheDocument();
+    });
+    fireEvent.change(within(conflicts).getByRole('textbox', { name: 'Optional note' }), { target: { value: 'Vendor A note' } });
+    fireEvent.change(within(legacy).getByRole('textbox', { name: 'Optional note' }), { target: { value: 'Vendor A legacy note' } });
+
+    const vendorInput = within(screen.getByLabelText('Refund adjustment filters')).getByRole('textbox', { name: 'Vendor' });
+    fireEvent.change(vendorInput, { target: { value: 'sporjinal' } });
+    expect(vendorInput).toHaveValue('sporjinal');
+    expect(queue).not.toHaveTextContent('Order #1097');
+    expect(conflicts).not.toHaveTextContent('refund-a');
+    expect(legacy).not.toHaveTextContent('legacy-refund-a');
+    expect(within(conflicts).queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
+    expect(within(legacy).queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
+    expect(acknowledgeAdminRefundReviewMock).not.toHaveBeenCalled();
+    expect(acknowledgeAdminLegacyRefundReviewMock).not.toHaveBeenCalled();
+    expect(listRefundAdjustmentsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' }));
+    expect(listAdminRefundReviewsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' }));
+
+    await act(async () => {
+      vendorBAdjustments.resolve(response([vendorBAdjustment]));
+      vendorBReviews.resolve(reviewResponse({
+        terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [vendorBTerminal] },
+        legacyCandidates: { error: null, count: 1, limit: 25, offset: 0, items: [vendorBLegacy] },
+      }));
+    });
+    await waitFor(() => {
+      expect(queue).toHaveTextContent('Order #2200');
+      expect(conflicts).toHaveTextContent('refund-b');
+      expect(legacy).toHaveTextContent('legacy-refund-b');
+      expect(within(conflicts).getByRole('textbox', { name: 'Optional note' })).toHaveValue('');
+      expect(within(legacy).getByRole('textbox', { name: 'Optional note' })).toHaveValue('');
+    });
+    await user.click(within(conflicts).getByRole('button', { name: 'Acknowledge' }));
+    await waitFor(() => expect(acknowledgeAdminRefundReviewMock).toHaveBeenCalledWith('review-b', expect.anything()));
+    expect(acknowledgeAdminRefundReviewMock).not.toHaveBeenCalledWith('review-a', expect.anything());
+
+    fireEvent.change(vendorInput, { target: { value: '' } });
+    await waitFor(() => expect(listRefundAdjustmentsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: null })));
+    expect(vendorInput).toHaveValue('');
+  });
+
+  it('does not accept a delayed B response after the local filter returns to A', async () => {
+    const delayedAdjustments = deferred<RefundAdjustmentsListResponse>();
+    const delayedReviews = deferred<AdminRefundReviewsResponse>();
+    listRefundAdjustmentsMock.mockImplementation((input) => input.vendorId === 'sporjinal'
+      ? delayedAdjustments.promise
+      : Promise.resolve(response([makeAdjustment({ id: 'adjustment-a' })])));
+    listAdminRefundReviewsMock.mockImplementation((input) => input.vendorId === 'sporjinal'
+      ? delayedReviews.promise
+      : Promise.resolve(reviewResponse({
+        terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ id: 'review-a', sourceShopifyRefundId: 'refund-a' })] },
+        legacyCandidates: { error: null, count: 1, limit: 25, offset: 0, items: [makeLegacyReview({ id: 'legacy-a', sourceShopifyRefundId: 'legacy-a' })] },
+      })));
+    renderPage();
+    const queue = screen.getByLabelText('Refund adjustments queue');
+    const conflicts = screen.getByLabelText('Refund evidence conflicts');
+    const legacy = screen.getByLabelText('Legacy refund finance');
+    await waitFor(() => expect(queue).toHaveTextContent('Order #1097'));
+    const vendorInput = within(screen.getByLabelText('Refund adjustment filters')).getByRole('textbox', { name: 'Vendor' });
+    fireEvent.change(vendorInput, { target: { value: 'sporjinal' } });
+    await waitFor(() => expect(listAdminRefundReviewsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' })));
+    fireEvent.change(vendorInput, { target: { value: 'yalispor' } });
+    await waitFor(() => expect(queue).toHaveTextContent('Order #1097'));
+    await act(async () => {
+      delayedAdjustments.resolve(response([makeAdjustment({
+        id: 'adjustment-b', vendorId: 'sporjinal',
+        references: { orderLabel: 'Order #2200', refundLabel: 'Refund #B-2200', originalSettlementLabel: null, originalCommissionInvoiceLabel: null },
+      })]));
+      delayedReviews.resolve(reviewResponse({
+        terminalReviews: { error: null, count: 1, limit: 25, offset: 0, items: [makeTerminalReview({ id: 'review-b', economicVendorId: 'sporjinal', sourceShopifyRefundId: 'refund-b' })] },
+        legacyCandidates: { error: null, count: 1, limit: 25, offset: 0, items: [makeLegacyReview({ id: 'legacy-b', observedVendorId: 'sporjinal', sourceShopifyRefundId: 'legacy-b' })] },
+      }));
+    });
+    expect(vendorInput).toHaveValue('yalispor');
+    expect(queue).not.toHaveTextContent('Order #2200');
+    expect(conflicts).not.toHaveTextContent('refund-b');
+    expect(legacy).not.toHaveTextContent('legacy-b');
+  });
+
+  it('keeps its local Vendor filter independent of Workspace Vendor changes', async () => {
+    setSession('test-session', {
+      ...adminUser,
+      vendorAccess: ['yalispor', 'sporjinal'],
+      vendorDetails: [
+        { vendorId: 'yalispor', vendorName: 'Yalı Spor' },
+        { vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+      ],
+      canSwitchVendors: true,
+    });
+    const vendorBAdjustment = makeAdjustment({
+      id: 'adjustment-b', vendorId: 'sporjinal',
+      references: { orderLabel: 'Order #2200', refundLabel: 'Refund #B-2200', originalSettlementLabel: null, originalCommissionInvoiceLabel: null },
+    });
+    listRefundAdjustmentsMock.mockImplementation(async (input) => response(input.vendorId === 'sporjinal' ? [vendorBAdjustment] : [makeAdjustment({ id: 'adjustment-a' })]));
+    renderPage();
+    const vendorInput = within(screen.getByLabelText('Refund adjustment filters')).getByRole('textbox', { name: 'Vendor' });
+    fireEvent.change(vendorInput, { target: { value: 'sporjinal' } });
+    await waitFor(() => expect(screen.getByLabelText('Refund adjustments queue')).toHaveTextContent('Order #2200'));
+    act(() => setCurrentVendorId('sporjinal'));
+    act(() => setCurrentVendorId('yalispor'));
+    expect(vendorInput).toHaveValue('sporjinal');
+    expect(screen.getByLabelText('Refund adjustments queue')).toHaveTextContent('Order #2200');
+    expect(listRefundAdjustmentsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' }));
   });
 });

@@ -304,6 +304,7 @@ export function AdminRefundAdjustmentsPage() {
     {
       routeName: 'Refund adjustments',
       endpoint: '/admin/finance/refund-adjustments',
+      placeholderData: () => undefined,
     },
   );
   const reviewQuery = useQueryResource(
@@ -321,7 +322,7 @@ export function AdminRefundAdjustmentsPage() {
       legacyAttribution: legacyAttributionFilter === 'all' ? null : legacyAttributionFilter,
       signal,
     }),
-    { routeName: 'Refund reviews', endpoint: '/admin/finance/refund-reviews' },
+    { routeName: 'Refund reviews', endpoint: '/admin/finance/refund-reviews', placeholderData: () => undefined },
   );
   const terminalPage = reviewQuery.data?.terminalReviews;
   const legacyPage = reviewQuery.data?.legacyCandidates;
@@ -329,9 +330,10 @@ export function AdminRefundAdjustmentsPage() {
   const legacyDetailQuery = useQueryResource(
     ['admin', 'finance', 'legacy-refund-review', selectedLegacyReview?.id ?? 'none'],
     ({ signal }) => getAdminLegacyRefundReview(selectedLegacyReview!.id, signal),
-    { routeName: 'Legacy refund finance review detail', endpoint: selectedLegacyReview ? `/admin/finance/legacy-refund-reviews/${selectedLegacyReview.id}` : '/admin/finance/legacy-refund-reviews', enabled: Boolean(selectedLegacyReview) },
+    { routeName: 'Legacy refund finance review detail', endpoint: selectedLegacyReview ? `/admin/finance/legacy-refund-reviews/${selectedLegacyReview.id}` : '/admin/finance/legacy-refund-reviews', enabled: Boolean(selectedLegacyReview), placeholderData: () => undefined },
   );
-  const legacyDetail = legacyDetailQuery.data?.review ?? null;
+  const legacyDetail = selectedLegacyReview && legacyDetailQuery.data?.review.id === selectedLegacyReview.id
+    ? legacyDetailQuery.data.review : null;
   const selectedTerminalReview = terminalPage?.items.find((review) => review.id === selectedTerminalId)
     ?? terminalPage?.items[0]
     ?? null;
@@ -342,9 +344,13 @@ export function AdminRefundAdjustmentsPage() {
       routeName: 'Refund review detail',
       endpoint: selectedTerminalReview ? `/admin/finance/refund-reviews/${selectedTerminalReview.id}` : '/admin/finance/refund-reviews',
       enabled: Boolean(selectedTerminalReview),
+      placeholderData: () => undefined,
     },
   );
-  const terminalDetail = terminalDetailQuery.data?.review ?? null;
+  const terminalDetail = selectedTerminalReview && terminalDetailQuery.data?.review.id === selectedTerminalReview.id
+    && terminalDetailQuery.data.review.economicVendorId === selectedTerminalReview.economicVendorId
+    && (!vendorFilter.trim() || terminalDetailQuery.data.review.economicVendorId === vendorFilter.trim())
+    ? terminalDetailQuery.data.review : null;
   const eligibleTerminalDetail = terminalDetail && selectedTerminalReview && terminalDetail.id === selectedTerminalReview.id
     && terminalDetail.status === 'RESOLVED'
     && terminalDetail.resolutionOutcome === 'CORRECTION_REQUIRED'
@@ -816,8 +822,27 @@ export function AdminRefundAdjustmentsPage() {
             <input value={vendorFilter} onChange={(event) => {
               setVendorFilter(event.target.value);
               setTerminalOffset(0);
-              setReviewEftNotSentConfirmation({ reviewId: '', value: false });
               setLegacyOffset(0);
+              setSelectedId(null);
+              setSelectedTerminalId(null);
+              setSelectedLegacyId(null);
+              setTerminalActionNote('');
+              setTerminalResolutionOutcome('');
+              setTerminalActionError(null);
+              setLegacyActionNote('');
+              setLegacyResolutionOutcome('');
+              setLegacyActionError(null);
+              setPaidCorrectionReason({ reviewId: '', value: '' });
+              setReviewEftNotSentConfirmation({ reviewId: '', value: false });
+              setZeroNetError(null);
+              setPaidCorrectionError(null);
+              setPaidCreditError(null);
+              setBeforeSettlementCreditError(null);
+              setApprovedSettlementCreditError(null);
+              setBeforeSettlementDeductionError(null);
+              setApprovedSettlementDeductionError(null);
+              setDraftPayoutCorrectionError(null);
+              setReviewPayoutCorrectionError(null);
             }} placeholder="Vendor id" />
           </label>
           <label>
