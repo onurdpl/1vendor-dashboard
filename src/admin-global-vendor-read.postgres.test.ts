@@ -103,10 +103,12 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     const { default: Fastify } = await import('../backend/node_modules/fastify/fastify.js');
     const { registerDashboardSummaryRoutes } = await import('../backend/src/modules/dashboard/dashboard-summary.routes.js');
     const { registerOrdersRoutes } = await import('../backend/src/modules/orders/orders.routes.js');
+    const { registerReturnsRoutes } = await import('../backend/src/modules/returns/returns.routes.js');
     ({ resolveAdminVendorTarget: resolver } = await import('../backend/src/modules/vendor-access/admin-vendor-target.service.js'));
     app = Fastify({ logger: false });
     registerDashboardSummaryRoutes(app, env);
     registerOrdersRoutes(app, env);
+    registerReturnsRoutes(app, env);
     await app.ready();
   }, 120_000);
 
@@ -216,6 +218,71 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     } finally {
       await db.vendorAllocation.deleteMany({ where: { id: { in: [allocationA, allocationB] } } });
       await db.shopifyOrder.delete({ where: { id: orderId } });
+    }
+  });
+
+  it('scopes authenticated Returns list, dashboard and detail to assigned allocations without membership', async () => {
+    const orderId = 'a2-test-returns-multi-order';
+    const restrictedOrderId = 'a2-test-returns-restricted-order';
+    const allocationIds = ['a2-test-returns-alloc-a', 'a2-test-returns-alloc-b', 'a2-test-returns-alloc-c'];
+    const returnIds = ['a2-test-return-a', 'a2-test-return-b', 'a2-test-return-c'];
+    await db.shopifyOrder.createMany({ data: [
+      { id: orderId, sourceShopifyOrderId: 'gid://shopify/Order/a2-returns-multi', sourceShopifyOrderNumber: '#a2-returns-multi' },
+      { id: restrictedOrderId, sourceShopifyOrderId: 'gid://shopify/Order/a2-returns-restricted', sourceShopifyOrderNumber: '#a2-returns-restricted' },
+    ] });
+    try {
+      await db.vendorAllocation.createMany({ data: [
+        { id: allocationIds[0], sourceShopifyOrderId: orderId, sourceShopifyOrderNumber: '#a2-returns-multi',
+          originalVendorId: vendorIds.a, assignedVendorId: vendorIds.a },
+        { id: allocationIds[1], sourceShopifyOrderId: orderId, sourceShopifyOrderNumber: '#a2-returns-multi',
+          originalVendorId: vendorIds.b, assignedVendorId: vendorIds.b },
+        { id: allocationIds[2], sourceShopifyOrderId: restrictedOrderId, sourceShopifyOrderNumber: '#a2-returns-restricted',
+          originalVendorId: vendorIds.c, assignedVendorId: vendorIds.c },
+      ] });
+      await db.returnRecord.createMany({ data: [
+        { id: returnIds[0], vendorAllocationId: allocationIds[0], sourceShopifyOrderId: orderId,
+          sourceShopifyOrderNumber: '#a2-returns-multi', sourceShopifyReturnId: 'A-ONLY-RETURN', status: 'requested' },
+        { id: returnIds[1], vendorAllocationId: allocationIds[1], sourceShopifyOrderId: orderId,
+          sourceShopifyOrderNumber: '#a2-returns-multi', sourceShopifyReturnId: 'B-ONLY-RETURN', status: 'requested' },
+        { id: returnIds[2], vendorAllocationId: allocationIds[2], sourceShopifyOrderId: restrictedOrderId,
+          sourceShopifyOrderNumber: '#a2-returns-restricted', sourceShopifyReturnId: 'C-ONLY-RETURN', status: 'requested' },
+      ] });
+      expect(await db.userVendorAccess.count({ where: { userId: userIds.admin } })).toBe(0);
+      const before = await db.returnRecord.findMany({ where: { id: { in: returnIds } },
+        select: { id: true, status: true, vendorAllocationId: true, updatedAt: true }, orderBy: { id: 'asc' } });
+      const financialCounts = [await db.financeLedgerEntry.count(), await db.refundRecord.count()];
+      for (const [vendorId, returnId, sourceId] of [
+        [vendorIds.a, returnIds[0], 'A-ONLY-RETURN'],
+        [vendorIds.b, returnIds[1], 'B-ONLY-RETURN'],
+        [vendorIds.c, returnIds[2], 'C-ONLY-RETURN'],
+      ] as const) {
+        const list = await get('/returns', 'admin', vendorId);
+        const dashboard = await get('/returns/dashboard', 'admin', vendorId);
+        const detail = await get(`/returns/${returnId}`, 'admin', vendorId);
+        expect(list.status).toBe(200);
+        expect(list.body).toEqual([expect.objectContaining({ id: returnId, vendorId, sourceShopifyReturnId: sourceId })]);
+        expect(dashboard.status).toBe(200);
+        expect(dashboard.body).toEqual([expect.objectContaining({ id: returnId })]);
+        expect(detail.status).toBe(200);
+        expect(detail.body).toMatchObject({ id: returnId, vendorId, sourceShopifyReturnId: sourceId });
+      }
+      expect((await get(`/returns/${returnIds[1]}`, 'admin', vendorIds.a)).status).toBe(404);
+      expect((await get(`/returns/${returnIds[0]}`, 'admin', vendorIds.b)).status).toBe(404);
+      expect((await get(`/returns/${returnIds[0]}`, 'admin')).status).toBe(400);
+      expect((await get('/returns', 'admin')).status).toBe(400);
+      expect((await get('/returns/dashboard', 'admin', 'missing')).status).toBe(404);
+      expect((await get(`/returns/${returnIds[0]}`, 'vendorA', vendorIds.a)).status).toBe(200);
+      expect((await get(`/returns/${returnIds[1]}`, 'vendorA', vendorIds.a)).status).toBe(404);
+      expect((await get('/returns', 'vendorA', vendorIds.b)).status).toBe(403);
+      expect((await get('/returns/dashboard', 'vendorA', vendorIds.b)).status).toBe(403);
+      expect((await get(`/returns/${returnIds[1]}`, 'vendorA', vendorIds.b)).status).toBe(403);
+      expect(await db.returnRecord.findMany({ where: { id: { in: returnIds } },
+        select: { id: true, status: true, vendorAllocationId: true, updatedAt: true }, orderBy: { id: 'asc' } })).toEqual(before);
+      expect([await db.financeLedgerEntry.count(), await db.refundRecord.count()]).toEqual(financialCounts);
+    } finally {
+      await db.returnRecord.deleteMany({ where: { id: { in: returnIds } } });
+      await db.vendorAllocation.deleteMany({ where: { id: { in: allocationIds } } });
+      await db.shopifyOrder.deleteMany({ where: { id: { in: [orderId, restrictedOrderId] } } });
     }
   });
 

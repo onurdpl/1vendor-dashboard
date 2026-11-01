@@ -1,9 +1,10 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import type { AuthUserContext } from '../auth/auth.types.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { readAdminVendorTargetHeader, resolveAdminVendorTarget } from '../vendor-access/admin-vendor-target.service.js';
 import { resolveRequestVendorContext } from '../vendor-access/vendor-access.service.js';
 import {
   assertVendorOperationalAccess,
@@ -110,6 +111,20 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
   const authMiddleware = createAuthMiddleware(authService);
   const shopifyAdminService = createShopifyAdminService(env);
 
+  const resolveReturnsReadVendor = async (request: Parameters<typeof requireVendorAccess>[0], reply: FastifyReply) => {
+    if (request.authUser?.role !== 'admin') return requireVendorAccess(request, reply);
+
+    const result = await resolveAdminVendorTarget(request, readAdminVendorTargetHeader(request));
+    if (!result.ok) return reply.code(result.code).send({ message: result.message });
+    request.vendorContext = {
+      vendorId: result.vendor.id,
+      vendorName: result.vendor.name,
+      vendorStatus: result.vendor.status,
+      role: result.actor.role,
+      accessScope: 'admin',
+    };
+  };
+
   async function resolveReturnActor(
     request: { authUser?: AuthUserContext; headers: { [key: string]: string | string[] | undefined } },
     reply: { code: (status: number) => { send: (body: unknown) => unknown } },
@@ -150,7 +165,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
   app.get(
     '/returns',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveReturnsReadVendor],
     },
     async (request) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -167,7 +182,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
   app.get(
     '/returns/dashboard',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveReturnsReadVendor],
     },
     async (request) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -184,7 +199,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
   app.get<{ Params: { returnId: string } }>(
     '/returns/:returnId',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveReturnsReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
