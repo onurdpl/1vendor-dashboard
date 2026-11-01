@@ -4,6 +4,7 @@ import type { PrismaClient } from '../backend/node_modules/@prisma/client/index.
 
 const url = process.env.TEST_DATABASE_URL?.trim();
 const databaseName = 'a2_admin_read_20261023_6e2b0c7a';
+const ciDatabaseName = 'a2_admin_read_ci_validation';
 const vendorIds = { a: 'a2-test-a', b: 'a2-test-b', c: 'a2-test-c', d: 'a2-test-d' };
 const userIds = { admin: 'a2-test-admin', adminLinked: 'a2-test-admin-linked', vendorA: 'a2-test-vendor-a',
   vendorB: 'a2-test-vendor-b', support: 'a2-test-support', finance: 'a2-test-finance' };
@@ -21,10 +22,21 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
 
   beforeAll(async () => {
     const target = new URL(url!);
+    const ciProof = process.env.FIN_AUTO_CI_DB_PROOF;
+    const ciClusterId = process.env.FIN_AUTO_CI_CLUSTER_ID;
+    const ciTarget = process.env.A2_ADMIN_READ_CI_MODE === '1' &&
+      process.env.GITHUB_ACTIONS === 'true' && process.env.CI === 'true' &&
+      target.username === 'postgres' && target.password === 'postgres' &&
+      target.pathname === `/${ciDatabaseName}` &&
+      process.env.FIN_AUTO_CI_PG_MAJOR === '18' &&
+      /^[a-f0-9]{64}$/.test(ciProof ?? '') && /^\d+$/.test(ciClusterId ?? '');
+    const localTarget = process.env.A2_ADMIN_READ_CI_MODE === undefined &&
+      process.env.GITHUB_ACTIONS !== 'true' &&
+      target.username === 'onur' && !target.password &&
+      target.pathname === `/${databaseName}`;
     if (process.env.A2_REAL_PG_TEST_ISOLATED !== '1' || target.protocol !== 'postgresql:' ||
-        target.hostname !== '127.0.0.1' || target.port !== '5432' || target.username !== 'onur' ||
-        target.password || target.pathname !== `/${databaseName}` ||
-        target.search !== '?schema=public') {
+        target.hostname !== '127.0.0.1' || target.port !== '5432' ||
+        target.search !== '?schema=public' || !(ciTarget || localTarget)) {
       throw new Error('A2 real-PostgreSQL test requires its exact dedicated local database and explicit authorization.');
     }
     process.env.NODE_ENV = 'test';
@@ -44,17 +56,28 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     db = new PrismaClient({ datasources: { db: { url } } });
     await db.$connect();
     const [identity] = await db.$queryRaw<Array<{ database: string; owner: string; address: string;
-      port: number; version: string; directory: string; systemId: bigint; databaseOwner: string }>>`
+      port: number; version: string; directory: string; systemId: bigint; databaseOwner: string; comment: string | null }>>`
       SELECT current_database() AS database, current_user AS owner, host(inet_server_addr()) AS address,
         inet_server_port() AS port, current_setting('server_version_num') AS version,
         current_setting('data_directory') AS directory,
         (pg_control_system()).system_identifier AS "systemId",
-        pg_get_userbyid(d.datdba) AS "databaseOwner" FROM pg_database d WHERE d.datname = current_database()
+        pg_get_userbyid(d.datdba) AS "databaseOwner",
+        shobj_description(d.oid, 'pg_database') AS comment
+      FROM pg_database d WHERE d.datname = current_database()
     `;
-    expect({ ...identity, systemId: String(identity.systemId) }).toMatchObject({
-      database: databaseName, owner: 'onur', databaseOwner: 'onur', address: '127.0.0.1', port: 5432,
-      version: '180003', directory: '/opt/homebrew/var/postgresql@18', systemId: '7637676237569338936',
-    });
+    if (ciTarget) {
+      expect(identity).toMatchObject({ database: ciDatabaseName, owner: 'postgres',
+        databaseOwner: 'postgres', address: '127.0.0.1', port: 5432,
+        comment: `fin-auto-ci:${ciProof}` });
+      expect(Math.floor(Number(identity.version) / 10000)).toBe(18);
+      expect(String(identity.systemId)).toBe(ciClusterId);
+      expect(identity.directory).toEqual(expect.any(String));
+    } else {
+      expect({ ...identity, systemId: String(identity.systemId) }).toMatchObject({
+        database: databaseName, owner: 'onur', databaseOwner: 'onur', address: '127.0.0.1', port: 5432,
+        version: '180003', directory: '/opt/homebrew/var/postgresql@18', systemId: '7637676237569338936',
+      });
+    }
     expect(await db.vendor.count()).toBe(0);
     expect(await db.user.count()).toBe(0);
     expect(await db.shopifyOrder.count()).toBe(0);
