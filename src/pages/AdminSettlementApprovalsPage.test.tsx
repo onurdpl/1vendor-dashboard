@@ -1266,8 +1266,24 @@ describe('Settlement Review queue cleanup', () => {
     expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('link-x');
     expect(screen.queryByRole('button', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
     if (selection === 'select Y') {
-      await user.click(getQueueRows(screen.getByLabelText('Settlement review queue'))[0]);
-      await waitFor(() => expect(screen.getByLabelText('Settlement review detail panel')).toHaveTextContent('888.88'));
+      const queue = screen.getByLabelText('Settlement review queue');
+      const yRow = await waitFor(() => {
+        expect(within(queue).getByLabelText('Vendor')).toHaveValue('Yalispor');
+        const rows = getQueueRows(queue);
+        expect(rows).toHaveLength(1);
+        const row = rows.find((candidate) => within(candidate).queryByText(/link-yreference/i)
+          && within(candidate).queryByText(/888\.88/));
+        expect(row).toBeDefined();
+        return row!;
+      });
+      expect(yRow).not.toHaveTextContent('link-x');
+      await user.click(yRow);
+      await waitFor(() => {
+        const panel = screen.getByLabelText('Settlement review detail panel');
+        expect(panel).toHaveTextContent('link-y');
+        expect(panel).toHaveTextContent('888.88');
+        expect(panel).not.toHaveTextContent('link-x');
+      });
     }
     await act(async () => refreshed.resolve({ ...x.detail, status: 'approved' }));
     const panel = screen.getByLabelText('Settlement review detail panel');
@@ -1282,6 +1298,7 @@ describe('Settlement Review queue cleanup', () => {
       expect(getQueueRows(screen.getByLabelText('Settlement review queue'))).toHaveLength(1);
     }
     expect(approveSettlementApprovalMock).toHaveBeenCalledExactlyOnceWith('link-x');
+    expect(cancelSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
   it.each(['approve', 'cancel'] as const)('rejects changed canonical status before an exact-target %s POST', async (action) => {
