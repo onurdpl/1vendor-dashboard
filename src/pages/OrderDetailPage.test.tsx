@@ -5,12 +5,12 @@ import { readFileSync } from 'node:fs';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
-import { markAuthConfirmed, setCurrentUser, setToken } from '../lib/auth';
+import { markAuthConfirmed, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
 import type { SupportTicket } from '../lib/api/contracts';
 import { OrderDetailPage } from './OrderDetailPage';
 
-const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
+const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
 const rejectOrderMock = vi.fn();
 const planAllocationSplitMock = vi.fn<(
   allocationId: string,
@@ -79,7 +79,7 @@ vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
   return {
     ...actual,
-    getOrder: (orderId: string) => getOrderMock(orderId),
+    getOrder: (orderId: string, options?: { vendorId?: string | null }) => getOrderMock(orderId, options),
     rejectOrder: (orderId: string, payload: unknown, options?: { vendorId?: string | null }) =>
       rejectOrderMock(orderId, payload, options),
     planAllocationSplit: (
@@ -9935,5 +9935,65 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('button', { name: 'Retry live shipment' })).not.toBeInTheDocument();
     expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
     expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('hides the previous Vendor order and form while the selected Vendor detail is pending', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['sporjinal', 'yalispor'],
+      vendorDetails: [
+        { vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+        { vendorId: 'yalispor', vendorName: 'Yalıspor' },
+      ],
+      canSwitchVendors: true, defaultVendorId: 'sporjinal',
+    });
+    const nextOrder = deferred<OrderDetail>();
+    getOrderMock.mockImplementation((_id, options) => options?.vendorId === 'yalispor'
+      ? nextOrder.promise
+      : Promise.resolve(orderWithShipmentSummary));
+    renderOrderDetail();
+    expect(await screen.findByText('Order #1028')).toBeInTheDocument();
+
+    act(() => setCurrentVendorId('yalispor'));
+    expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Order detail render frame')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    expect(getOrderMock).toHaveBeenCalledWith(orderWithShipmentSummary.id, expect.objectContaining({ vendorId: 'yalispor' }));
+
+    await act(async () => nextOrder.resolve({
+      ...orderWithShipmentSummary,
+      originalVendorId: 'yalispor', assignedVendorId: 'yalispor', vendorId: 'yalispor',
+      sourceShopifyOrderNumber: '#2099', amount: 'TRY 8,888.00',
+    }));
+    expect(await screen.findByText('Order #2099')).toBeInTheDocument();
+    expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
+  });
+
+  it('rejects a late previous-Vendor order response after switching context', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['sporjinal', 'yalispor'],
+      vendorDetails: [
+        { vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+        { vendorId: 'yalispor', vendorName: 'Yalıspor' },
+      ],
+      canSwitchVendors: true, defaultVendorId: 'sporjinal',
+    });
+    const oldOrder = deferred<OrderDetail>();
+    const nextOrder = deferred<OrderDetail>();
+    getOrderMock.mockImplementation((_id, options) => options?.vendorId === 'yalispor'
+      ? nextOrder.promise : oldOrder.promise);
+    renderOrderDetail();
+    act(() => setCurrentVendorId('yalispor'));
+    await act(async () => oldOrder.resolve(orderWithShipmentSummary));
+    expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    await act(async () => nextOrder.resolve({
+      ...orderWithShipmentSummary,
+      originalVendorId: 'yalispor', assignedVendorId: 'yalispor', vendorId: 'yalispor',
+      sourceShopifyOrderNumber: '#2099', amount: 'TRY 8,888.00',
+    }));
+    expect(await screen.findByText('Order #2099')).toBeInTheDocument();
+    expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
   });
 });

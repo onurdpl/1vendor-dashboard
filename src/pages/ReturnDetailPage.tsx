@@ -21,7 +21,7 @@ import {
   type ReturnDetail,
   type ReturnLineItem,
 } from '../features/returns/api';
-import { useAppReadiness } from '../lib/appReadiness';
+import { useAppReadiness, type AppReadinessState } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { useActionFeedback } from '../lib/ui';
 import { SupportTicketModal } from '../components/SupportTicketModal';
@@ -621,8 +621,13 @@ function collectReturnPickupMissingFields(snapshot: Record<string, unknown>, mes
 
 export function ReturnDetailPage() {
   const { returnId } = useParams();
-  const location = useLocation();
   const appReadiness = useAppReadiness();
+  return <ReturnDetailContent key={`${appReadiness.currentVendor.vendorId}:${returnId ?? ''}`} appReadiness={appReadiness} />;
+}
+
+function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState }) {
+  const { returnId } = useParams();
+  const location = useLocation();
   const currentVendor = appReadiness.currentVendor;
   const currentUser = appReadiness.currentUser;
   const authContextReady = appReadiness.ready;
@@ -644,7 +649,7 @@ export function ReturnDetailPage() {
     ? queryKeys.returns.detail(returnId, currentVendor.vendorId)
     : queryKeys.returns.list(currentVendor.vendorId);
   const {
-    data: returnRequest,
+    data: queriedReturn,
     isLoading,
     isError,
     error,
@@ -665,8 +670,15 @@ export function ReturnDetailPage() {
       enabled: returnDetailQueryEnabled,
       routeName: 'ReturnDetailPage',
       endpoint: returnDetailEndpoint,
+      placeholderData: () => undefined,
     },
   );
+  const returnRequest = authContextReady && (
+    !isRenderableReturnDetail(queriedReturn) ||
+    (queriedReturn.id === returnId && queriedReturn.assignedVendorId === currentVendor.vendorId)
+  )
+    ? queriedReturn
+    : null;
   const {
     data: relatedFinanceData,
     isError: relatedFinanceError,
@@ -689,6 +701,7 @@ export function ReturnDetailPage() {
       enabled: isAdmin && authContextReady && Boolean(returnRequest),
       routeName: 'ReturnDetailPage.relatedFinance',
       endpoint: '/finance/return-records',
+      placeholderData: () => undefined,
     },
   );
   const {
@@ -703,6 +716,7 @@ export function ReturnDetailPage() {
       enabled: authContextReady && Boolean(returnRequest),
       routeName: 'ReturnDetailPage.relatedSupportTickets',
       endpoint: isAdmin ? '/admin/support/tickets' : '/support/tickets',
+      placeholderData: () => undefined,
     },
   );
   const markReceivedMutation = useMutationAction(
