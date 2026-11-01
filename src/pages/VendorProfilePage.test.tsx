@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -456,6 +456,34 @@ function renderVendorProfilePage(initialEntries = ['/vendor/profile'], showVendo
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+function setTwoVendorAdmin() {
+  setCurrentUser({
+    email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+    vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+    vendorDetails: [
+      { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+      { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+    ],
+    canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+  });
+  getAdminVendorFinancialProfileMock.mockImplementation(async (vendorId) => ({
+    ...financeProfile, vendorId, commissionPercent: vendorId === 'demo-vendor-a' ? '12.50' : '7.25',
+  }));
+  getVendorBillingProfileMock.mockImplementation(async (vendorId) => ({
+    ...billingProfile, vendorId,
+    legalCompanyName: vendorId === 'demo-vendor-a' ? 'Vendor A Ltd.' : 'Vendor B Ltd.',
+  }));
+  getVendorStatusMock.mockImplementation(async (vendorId) => ({
+    ...activeVendorStatus, vendorId,
+    vendorName: vendorId === 'demo-vendor-a' ? 'Demo Vendor A' : 'Demo Vendor B',
+    restrictionReason: vendorId === 'demo-vendor-a' ? 'Finance review' : null,
+  }));
+  getVendorShippingConfigMock.mockImplementation(async (options) => ({
+    ...shippingConfig, vendorId: options?.vendorId ?? 'demo-vendor-a',
+  }));
+  listVendorProfileAuditLogsMock.mockImplementation(async () => []);
 }
 
 async function openLogoDiagnostics(section: HTMLElement) {
@@ -1712,15 +1740,17 @@ describe('VendorProfilePage', () => {
 
     await user.click(screen.getByRole('link', { name: 'Open Vendor B' }));
     await waitFor(() => expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-b', expect.any(Object)));
-    expect(within(shippingSection).getByRole('heading', { name: 'Loading shipping setup' })).toBeInTheDocument();
-    expect(within(warehouseSection).getByRole('heading', { name: 'Loading warehouse setup' })).toBeInTheDocument();
-    expect(within(warehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
-    expect(within(shippingSection).queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+    const vendorBShippingSection = screen.getByRole('heading', { name: 'Shipping operations' }).closest('section')!;
+    const vendorBWarehouseSection = screen.getByRole('heading', { name: 'Warehouse and returns' }).closest('section')!;
+    expect(within(vendorBShippingSection).getByRole('heading', { name: 'Loading shipping setup' })).toBeInTheDocument();
+    expect(within(vendorBWarehouseSection).getByRole('heading', { name: 'Loading warehouse setup' })).toBeInTheDocument();
+    expect(within(vendorBWarehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(within(vendorBShippingSection).queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
 
     rejectVendorB?.(new Error('Vendor B shipping read failed.'));
-    expect(await within(shippingSection).findByText('Vendor B shipping read failed.')).toBeInTheDocument();
-    expect(within(warehouseSection).getByText('Vendor B shipping read failed.')).toBeInTheDocument();
-    expect(within(warehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(await within(vendorBShippingSection).findByText('Vendor B shipping read failed.')).toBeInTheDocument();
+    expect(within(vendorBWarehouseSection).getByText('Vendor B shipping read failed.')).toBeInTheDocument();
+    expect(within(vendorBWarehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
 
     getAdminVendorShippingConfigMock.mockResolvedValue({
       ...shippingConfig,
@@ -1731,10 +1761,10 @@ describe('VendorProfilePage', () => {
         warehouseId: 'warehouse-b', name: 'Vendor B warehouse', address: 'Vendor B address',
       }],
     });
-    await user.click(within(shippingSection).getByRole('button', { name: 'Retry' }));
-    expect(await within(warehouseSection).findByText('Vendor B warehouse')).toBeInTheDocument();
-    expect(within(warehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
-    expect(await within(shippingSection).findByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
+    await user.click(within(vendorBShippingSection).getByRole('button', { name: 'Retry' }));
+    expect(await within(vendorBWarehouseSection).findByText('Vendor B warehouse')).toBeInTheDocument();
+    expect(within(vendorBWarehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(await within(vendorBShippingSection).findByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
   });
 
   it('rejects an Admin shipping response for a different Vendor before rendering an editor', async () => {
@@ -3172,5 +3202,134 @@ describe('VendorProfilePage', () => {
       'Vendor billing profile is missing required fields: billingCity.',
     );
     expect(within(billingSection!).queryByText('Commission e-Fatura sanitized preview')).not.toBeInTheDocument();
+  });
+
+  it('discards an Admin billing edit immediately when the workspace Vendor changes', async () => {
+    setTwoVendorAdmin();
+    const user = userEvent.setup();
+    renderVendorProfilePage();
+    await user.click(await screen.findByRole('button', { name: 'Edit billing profile' }));
+    await user.clear(screen.getByLabelText('Legal company name'));
+    await user.type(screen.getByLabelText('Legal company name'), 'UNSAVED_VENDOR_A');
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    expect(screen.queryByDisplayValue('UNSAVED_VENDOR_A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save billing profile' })).not.toBeInTheDocument();
+    expect((await screen.findAllByText('Vendor B Ltd.')).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: 'Edit billing profile' }));
+    expect(screen.getByLabelText('Legal company name')).toHaveValue('Vendor B Ltd.');
+    expect(updateVendorBillingProfileMock).not.toHaveBeenCalled();
+
+    act(() => setCurrentVendorId('demo-vendor-a'));
+    expect(screen.queryByRole('button', { name: 'Save billing profile' })).not.toBeInTheDocument();
+    expect((await screen.findAllByText('Vendor A Ltd.')).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: 'Edit billing profile' }));
+    expect(screen.getByLabelText('Legal company name')).toHaveValue('Vendor A Ltd.');
+  });
+
+  it('discards Admin finance and status edits on a workspace Vendor change', async () => {
+    setTwoVendorAdmin();
+    const user = userEvent.setup();
+    renderVendorProfilePage();
+    await user.click(await screen.findByRole('button', { name: 'Edit finance policy' }));
+    await user.clear(screen.getByLabelText('Commission %'));
+    await user.type(screen.getByLabelText('Commission %'), '44');
+    await user.selectOptions(await screen.findByLabelText('Status'), 'inactive');
+    await user.selectOptions(screen.getByLabelText('Status reason'), 'Finance review');
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    expect(screen.queryByRole('button', { name: 'Save finance policy' })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('44')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Edit finance policy' }));
+    expect(screen.getByLabelText('Commission %')).toHaveValue(7.25);
+    expect(screen.getByLabelText('Status')).toHaveValue('active');
+    expect(screen.getByLabelText('Status reason')).toHaveValue('');
+    expect(updateVendorFinancialProfileMock).not.toHaveBeenCalled();
+    expect(updateVendorStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('does not apply a completed Vendor A billing mutation to Vendor B', async () => {
+    setTwoVendorAdmin();
+    let completeA!: (profile: VendorBillingProfile) => void;
+    updateVendorBillingProfileMock.mockImplementation(() => new Promise((resolve) => { completeA = resolve; }));
+    const user = userEvent.setup();
+    renderVendorProfilePage();
+    await user.click(await screen.findByRole('button', { name: 'Edit billing profile' }));
+    await user.click(screen.getByRole('button', { name: 'Save billing profile' }));
+    await waitFor(() => expect(updateVendorBillingProfileMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await act(async () => completeA({ ...billingProfile, vendorId: 'demo-vendor-a', legalCompanyName: 'SAVED_A_LATE' }));
+    expect((await screen.findAllByText('Vendor B Ltd.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('SAVED_A_LATE')).not.toBeInTheDocument();
+    expect(screen.queryByText('Billing profile saved.')).not.toBeInTheDocument();
+    expect(updateVendorBillingProfileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show a delayed Vendor A billing response after switching to B', async () => {
+    setTwoVendorAdmin();
+    let completeA!: (profile: VendorBillingProfile) => void;
+    getVendorBillingProfileMock.mockImplementation((vendorId) => vendorId === 'demo-vendor-a'
+      ? new Promise((resolve) => { completeA = resolve; })
+      : Promise.resolve({ ...billingProfile, vendorId, legalCompanyName: 'Vendor B Ltd.' }));
+    renderVendorProfilePage();
+    await waitFor(() => expect(getVendorBillingProfileMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await screen.findAllByText('Vendor B Ltd.');
+    await act(async () => completeA({ ...billingProfile, vendorId: 'demo-vendor-a', legalCompanyName: 'LATE_A_BILLING' }));
+    expect(screen.queryByText('LATE_A_BILLING')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit billing profile' }));
+    expect(screen.getByLabelText('Legal company name')).toHaveValue('Vendor B Ltd.');
+  });
+
+  it('submits only the valid Vendor B billing edit after discarding A', async () => {
+    setTwoVendorAdmin();
+    const user = userEvent.setup();
+    renderVendorProfilePage();
+    await user.click(await screen.findByRole('button', { name: 'Edit billing profile' }));
+    await user.clear(screen.getByLabelText('Legal company name'));
+    await user.type(screen.getByLabelText('Legal company name'), 'UNSAVED_A');
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await screen.findAllByText('Vendor B Ltd.');
+    await user.click(screen.getByRole('button', { name: 'Edit billing profile' }));
+    await user.click(screen.getByRole('button', { name: 'Save billing profile' }));
+    await waitFor(() => expect(updateVendorBillingProfileMock).toHaveBeenCalledTimes(1));
+    expect(updateVendorBillingProfileMock.mock.calls[0]?.[0]).toBe('demo-vendor-b');
+    expect(JSON.stringify(updateVendorBillingProfileMock.mock.calls[0]?.[1])).not.toContain('UNSAVED_A');
+  });
+
+  it('invalidates an Admin route edit when navigating to another Vendor detail', async () => {
+    setTwoVendorAdmin();
+    const user = userEvent.setup();
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a'], true);
+    await user.click(await screen.findByRole('button', { name: 'Edit finance policy' }));
+    await user.clear(screen.getByLabelText('Commission %'));
+    await user.type(screen.getByLabelText('Commission %'), '44');
+    await user.click(screen.getByRole('link', { name: 'Open Vendor B' }));
+    expect(screen.queryByRole('button', { name: 'Save finance policy' })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('44')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Edit finance policy' }));
+    expect(screen.getByLabelText('Commission %')).toHaveValue(7.25);
+    expect(updateVendorFinancialProfileMock).not.toHaveBeenCalled();
+  });
+
+  it('does not revive an old A mutation after an A to B to A cycle', async () => {
+    setTwoVendorAdmin();
+    let completeOldA!: (profile: VendorBillingProfile) => void;
+    updateVendorBillingProfileMock.mockImplementation(() => new Promise((resolve) => { completeOldA = resolve; }));
+    const user = userEvent.setup();
+    renderVendorProfilePage();
+    await user.click(await screen.findByRole('button', { name: 'Edit billing profile' }));
+    await user.click(screen.getByRole('button', { name: 'Save billing profile' }));
+    await waitFor(() => expect(updateVendorBillingProfileMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await screen.findAllByText('Vendor B Ltd.');
+    act(() => setCurrentVendorId('demo-vendor-a'));
+    await screen.findAllByText('Vendor A Ltd.');
+    await act(async () => completeOldA({ ...billingProfile, vendorId: 'demo-vendor-a', legalCompanyName: 'OBSOLETE_A_RESULT' }));
+    expect(screen.queryByText('OBSOLETE_A_RESULT')).not.toBeInTheDocument();
+    expect(screen.queryByText('Billing profile saved.')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit billing profile' }));
+    expect(screen.getByLabelText('Legal company name')).toHaveValue('Vendor A Ltd.');
   });
 });
