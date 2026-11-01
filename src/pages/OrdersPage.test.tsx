@@ -3496,4 +3496,68 @@ describe('OrdersPage control center', () => {
     expect(await screen.findByText('Linked order unavailable')).toBeInTheDocument();
     expect(getOrderMock).not.toHaveBeenCalled();
   });
+  it('hides prior vendor rows, detail and counts while the next vendor is loading', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ], canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    setCurrentVendorId('demo-vendor-a');
+    const bOrder: OrderDetail = { ...orderDetail, id: 'ORD-B-2001',
+      originalVendorId: 'demo-vendor-b', assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b',
+      sourceShopifyOrderId: 'gid://shopify/Order/2001', sourceShopifyOrderNumber: '#2001',
+      customer: 'Vendor B Customer' };
+    const bList = deferred<OrderSummary[]>();
+    const bSummary = deferred<VendorOrdersWorkflowSummary>();
+    listOrdersMock.mockImplementation((options) => options?.vendorId === 'demo-vendor-b'
+      ? bList.promise : Promise.resolve([toSummary(orderDetail)]));
+    getOrderMock.mockImplementation((id) => Promise.resolve(id === bOrder.id ? bOrder : orderDetail));
+    getVendorOrdersWorkflowSummaryMock.mockImplementation((options) => options?.vendorId === 'demo-vendor-b'
+      ? bSummary.promise : Promise.resolve({ all: 7, awaitingShipment: 3, shipmentReview: 2, trackingMissing: 1 }));
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1002');
+    expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(within(screen.getByLabelText('Orders workflow tabs')).getByRole('button', { name: /All orders/ })).toHaveTextContent('7');
+
+    await act(async () => setCurrentVendorId('demo-vendor-b'));
+    expect(table.queryByText('#1002')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'View details' })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Orders workflow tabs')).getByRole('button', { name: /All orders/ })).not.toHaveTextContent('7');
+    await act(async () => { bList.resolve([toSummary(bOrder)]); bSummary.resolve({ all: 1, awaitingShipment: 0, shipmentReview: 0, trackingMissing: 0 }); });
+    await table.findByText('#2001');
+    expect(table.queryByText('#1002')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-B-2001');
+  });
+
+  it('does not restore prior vendor orders after the next vendor fails and retries empty', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ], canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    setCurrentVendorId('demo-vendor-a');
+    let bCalls = 0;
+    listOrdersMock.mockImplementation((options) => options?.vendorId === 'demo-vendor-b'
+      ? ++bCalls === 1 ? Promise.reject(new Error('B orders unavailable.')) : Promise.resolve([])
+      : Promise.resolve([toSummary(orderDetail)]));
+    getOrderMock.mockResolvedValue(orderDetail);
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1002');
+    await act(async () => setCurrentVendorId('demo-vendor-b'));
+    expect(await screen.findByText('Orders unavailable')).toBeInTheDocument();
+    expect(table.queryByText('#1002')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'View details' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('No orders in this view')).toBeInTheDocument();
+    expect(table.queryByText('#1002')).not.toBeInTheDocument();
+  });
+
 });
