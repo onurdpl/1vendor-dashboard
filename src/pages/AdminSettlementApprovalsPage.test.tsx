@@ -1931,11 +1931,13 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
     const queue = screen.getByLabelText('Settlement review queue');
     const tabs = within(queue).getByLabelText('Settlement review workflow tabs');
-    expect(within(tabs).getByRole('button', { name: /All2/i })).toBeInTheDocument();
-    expect(within(tabs).getByRole('button', { name: /Summary flags0/i })).toBeInTheDocument();
-    expect(within(tabs).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
-    expect(within(tabs).getByRole('button', { name: /Refund0/i })).toBeInTheDocument();
-    expect(within(tabs).getByRole('button', { name: /Paid0/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(tabs).getByRole('button', { name: /All2/i })).toBeInTheDocument();
+      expect(within(tabs).getByRole('button', { name: /Summary flags0/i })).toBeInTheDocument();
+      expect(within(tabs).getByRole('button', { name: /No summary flags1/i })).toBeInTheDocument();
+      expect(within(tabs).getByRole('button', { name: /Refund0/i })).toBeInTheDocument();
+      expect(within(tabs).getByRole('button', { name: /Paid0/i })).toBeInTheDocument();
+    });
 
     const rows = within(queue).getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
     const draftRow = rows.find((row) => within(row).queryByText('Gross TRY 7,598.00')) as HTMLElement | undefined;
