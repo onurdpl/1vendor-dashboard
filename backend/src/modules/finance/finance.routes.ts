@@ -14,6 +14,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { readAdminVendorTargetHeader, resolveAdminVendorTarget } from '../vendor-access/admin-vendor-target.service.js';
 import {
   cancelPayoutBatch,
   getPayoutBatch,
@@ -384,10 +385,24 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
 
+  const resolveFinanceReadVendor = async (request: Parameters<typeof requireVendorAccess>[0], reply: FastifyReply) => {
+    if (request.authUser?.role !== 'admin') return requireVendorAccess(request, reply);
+
+    const result = await resolveAdminVendorTarget(request, readAdminVendorTargetHeader(request));
+    if (!result.ok) return reply.code(result.code).send({ message: result.message });
+    request.vendorContext = {
+      vendorId: result.vendor.id,
+      vendorName: result.vendor.name,
+      vendorStatus: result.vendor.status,
+      role: result.actor.role,
+      accessScope: 'admin',
+    };
+  };
+
   app.get(
     '/finance/summary',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -404,7 +419,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   app.get(
     '/finance/profile',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -421,7 +436,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   app.get(
     '/finance/return-records',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -443,7 +458,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   app.get(
     '/finance/vendor-debt-history',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -459,7 +474,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
   app.get(
     '/finance/payout-offset-obligations',
-    { preHandler: [authMiddleware.authenticateRequest, requireVendorAccess] },
+    { preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor] },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
       if (!vendorId) return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
@@ -470,7 +485,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   app.get(
     '/finance',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
