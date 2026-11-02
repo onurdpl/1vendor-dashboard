@@ -2,6 +2,7 @@ import { apiClient, buildApiUrl, clearCsrfToken, setCsrfToken } from '../lib/api
 import { ApiError } from '../lib/api/errors';
 import { runtimeConfig } from '../config/runtime';
 import { createAuthDiagnosticId, isAuthDiagnosticsEnabled, recordAuthDiagnostic } from '../lib/auth/diagnostics';
+import { getAuthRestoreSnapshot } from '../lib/auth/restoreState';
 
 export type BackendAuthVendorAccess = {
   vendorId: string;
@@ -646,6 +647,9 @@ export async function me(options: AuthCorrelationOptions & { signal?: AbortSigna
       vendorId: null,
       signal: options.signal,
     });
+    if (options.signal?.aborted || (options.authAttemptId && getAuthRestoreSnapshot().restoreAttemptId !== options.authAttemptId)) {
+      throw new ApiError('Session restore changed while the request was pending.', 'invalid-response');
+    }
     setCsrfToken(response.csrfToken);
     recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
       flowId: authFlowId,

@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeConfig } from './config/runtime';
 import { apiClient, clearCsrfToken, setCsrfToken } from './lib/api-client';
-import { getCurrentUser, getToken, setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
+import { getCurrentUser, getToken, setCurrentUser, setCurrentVendorId, setSession, setToken } from './lib/auth';
+import { clearAuthRestoreState, setAuthRestoreSnapshot } from './lib/auth/restoreState';
+import { publishSessionTransition } from './lib/auth/sessionTransition';
 import {
   interpretDualPathTransportDiagnostic,
   login,
@@ -49,6 +51,7 @@ describe('backend auth client diagnostics', () => {
 
   afterEach(() => {
     clearCsrfToken();
+    clearAuthRestoreState();
     Object.assign(runtimeConfig, originalRuntimeConfig);
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -160,6 +163,7 @@ describe('backend auth client diagnostics', () => {
   });
 
   it('sends restore attempt id on /auth/me without exposing session material', async () => {
+    setAuthRestoreSnapshot({ phase: 'restoring', restoreAttemptId: 'restore-test123' });
     await me({
       authAttemptId: 'restore-test123',
       authFlowId: 'restore-flow123',
@@ -176,6 +180,66 @@ describe('backend auth client diagnostics', () => {
     expect(headers.get('X-Auth-Request-Id')).toBe('req-restore123');
     expect(JSON.stringify(init)).not.toContain('sporgym_session=');
     expect(JSON.stringify(init)).not.toContain('csrf-token');
+  });
+
+  it.each([200, 401])('keeps a newer session CSRF token when old /auth/me resolves with %i', async (status) => {
+    Object.assign(runtimeConfig, { apiMode: 'real', apiBaseUrl: '/api' });
+    const admin = {
+      email: 'admin@example.com', name: 'Admin A', role: 'admin' as const,
+      vendorAccess: ['vendor-a'], canSwitchVendors: true, defaultVendorId: 'vendor-a',
+    };
+    const vendor = {
+      email: 'vendor@example.com', name: 'Vendor B', role: 'vendor' as const,
+      vendorAccess: ['vendor-b'], canSwitchVendors: false, defaultVendorId: 'vendor-b',
+    };
+    setSession('token-a', admin);
+    publishSessionTransition('login');
+    setAuthRestoreSnapshot({ phase: 'restoring', restoreAttemptId: 'old-restore' });
+    let resolveOld!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    fetchMock.mockImplementationOnce(() => oldResponse);
+    const oldMe = me({ authAttemptId: 'old-restore' });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    setSession('token-b', vendor);
+    publishSessionTransition('login');
+    setAuthRestoreSnapshot({ phase: 'restoring', restoreAttemptId: 'new-restore' });
+    setCsrfToken('csrf-vendor-b');
+    resolveOld(new Response(JSON.stringify(status === 200
+      ? { user: { id: 'admin-a', email: admin.email }, csrfToken: 'csrf-admin-a' }
+      : { message: 'Unauthorized' }), {
+      status, headers: { 'Content-Type': 'application/json' },
+    }));
+    await expect(oldMe).rejects.toMatchObject({ kind: 'invalid-response' });
+    expect(getCurrentUser()?.email).toBe(vendor.email);
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    await apiClient.post('/vendor-action', {});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('X-CSRF-Token')).toBe('csrf-vendor-b');
+  });
+
+  it('does not commit CSRF from an aborted restore even if fetch ignores its signal', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real', apiBaseUrl: '/api' });
+    setAuthRestoreSnapshot({ phase: 'restoring', restoreAttemptId: 'aborted-restore' });
+    const controller = new AbortController();
+    let resolveOld!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveOld = resolve; }));
+    const oldMe = me({ authAttemptId: 'aborted-restore', signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort();
+    setCsrfToken('csrf-current');
+    resolveOld(new Response(JSON.stringify({ user: { id: 'old' }, csrfToken: 'csrf-old' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    await expect(oldMe).rejects.toMatchObject({ kind: 'invalid-response' });
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    await apiClient.post('/current-action', {});
+    expect(new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('X-CSRF-Token')).toBe('csrf-current');
   });
 
   it('preserves the current CSRF token when backend logout fails', async () => {
