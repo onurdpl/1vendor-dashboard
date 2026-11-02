@@ -5,13 +5,20 @@ import { readFileSync } from 'node:fs';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
-import { markAuthConfirmed, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { markAuthConfirmed, setCurrentUser as setCachedCurrentUser, setCurrentVendorId, setToken, type CurrentUser } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
 import { queryKeys } from '../lib/api/queryKeys';
 import type { SupportTicket } from '../lib/api/contracts';
 import { OrderDetailPage } from './OrderDetailPage';
 
 const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
+
+// These Order Detail fixtures exercise authenticated sessions in real API mode.
+function setCurrentUser(user: CurrentUser) {
+  setCachedCurrentUser(user);
+  markAuthConfirmed({ restoreAttemptId: 'order-detail-test-restore' });
+}
+
 const rejectOrderMock = vi.fn();
 const planAllocationSplitMock = vi.fn<(
   allocationId: string,
@@ -512,7 +519,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     cleanup();
     window.localStorage.clear();
     setToken('test-token');
-    markAuthConfirmed({ restoreAttemptId: 'order-detail-test-restore' });
     getOrderMock.mockReset();
     getOrderMock.mockResolvedValue(orderWithShipmentSummary);
     rejectOrderMock.mockReset();
