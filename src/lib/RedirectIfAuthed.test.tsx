@@ -11,6 +11,7 @@ import {
   type CurrentUser,
 } from './auth';
 import { RedirectIfAuthed } from './RedirectIfAuthed';
+import { readSessionTransition } from './auth/sessionTransition';
 
 const meMock = vi.hoisted(() => vi.fn());
 
@@ -115,6 +116,7 @@ describe('RedirectIfAuthed', () => {
       phase: 'confirmed',
       authConfirmed: true,
     });
+    expect(readSessionTransition()).toBeNull();
     expect(screen.queryByRole('button', { name: 'Login form' })).not.toBeInTheDocument();
   });
 

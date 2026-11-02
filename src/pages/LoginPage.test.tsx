@@ -12,6 +12,8 @@ import {
 } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { LoginPage } from './LoginPage';
+import { readSessionTransition } from '../lib/auth/sessionTransition';
+import { getAuthRestoreSnapshot } from '../lib/auth';
 
 const loginMock = vi.hoisted(() => vi.fn());
 const probePublicLoginReadinessMock = vi.hoisted(() => vi.fn());
@@ -236,6 +238,7 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('shows invalid credential errors without changing the login flow', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
     loginMock.mockRejectedValueOnce(new Error('Invalid email or password.'));
     renderStandaloneLogin();
 
@@ -245,6 +248,41 @@ describe('LoginPage expired session flow', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect(screen.queryByText('Sign-in is taking longer than expected. Please try again.')).not.toBeInTheDocument();
     expect(probeDualPathLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(readSessionTransition()).toBeNull();
+  });
+
+  it('publishes one real-login transition after local session setup without an extra restore', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    const storageWrites = vi.spyOn(window.localStorage, 'setItem');
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
+    expect(readSessionTransition()).toMatchObject({ version: 1, kind: 'login', id: expect.any(String) });
+    expect(storageWrites.mock.calls.filter(([key]) => key === 'vendor-dashboard.session-transition')).toHaveLength(1);
+    expect(getAuthRestoreSnapshot().authConfirmed).toBe(true);
+    expect(loginMock).toHaveBeenCalledTimes(1);
+    storageWrites.mockRestore();
+  });
+
+  it('does not publish for a stale successful login response', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    let finishOldLogin!: (value: { token: null; user: CurrentUser }) => void;
+    loginMock
+      .mockImplementationOnce(() => new Promise((resolve) => { finishOldLogin = resolve; }))
+      .mockResolvedValueOnce({ token: null, user: testUser });
+    const storageWrites = vi.spyOn(window.localStorage, 'setItem');
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+    const form = screen.getByRole('button', { name: 'Signing in…' }).closest('form');
+    fireEvent.submit(form as HTMLFormElement);
+    expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
+
+    await act(async () => { finishOldLogin({ token: null, user: testUser }); });
+    expect(storageWrites.mock.calls.filter(([key]) => key === 'vendor-dashboard.session-transition')).toHaveLength(1);
+    storageWrites.mockRestore();
   });
 
   it('hides demo credentials and unfinished-product copy in real production mode', () => {
@@ -561,6 +599,7 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('aborts a hanging login request and shows a retryable timeout error', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
     vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
     vi.useFakeTimers();
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -596,6 +635,7 @@ describe('LoginPage expired session flow', () => {
       'POST transport: Same-origin /api: Ready Direct backend: Ready Both safe POST paths work; login route or intermittent behavior remains possible',
     )).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+    expect(readSessionTransition()).toBeNull();
     expect((loginMock.mock.calls[0][2] as { signal?: AbortSignal }).signal?.aborted).toBe(true);
     expect((loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId).toEqual(
       expect.stringMatching(/^auth-[a-z0-9]{10}$/i),

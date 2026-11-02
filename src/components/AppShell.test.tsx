@@ -17,6 +17,8 @@ import {
 import { clearCsrfToken, setCsrfToken } from '../lib/api-client';
 import { queryClient } from '../lib/api/queryClient';
 import { runtimeServices } from '../services/runtime-services';
+import { runtimeConfig } from '../config/runtime';
+import { readSessionTransition } from '../lib/auth/sessionTransition';
 
 vi.mock('../lib/api-client', async () => {
   const actual = await vi.importActual<typeof import('../lib/api-client')>('../lib/api-client');
@@ -37,6 +39,7 @@ vi.mock('../services/runtime-services', () => ({
 const logoutMock = vi.mocked(runtimeServices.auth.logout);
 const clearCsrfTokenMock = vi.mocked(clearCsrfToken);
 const logoutQueryKey = ['logout-ordering-test'] as const;
+const initialApiMode = runtimeConfig.apiMode;
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -148,6 +151,7 @@ afterEach(() => {
   clearAuthRestoreState();
   clearCsrfToken();
   vi.clearAllMocks();
+  Object.assign(runtimeConfig, { apiMode: initialApiMode });
 });
 
 describe('AppShell workspace navigation', () => {
@@ -395,6 +399,27 @@ describe('AppShell workspace navigation', () => {
     expect(logoutMock).toHaveBeenCalledTimes(1);
   });
 
+  it('publishes one real-logout transition only after successful cleanup', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    const user = userEvent.setup();
+    const storageWrites = vi.spyOn(window.localStorage, 'setItem');
+    seedLogoutState(vendorUser);
+    renderShell('/orders');
+
+    const menu = await openAccountMenu(user);
+    const button = within(menu).getByRole('button', { name: /Log out/i });
+    await user.click(button);
+    await user.click(button);
+
+    await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
+    expect(readSessionTransition()).toMatchObject({ version: 1, kind: 'logout', id: expect.any(String) });
+    expect(storageWrites.mock.calls.filter(([key]) => key === 'vendor-dashboard.session-transition')).toHaveLength(1);
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+    expect(getCurrentUser()).toBeNull();
+    expect(queryClient.getQueryData(logoutQueryKey)).toBeUndefined();
+    storageWrites.mockRestore();
+  });
+
   it('keeps local auth and query state intact until backend logout resolves', async () => {
     const user = userEvent.setup();
     const deferredLogout = createDeferred();
@@ -475,6 +500,7 @@ describe('AppShell workspace navigation', () => {
   });
 
   it('preserves local auth and query state after logout rejection and allows retry', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
     const user = userEvent.setup();
     logoutMock.mockRejectedValueOnce(new Error('logout unavailable'));
     seedLogoutState(vendorUser);
@@ -496,6 +522,7 @@ describe('AppShell workspace navigation', () => {
     expect(clearCsrfTokenMock).not.toHaveBeenCalled();
     expect(queryClient.getQueryData(logoutQueryKey)).toEqual({ preserved: true });
     expect(getAuthRestoreSnapshot()).toMatchObject({ phase: 'confirmed', authConfirmed: true });
+    expect(readSessionTransition()).toBeNull();
     expect(logoutMock).toHaveBeenCalledTimes(1);
 
     await user.click(logoutButton);
