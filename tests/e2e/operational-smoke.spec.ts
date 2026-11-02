@@ -246,6 +246,54 @@ test.describe('operational browser smoke', () => {
     await expect(returnsTab.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', /RET-B-/);
   });
 
+  test('two tabs keep Shipping GET and pending save scoped to their original Vendors', async ({ page, context }) => {
+    await login(page);
+    await page.goto('/admin/vendors/demo-vendor-a');
+    await expect(page.getByText('Vendor ID: demo-vendor-a')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save shipping config' })).toBeVisible();
+    await page.addScriptTag({ type: 'module', content: `
+      import { runtimeServices } from '/src/services/runtime-services.ts';
+      const originalRead = runtimeServices.orders.vendorShippingConfig;
+      window.__shippingSaveCalls = [];
+      runtimeServices.orders.updateVendorShippingConfig = (id, input) => {
+        window.__shippingSaveCalls.push({ id, input });
+        return new Promise((resolve) => { window.__finishShippingSaveA = () => originalRead(id).then(resolve); });
+      };
+    ` });
+    await page.getByRole('button', { name: 'Save shipping config' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__shippingSaveCalls?.length ?? 0)).toBe(1);
+
+    const workspaceTab = await context.newPage();
+    await workspaceTab.goto('/');
+    await workspaceTab.addScriptTag({ type: 'module', content: `
+      import { runtimeServices } from '/src/services/runtime-services.ts';
+      const originalRead = runtimeServices.orders.vendorShippingConfig;
+      runtimeServices.orders.vendorShippingConfig = (id, options) => id === 'demo-vendor-b'
+        ? new Promise((resolve) => { window.__releaseShippingB = () => originalRead(id, options).then((config) => resolve({
+            ...config, defaultWarehouseId: '223344',
+            warehouses: [{ ...config.warehouses[0], vendorId: id, warehouseId: '223344', name: 'Vendor B warehouse' }],
+          })); })
+        : originalRead(id, options).then((config) => ({
+            ...config, defaultWarehouseId: '112668',
+            warehouses: [{ ...config.warehouses[0], vendorId: id, warehouseId: '112668', name: 'Vendor A warehouse' }],
+          }));
+    ` });
+    await workspaceTab.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Settings' }).click();
+    await expect(workspaceTab.getByText('Vendor A warehouse').first()).toBeVisible();
+    await workspaceTab.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
+    await workspaceTab.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await expect(workspaceTab.getByText('Vendor A warehouse')).toHaveCount(0);
+    await expect(workspaceTab.getByText('Vendor B warehouse')).toHaveCount(0);
+    await expect(page.getByText('Vendor ID: demo-vendor-a')).toBeVisible();
+    await workspaceTab.evaluate(() => (window as any).__releaseShippingB?.());
+    await expect(workspaceTab.getByText('Vendor B warehouse').first()).toBeVisible();
+    await page.evaluate(() => (window as any).__finishShippingSaveA?.());
+    await expect(workspaceTab.getByText('Vendor B warehouse').first()).toBeVisible();
+    await expect(workspaceTab.getByText('Shipping provider configuration saved.')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__shippingSaveCalls?.map((call: { id: string }) => call.id))).toEqual(['demo-vendor-a']);
+    await expect(page.getByText('Vendor ID: demo-vendor-a')).toBeVisible();
+  });
+
   test('admin Settings discards unsaved finance policy across A to B to A', async ({ page }) => {
     await login(page);
     await page.goto('/vendor/profile');

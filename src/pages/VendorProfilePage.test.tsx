@@ -5,6 +5,7 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorProfilePage } from './VendorProfilePage';
 import { ApiError } from '../lib/api/errors';
+import { queryKeys } from '../lib/api/queryKeys';
 import type {
   LogoIsbasiCommissionInvoicePreviewInput,
   LogoIsbasiCommissionInvoicePreviewResult,
@@ -438,10 +439,10 @@ function renderVendorProfilePage(initialEntries = ['/vendor/profile'], showVendo
     },
   });
 
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
-        {showVendorNavigation ? <Link to="/admin/vendors/demo-vendor-b">Open Vendor B</Link> : null}
+        {showVendorNavigation ? <><Link to="/admin/vendors/demo-vendor-b">Open Vendor B</Link><Link to="/admin/vendors/demo-vendor-a">Open Vendor A</Link></> : null}
         <Routes>
           <Route path="/vendor/profile" element={<VendorProfilePage />} />
           <Route path="/admin/vendors/:vendorId" element={<VendorProfilePage />} />
@@ -456,6 +457,26 @@ function renderVendorProfilePage(initialEntries = ['/vendor/profile'], showVendo
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...rendered, queryClient };
+}
+
+function deferredShipping<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((accept, decline) => { resolve = accept; reject = decline; });
+  return { promise, resolve, reject };
+}
+
+function isolationShippingConfig(vendorId: string, warehouseId: string): VendorShippingConfig {
+  return {
+    ...shippingConfig, vendorId, preferredProvider: 'kargonomi', cargoIntegrationId: null,
+    defaultWarehouseId: warehouseId,
+    providerMetadata: { kargonomiBuyerStateId: '34', kargonomiBuyerCityId: '828' },
+    warehouses: [{
+      ...shippingConfig.warehouses[0], id: `warehouse-${vendorId}`, vendorId,
+      provider: 'kargonomi', warehouseId, name: `${vendorId} warehouse`,
+    }],
+  };
 }
 
 function setTwoVendorAdmin() {
@@ -1765,6 +1786,54 @@ describe('VendorProfilePage', () => {
     expect(await within(vendorBWarehouseSection).findByText('Vendor B warehouse')).toBeInTheDocument();
     expect(within(vendorBWarehouseSection).queryByText('Main warehouse')).not.toBeInTheDocument();
     expect(await within(vendorBShippingSection).findByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
+  });
+
+  it('keeps Vendor B Settings and cache intact when Vendor A shipping save fails late', async () => {
+    const user = userEvent.setup();
+    setTwoVendorAdmin();
+    const pendingSave = deferredShipping<VendorShippingConfig>();
+    const aConfig = isolationShippingConfig('demo-vendor-a', '112668');
+    const bConfig = isolationShippingConfig('demo-vendor-b', '223344');
+    getAdminVendorShippingConfigMock.mockImplementation(async (id) => id === 'demo-vendor-a' ? aConfig : bConfig);
+    updateVendorShippingConfigMock.mockReturnValue(pendingSave.promise);
+    const { queryClient } = renderVendorProfilePage(['/admin/vendors/demo-vendor-a'], true);
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('112668');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+    await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
+    await user.click(screen.getByRole('link', { name: 'Open Vendor B' }));
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('223344');
+    await user.clear(screen.getByLabelText('Warehouse ID'));
+    await user.type(screen.getByLabelText('Warehouse ID'), '223345');
+    await act(async () => pendingSave.reject(new Error('Vendor A save failed late.')));
+    expect(screen.getByLabelText('Warehouse ID')).toHaveValue('223345');
+    expect(screen.queryByText('Vendor A save failed late.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipping provider configuration saved.')).not.toBeInTheDocument();
+    expect(updateVendorShippingConfigMock).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(queryKeys.admin.shipments.vendorShippingConfig('demo-vendor-b'))).toMatchObject({ vendorId: 'demo-vendor-b' });
+  });
+
+  it('keeps Vendor B Settings intact when Vendor A Kargonomi sync succeeds late', async () => {
+    const user = userEvent.setup();
+    setTwoVendorAdmin();
+    const pendingSync = deferredShipping<{ syncedConfig: VendorShippingConfig }>();
+    const aConfig = isolationShippingConfig('demo-vendor-a', '112668');
+    const bConfig = isolationShippingConfig('demo-vendor-b', '223344');
+    getAdminVendorShippingConfigMock.mockImplementation(async (id) => id === 'demo-vendor-a' ? aConfig : bConfig);
+    syncKargonomiWarehouseDetailsMock.mockReturnValue(pendingSync.promise);
+    const { queryClient } = renderVendorProfilePage(['/admin/vendors/demo-vendor-a'], true);
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('112668');
+    await user.click(screen.getByRole('button', { name: 'Sync Kargonomi warehouse details' }));
+    await waitFor(() => expect(syncKargonomiWarehouseDetailsMock).toHaveBeenCalledWith('demo-vendor-a', '112668'));
+    await user.click(screen.getByRole('link', { name: 'Open Vendor B' }));
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('223344');
+    await act(async () => pendingSync.resolve({ syncedConfig: aConfig }));
+    expect(screen.getByLabelText('Warehouse ID')).toHaveValue('223344');
+    expect(screen.queryByText('Kargonomi warehouse details synced.')).not.toBeInTheDocument();
+    expect(queryClient.getQueryData(queryKeys.admin.shipments.vendorShippingConfig('demo-vendor-b'))).toMatchObject({ vendorId: 'demo-vendor-b' });
+    expect(syncKargonomiWarehouseDetailsMock).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('link', { name: 'Open Vendor A' }));
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('112668');
+    expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object));
   });
 
   it('rejects an Admin shipping response for a different Vendor before rendering an editor', async () => {

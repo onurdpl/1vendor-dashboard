@@ -2,11 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
 import { markAuthConfirmed, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
+import { queryKeys } from '../lib/api/queryKeys';
 import type { SupportTicket } from '../lib/api/contracts';
 import { OrderDetailPage } from './OrderDetailPage';
 
@@ -341,15 +342,17 @@ function renderOrderDetail() {
     },
   });
 
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/orders/alloc-sporjinal-7621783322961']}>
+        <Link to="/orders/alloc-yalispor-2099">Open Vendor B order</Link>
         <Routes>
           <Route path="/orders/:orderId" element={<OrderDetailPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...rendered, queryClient };
 }
 
 function buildOrderFinanceDashboard(options: { estimatedPayout?: string; includeProductRefund?: boolean } = {}) {
@@ -9995,5 +9998,83 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     }));
     expect(await screen.findByText('Order #2099')).toBeInTheDocument();
     expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['save', 'success'], ['save', 'failure'], ['sync', 'success'], ['sync', 'failure'],
+  ] as const)('keeps Order Detail Vendor B isolated from a pending Vendor A shipping %s %s', async (operation, outcome) => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['sporjinal', 'yalispor'],
+      vendorDetails: [
+        { vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+        { vendorId: 'yalispor', vendorName: 'Yalıspor' },
+      ],
+      canSwitchVendors: true, defaultVendorId: 'sporjinal',
+    });
+    const aConfig = await getAdminVendorShippingConfigMock('sporjinal');
+    const bConfig = {
+      ...aConfig, vendorId: 'yalispor', defaultWarehouseId: '223344',
+      warehouses: [{ ...aConfig.warehouses[0], id: 'warehouse-b', vendorId: 'yalispor', warehouseId: '223344', name: 'Yalıspor warehouse' }],
+    };
+    getAdminVendorShippingConfigMock.mockImplementation(async (id) => id === 'sporjinal' ? aConfig : bConfig);
+    getOrderMock.mockImplementation(async (id, options) => options?.vendorId === 'yalispor'
+      ? { ...orderWithShipmentSummary, id, originalVendorId: 'yalispor', assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099' }
+      : orderWithShipmentSummary);
+    const pending = deferred<unknown>();
+    if (operation === 'save') updateVendorShippingConfigMock.mockReturnValue(pending.promise);
+    else syncKargonomiWarehouseDetailsMock.mockReturnValue(pending.promise);
+    const { queryClient } = renderOrderDetail();
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('112668');
+    await user.click(screen.getByRole('button', { name: operation === 'save' ? 'Save shipping config' : 'Sync Kargonomi warehouse details' }));
+    if (operation === 'save') await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalledWith('sporjinal', expect.any(Object)));
+    else await waitFor(() => expect(syncKargonomiWarehouseDetailsMock).toHaveBeenCalledWith('sporjinal', '112668'));
+    act(() => setCurrentVendorId('yalispor'));
+    await user.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+    expect(await screen.findByText('Order #2099')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('223344');
+    await user.clear(screen.getByLabelText('Warehouse ID'));
+    await user.type(screen.getByLabelText('Warehouse ID'), '223345');
+    await act(async () => {
+      if (outcome === 'failure') pending.reject(new Error('Late Vendor A shipping failure.'));
+      else pending.resolve(operation === 'save' ? aConfig : { syncedConfig: aConfig });
+    });
+    expect(screen.getByLabelText('Warehouse ID')).toHaveValue('223345');
+    expect(screen.queryByText('Late Vendor A shipping failure.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipping provider configuration saved.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Kargonomi warehouse details synced.')).not.toBeInTheDocument();
+    expect(queryClient.getQueryData(queryKeys.admin.shipments.vendorShippingConfig('yalispor'))).toMatchObject({ vendorId: 'yalispor', defaultWarehouseId: '223344' });
+    expect(updateVendorShippingConfigMock).toHaveBeenCalledTimes(operation === 'save' ? 1 : 0);
+    expect(syncKargonomiWarehouseDetailsMock).toHaveBeenCalledTimes(operation === 'sync' ? 1 : 0);
+    expect(getOrderMock).toHaveBeenCalledWith('alloc-yalispor-2099', expect.objectContaining({ vendorId: 'yalispor' }));
+  });
+
+  it('does not accept a delayed Vendor A Shipping GET after Vendor B Order Detail loads', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['sporjinal', 'yalispor'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }, { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+      canSwitchVendors: true, defaultVendorId: 'sporjinal',
+    });
+    const aConfig = await getAdminVendorShippingConfigMock('sporjinal');
+    const pendingA = deferred<typeof aConfig>();
+    const bConfig = {
+      ...aConfig, vendorId: 'yalispor', defaultWarehouseId: '223344',
+      warehouses: [{ ...aConfig.warehouses[0], id: 'warehouse-b', vendorId: 'yalispor', warehouseId: '223344', name: 'Yalıspor warehouse' }],
+    };
+    getAdminVendorShippingConfigMock.mockImplementation((id) => id === 'sporjinal' ? pendingA.promise : Promise.resolve(bConfig));
+    getOrderMock.mockImplementation(async (id, options) => options?.vendorId === 'yalispor'
+      ? { ...orderWithShipmentSummary, id, originalVendorId: 'yalispor', assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099' }
+      : orderWithShipmentSummary);
+    renderOrderDetail();
+    await waitFor(() => expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('sporjinal', expect.any(Object)));
+    act(() => setCurrentVendorId('yalispor'));
+    await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('223344');
+    await act(async () => pendingA.resolve(aConfig));
+    expect(screen.getByLabelText('Warehouse ID')).toHaveValue('223344');
+    expect(screen.queryByText('Sporjinal warehouse')).not.toBeInTheDocument();
+    expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('yalispor', expect.any(Object));
   });
 });
