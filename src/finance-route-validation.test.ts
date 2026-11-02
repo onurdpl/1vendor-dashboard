@@ -5,6 +5,7 @@ const upsertVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorFinanceSummaryMock = vi.hoisted(() => vi.fn());
 const getVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getAdminVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
+const adminVendorFinancialProfileTargetExistsMock = vi.hoisted(() => vi.fn());
 const getVendorReturnFinanceRecordsMock = vi.hoisted(() => vi.fn());
 const getVendorDebtHistoryMock = vi.hoisted(() => vi.fn());
 const getSettlementScheduleDryRunMock = vi.hoisted(() => vi.fn());
@@ -139,6 +140,7 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getVendorFinanceSummary: getVendorFinanceSummaryMock,
   getVendorFinancialProfile: getVendorFinancialProfileMock,
   getAdminVendorFinancialProfile: getAdminVendorFinancialProfileMock,
+  adminVendorFinancialProfileTargetExists: adminVendorFinancialProfileTargetExistsMock,
   getVendorReturnFinanceRecords: getVendorReturnFinanceRecordsMock,
   listPayoutBatches: vi.fn(),
   markPayoutBatchPaid: markPayoutBatchPaidMock,
@@ -393,6 +395,7 @@ describe('finance route validation', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    adminVendorFinancialProfileTargetExistsMock.mockResolvedValue(true);
     markPayoutBatchReviewMock.mockReset();
     markPayoutBatchPaidMock.mockReset();
     acknowledgeZeroNetMock.mockReset();
@@ -1067,13 +1070,24 @@ describe('finance route validation', () => {
     );
     expect(result).toMatchObject({ active: false, source: 'configured', commissionPercent: '17.00' });
     expect(getAdminVendorFinancialProfileMock).toHaveBeenCalledWith('sporjinal');
+    expect(adminVendorFinancialProfileTargetExistsMock).toHaveBeenCalledWith('sporjinal');
     expect(getVendorFinancialProfileMock).not.toHaveBeenCalled();
 
     getAdminVendorFinancialProfileMock.mockClear();
+    adminVendorFinancialProfileTargetExistsMock.mockClear();
     const denied = await gets.get('/admin/vendors/:vendorId/financial-profile')?.(
       { authUser: { role: 'vendor' }, params: { vendorId: 'sporjinal' } }, createReply(),
     );
     expect(denied).toMatchObject({ status: 403 });
+    expect(getAdminVendorFinancialProfileMock).not.toHaveBeenCalled();
+    expect(adminVendorFinancialProfileTargetExistsMock).not.toHaveBeenCalled();
+
+    adminVendorFinancialProfileTargetExistsMock.mockResolvedValueOnce(false);
+    const missing = await gets.get('/admin/vendors/:vendorId/financial-profile')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'missing-vendor' } }, createReply(),
+    );
+    expect(missing).toEqual({ status: 404, body: { message: 'Vendor could not be found.' } });
+    expect(adminVendorFinancialProfileTargetExistsMock).toHaveBeenCalledWith('missing-vendor');
     expect(getAdminVendorFinancialProfileMock).not.toHaveBeenCalled();
   });
 

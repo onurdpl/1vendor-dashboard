@@ -19,6 +19,7 @@ import {
   cancelPayoutBatch,
   getPayoutBatch,
   getPayoutOffsetObligationSummary,
+  adminVendorFinancialProfileTargetExists,
   getAdminVendorFinancialProfile,
   getVendorFinanceDashboard,
   getVendorFinanceSummary,
@@ -822,6 +823,9 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const { vendorId } = request.params as { vendorId: string };
+      if (!(await adminVendorFinancialProfileTargetExists(vendorId))) {
+        return reply.code(404).send({ message: 'Vendor could not be found.' });
+      }
       return getAdminVendorFinancialProfile(vendorId);
     },
   );
