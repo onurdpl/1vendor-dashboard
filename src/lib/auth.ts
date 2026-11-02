@@ -43,6 +43,7 @@ export {
 export {
   clearAuthRestoreState,
   getAuthRestoreSnapshot,
+  isAuthConfirmationCurrent,
   markAuthConfirmed,
   onAuthRestoreRetryRequest,
   onAuthRestoreStateChange,

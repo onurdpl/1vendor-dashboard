@@ -3,11 +3,13 @@ import { queryClient } from './api/queryClient';
 import { useEffect, useRef, useState } from 'react';
 import {
   clearToken,
+  clearAuthRestoreState,
   createAuthDiagnosticId,
   getCurrentUser,
   getAuthRestoreSnapshot,
   isAuthDiagnosticsEnabled,
   isAuthenticated,
+  isAuthConfirmationCurrent,
   markAuthConfirmed,
   onAuthRestoreRetryRequest,
   recordAuthDiagnostic,
@@ -15,6 +17,7 @@ import {
   setAuthRestoreSnapshot,
   setSession,
 } from './auth';
+import { onSessionTransition, readSessionTransition } from './auth/sessionTransition';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
 import { ApiError } from './api/errors';
@@ -33,7 +36,7 @@ const AUTH_RESTORE_RECOVERY_RETRY_LIMIT = 1;
 
 function getInitialAuthGateStatus(): AuthGateStatus {
   if (runtimeConfig.apiMode === 'real') {
-    if (getCurrentUser() && getAuthRestoreSnapshot().authConfirmed) {
+    if (isAuthConfirmationCurrent()) {
       return 'authenticated';
     }
     return getCurrentUser() ? 'authenticated_unconfirmed' : 'restoring';
@@ -196,6 +199,7 @@ export function RequireAuth() {
   const [authGateStatus, setAuthGateStatus] = useState<AuthGateStatus>(getInitialAuthGateStatus);
   const [restoreErrorMessage, setRestoreErrorMessage] = useState<string | null>(null);
   const [restoreRetryCount, setRestoreRetryCount] = useState(0);
+  const [externalTransitionPending, setExternalTransitionPending] = useState(false);
   const latestRestoreAttemptIdRef = useRef<string | null>(null);
   const activeRestoreControllerRef = useRef<AbortController | null>(null);
 
@@ -228,6 +232,9 @@ export function RequireAuth() {
     let cancelled = false;
     let suppressNextSessionReset = false;
     let delayedUiTimer: ReturnType<typeof setTimeout> | null = null;
+    let externalRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastExternalTransitionId = readSessionTransition()?.id ?? null;
+    let lastExternalUserValue = window.localStorage.getItem('vendor-dashboard.current-user');
 
     const isLatestRestore = (restoreAttemptId: string) =>
       !cancelled && latestRestoreAttemptIdRef.current === restoreAttemptId;
@@ -317,7 +324,7 @@ export function RequireAuth() {
         return;
       }
 
-      if (getCurrentUser() && getAuthRestoreSnapshot().authConfirmed) {
+      if (isAuthConfirmationCurrent()) {
         setAuthGateStatus('authenticated');
         return;
       }
@@ -366,6 +373,7 @@ export function RequireAuth() {
             source: 'RequireAuth.restoreSession.success',
           });
           markAuthConfirmed({ restoreAttemptId });
+          setExternalTransitionPending(false);
           clearDelayedUiTimer();
           logAuthRestoreInfo('AUTH_RESTORE_SUCCESS', { restoreAttemptId, durationMs: Date.now() - startedAt });
           setAuthGateStatus('authenticated');
@@ -428,6 +436,7 @@ export function RequireAuth() {
                   source: 'RequireAuth.restoreSession.recoverySuccess',
                 });
                 markAuthConfirmed({ restoreAttemptId });
+                setExternalTransitionPending(false);
                 clearDelayedUiTimer();
                 logAuthRestoreInfo('AUTH_RESTORE_RECOVERY_RETRY_SUCCESS', {
                   restoreAttemptId,
@@ -536,15 +545,64 @@ export function RequireAuth() {
       void restoreSession();
     });
 
+    function invalidateExternalSession(delayMs: number) {
+      if (runtimeConfig.apiMode !== 'real') return;
+      if (externalRestoreTimer) clearTimeout(externalRestoreTimer);
+      abortActiveRestore();
+      latestRestoreAttemptIdRef.current = null;
+      clearAuthRestoreState();
+      void queryClient.cancelQueries();
+      queryClient.clear();
+      setExternalTransitionPending(true);
+      setAuthGateStatus('restoring');
+      if (!getCurrentUser()) {
+        setAuthGateStatus('unauthenticated');
+        return;
+      }
+      externalRestoreTimer = setTimeout(() => {
+        externalRestoreTimer = null;
+        void restoreSession();
+      }, delayMs);
+    }
+
+    const onStoredUserChange = (event: StorageEvent) => {
+      if (event.key !== 'vendor-dashboard.current-user') return;
+      const currentValue = window.localStorage.getItem('vendor-dashboard.current-user');
+      if (event.newValue !== currentValue || currentValue === lastExternalUserValue) return;
+      lastExternalUserValue = currentValue;
+      if (isAuthConfirmationCurrent()) return;
+      invalidateExternalSession(30);
+    };
+    window.addEventListener('storage', onStoredUserChange);
+    const unsubscribeTransition = onSessionTransition((transition) => {
+      if (readSessionTransition()?.id !== transition.id || lastExternalTransitionId === transition.id) return;
+      lastExternalTransitionId = transition.id;
+      invalidateExternalSession(0);
+    });
+
     return () => {
       cancelled = true;
+      if (externalRestoreTimer) clearTimeout(externalRestoreTimer);
       clearDelayedUiTimer();
       abortActiveRestore();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubscribeSession();
+      unsubscribeTransition();
+      window.removeEventListener('storage', onStoredUserChange);
       unsubscribeRetry();
     };
   }, [navigate, restoreRetryCount]);
+
+  if ((externalTransitionPending && authGateStatus !== 'unauthenticated') ||
+    (runtimeConfig.apiMode === 'real' && authGateStatus === 'authenticated' && !isAuthConfirmationCurrent())) {
+    return (
+      <div className="auth-page" role="status">
+        <section className="auth-panel">
+          <h1>Checking your session</h1>
+        </section>
+      </div>
+    );
+  }
 
   if (authGateStatus === 'authenticated_unconfirmed') {
     return <Outlet />;
