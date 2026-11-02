@@ -188,6 +188,9 @@ describe.skipIf(!url)('Admin Vendor Finance reads against isolated PostgreSQL 18
     ] as const) {
       expect((await get('/finance/profile', 'admin', vendorId)).body)
         .toMatchObject({ vendorId, commissionPercent: commission });
+      const adminProfile = await get(`/admin/vendors/${vendorId}/financial-profile`, 'admin');
+      expect(adminProfile.status).toBe(200);
+      expect(adminProfile.body).toMatchObject({ vendorId, commissionPercent: commission, source: 'configured' });
       const records = await get(`/finance/return-records?shopifyRefundId=refund-${suffix}`, 'admin', vendorId);
       expect(records.body.records.map((row: { id: string }) => row.id).sort())
         .toEqual([`refund-ledger-${suffix}`, `sale-${suffix}`]);
@@ -217,6 +220,12 @@ describe.skipIf(!url)('Admin Vendor Finance reads against isolated PostgreSQL 18
       }
       expect((await get('/finance', 'admin', vendorId)).body.records).toEqual([]);
       expect((await get('/finance/vendor-debt-history', 'admin', vendorId)).body.events).toEqual([]);
+      const adminProfile = await get(`/admin/vendors/${vendorId}/financial-profile`, 'admin');
+      expect(adminProfile.status).toBe(200);
+      expect(adminProfile.body).toMatchObject({ vendorId, source: 'default' });
+      expect(adminProfile.body).toEqual((await get('/finance/profile', 'admin', vendorId)).body);
+      expect(adminProfile.body.commissionPercent).not.toBe('12.00');
+      expect(adminProfile.body.commissionPercent).not.toBe('18.00');
     }
   });
 
@@ -228,6 +237,9 @@ describe.skipIf(!url)('Admin Vendor Finance reads against isolated PostgreSQL 18
       expect((await get(path, 'admin', undefined, { 'x-vendor-id': [vendors.a, vendors.b] })).status).toBe(400);
       expect((await get(path)).status).toBe(401);
     }
+    const missingProfile = await get('/admin/vendors/a2-finance-nonexistent/financial-profile', 'admin');
+    expect(missingProfile).toEqual({ status: 404, body: { message: 'Vendor could not be found.' } });
+    expect((await get(`/admin/vendors/${vendors.a}/financial-profile`)).status).toBe(401);
   });
 
   it('rejects duplicate identical raw Admin target headers on all six endpoints', async () => {
@@ -255,6 +267,11 @@ describe.skipIf(!url)('Admin Vendor Finance reads against isolated PostgreSQL 18
         expect((await get(path, actor, vendors.b)).status).toBe(403);
       }
     }
+    for (const actor of ['vendorA', 'support', 'finance'] as const) {
+      expect((await get(`/admin/vendors/${vendors.a}/financial-profile`, actor, vendors.a)).status).toBe(403);
+    }
+    expect(await db.userVendorAccess.count({ where: { userId: users.admin } })).toBe(0);
+    expect((await get(`/admin/vendors/${vendors.b}/financial-profile`, 'admin', vendors.a)).status).toBe(200);
   });
 
   it('read requests preserve financial, return and membership records', async () => {
@@ -267,10 +284,16 @@ describe.skipIf(!url)('Admin Vendor Finance reads against isolated PostgreSQL 18
         orderBy: { id: 'asc' } }),
       memberships: await db.userVendorAccess.findMany({ select: { userId: true, vendorId: true },
         orderBy: [{ userId: 'asc' }, { vendorId: 'asc' }] }),
+      profiles: await db.vendorFinancialProfile.findMany({
+        select: { vendorId: true, commissionPercent: true, active: true }, orderBy: { vendorId: 'asc' },
+      }),
       payoutCount: await db.payoutBatch.count(),
       settlementCount: await db.settlementApproval.count(),
     };
     for (const path of paths) expect((await get(path, 'admin', vendors.a)).status).toBe(200);
+    expect((await get(`/admin/vendors/${vendors.a}/financial-profile`, 'admin')).status).toBe(200);
+    expect((await get(`/admin/vendors/${vendors.empty}/financial-profile`, 'admin')).status).toBe(200);
+    expect((await get('/admin/vendors/a2-finance-nonexistent/financial-profile', 'admin')).status).toBe(404);
     expect(await db.financeLedgerEntry.findMany({ select: { id: true, vendorId: true, amount: true,
       payoutStatus: true, settlementStatus: true, updatedAt: true }, orderBy: { id: 'asc' } })).toEqual(before.ledger);
     expect(await db.vendorBalanceEvent.findMany({ select: { id: true, vendorId: true, amountMinor: true },
@@ -279,6 +302,9 @@ describe.skipIf(!url)('Admin Vendor Finance reads against isolated PostgreSQL 18
       orderBy: { id: 'asc' } })).toEqual(before.refunds);
     expect(await db.userVendorAccess.findMany({ select: { userId: true, vendorId: true },
       orderBy: [{ userId: 'asc' }, { vendorId: 'asc' }] })).toEqual(before.memberships);
+    expect(await db.vendorFinancialProfile.findMany({
+      select: { vendorId: true, commissionPercent: true, active: true }, orderBy: { vendorId: 'asc' },
+    })).toEqual(before.profiles);
     expect(await db.payoutBatch.count()).toBe(before.payoutCount);
     expect(await db.settlementApproval.count()).toBe(before.settlementCount);
   });

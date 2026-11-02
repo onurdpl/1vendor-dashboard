@@ -2453,6 +2453,11 @@ export async function getAdminVendorFinancialProfile(vendorId: string): Promise<
   return mapProfile(profile, vendorId);
 }
 
+export async function adminVendorFinancialProfileTargetExists(vendorId: string): Promise<boolean> {
+  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { id: true } });
+  return Boolean(vendor);
+}
+
 function normalizeShippingCostStatus(value: ShippingCostInputDto['status'] | undefined) {
   const normalized = (value ?? 'confirmed').toUpperCase();
   if (normalized === 'PENDING' || normalized === 'CONFIRMED' || normalized === 'DISPUTED' || normalized === 'IGNORED') {
