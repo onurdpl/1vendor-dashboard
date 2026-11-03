@@ -1740,6 +1740,107 @@ describe('VendorProfilePage', () => {
     expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-b');
   });
 
+  it('reads an unassigned Admin workspace Vendor shipping config through the existing Admin API without editing controls', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: [], vendorDetails: [{ vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-b',
+    });
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    const vendorB = isolationShippingConfig('demo-vendor-b', '223344');
+    getAdminVendorShippingConfigMock.mockResolvedValue(vendorB);
+    getVendorShippingConfigMock.mockRejectedValue(new Error('Vendor assignment required.'));
+
+    renderVendorProfilePage();
+
+    expect(await screen.findByText('demo-vendor-b warehouse')).toBeInTheDocument();
+    expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-b', expect.any(Object));
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sync Kargonomi warehouse details' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Vendor workspace shipping reads on the assigned Vendor API only', async () => {
+    renderVendorProfilePage();
+
+    expect(await screen.findByText('Main warehouse')).toBeInTheDocument();
+    expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(getAdminVendorShippingConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps Admin workspace shipping data scoped through A to B to A and rejects an old A response', async () => {
+    setTwoVendorAdmin();
+    const oldA = deferredShipping<VendorShippingConfig>();
+    const vendorA = isolationShippingConfig('demo-vendor-a', '112668');
+    const vendorB = isolationShippingConfig('demo-vendor-b', '223344');
+    let aRequests = 0;
+    getAdminVendorShippingConfigMock.mockImplementation((id) => {
+      if (id === 'demo-vendor-b') return Promise.resolve(vendorB);
+      aRequests += 1;
+      return aRequests === 1 ? oldA.promise : Promise.resolve(vendorA);
+    });
+
+    renderVendorProfilePage();
+    await waitFor(() => expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
+    expect(screen.getByRole('heading', { name: 'Loading shipping setup' })).toBeInTheDocument();
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    expect(screen.queryByText('demo-vendor-a warehouse')).not.toBeInTheDocument();
+    expect(await screen.findByText('demo-vendor-b warehouse')).toBeInTheDocument();
+
+    act(() => setCurrentVendorId('demo-vendor-a'));
+    expect(screen.queryByText('demo-vendor-b warehouse')).not.toBeInTheDocument();
+    expect(await screen.findByText('demo-vendor-a warehouse')).toBeInTheDocument();
+    await act(async () => oldA.resolve({ ...vendorA, defaultWarehouseId: 'old-a', warehouses: [{
+      ...vendorA.warehouses[0], warehouseId: 'old-a', name: 'Old A warehouse',
+    }] }));
+    expect(screen.queryByText('Old A warehouse')).not.toBeInTheDocument();
+    expect(screen.getByText('demo-vendor-a warehouse')).toBeInTheDocument();
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+  });
+
+  it('fails closed for a mismatched Admin workspace shipping response and keeps the current Vendor error state', async () => {
+    setTwoVendorAdmin();
+    getAdminVendorShippingConfigMock.mockResolvedValue(isolationShippingConfig('demo-vendor-b', '223344'));
+    renderVendorProfilePage();
+
+    expect(await screen.findAllByText('Shipping configuration vendor identity does not match the requested vendor.'))
+      .toHaveLength(2);
+    expect(screen.queryByText('demo-vendor-b warehouse')).not.toBeInTheDocument();
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Admin workspace shipping loading, error, retry and empty configuration scoped to the selected Vendor', async () => {
+    setTwoVendorAdmin();
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce(isolationShippingConfig('demo-vendor-a', '112668'));
+    renderVendorProfilePage();
+    expect(await screen.findByText('demo-vendor-a warehouse')).toBeInTheDocument();
+
+    const pendingB = deferredShipping<VendorShippingConfig>();
+    getAdminVendorShippingConfigMock.mockReturnValueOnce(pendingB.promise);
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    const shippingSection = screen.getByRole('heading', { name: 'Shipping operations' }).closest('section')!;
+    expect(within(shippingSection).getByRole('heading', { name: 'Loading shipping setup' })).toBeInTheDocument();
+    expect(screen.queryByText('demo-vendor-a warehouse')).not.toBeInTheDocument();
+
+    await act(async () => pendingB.reject(new Error('Vendor B configuration unavailable.')));
+    expect(await within(shippingSection).findByText('Vendor B configuration unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('demo-vendor-a warehouse')).not.toBeInTheDocument();
+
+    getAdminVendorShippingConfigMock.mockResolvedValueOnce({
+      ...shippingConfig, vendorId: 'demo-vendor-b', source: 'default', warehouses: [],
+      defaultWarehouseId: null,
+    });
+    await userEvent.click(within(shippingSection).getByRole('button', { name: 'Retry' }));
+    expect(await within(shippingSection).findByText('Current configuration')).toBeInTheDocument();
+    expect(within(shippingSection).getByText('Not configured')).toBeInTheDocument();
+    expect(screen.queryByText('demo-vendor-a warehouse')).not.toBeInTheDocument();
+    expect(getAdminVendorShippingConfigMock).toHaveBeenLastCalledWith('demo-vendor-b', expect.any(Object));
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+  });
+
   it('keeps Admin shipping and warehouse data isolated while another Vendor loads and fails', async () => {
     const user = userEvent.setup();
     setCurrentUser({
