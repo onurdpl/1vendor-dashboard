@@ -128,12 +128,16 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     const { registerOrdersRoutes } = await import('../backend/src/modules/orders/orders.routes.js');
     const { registerReturnsRoutes } = await import('../backend/src/modules/returns/returns.routes.js');
     const { registerSupportRoutes } = await import('../backend/src/modules/support/support.routes.js');
+    const { registerAutomationRoutes } = await import('../backend/src/modules/automation/automation.routes.js');
+    const { registerDiagnosticsRoutes } = await import('../backend/src/modules/diagnostics/diagnostics.routes.js');
     ({ resolveAdminVendorTarget: resolver } = await import('../backend/src/modules/vendor-access/admin-vendor-target.service.js'));
     app = Fastify({ logger: false });
     registerDashboardSummaryRoutes(app, env);
     registerOrdersRoutes(app, env);
     registerReturnsRoutes(app, env);
     registerSupportRoutes(app, env);
+    registerAutomationRoutes(app, env);
+    registerDiagnosticsRoutes(app, env);
     await app.ready();
   }, 120_000);
 
@@ -161,6 +165,103 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     expect(await resolver({ authUser: authUsers.admin }, '')).toMatchObject({ ok: false, code: 400 });
     for (const actor of ['vendorA', 'support', 'finance'] as const) {
       expect(await resolver({ authUser: authUsers[actor] }, vendorIds.a)).toMatchObject({ ok: false, code: 403 });
+    }
+  });
+
+  it('Automation GET requires an explicit Admin target and preserves Vendor ownership without writes', async () => {
+    const orderId = 'a2-test-automation-multi-order';
+    const allocationA = 'a2-test-automation-allocation-a';
+    const allocationB = 'a2-test-automation-allocation-b';
+    const returnA = 'a2-test-automation-return-a';
+    const returnB = 'a2-test-automation-return-b';
+    const fulfillmentA = 'a2-test-automation-fulfillment-a';
+    const fulfillmentB = 'a2-test-automation-fulfillment-b';
+    const failedEventId = 'a2-test-automation-shared-refund-failure';
+    const rawError = `Canonical refund evidence requires finance review: ${allocationB}[unresolved].`;
+    await db.shopifyOrder.create({ data: { id: orderId,
+      sourceShopifyOrderId: 'gid://shopify/Order/a2-automation-multi', sourceShopifyOrderNumber: '#a2-automation-multi' } });
+    try {
+      await db.vendorAllocation.createMany({ data: [
+        { id: allocationA, sourceShopifyOrderId: orderId, sourceShopifyOrderNumber: '#a2-automation-multi',
+          originalVendorId: vendorIds.a, assignedVendorId: vendorIds.a, shippingStatus: 'Awaiting Shipment' },
+        { id: allocationB, sourceShopifyOrderId: orderId, sourceShopifyOrderNumber: '#a2-automation-multi',
+          originalVendorId: vendorIds.b, assignedVendorId: vendorIds.b, shippingStatus: 'Awaiting Shipment' },
+      ] });
+      await db.returnRecord.createMany({ data: [
+        { id: returnA, vendorAllocationId: allocationA, sourceShopifyOrderId: 'a2-automation-multi',
+          sourceShopifyOrderNumber: '#a2-automation-multi', status: 'pending' },
+        { id: returnB, vendorAllocationId: allocationB, sourceShopifyOrderId: 'a2-automation-multi',
+          sourceShopifyOrderNumber: '#a2-automation-multi', status: 'pending' },
+      ] });
+      await db.fulfillment.createMany({ data: [
+        { id: fulfillmentA, vendorAllocationId: allocationA, fulfillmentStatus: 'pending', syncStatus: 'failed' },
+        { id: fulfillmentB, vendorAllocationId: allocationB, fulfillmentStatus: 'pending', syncStatus: 'failed' },
+      ] });
+      await db.webhookEvent.create({ data: {
+        id: failedEventId, sourceShopDomain: 'isolated.example.myshopify.com', topic: 'refunds/create',
+        status: 'FAILED', shopifyOrderId: orderId, sourceShopifyOrderId: 'a2-automation-multi',
+        rawPayload: JSON.stringify({ order_id: 'a2-automation-multi', id: 'a2-refund-review' }),
+        errorMessage: rawError,
+      } });
+      const before = await db.vendorAllocation.findMany({ where: { id: { in: [allocationA, allocationB] } },
+        select: { id: true, assignedVendorId: true, shippingStatus: true, updatedAt: true }, orderBy: { id: 'asc' } });
+      const eventBefore = await db.webhookEvent.findUniqueOrThrow({ where: { id: failedEventId } });
+      const signalCount = await db.operationalSignal.count();
+      const actionCount = await db.automationAction.count();
+      expect(await db.userVendorAccess.count({ where: { userId: userIds.admin } })).toBe(0);
+
+      const adminA = await get('/automation', 'admin', vendorIds.a);
+      const adminB = await get('/automation', 'admin', vendorIds.b);
+      expect(adminA.status).toBe(200);
+      expect(adminB.status).toBe(200);
+      expect(JSON.stringify(adminA.body)).toContain(allocationA);
+      expect(JSON.stringify(adminA.body)).not.toContain(allocationB);
+      expect(JSON.stringify(adminB.body)).toContain(allocationB);
+      expect(JSON.stringify(adminB.body)).not.toContain(allocationA);
+      for (const [body, ownedReturn, foreignReturn, ownedFulfillment, foreignFulfillment] of [
+        [adminA.body, returnA, returnB, fulfillmentA, fulfillmentB],
+        [adminB.body, returnB, returnA, fulfillmentB, fulfillmentA],
+      ] as const) {
+        const serialized = JSON.stringify(body);
+        expect(serialized).toContain(ownedReturn);
+        expect(serialized).toContain(ownedFulfillment);
+        expect(serialized).not.toContain(foreignReturn);
+        expect(serialized).not.toContain(foreignFulfillment);
+        expect(serialized).not.toContain(failedEventId);
+        expect(serialized).not.toContain(rawError);
+      }
+      expect((await get('/automation', 'vendorA', vendorIds.a)).status).toBe(200);
+      expect((await get('/automation', 'vendorA', vendorIds.b)).status).toBe(403);
+      const vendorA = await get('/automation', 'vendorA', vendorIds.a);
+      const vendorB = await get('/automation', 'vendorB', vendorIds.b);
+      expect(JSON.stringify(vendorA.body)).not.toContain(failedEventId);
+      expect(JSON.stringify(vendorB.body)).not.toContain(failedEventId);
+      expect(JSON.stringify(vendorA.body)).not.toContain(rawError);
+      expect(JSON.stringify(vendorB.body)).not.toContain(rawError);
+      const diagnostic = await get(`/admin/diagnostics/webhooks/${failedEventId}`, 'admin');
+      expect(diagnostic.status).toBe(200);
+      expect(diagnostic.body).toMatchObject({ id: failedEventId, status: 'FAILED', errorMessage: rawError });
+      expect((await get(`/admin/diagnostics/webhooks/${failedEventId}`, 'vendorA', vendorIds.a)).status).toBe(403);
+      expect((await get('/automation', 'admin')).status).toBe(400);
+      expect((await get('/automation', 'admin', '')).status).toBe(400);
+      expect((await get('/automation', 'admin', 'a,b')).status).toBe(400);
+      expect((await get('/automation', 'admin', 'does-not-exist')).status).toBe(404);
+      expect((await get('/automation')).status).toBe(401);
+      const duplicate = await app.inject({ method: 'GET', url: '/automation',
+        headers: { authorization: `Bearer ${tokens.admin}`, 'x-vendor-id': [vendorIds.a, vendorIds.b] } });
+      expect(duplicate.statusCode).toBe(400);
+
+      expect(await db.vendorAllocation.findMany({ where: { id: { in: [allocationA, allocationB] } },
+        select: { id: true, assignedVendorId: true, shippingStatus: true, updatedAt: true }, orderBy: { id: 'asc' } })).toEqual(before);
+      expect(await db.operationalSignal.count()).toBe(signalCount);
+      expect(await db.automationAction.count()).toBe(actionCount);
+      expect(await db.webhookEvent.findUniqueOrThrow({ where: { id: failedEventId } })).toEqual(eventBefore);
+    } finally {
+      await db.webhookEvent.deleteMany({ where: { id: failedEventId } });
+      await db.returnRecord.deleteMany({ where: { id: { in: [returnA, returnB] } } });
+      await db.fulfillment.deleteMany({ where: { id: { in: [fulfillmentA, fulfillmentB] } } });
+      await db.vendorAllocation.deleteMany({ where: { id: { in: [allocationA, allocationB] } } });
+      await db.shopifyOrder.delete({ where: { id: orderId } });
     }
   });
 

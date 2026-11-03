@@ -96,7 +96,7 @@ export async function getAutomationDashboard(
   vendorId: string,
   vendorName: string,
 ): Promise<AutomationDashboardDto> {
-  const [allocations, pendingReturns, failedFulfillments, vendorWebhookEvents] = await Promise.all([
+  const [allocations, pendingReturns, failedFulfillments] = await Promise.all([
     withDashboardTiming('automation.allocation_fetch', () => prisma.vendorAllocation.findMany({
       where: {
         assignedVendorId: vendorId,
@@ -151,25 +151,6 @@ export async function getAutomationDashboard(
       },
       orderBy: {
         updatedAt: 'desc',
-      },
-      take: 8,
-    })),
-    withDashboardTiming('automation.failed_webhook_fetch', () => prisma.webhookEvent.findMany({
-      where: {
-        status: 'FAILED',
-        shopifyOrder: {
-          allocations: {
-            some: {
-              assignedVendorId: vendorId,
-            },
-          },
-        },
-      },
-      include: {
-        shopifyOrder: true,
-      },
-      orderBy: {
-        receivedAt: 'desc',
       },
       take: 8,
     })),
@@ -256,24 +237,6 @@ export async function getAutomationDashboard(
       status: 'New',
       timestamp: fulfillment.updatedAt,
       source: 'Fulfillment sync',
-    });
-    if (!seenAlertIds.has(alert.id)) {
-      seenAlertIds.add(alert.id);
-      alerts.push(alert);
-    }
-  }
-
-  for (const webhookEvent of vendorWebhookEvents) {
-    const orderNumber = formatOrderNumber(webhookEvent.shopifyOrder?.sourceShopifyOrderNumber);
-    const alert = createAlert({
-      id: `automation-webhook-${webhookEvent.id}`,
-      type: 'Critical',
-      message: webhookEvent.errorMessage
-        ? `Webhook ${webhookEvent.topic} failed${orderNumber !== 'unknown' ? ` for Shopify order ${orderNumber}` : ''}: ${webhookEvent.errorMessage}`
-        : `Webhook ${webhookEvent.topic} failed${orderNumber !== 'unknown' ? ` for Shopify order ${orderNumber}` : ''}.`,
-      status: 'New',
-      timestamp: webhookEvent.processedAt ?? webhookEvent.receivedAt,
-      source: 'Webhook diagnostics',
     });
     if (!seenAlertIds.has(alert.id)) {
       seenAlertIds.add(alert.id);
