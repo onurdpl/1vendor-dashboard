@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerSupportRoutes } from '../backend/src/modules/support/support.routes.js';
 
 const prismaMock = vi.hoisted(() => ({
@@ -13,6 +13,8 @@ const getAdminSupportAnalyticsMock = vi.hoisted(() => vi.fn());
 const listVendorSupportTicketsMock = vi.hoisted(() => vi.fn());
 const getAdminSupportTicketMock = vi.hoisted(() => vi.fn());
 const getVendorSupportTicketMock = vi.hoisted(() => vi.fn());
+const getAdminVendorSupportTicketMock = vi.hoisted(() => vi.fn());
+const resolveAdminVendorTargetMock = vi.hoisted(() => vi.fn());
 const updateAdminSupportTicketStatusMock = vi.hoisted(() => vi.fn());
 const addAdminSupportTicketNoteMock = vi.hoisted(() => vi.fn());
 const addAdminSupportTicketReplyMock = vi.hoisted(() => vi.fn());
@@ -29,6 +31,7 @@ vi.mock('../backend/src/modules/support/support.service.js', () => ({
   assignSupportTicketToSelf: assignSupportTicketToSelfMock,
   getAdminSupportTicket: getAdminSupportTicketMock,
   getVendorSupportTicket: getVendorSupportTicketMock,
+  getAdminVendorSupportTicket: getAdminVendorSupportTicketMock,
   listAdminSupportAttentionTickets: listAdminSupportAttentionTicketsMock,
   listAdminSupportTickets: listAdminSupportTicketsMock,
   listVendorSupportTickets: listVendorSupportTicketsMock,
@@ -42,6 +45,11 @@ vi.mock('../backend/src/modules/support/support.service.js', () => ({
       this.statusCode = statusCode;
     }
   },
+}));
+
+vi.mock('../backend/src/modules/vendor-access/admin-vendor-target.service.js', () => ({
+  readAdminVendorTargetHeader: (request: { headers: Record<string, string> }) => request.headers['x-vendor-id'] ?? null,
+  resolveAdminVendorTarget: resolveAdminVendorTargetMock,
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -63,6 +71,32 @@ vi.mock('../backend/src/modules/vendor-access/vendor-access.middleware.js', () =
 }));
 
 describe('support route contract', () => {
+  afterEach(() => {
+    listVendorSupportTicketsMock.mockReset();
+    getVendorSupportTicketMock.mockReset();
+    getAdminVendorSupportTicketMock.mockReset();
+    resolveAdminVendorTargetMock.mockReset();
+  });
+  it('lets a non-member Admin list only the explicitly selected Vendor tickets', async () => {
+    const gets = new Map<string, (request: any, reply: any) => unknown>();
+    registerSupportRoutes({ get: (path: string, _options: unknown, handler: (request: any, reply: any) => unknown) => gets.set(path, handler), post: vi.fn() } as never, {} as never);
+    resolveAdminVendorTargetMock.mockResolvedValueOnce({ ok: true, actor: { role: 'admin' }, vendor: { id: 'vendor-b', name: 'B', status: 'active' } });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([{ id: 'ticket-b', vendorId: 'vendor-b' }]);
+    const response = await gets.get('/support/tickets')?.({ authUser: { role: 'admin' }, headers: { 'x-vendor-id': 'vendor-b' }, query: {} }, { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) });
+    expect(response).toEqual([{ id: 'ticket-b', vendorId: 'vendor-b' }]);
+    expect(listVendorSupportTicketsMock).toHaveBeenCalledWith('vendor-b', {});
+  });
+
+  it('uses Admin-scoped detail semantics for a non-member Admin', async () => {
+    const gets = new Map<string, (request: any, reply: any) => unknown>();
+    registerSupportRoutes({ get: (path: string, _options: unknown, handler: (request: any, reply: any) => unknown) => gets.set(path, handler), post: vi.fn() } as never, {} as never);
+    resolveAdminVendorTargetMock.mockResolvedValueOnce({ ok: true, actor: { role: 'admin' }, vendor: { id: 'vendor-b', name: 'B', status: 'active' } });
+    getAdminVendorSupportTicketMock.mockResolvedValueOnce({ id: 'ticket-b', vendorId: 'vendor-b' });
+    const response = await gets.get('/support/tickets/:ticketId')?.({ authUser: { role: 'admin' }, headers: { 'x-vendor-id': 'vendor-b' }, params: { ticketId: 'ticket-b' } }, { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) });
+    expect(response).toEqual({ id: 'ticket-b', vendorId: 'vendor-b' });
+    expect(getAdminVendorSupportTicketMock).toHaveBeenCalledWith('ticket-b', 'vendor-b');
+    expect(getVendorSupportTicketMock).not.toHaveBeenCalled();
+  });
   it('creates support tickets with request vendor context', async () => {
     createSupportTicketMock.mockResolvedValueOnce({ id: 'ticket-1' });
     const posts = new Map<string, (request: unknown, reply: unknown) => unknown>();

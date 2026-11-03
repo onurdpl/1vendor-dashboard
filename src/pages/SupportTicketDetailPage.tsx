@@ -294,6 +294,7 @@ export function SupportTicketDetailPage() {
   const isAdmin = location.pathname.startsWith('/admin/');
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
+  const isVendorWorkspaceAdmin = !isAdmin && currentUser?.role === 'admin';
   const currentVendor = appReadiness.currentVendor;
   const authContextReady = appReadiness.ready;
   const [note, setNote] = useState('');
@@ -313,7 +314,8 @@ export function SupportTicketDetailPage() {
       return isAdmin ? getAdminSupportTicket(ticketId, { signal }) : getVendorSupportTicket(ticketId, { signal });
     },
     {
-      enabled: authContextReady && Boolean(ticketId),
+      enabled: authContextReady && Boolean(ticketId) && (isAdmin || Boolean(currentVendor.vendorId)),
+      placeholderData: () => undefined,
     },
   );
 
@@ -436,7 +438,7 @@ export function SupportTicketDetailPage() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(currentVendor.vendorId) });
   }, [currentVendor.vendorId, isAdmin, ticket?.id]);
 
-  if (!authContextReady || (isLoading && !ticket)) {
+  if (!authContextReady || (!isAdmin && !currentVendor.vendorId) || (isLoading && !ticket)) {
     return (
       <section className="op-page support-detail-page">
         <div className="op-page-heading">
@@ -451,7 +453,7 @@ export function SupportTicketDetailPage() {
     );
   }
 
-  if (isError || !ticket) {
+  if (isError || !ticket || (!isAdmin && (ticket.id !== ticketId || ticket.vendorId !== currentVendor.vendorId))) {
     return (
       <section className="op-page support-detail-page">
         <div className="op-page-heading">
@@ -470,7 +472,7 @@ export function SupportTicketDetailPage() {
     );
   }
 
-  const canReply = ticket.status !== 'CLOSED';
+  const canReply = ticket.status !== 'CLOSED' && !isVendorWorkspaceAdmin;
   const assignedToCurrentUser = Boolean(currentUser?.name && ticket.assigneeName === currentUser.name);
   const story = getSupportOperationalStory(ticket);
   const contextLinks = buildContextLinks(ticket, isAdmin);
@@ -653,7 +655,7 @@ export function SupportTicketDetailPage() {
                 </button>
               </form>
             ) : (
-              <p className="page-description">Closed support tickets cannot receive new replies.</p>
+              <p className="page-description">{isVendorWorkspaceAdmin ? 'Open this ticket in Admin Support to reply.' : 'Closed support tickets cannot receive new replies.'}</p>
             )}
           </article>
 
