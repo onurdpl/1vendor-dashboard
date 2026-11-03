@@ -127,11 +127,13 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     const { registerDashboardSummaryRoutes } = await import('../backend/src/modules/dashboard/dashboard-summary.routes.js');
     const { registerOrdersRoutes } = await import('../backend/src/modules/orders/orders.routes.js');
     const { registerReturnsRoutes } = await import('../backend/src/modules/returns/returns.routes.js');
+    const { registerSupportRoutes } = await import('../backend/src/modules/support/support.routes.js');
     ({ resolveAdminVendorTarget: resolver } = await import('../backend/src/modules/vendor-access/admin-vendor-target.service.js'));
     app = Fastify({ logger: false });
     registerDashboardSummaryRoutes(app, env);
     registerOrdersRoutes(app, env);
     registerReturnsRoutes(app, env);
+    registerSupportRoutes(app, env);
     await app.ready();
   }, 120_000);
 
@@ -334,6 +336,61 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
   });
 
   it('read requests preserve Vendor, allocation ownership, memberships and financial tables', async () => {
+    const supportIds = ['a2-support-ticket-a', 'a2-support-ticket-b'];
+    await db.supportTicket.createMany({ data: [
+      { id: supportIds[0], vendorId: vendorIds.a, createdByUserId: userIds.vendorA,
+        createdByRole: 'VENDOR', subject: 'A private support', message: 'A message', contextType: 'general',
+        vendorUnreadCount: 2, adminUnreadCount: 3 },
+      { id: supportIds[1], vendorId: vendorIds.b, createdByUserId: userIds.vendorB,
+        createdByRole: 'VENDOR', subject: 'B private support', message: 'B message', contextType: 'general',
+        vendorUnreadCount: 4, adminUnreadCount: 5, contextSnapshot: { secret: 'admin only' } },
+    ] });
+    try {
+      const bList = await get('/support/tickets', 'admin', vendorIds.b);
+      expect(bList.status).toBe(200);
+      expect(bList.body.map((item: { id: string }) => item.id)).toEqual([supportIds[1]]);
+      expect((await get('/support/tickets', 'admin')).status).toBe(400);
+      expect((await get('/support/tickets', 'admin', 'unknown-vendor')).status).toBe(404);
+      expect((await get('/support/tickets', 'admin', `${vendorIds.a},${vendorIds.b}`)).status).toBe(400);
+      const duplicate = await app.inject({ method: 'GET', url: '/support/tickets',
+        headers: { authorization: `Bearer ${tokens.admin}`, 'x-vendor-id': [vendorIds.a, vendorIds.b] } });
+      expect(duplicate.statusCode).toBe(400);
+      expect((await get(`/support/tickets/${supportIds[0]}`, 'admin', vendorIds.b)).status).toBe(404);
+      expect((await get(`/support/tickets/${supportIds[1]}`, 'admin')).status).toBe(400);
+      const bDetail = await get(`/support/tickets/${supportIds[1]}`, 'admin', vendorIds.b);
+      expect(bDetail.status).toBe(200);
+      expect(bDetail.body).toMatchObject({ id: supportIds[1], vendorId: vendorIds.b, subject: 'B private support',
+        vendorUnreadCount: 4, adminUnreadCount: 0 });
+      expect(bDetail.body).not.toHaveProperty('contextSnapshot');
+      expect(bDetail.body).not.toHaveProperty('notes');
+      expect(await db.supportTicket.findUniqueOrThrow({ where: { id: supportIds[1] },
+        select: { vendorUnreadCount: true, adminUnreadCount: true } })).toEqual({ vendorUnreadCount: 4, adminUnreadCount: 0 });
+      expect(await db.supportTicket.findUniqueOrThrow({ where: { id: supportIds[0] },
+        select: { vendorUnreadCount: true, adminUnreadCount: true } })).toEqual({ vendorUnreadCount: 2, adminUnreadCount: 3 });
+      expect((await get('/support/tickets', 'vendorA', vendorIds.b)).status).toBe(403);
+      expect((await get('/support/tickets', 'support', vendorIds.b)).status).toBe(403);
+      expect((await get('/support/tickets', 'finance', vendorIds.b)).status).toBe(403);
+      expect((await get(`/support/tickets/${supportIds[1]}`, 'vendorA', vendorIds.a)).status).toBe(404);
+      expect((await get(`/support/tickets/${supportIds[0]}`, 'vendorA', vendorIds.a)).status).toBe(200);
+      expect(await db.supportTicket.findUniqueOrThrow({ where: { id: supportIds[0] },
+        select: { vendorUnreadCount: true, adminUnreadCount: true } })).toEqual({ vendorUnreadCount: 0, adminUnreadCount: 3 });
+      await db.supportTicket.update({ where: { id: supportIds[1] },
+        data: { adminUnreadCount: 5 } });
+      const [concurrentAdmin, concurrentVendor] = await Promise.all([
+        get(`/support/tickets/${supportIds[1]}`, 'admin', vendorIds.b),
+        get(`/support/tickets/${supportIds[1]}`, 'vendorB', vendorIds.b),
+      ]);
+      expect([concurrentAdmin.status, concurrentVendor.status]).toEqual([200, 200]);
+      expect(await db.supportTicket.findUniqueOrThrow({ where: { id: supportIds[1] },
+        select: { vendorUnreadCount: true, adminUnreadCount: true } })).toEqual({ vendorUnreadCount: 0, adminUnreadCount: 0 });
+      const reply = await app.inject({ method: 'POST', url: `/support/tickets/${supportIds[1]}/replies`,
+        headers: { authorization: `Bearer ${tokens.admin}`, 'x-vendor-id': vendorIds.b },
+        payload: { message: 'not permitted' } });
+      expect(reply.statusCode).toBe(403);
+      expect(await db.supportTicketReply.count({ where: { supportTicketId: supportIds[1] } })).toBe(0);
+    } finally {
+      await db.supportTicket.deleteMany({ where: { id: { in: supportIds } } });
+    }
     expect(await db.vendor.findMany({ select: { id: true, status: true }, orderBy: { id: 'asc' } })).toEqual([
       { id: vendorIds.a, status: 'active' }, { id: vendorIds.b, status: 'active' },
       { id: vendorIds.c, status: 'restricted' }, { id: vendorIds.d, status: 'active' },

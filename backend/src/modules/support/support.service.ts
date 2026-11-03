@@ -1063,6 +1063,30 @@ export async function getAdminSupportTicket(ticketId: string): Promise<SupportTi
   return ticket ? mapAdminTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true }) : null;
 }
 
+export async function getAdminVendorSupportTicket(ticketId: string, vendorId: string): Promise<SupportTicketDto | null> {
+  return prisma.$transaction(async (tx) => {
+    const owned = await tx.supportTicket.findFirst({
+      where: { id: ticketId, vendorId },
+      select: { id: true },
+    });
+    if (!owned) return null;
+
+    await tx.supportTicket.updateMany({
+      where: { id: ticketId, vendorId, adminUnreadCount: { gt: 0 } },
+      data: { adminUnreadCount: 0 },
+    });
+    const ticket = await tx.supportTicket.findFirst({
+      where: { id: ticketId, vendorId },
+      include: {
+        vendor: { select: { name: true } },
+        replies: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!ticket) throw new SupportTicketError('Support ticket not found.', 404);
+    return mapVendorTicket(ticket, { includeReplies: true });
+  });
+}
+
 export async function getVendorSupportTicket(ticketId: string, vendorId: string): Promise<SupportTicketDto | null> {
   await prisma.supportTicket.updateMany({
     where: {

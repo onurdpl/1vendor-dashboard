@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { readAdminVendorTargetHeader, resolveAdminVendorTarget } from '../vendor-access/admin-vendor-target.service.js';
 import { prisma } from '../../db/prisma.js';
 import {
   addAdminSupportTicketNote,
@@ -13,6 +14,7 @@ import {
   escalateVendorSupportTicket,
   getAdminSupportAnalytics,
   getAdminSupportTicket,
+  getAdminVendorSupportTicket,
   getVendorSupportTicket,
   listAdminSupportAttentionTickets,
   listAdminSupportTickets,
@@ -115,9 +117,17 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
   app.get<{ Querystring: SupportTicketFilters }>(
     '/support/tickets',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, async (request, reply) => {
+        if (request.authUser?.role !== 'admin') await requireVendorAccess(request, reply);
+      }],
     },
     async (request, reply) => {
+      if (request.authUser?.role === 'admin') {
+        const target = await resolveAdminVendorTarget(request, readAdminVendorTargetHeader(request));
+        if (!target.ok) return reply.code(target.code).send({ message: target.message });
+        return withDashboardRouteTiming('GET /support/tickets', () =>
+          listVendorSupportTickets(target.vendor.id, request.query ?? {}));
+      }
       if (!request.vendorContext) {
         return reply.code(401).send({ message: 'Unauthorized' });
       }
@@ -132,9 +142,22 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
   app.get<{ Params: { ticketId: string } }>(
     '/support/tickets/:ticketId',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, async (request, reply) => {
+        if (request.authUser?.role !== 'admin') await requireVendorAccess(request, reply);
+      }],
     },
     async (request, reply) => {
+      if (request.authUser?.role === 'admin') {
+        const target = await resolveAdminVendorTarget(request, readAdminVendorTargetHeader(request));
+        if (!target.ok) return reply.code(target.code).send({ message: target.message });
+        try {
+          const ticket = await getAdminVendorSupportTicket(request.params.ticketId, target.vendor.id);
+          if (!ticket) return reply.code(404).send({ message: 'Support ticket not found.' });
+          return ticket;
+        } catch (error) {
+          return sendSupportError(error, reply);
+        }
+      }
       if (!request.vendorContext) {
         return reply.code(401).send({ message: 'Unauthorized' });
       }

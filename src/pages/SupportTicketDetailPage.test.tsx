@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import type { SupportTicket } from '../lib/api/contracts';
 import { SupportTicketDetailPage } from './SupportTicketDetailPage';
 
@@ -102,6 +102,43 @@ describe('SupportTicketDetailPage context visibility', () => {
     getVendorSupportTicketMock.mockReset();
     assignAdminSupportTicketToSelfMock.mockReset();
     addVendorSupportTicketReplyMock.mockReset();
+  });
+
+  it('hides a foreign Vendor ticket returned under the selected Vendor context', async () => {
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor User', role: 'vendor', vendorAccess: ['vendor-a'], vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }], canSwitchVendors: false, defaultVendorId: 'vendor-a' });
+    getVendorSupportTicketMock.mockResolvedValueOnce(ticket({ id: 'ticket-1', vendorId: 'vendor-b', subject: 'Vendor B private ticket' }));
+    renderPage('/support/ticket-1');
+    expect(await screen.findByText('Support ticket unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Vendor B private ticket')).not.toBeInTheDocument();
+  });
+
+  it('does not offer a Vendor reply form to an Admin in Vendor Workspace', async () => {
+    setCurrentUser({ email: 'admin@example.com', name: 'Admin', role: 'admin', vendorAccess: ['vendor-a'], vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }], canSwitchVendors: true, defaultVendorId: 'vendor-a' });
+    getVendorSupportTicketMock.mockResolvedValueOnce(ticket());
+    renderPage('/support/ticket-1');
+    await screen.findByRole('heading', { name: 'Return support' });
+    expect(screen.queryByRole('button', { name: 'Post reply' })).not.toBeInTheDocument();
+  });
+
+  it('hides old details across A to B to A and rejects the first delayed A response', async () => {
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor User', role: 'vendor',
+      vendorAccess: ['vendor-a', 'vendor-b'], vendorDetails: [
+        { vendorId: 'vendor-a', vendorName: 'Vendor A' }, { vendorId: 'vendor-b', vendorName: 'Vendor B' },
+      ], canSwitchVendors: true, defaultVendorId: 'vendor-a' });
+    let resolveOldA!: (value: SupportTicket) => void;
+    getVendorSupportTicketMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldA = resolve; }))
+      .mockResolvedValueOnce(ticket({ vendorId: 'vendor-b', subject: 'Current B detail' }))
+      .mockResolvedValueOnce(ticket({ subject: 'Current A detail' }));
+    renderPage('/support/ticket-1');
+    await waitFor(() => expect(getVendorSupportTicketMock).toHaveBeenCalledTimes(1));
+    act(() => setCurrentVendorId('vendor-b'));
+    expect(await screen.findByRole('heading', { name: 'Current B detail' })).toBeInTheDocument();
+    act(() => setCurrentVendorId('vendor-a'));
+    expect(screen.queryByText('Current B detail')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Current A detail' })).toBeInTheDocument();
+    await act(async () => resolveOldA(ticket({ subject: 'Stale A detail' })));
+    expect(screen.queryByText('Stale A detail')).not.toBeInTheDocument();
   });
 
   it('renders compact ticket metadata without an operations summary', async () => {

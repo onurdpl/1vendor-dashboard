@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupportTicket } from '../lib/api/contracts';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { formatDateTime } from '../services/real/formatting';
 import { VendorSupportTicketsPage } from './VendorSupportTicketsPage';
 
@@ -203,5 +203,36 @@ describe('VendorSupportTicketsPage workflow filtering', () => {
 
     expect(screen.getByRole('link', { name: unreadTicket.subject })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: waitingTicket.subject })).not.toBeInTheDocument();
+  });
+
+  it('does not render a ticket returned for another selected Vendor', async () => {
+    listVendorSupportTicketsMock.mockResolvedValue([supportTicket({ id: 'ticket-b', vendorId: 'demo-vendor-b', subject: 'Vendor B private ticket' })]);
+    renderSupportPage();
+    expect(await screen.findByText('No support requests')).toBeInTheDocument();
+    expect(screen.queryByText('Vendor B private ticket')).not.toBeInTheDocument();
+  });
+
+  it('keeps A, B and a new A generation isolated when the first A response arrives late', async () => {
+    setCurrentUser({ email: 'admin@example.com', name: 'Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'], vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ], canSwitchVendors: true, defaultVendorId: 'demo-vendor-a' });
+    let resolveOldA!: (value: SupportTicket[]) => void;
+    listVendorSupportTicketsMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldA = resolve; }))
+      .mockResolvedValueOnce([supportTicket({ id: 'ticket-b', vendorId: 'demo-vendor-b', subject: 'B support' })])
+      .mockResolvedValueOnce([supportTicket({ id: 'ticket-a-new', subject: 'Current A support' })]);
+    renderSupportPage();
+    await waitFor(() => expect(listVendorSupportTicketsMock).toHaveBeenCalledTimes(1));
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    expect(await screen.findByRole('link', { name: 'B support' })).toBeInTheDocument();
+    expect(screen.queryByText('Shipment tracking help')).not.toBeInTheDocument();
+    act(() => setCurrentVendorId('demo-vendor-a'));
+    expect(await screen.findByRole('link', { name: 'Current A support' })).toBeInTheDocument();
+    expect(screen.queryByText('B support')).not.toBeInTheDocument();
+    await act(async () => resolveOldA([supportTicket({ id: 'ticket-a-old', subject: 'Stale A support' })]));
+    expect(screen.getByRole('link', { name: 'Current A support' })).toBeInTheDocument();
+    expect(screen.queryByText('Stale A support')).not.toBeInTheDocument();
   });
 });

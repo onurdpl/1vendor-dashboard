@@ -57,16 +57,17 @@ export function VendorSupportTicketsPage() {
   const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => listVendorSupportTickets({ signal }),
-    { enabled: pageReadiness.ready },
+    { enabled: pageReadiness.ready, placeholderData: () => undefined },
   );
 
   const filteredTickets = useMemo(() => {
     return safeArray(tickets).filter((ticket) => {
+      if (!pageReadiness.ready || ticket.vendorId !== currentVendor.vendorId) return false;
       const matchesWorkflow = !workflowOpenSupportIssues || isOpenSupportIssue(ticket);
       const matchesUnread = !unreadOnly || isVendorSupportUnread(ticket);
       return matchesWorkflow && matchesUnread;
     });
-  }, [tickets, unreadOnly, workflowOpenSupportIssues]);
+  }, [tickets, unreadOnly, workflowOpenSupportIssues, currentVendor.vendorId, pageReadiness.ready]);
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
