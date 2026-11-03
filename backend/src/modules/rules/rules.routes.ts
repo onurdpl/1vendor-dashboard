@@ -1,8 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { readAdminVendorTargetHeader, resolveAdminVendorTarget } from '../vendor-access/admin-vendor-target.service.js';
 import { evaluateOperationalSignalsForUser, listDashboardOperationalSignals, listOperationalSignals, updateOperationalSignalStatus } from './rules.service.js';
 import type { OperationalSignalLifecycleAction } from './rules.types.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -19,18 +20,39 @@ type SignalDashboardListQuery = SignalListQuery & {
 export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+  const requireSignalsReadVendorContext = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (request.authUser?.role !== 'admin') {
+      return requireVendorAccess(request, reply);
+    }
+
+    const targetId = readAdminVendorTargetHeader(request);
+    const result = await resolveAdminVendorTarget(request, targetId);
+    if (!result.ok) {
+      return reply.code(result.code).send({ message: result.message });
+    }
+
+    request.vendorContext = {
+      vendorId: result.vendor.id,
+      vendorName: result.vendor.name,
+      vendorStatus: result.vendor.status,
+      role: result.actor.role,
+      accessScope: 'admin',
+    };
+  };
 
   app.get<{ Querystring: SignalListQuery }>(
     '/signals',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireSignalsReadVendorContext],
     },
-    async (request) => {
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) return reply.code(400).send({ message: 'A single explicit vendor ID is required.' });
       const includeInternal = request.authUser?.role === 'admin';
 
       return withDashboardRouteTiming('GET /signals', () =>
         listOperationalSignals({
-          vendorId: request.vendorContext?.vendorId,
+          vendorId,
           includeInternal,
           limit: parseSignalLimit(request.query?.limit),
         }),
@@ -41,14 +63,16 @@ export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
   app.get<{ Querystring: SignalDashboardListQuery }>(
     '/signals/dashboard',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireSignalsReadVendorContext],
     },
-    async (request) => {
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) return reply.code(400).send({ message: 'A single explicit vendor ID is required.' });
       const includeInternal = request.authUser?.role === 'admin';
 
       return withDashboardRouteTiming('GET /signals/dashboard', () =>
         listDashboardOperationalSignals({
-          vendorId: request.vendorContext?.vendorId,
+          vendorId,
           includeInternal,
           ...resolvePagination(request.query, { limit: 10 }),
         }),

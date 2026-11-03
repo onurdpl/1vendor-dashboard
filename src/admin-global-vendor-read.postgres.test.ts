@@ -129,6 +129,7 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     const { registerReturnsRoutes } = await import('../backend/src/modules/returns/returns.routes.js');
     const { registerSupportRoutes } = await import('../backend/src/modules/support/support.routes.js');
     const { registerAutomationRoutes } = await import('../backend/src/modules/automation/automation.routes.js');
+    const { registerRulesRoutes } = await import('../backend/src/modules/rules/rules.routes.js');
     const { registerDiagnosticsRoutes } = await import('../backend/src/modules/diagnostics/diagnostics.routes.js');
     ({ resolveAdminVendorTarget: resolver } = await import('../backend/src/modules/vendor-access/admin-vendor-target.service.js'));
     app = Fastify({ logger: false });
@@ -137,6 +138,7 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
     registerReturnsRoutes(app, env);
     registerSupportRoutes(app, env);
     registerAutomationRoutes(app, env);
+    registerRulesRoutes(app, env);
     registerDiagnosticsRoutes(app, env);
     await app.ready();
   }, 120_000);
@@ -262,6 +264,59 @@ describe.skipIf(!url)('A2 Admin global vendor reads against isolated real Postgr
       await db.fulfillment.deleteMany({ where: { id: { in: [fulfillmentA, fulfillmentB] } } });
       await db.vendorAllocation.deleteMany({ where: { id: { in: [allocationA, allocationB] } } });
       await db.shopifyOrder.delete({ where: { id: orderId } });
+    }
+  });
+
+  it('Signals GET and dashboard require an explicit Admin target and keep Vendor records isolated', async () => {
+    const ids = ['a2-test-signal-a1', 'a2-test-signal-a2', 'a2-test-signal-b', 'a2-test-signal-global'];
+    await db.operationalSignal.createMany({ data: [
+      { id: ids[0], type: 'a2_test', severity: 'HIGH', sourceArea: 'PAYOUT', vendorId: vendorIds.a,
+        title: 'Vendor A payout signal', description: 'A-only finance record', ruleKey: 'a2.test.a1' },
+      { id: ids[1], type: 'a2_test', severity: 'WARNING', sourceArea: 'REFUND', vendorId: vendorIds.a,
+        title: 'Vendor A refund signal', description: 'A-only refund record', ruleKey: 'a2.test.a2' },
+      { id: ids[2], type: 'a2_test', severity: 'CRITICAL', sourceArea: 'PAYOUT', vendorId: vendorIds.b,
+        title: 'Vendor B payout signal', description: 'B-only finance record', ruleKey: 'a2.test.b' },
+      { id: ids[3], type: 'a2_test', severity: 'INFO', sourceArea: 'DIAGNOSTICS',
+        title: 'Global diagnostic signal', description: 'Admin-global record', ruleKey: 'a2.test.global' },
+    ] });
+    try {
+      expect(await db.userVendorAccess.count({ where: { userId: userIds.admin } })).toBe(0);
+      const before = await db.operationalSignal.findMany({ where: { id: { in: ids } }, orderBy: { id: 'asc' } });
+      for (const [actor, vendorId, expectedIds, forbiddenIds] of [
+        ['admin', vendorIds.a, ids.slice(0, 2), ids.slice(2)],
+        ['admin', vendorIds.b, [ids[2]], [ids[0], ids[1], ids[3]]],
+        ['admin', vendorIds.d, [], ids],
+        ['vendorA', vendorIds.a, ids.slice(0, 2), ids.slice(2)],
+        ['vendorB', vendorIds.b, [ids[2]], [ids[0], ids[1], ids[3]]],
+      ] as const) {
+        for (const path of ['/signals', '/signals/dashboard?limit=10&offset=0']) {
+          const response = await get(path, actor, vendorId);
+          expect(response.status).toBe(200);
+          const ownIds = response.body.signals.map((signal: { id: string }) => signal.id);
+          expect(ownIds).toEqual(expect.arrayContaining(expectedIds));
+          for (const forbiddenId of forbiddenIds) expect(JSON.stringify(response.body)).not.toContain(forbiddenId);
+          if (path === '/signals') expect(response.body.summary.total).toBe(expectedIds.length);
+          if (expectedIds.length === 0) expect(ownIds).toEqual([]);
+        }
+      }
+      for (const path of ['/signals', '/signals/dashboard']) {
+        expect((await get(path, 'admin')).status).toBe(400);
+        expect((await get(path, 'admin', '')).status).toBe(400);
+        expect((await get(path, 'admin', 'a,b')).status).toBe(400);
+        expect((await get(path, 'admin', 'does-not-exist')).status).toBe(404);
+        expect((await get(path, 'vendorA', vendorIds.b)).status).toBe(403);
+        expect((await get(path)).status).toBe(401);
+        const duplicate = await app.inject({ method: 'GET', url: path,
+          headers: { authorization: `Bearer ${tokens.admin}`, 'x-vendor-id': [vendorIds.a, vendorIds.b] } });
+        expect(duplicate.statusCode).toBe(400);
+      }
+      const global = await get('/admin/signals', 'admin');
+      expect(global.status).toBe(200);
+      expect(global.body.signals.map((signal: { id: string }) => signal.id)).toEqual(expect.arrayContaining(ids));
+      expect((await get('/admin/signals', 'vendorA', vendorIds.a)).status).toBe(403);
+      expect(await db.operationalSignal.findMany({ where: { id: { in: ids } }, orderBy: { id: 'asc' } })).toEqual(before);
+    } finally {
+      await db.operationalSignal.deleteMany({ where: { id: { in: ids } } });
     }
   });
 
