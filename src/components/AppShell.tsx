@@ -16,6 +16,7 @@ import { useActionFeedback } from '../lib/ui';
 import { runtimeServices } from '../services/runtime-services';
 import { ActionFeedback } from './ActionFeedback';
 import { runtimeConfig } from '../config/runtime';
+import { publishSessionTransition } from '../lib/auth/sessionTransition';
 
 type ShellIconName =
   | 'dashboard'
@@ -227,6 +228,9 @@ function useShellContext() {
       clearCsrfToken();
       clearToken({ source: 'AppShell.handleLogout' });
       queryClient.clear();
+      if (runtimeConfig.apiMode === 'real') {
+        publishSessionTransition('logout');
+      }
       showFeedback('Signed out successfully.', 'success');
       recordAuthDiagnostic('REDIRECT_LOGIN', {
         flowId: null,

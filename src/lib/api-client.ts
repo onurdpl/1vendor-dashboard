@@ -1,4 +1,5 @@
-import { clearToken, getCurrentVendorContext, getToken } from './auth';
+import { clearToken, getAuthRestoreSnapshot, getCurrentUser, getCurrentVendorContext, getToken } from './auth';
+import { readSessionTransition } from './auth/sessionTransition';
 import { ApiError, type ApiErrorDiagnostics } from './api/errors';
 import { getAppReadinessSnapshot } from './appReadiness';
 import { runtimeConfig } from '../config/runtime';
@@ -19,6 +20,31 @@ type ApiClientRequestOptions = {
 };
 
 let csrfToken: string | null = null;
+
+export function captureSessionOwner() {
+  return {
+    user: JSON.stringify(getCurrentUser()),
+    token: getToken(),
+    transitionId: readSessionTransition()?.id ?? null,
+    restoreAttemptId: getAuthRestoreSnapshot().restoreAttemptId,
+  };
+}
+
+type SessionOwner = ReturnType<typeof captureSessionOwner>;
+
+export function isCurrentSessionOwner(owner: SessionOwner) {
+  const current = captureSessionOwner();
+  return current.user === owner.user &&
+    current.token === owner.token &&
+    current.transitionId === owner.transitionId &&
+    current.restoreAttemptId === owner.restoreAttemptId;
+}
+
+function assertCurrentSessionOwner(owner: SessionOwner) {
+  if (!isCurrentSessionOwner(owner)) {
+    throw new ApiError('Session changed while the request was pending.', 'invalid-response');
+  }
+}
 
 export function setCsrfToken(token: string | null | undefined) {
   csrfToken = token?.trim() || null;
@@ -197,7 +223,7 @@ function requiresCsrf(method: HttpMethod, path: string) {
   return endpoint !== '/auth/login' && endpoint !== '/auth/logout';
 }
 
-async function fetchCsrfToken(signal?: AbortSignal) {
+async function fetchCsrfToken(owner: SessionOwner, signal?: AbortSignal) {
   const startedAt = Date.now();
   logAuthClientInfo('AUTH_CSRF_START');
   let response: Response;
@@ -216,6 +242,8 @@ async function fetchCsrfToken(signal?: AbortSignal) {
     });
     throw error;
   }
+
+  assertCurrentSessionOwner(owner);
 
   if (!response.ok) {
     clearCsrfToken();
@@ -239,6 +267,7 @@ async function fetchCsrfToken(signal?: AbortSignal) {
   }
 
   const payload = await response.json() as { csrfToken?: unknown };
+  assertCurrentSessionOwner(owner);
   if (typeof payload.csrfToken !== 'string' || !payload.csrfToken.trim()) {
     clearCsrfToken();
     logAuthClientWarn('AUTH_CSRF_FAILURE', {
@@ -274,13 +303,15 @@ async function attachCsrfHeaderIfNeeded(
   method: HttpMethod,
   path: string,
   headers: Headers,
+  owner: SessionOwner,
   signal?: AbortSignal,
 ) {
   if (!requiresCsrf(method, path) || headers.has(CSRF_HEADER_NAME)) {
     return;
   }
 
-  const token = csrfToken ?? await fetchCsrfToken(signal);
+  const token = csrfToken ?? await fetchCsrfToken(owner, signal);
+  assertCurrentSessionOwner(owner);
   if (token) {
     headers.set(CSRF_HEADER_NAME, token);
   }
@@ -362,13 +393,15 @@ async function parseResponse(response: Response, diagnostics?: ApiErrorDiagnosti
 }
 
 async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
+  const owner = captureSessionOwner();
   const hasBody = options.body !== undefined;
   const method = options.method ?? 'GET';
   const headers = createHeaders(options, hasBody);
   const isLoginPost = isLoginPostRequest(method, path);
 
   try {
-    await attachCsrfHeaderIfNeeded(method, path, headers, options.signal);
+    await attachCsrfHeaderIfNeeded(method, path, headers, owner, options.signal);
+    assertCurrentSessionOwner(owner);
     const builtUrl = buildApiUrl(path);
     if (isLoginPost) {
       recordAuthDiagnostic('AUTH_LOGIN_BUILD_API_URL_COMPLETE', {
@@ -424,6 +457,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
       });
     }
     const response = await fetchPromise;
+    assertCurrentSessionOwner(owner);
     if (isLoginPost) {
       recordAuthDiagnostic('AUTH_LOGIN_FETCH_RESOLVED', {
         stage: 'fetch_resolved',
@@ -444,28 +478,10 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
 
     const parseDiagnostics = createApiDiagnostics(path, headers, response);
     const payload = await parseResponse(response, parseDiagnostics);
+    assertCurrentSessionOwner(owner);
 
-      if (!response.ok) {
+    if (!response.ok) {
       const diagnostics = createApiDiagnostics(path, headers, response, payload);
-
-      if (response.status === 401 && shouldClearLocalSessionOnUnauthorized(path)) {
-        recordAuthDiagnostic('CACHE_USER_CLEAR', {
-          flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
-          requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? diagnostics.requestId,
-          source: 'api-client.request.401-handler',
-          httpStatus: response.status,
-          resultCategory: 'unauthorized',
-          cachedUserPresent: Boolean(getAppReadinessSnapshot().currentUser),
-        });
-        clearCsrfToken();
-        clearToken({
-          reason: 'expired',
-          intendedPath: getCurrentRouteForAuthRedirect(),
-          flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
-          requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? diagnostics.requestId,
-          source: 'api-client.request.401-handler',
-        });
-      }
 
       const backendMessage =
         payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
@@ -508,7 +524,8 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
       });
     }
     if (error instanceof ApiError) {
-      if (error.kind === 'unauthorized' && shouldClearLocalSessionOnUnauthorized(path)) {
+      if ((error.kind === 'unauthorized' || error.status === 401) &&
+        shouldClearLocalSessionOnUnauthorized(path) && isCurrentSessionOwner(owner)) {
         recordAuthDiagnostic('CACHE_USER_CLEAR', {
           flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
           requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? error.diagnostics?.requestId ?? null,

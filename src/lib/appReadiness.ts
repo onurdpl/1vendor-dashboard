@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getCurrentUser, getToken, onSessionReset, type CurrentUser } from './auth/session';
-import { getAuthRestoreSnapshot, onAuthRestoreStateChange, type AuthRestorePhase } from './auth/restoreState';
+import { getAuthRestoreSnapshot, isAuthConfirmationCurrent, onAuthRestoreStateChange, type AuthRestorePhase } from './auth/restoreState';
 import { getCurrentVendorContext, onVendorChange, type VendorContext } from './auth/vendorContext';
 import { runtimeConfig } from '../config/runtime';
 
@@ -48,7 +48,7 @@ export function getAppReadinessSnapshot(): AppReadinessState {
   const authConfirmed =
     runtimeConfig.apiMode !== 'real' ||
     runtimeConfig.appEnvironment === 'test' ||
-    authRestore.authConfirmed;
+    isAuthConfirmationCurrent();
 
   if (!currentUser) {
     return {

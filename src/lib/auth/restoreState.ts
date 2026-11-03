@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { recordAuthDiagnostic } from './diagnostics';
+import { getCurrentUser } from './session';
+import { readSessionTransition } from './sessionTransition';
 
 const AUTH_RESTORE_STATE_EVENT = 'vendor-dashboard:auth-restore-state';
 const AUTH_RESTORE_RETRY_EVENT = 'vendor-dashboard:auth-restore-retry';
@@ -9,6 +11,8 @@ export type AuthRestorePhase = 'unconfirmed' | 'restoring' | 'confirmed' | 'rest
 export type AuthRestoreSnapshot = {
   phase: AuthRestorePhase;
   authConfirmed: boolean;
+  confirmedUserSnapshot: string | null;
+  confirmedTransitionId: string | null;
   restoreAttemptId: string | null;
   startedAt: number | null;
   delayed: boolean;
@@ -18,6 +22,8 @@ export type AuthRestoreSnapshot = {
 let authRestoreSnapshot: AuthRestoreSnapshot = {
   phase: 'unconfirmed',
   authConfirmed: false,
+  confirmedUserSnapshot: null,
+  confirmedTransitionId: null,
   restoreAttemptId: null,
   startedAt: null,
   delayed: false,
@@ -34,6 +40,16 @@ function emitAuthRestoreStateChange() {
 
 export function getAuthRestoreSnapshot() {
   return authRestoreSnapshot;
+}
+
+export function isAuthConfirmationCurrent() {
+  const user = getCurrentUser();
+  return Boolean(
+    authRestoreSnapshot.authConfirmed &&
+    user &&
+    authRestoreSnapshot.confirmedUserSnapshot === JSON.stringify(user) &&
+    authRestoreSnapshot.confirmedTransitionId === (readSessionTransition()?.id ?? null),
+  );
 }
 
 export function setAuthRestoreSnapshot(next: Partial<AuthRestoreSnapshot>) {
@@ -59,9 +75,12 @@ export function setAuthRestoreSnapshot(next: Partial<AuthRestoreSnapshot>) {
 }
 
 export function markAuthConfirmed(input: { restoreAttemptId?: string | null } = {}) {
+  const user = getCurrentUser();
   setAuthRestoreSnapshot({
     phase: 'confirmed',
     authConfirmed: true,
+    confirmedUserSnapshot: user ? JSON.stringify(user) : null,
+    confirmedTransitionId: readSessionTransition()?.id ?? null,
     restoreAttemptId: input.restoreAttemptId ?? authRestoreSnapshot.restoreAttemptId,
     delayed: false,
     errorMessage: null,
@@ -73,6 +92,8 @@ export function clearAuthRestoreState() {
   authRestoreSnapshot = {
     phase: 'unconfirmed',
     authConfirmed: false,
+    confirmedUserSnapshot: null,
+    confirmedTransitionId: null,
     restoreAttemptId: null,
     startedAt: null,
     delayed: false,

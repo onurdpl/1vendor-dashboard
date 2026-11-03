@@ -24,6 +24,7 @@ import {
   type PublicLoginPostTransportResult,
 } from '../services/backend-auth';
 import { runtimeServices } from '../services/runtime-services';
+import { publishSessionTransition } from '../lib/auth/sessionTransition';
 
 type LoginRedirectState = {
   from?: {
@@ -403,8 +404,11 @@ export function LoginPage() {
         requestId: loginRequestId,
         source: 'LoginPage.handleSubmit.setSession',
       });
-      markAuthConfirmed();
       setCurrentVendorId(user.defaultVendorId as VendorId);
+      if (runtimeConfig.apiMode === 'real') {
+        publishSessionTransition('login');
+      }
+      markAuthConfirmed();
       navigate(from, { replace: true });
       recordAuthDiagnostic('AUTH_STATE_CHANGE', {
         flowId: authFlowId,

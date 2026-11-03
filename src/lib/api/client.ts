@@ -1,4 +1,4 @@
-import { apiClient as runtimeApiClient } from '../api-client';
+import { apiClient as runtimeApiClient, captureSessionOwner, isCurrentSessionOwner } from '../api-client';
 import { clearToken } from '../auth';
 import { apiConfig } from './config';
 import { ApiError } from './errors';
@@ -45,13 +45,17 @@ function handleUnauthorized() {
 }
 
 export async function request<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
+  const owner = captureSessionOwner();
   try {
     if (apiConfig.mode === 'mock') {
       try {
-        return await mockRequest<T>(path, options);
+        const result = await mockRequest<T>(path, options);
+        if (!isCurrentSessionOwner(owner)) {
+          throw new ApiError('Session changed while the request was pending.', 'invalid-response');
+        }
+        return result;
       } catch (error) {
         if (error instanceof MockRequestError && error.status === 401) {
-          handleUnauthorized();
           throw new ApiError('Unauthorized request', 'unauthorized', {
             status: error.status,
             details: error.body,
@@ -81,7 +85,7 @@ export async function request<T = unknown>(path: string, options: RequestOptions
       signal: options.signal ?? undefined,
     });
   } catch (error) {
-    if (error instanceof ApiError && error.kind === 'unauthorized') {
+    if (apiConfig.mode === 'mock' && error instanceof ApiError && error.kind === 'unauthorized' && isCurrentSessionOwner(owner)) {
       handleUnauthorized();
     }
 
