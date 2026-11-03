@@ -182,6 +182,7 @@ jobs:
               if (file === "src/admin-global-vendor-read.postgres.test.ts") {
                 const expected = [
                   "Phase A resolves every real Vendor for a zero-membership Admin but not non-Admins",
+                  "Automation GET requires an explicit Admin target and preserves Vendor ownership without writes",
                   "B1 returns only assigned-Vendor operational counts for Admin A/B/C/D",
                   "B2 returns assigned allocations, original owner, pagination and workflow counts",
                   "allows zero-membership Admin detail reads only for the explicitly assigned Vendor allocation",
@@ -192,10 +193,10 @@ jobs:
                   "read requests preserve Vendor, allocation ownership, memberships and financial tables",
                 ];
                 const assertions = r.testResults[0].assertionResults;
-                if (r.numTotalTests !== 9 || r.numPassedTests !== 9 ||
-                    !Array.isArray(assertions) || assertions.length !== 9 ||
+                if (r.numTotalTests !== 10 || r.numPassedTests !== 10 ||
+                    !Array.isArray(assertions) || assertions.length !== 10 ||
                     !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
-                console.log("A2 Admin reads verified: 9 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
+                console.log("A2 Admin reads verified: 10 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
               }
               if (file === "src/admin-finance-read.postgres.test.ts") {
                 const expected = [
