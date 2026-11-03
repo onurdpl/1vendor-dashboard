@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -70,27 +70,31 @@ export function VendorInboxPage() {
   });
   const [activeFilter, setActiveFilter] = useState<CommunicationFilter>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedEventTarget, setSelectedEventTarget] = useState<{ vendorId: string; id: string } | null>(null);
+
+  useEffect(() => {
+    setSelectedEventTarget(null);
+  }, [currentVendor.vendorId]);
 
   const supportQuery = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => listVendorSupportTickets({ signal }),
-    { enabled: pageReadiness.ready },
+    { enabled: pageReadiness.ready, placeholderData: () => undefined },
   );
   const ordersQuery = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
     ({ signal }) => listOrders({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: pageReadiness.ready },
+    { enabled: pageReadiness.ready, placeholderData: () => undefined },
   );
   const returnsQuery = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: pageReadiness.ready },
+    { enabled: pageReadiness.ready, placeholderData: () => undefined },
   );
   const financeQuery = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: pageReadiness.ready },
+    { enabled: pageReadiness.ready, placeholderData: () => undefined },
   );
 
   const isLoading =
@@ -124,7 +128,9 @@ export function VendorInboxPage() {
         .includes(query);
     });
   }, [activeFilter, feed, searchTerm]);
-  const selectedEvent = filteredFeed.find((event) => event.id === selectedEventId) ?? filteredFeed[0] ?? null;
+  const selectedEvent = filteredFeed.find((event) =>
+    selectedEventTarget?.vendorId === currentVendor.vendorId && event.id === selectedEventTarget.id
+  ) ?? filteredFeed[0] ?? null;
   const summary = getCommunicationSummary(feed);
 
   return (
@@ -224,7 +230,7 @@ export function VendorInboxPage() {
                 key={event.id}
                 type="button"
                 className={`communication-feed-row ${selectedEvent?.id === event.id ? 'selected' : ''}`}
-                onClick={() => setSelectedEventId(event.id)}
+                onClick={() => setSelectedEventTarget({ vendorId: currentVendor.vendorId, id: event.id })}
               >
                 <span className={`communication-dot communication-${event.severity}`} aria-hidden="true" />
                 <div>

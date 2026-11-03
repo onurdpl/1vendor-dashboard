@@ -592,7 +592,7 @@ export function DashboardPage() {
   } = useQueryResource(
     queryKeys.orders.list(vendorId),
     ({ signal }) => listOrders({ vendorId, signal }),
-    { enabled: pageReadiness.ready && Boolean(vendorId) },
+    { enabled: pageReadiness.ready && Boolean(vendorId), placeholderData: () => undefined },
   );
 
   async function refetchDashboard() {
@@ -613,7 +613,7 @@ export function DashboardPage() {
     ? dashboardView.financeSnapshot?.payoutEstimate
     : null;
   const latestCompletedPayment = dashboardView.financeSnapshot?.latestCompletedPayment ?? null;
-  const recentOrders = buildRecentOrderRows(vendorOrders ?? undefined);
+  const recentOrders = buildRecentOrderRows(vendorOrders?.filter((order) => order.assignedVendorId === vendorId));
   const recentChanges = buildRecentChanges(dashboardView, recentOrders);
   const vendorName = dashboardView.vendorName || currentVendor.vendorName;
 
