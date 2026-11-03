@@ -1205,7 +1205,7 @@ function VendorProfilePageForContext() {
       ? queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId)
       : queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
     async ({ signal }) => {
-      const config = isAdminVendorRoute
+      const config = isAdmin
         ? await getAdminVendorShippingConfig(currentVendor.vendorId, { signal })
         : await getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal });
       if (config.vendorId !== currentVendor.vendorId) {
