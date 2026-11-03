@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage } from './DashboardPage';
 import type { DashboardOverview, OrderSummary } from '../lib/api/contracts';
-import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { setCurrentUser, setCurrentVendorId, setSession, setToken } from '../lib/auth';
+import { VendorShell } from '../components/AppShell';
+import { queryClient as sharedQueryClient } from '../lib/api/queryClient';
 
 const getDashboardOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
 const getDashboardDeferredOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
@@ -176,6 +178,7 @@ function deferred<T>() {
 describe('DashboardPage vendor launchpad', () => {
   afterEach(() => {
     cleanup();
+    sharedQueryClient.clear();
   });
 
   beforeEach(() => {
@@ -521,5 +524,47 @@ describe('DashboardPage vendor launchpad', () => {
     expect(screen.queryByText('No active notifications')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /mark as read/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /dismiss/i })).not.toBeInTheDocument();
+  });
+
+  it('hides Vendor A order identity and link immediately while Vendor B orders are pending', async () => {
+    sharedQueryClient.clear();
+    setSession('fixture-session', {
+      email: 'admin@example.test', name: 'Fixture Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+    });
+    setCurrentVendorId('demo-vendor-a');
+    const vendorBOrders = deferred<OrderSummary[]>();
+    const orderA = makeOrder({ id: 'A-101', sourceShopifyOrderNumber: 'A-101' });
+    const orderB = makeOrder({ id: 'B-202', sourceShopifyOrderNumber: 'B-202',
+      originalVendorId: 'demo-vendor-b', assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b', amount: 'TRY 202' });
+    getDashboardOverviewMock.mockImplementation(async (vendorId) => ({ ...dashboardOverview,
+      vendorId: vendorId ?? '', vendorName: vendorId === 'demo-vendor-b' ? 'Demo Vendor B' : 'Demo Vendor A' }));
+    listOrdersMock.mockImplementation(async (options) => options?.vendorId === 'demo-vendor-b'
+      ? vendorBOrders.promise : [orderA]);
+    render(<QueryClientProvider client={sharedQueryClient}><MemoryRouter initialEntries={['/']}>
+      <Routes><Route element={<VendorShell />}><Route path="/" element={<DashboardPage />} /></Route></Routes>
+    </MemoryRouter></QueryClientProvider>);
+    expect(await screen.findByText('#A-101')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Demo Vendor A.*Admin view/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-b' } });
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Today, Demo Vendor B' })).toBeInTheDocument());
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-b' }));
+    expect(screen.queryByText('#A-101')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open', hidden: true })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Recent changes').querySelector('.dashboard-vendor-change-row')).not.toBeNull();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-a' } });
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Today, Demo Vendor A' })).toBeInTheDocument());
+    expect(await screen.findByText('#A-101')).toBeInTheDocument();
+    await act(async () => vendorBOrders.resolve([orderB]));
+    expect(screen.getByText('#A-101')).toBeInTheDocument();
+    expect(screen.queryByText('#B-202')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-b' } });
+    expect(await screen.findByText('#B-202')).toBeInTheDocument();
+    expect(screen.queryByText('#A-101')).not.toBeInTheDocument();
   });
 });
