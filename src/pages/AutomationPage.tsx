@@ -6,7 +6,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useActionFeedback } from '../lib/ui';
 import { getAutomationDashboard } from '../features/automation/api';
-import { canPerformAction } from '../lib/auth';
+import { canPerformAction, getCurrentVendorContext } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatDateTime, safeArray } from '../services/real/formatting';
 import { formatOperationalSource, projectOperationalEvent } from '../lib/operationalEventProjection';
@@ -32,8 +32,18 @@ export function AutomationPage() {
   const workflowActiveIssues = searchParams.get('workflow') === 'active-issue-groups';
   const { data: automation, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.automation.alerts(currentVendor.vendorId),
-    ({ signal }) => getAutomationDashboard({ signal }),
-    { enabled: appReadiness.ready },
+    async ({ signal }) => {
+      const requestVendorId = currentVendor.vendorId;
+      if (!requestVendorId || signal.aborted || getCurrentVendorContext().vendorId !== requestVendorId) {
+        throw new Error('Automation Vendor context changed before the request.');
+      }
+      const result = await getAutomationDashboard({ signal });
+      if (signal.aborted || getCurrentVendorContext().vendorId !== requestVendorId) {
+        throw new Error('Automation Vendor context changed during the request.');
+      }
+      return result;
+    },
+    { enabled: appReadiness.ready && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
   );
   const { message, tone, showFeedback } = useActionFeedback();
   const canRunAutomationAction = canPerformAction('automation:write');

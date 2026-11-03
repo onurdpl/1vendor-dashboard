@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationPage } from './AutomationPage';
@@ -7,6 +7,33 @@ import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import type { AutomationDashboard } from '../lib/api/contracts';
 
 const getAutomationDashboardMock = vi.fn<() => Promise<AutomationDashboard>>();
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function vendorDashboard(vendor: string): AutomationDashboard {
+  return { alerts: [{ id: `alert-${vendor}`, type: 'Warning', message: `${vendor} only alert`,
+    status: 'New', timestamp: '2026-05-13T10:00:00.000Z', source: 'Allocation monitor' }], suggestions: [] };
+}
+
+function enableTwoVendors() {
+  setCurrentUser({
+    email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+    vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+    vendorDetails: [
+      { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+      { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+    ],
+    canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+  });
+}
 
 vi.mock('../features/automation/api', () => ({
   getAutomationDashboard: () => getAutomationDashboardMock(),
@@ -159,5 +186,57 @@ describe('AutomationPage suggested actions', () => {
 
     expect(await screen.findByText('No active automation issue groups')).toBeInTheDocument();
     expect(screen.getByText('This workflow queue is clear. Clear the workflow to inspect passive automation history.')).toBeInTheDocument();
+  });
+
+  it('hides a loaded Vendor A alert while Vendor B loads and after B fails', async () => {
+    enableTwoVendors();
+    const pendingB = deferred<AutomationDashboard>();
+    getAutomationDashboardMock.mockResolvedValueOnce(vendorDashboard('Vendor A'))
+      .mockImplementationOnce(() => pendingB.promise);
+    renderAutomationPage();
+    expect(await screen.findByText('Vendor A only alert')).toBeInTheDocument();
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await waitFor(() => expect(getAutomationDashboardMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Demo Vendor B alerts and actions workspace')).toBeInTheDocument();
+    expect(screen.queryByText('Vendor A only alert')).not.toBeInTheDocument();
+    await act(async () => pendingB.reject(new Error('Vendor B request failed')));
+    expect(screen.queryByText('Vendor A only alert')).not.toBeInTheDocument();
+    expect(await screen.findByText('Automation unavailable')).toBeInTheDocument();
+  });
+
+  it('rejects a delayed A response across A → B → A and retains disabled actions', async () => {
+    enableTwoVendors();
+    const oldA = deferred<AutomationDashboard>();
+    const pendingB = deferred<AutomationDashboard>();
+    const currentA = deferred<AutomationDashboard>();
+    getAutomationDashboardMock.mockImplementationOnce(() => oldA.promise)
+      .mockImplementationOnce(() => pendingB.promise)
+      .mockImplementationOnce(() => currentA.promise);
+    renderAutomationPage();
+    await waitFor(() => expect(getAutomationDashboardMock).toHaveBeenCalledTimes(1));
+
+    act(() => setCurrentVendorId('demo-vendor-b'));
+    await waitFor(() => expect(getAutomationDashboardMock).toHaveBeenCalledTimes(2));
+    await act(async () => pendingB.resolve(vendorDashboard('Vendor B')));
+    expect(await screen.findByText('Vendor B only alert')).toBeInTheDocument();
+
+    act(() => setCurrentVendorId('demo-vendor-a'));
+    await waitFor(() => expect(getAutomationDashboardMock).toHaveBeenCalledTimes(3));
+    expect(screen.queryByText('Vendor B only alert')).not.toBeInTheDocument();
+    await act(async () => oldA.resolve(vendorDashboard('Old Vendor A')));
+    expect(screen.queryByText('Old Vendor A only alert')).not.toBeInTheDocument();
+    await act(async () => currentA.resolve(vendorDashboard('Current Vendor A')));
+    expect(await screen.findByText('Current Vendor A only alert')).toBeInTheDocument();
+    expect(screen.queryByText('Old Vendor A only alert')).not.toBeInTheDocument();
+  });
+
+  it('does not request Automation data without a selected Vendor', async () => {
+    setCurrentUser({ email: 'admin@demo.com', name: 'Demo Admin', role: 'admin', vendorAccess: [],
+      vendorDetails: [], canSwitchVendors: true, defaultVendorId: '' });
+    setCurrentVendorId('');
+    renderAutomationPage();
+    expect(screen.queryByText('Vendor A only alert')).not.toBeInTheDocument();
+    expect(getAutomationDashboardMock).not.toHaveBeenCalled();
   });
 });
