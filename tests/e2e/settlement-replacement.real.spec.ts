@@ -89,7 +89,26 @@ test('Admin reviews, confirms and reopens a distinct replacement through real fi
   const secondBefore = await page.request.get(`http://localhost:4000/admin/finance/settlement-schedules/dry-run?runDate=${runDate}&vendorId=${uncertainVendorId}`);
   expect(secondBefore.ok()).toBe(true);
   const uncertainOriginalId = (await secondBefore.json()).vendors[0].existingSettlementApprovalId as string;
-  await page.getByRole('combobox', { name: 'Select vendor' }).selectOption({ label: 'Replacement uncertain Vendor' });
+  const directoryResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === 'GET' && url.pathname === '/admin/vendors'
+      && url.searchParams.get('search') === uncertainVendorId;
+  });
+  await page.getByRole('textbox', { name: 'Search vendors' }).fill(uncertainVendorId);
+  const directory = await directoryResponse;
+  expect(directory.ok()).toBe(true);
+  expect((await directory.json()).vendors).toContainEqual(expect.objectContaining({
+    vendorId: uncertainVendorId, vendorName: 'Replacement uncertain Vendor',
+  }));
+  const vendorSelect = page.getByRole('combobox', { name: 'Select vendor' });
+  await expect(vendorSelect.locator(`option[value="${uncertainVendorId}"]`)).toContainText('Replacement uncertain Vendor');
+  const verificationResponse = page.waitForResponse((response) => response.request().method() === 'GET'
+    && new URL(response.url()).pathname === `/admin/vendors/${uncertainVendorId}/status`);
+  await vendorSelect.selectOption(uncertainVendorId);
+  const verified = await verificationResponse;
+  expect(verified.ok()).toBe(true);
+  expect(await verified.json()).toMatchObject({ vendorId: uncertainVendorId, vendorName: 'Replacement uncertain Vendor' });
+  await expect(page.getByText('Vendor Replacement uncertain Vendor', { exact: true })).toBeVisible();
   await page.goto('/admin/finance/settlement-approvals');
   await page.getByPlaceholder('Vendor, settlement, status').fill(uncertainVendorId);
   const secondCancelResponse = page.waitForResponse((response) => response.request().method() === 'POST' &&
