@@ -67,17 +67,22 @@ export function AdminVendorDirectoryPage() {
   });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<VendorDirectoryStatusFilter>('all');
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [requestGeneration, setRequestGeneration] = useState(0);
   const normalizedSearch = search.trim();
+  const cursor = cursors[cursors.length - 1];
   const query = useQueryResource(
-    queryKeys.admin.vendors.directory(normalizedSearch, statusFilter),
+    [...queryKeys.admin.vendors.directory(normalizedSearch, statusFilter), 'page', cursor, requestGeneration],
     ({ signal }) =>
       runtimeServices.vendors.directory({
         signal,
         search: normalizedSearch || null,
         status: statusFilter,
+        cursor,
       }),
     {
       enabled: pageReadiness.ready,
+      placeholderData: () => undefined,
       routeName: 'Admin vendor directory',
       endpoint: '/admin/vendors',
     },
@@ -93,6 +98,12 @@ export function AdminVendorDirectoryPage() {
   function clearFilters() {
     setSearch('');
     setStatusFilter('all');
+    resetPagination();
+  }
+
+  function resetPagination() {
+    setCursors([null]);
+    setRequestGeneration((generation) => generation + 1);
   }
 
   return (
@@ -113,10 +124,10 @@ export function AdminVendorDirectoryPage() {
       </div>
 
       <div className="op-kpi-row">
-        <KPIStatCard label="Total vendors" value={summary.total} detail="Directory results" tone="info" />
-        <KPIStatCard label="Active" value={summary.active} detail="Operational accounts" tone={summary.active ? 'success' : 'neutral'} />
-        <KPIStatCard label="Restricted" value={summary.restricted} detail="Onboarding or read-only" tone={summary.restricted ? 'attention' : 'neutral'} />
-        <KPIStatCard label="Recently updated" value={summary.recentlyUpdated} detail="Last 7 days" tone={summary.recentlyUpdated ? 'info' : 'neutral'} />
+        <KPIStatCard label="Vendors on this page" value={query.data ? summary.total : '—'} detail="Current page only" tone="info" />
+        <KPIStatCard label="Active" value={query.data ? summary.active : '—'} detail="On this page · Operational accounts" tone={summary.active ? 'success' : 'neutral'} />
+        <KPIStatCard label="Restricted" value={query.data ? summary.restricted : '—'} detail="On this page · Onboarding or read-only" tone={summary.restricted ? 'attention' : 'neutral'} />
+        <KPIStatCard label="Recently updated" value={query.data ? summary.recentlyUpdated : '—'} detail="On this page · Last 7 days" tone={summary.recentlyUpdated ? 'info' : 'neutral'} />
       </div>
 
       <OperationalToolbar>
@@ -124,14 +135,20 @@ export function AdminVendorDirectoryPage() {
           aria-label="Search vendor ID or name"
           placeholder="Search vendor ID or name"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            resetPagination();
+          }}
         />
         <label className="admin-vendor-directory-filter">
           <span>Status</span>
           <select
             aria-label="Vendor status filter"
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as VendorDirectoryStatusFilter)}
+            onChange={(event) => {
+              setStatusFilter(event.target.value as VendorDirectoryStatusFilter);
+              resetPagination();
+            }}
           >
             {STATUS_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -158,7 +175,7 @@ export function AdminVendorDirectoryPage() {
         <SectionSkeleton title="Loading vendors" description="Reading marketplace seller accounts." />
       ) : null}
 
-      {!query.isInitialLoading && !query.isError && !vendors.length ? (
+      {pageReadiness.ready && query.isSuccess && !vendors.length ? (
         <div className="admin-vendor-directory-empty">
           <EmptyStatePanel title={emptyTitle} description={emptyDescription} />
           <div className="op-action-group">
@@ -208,6 +225,34 @@ export function AdminVendorDirectoryPage() {
           ))}
         </OperationalTable>
       ) : null}
+
+      <nav className="op-action-group" aria-label="Vendor directory pagination">
+        <button
+          type="button"
+          className="button button-secondary button-compact"
+          disabled={cursors.length === 1 || query.isFetching}
+          onClick={() => {
+            setCursors((value) => value.slice(0, -1));
+            setRequestGeneration((generation) => generation + 1);
+          }}
+        >
+          Previous page
+        </button>
+        <span aria-live="polite">Page {cursors.length}</span>
+        <button
+          type="button"
+          className="button button-secondary button-compact"
+          disabled={query.isFetching || !query.data?.hasMore || !query.data.nextCursor}
+          onClick={() => {
+            const nextCursor = query.data?.nextCursor;
+            if (!nextCursor) return;
+            setCursors((value) => [...value, nextCursor]);
+            setRequestGeneration((generation) => generation + 1);
+          }}
+        >
+          Next page
+        </button>
+      </nav>
     </section>
   );
 }
