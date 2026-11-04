@@ -336,6 +336,10 @@ a:focus-visible {
   min-width: 0;
 }
 
+.admin-app-shell .sidebar {
+  z-index: 1;
+}
+
 .admin-app-shell .sidebar > .nav-group {
   margin-bottom: 0;
 }

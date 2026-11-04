@@ -103,6 +103,12 @@ test('Admin reviews, confirms and reopens a distinct replacement through real fi
   }));
   const vendorOption = page.getByRole('option', { name: new RegExp(uncertainVendorId) });
   await expect(vendorOption).toBeVisible();
+  await vendorOption.scrollIntoViewIfNeeded();
+  await expect.poll(() => vendorOption.evaluate((option) => {
+    const bounds = option.getBoundingClientRect();
+    const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    return option.contains(hit);
+  })).toBe(true);
   const verificationResponse = page.waitForResponse((response) => response.request().method() === 'GET'
     && new URL(response.url()).pathname === `/admin/vendors/${uncertainVendorId}/status`);
   await vendorOption.click();
