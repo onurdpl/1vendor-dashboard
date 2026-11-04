@@ -111,12 +111,14 @@ async function delayedSwitch(from: 'a' | 'b', to: 'a' | 'b') {
   await page.goto('/orders', { waitUntil: 'domcontentloaded' });
   await seen;
   await page.locator('.vendor-account-trigger').click();
-  await page.getByRole('textbox', { name: 'Search vendors' }).fill(`Context Vendor ${to.toUpperCase()}`);
-  const selector = page.getByRole('combobox', { name: 'Select vendor' });
-  await expect(selector.locator(`option[value="context-vendor-${to}"]`)).toHaveCount(1);
+  const menu = page.getByRole('menu', { name: 'Account menu' });
+  await menu.getByRole('button', { name: 'Choose Vendor' }).click();
+  await menu.getByRole('combobox', { name: 'Search vendors' }).fill(`Context Vendor ${to.toUpperCase()}`);
+  const option = menu.getByRole('option').filter({ hasText: `context-vendor-${to}` });
+  await expect(option).toHaveCount(1);
   const statusResponse = page.waitForResponse(response =>
     new URL(response.url()).pathname === `/admin/vendors/context-vendor-${to}/status`);
-  await selector.selectOption(`context-vendor-${to}`);
+  await option.click();
   const status = await statusResponse;
   assert.equal(status.status(), 200);
   assert.equal((await status.json()).vendorId, `context-vendor-${to}`);
