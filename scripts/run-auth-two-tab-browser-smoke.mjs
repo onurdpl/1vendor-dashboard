@@ -6,6 +6,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const scenario = process.argv[2] === '--scenario=vendor-context' ? 'vendor-context' : 'auth-session';
+if (process.argv.length > 3 || (process.argv[2] && process.argv[2] !== '--scenario=vendor-context')) {
+  throw new Error('Unsupported auth browser scenario.');
+}
 const guard = join(root, 'scripts/test-node-egress-guard.mjs');
 const adminUrl = new URL(process.env.AUTH_BROWSER_ADMIN_DATABASE_URL ??
   `postgresql://${encodeURIComponent(userInfo().username)}@localhost:5432/postgres`);
@@ -116,14 +120,16 @@ try {
   console.log(`Disposable local PostgreSQL 18 database ${databaseName} identity verified.`);
   await run('npm', ['run', 'backend:db:generate'], dbEnv);
   await run('npm', ['run', 'backend:db:bootstrap:fresh'], dbEnv);
-  await run('node_modules/.bin/tsx', ['tests/e2e/fixtures/auth-session-ownership.ts'], dbEnv);
+  await run('node_modules/.bin/tsx', [scenario === 'vendor-context'
+    ? 'tests/e2e/fixtures/global-vendor-context.ts' : 'tests/e2e/fixtures/auth-session-ownership.ts'], dbEnv);
   await run('npm', ['run', 'backend:build'], backendEnv);
   await run('npm', ['run', 'build'], frontendEnv);
   const backend = start('npm', ['run', 'backend:start'], backendEnv, processes);
   await ready('http://localhost:4000/health', backend);
   const frontend = start('npm', ['run', 'dev', '--', '--host', 'localhost', '--port', '5173', '--strictPort'], frontendEnv, processes);
   await ready('http://localhost:5173', frontend);
-  await run('node_modules/.bin/tsx', ['tests/e2e/auth-session-ownership.real.spec.ts'],
+  await run('node_modules/.bin/tsx', [scenario === 'vendor-context'
+    ? 'tests/e2e/global-vendor-context.real.spec.ts' : 'tests/e2e/auth-session-ownership.real.spec.ts'],
     { ...guardedEnv, AUTH_BROWSER_REAL_TEST: '1' });
 } finally {
   await stop(processes);
