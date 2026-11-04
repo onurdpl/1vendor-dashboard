@@ -132,6 +132,18 @@ describe('app readiness', () => {
     auth.markAuthConfirmed();
 
     expect(readinessModule.getAppReadinessSnapshot()).toMatchObject({
+      status: 'missing_vendor_context',
+      authConfirmed: true,
+      sessionReady: true,
+      ready: false,
+    });
+    const vendorContext = await import('./auth/vendorContext');
+    await vendorContext.verifyAdminVendorSelection(async (vendorId) => ({
+      vendorId, vendorName: 'Demo Vendor A', status: 'active', restricted: false,
+      restrictionReason: null, changedByUserId: null, changedByEmail: null, changedAt: null,
+    }), async () => undefined);
+
+    expect(readinessModule.getAppReadinessSnapshot()).toMatchObject({
       status: 'ready',
       authConfirmed: true,
       sessionReady: true,

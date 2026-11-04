@@ -3,9 +3,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
-import { markAuthConfirmed, setCurrentUser as setCachedCurrentUser, setCurrentVendorId, setToken, type CurrentUser } from '../lib/auth';
+import { getCurrentUser, markAuthConfirmed, setCurrentUser as setCachedCurrentUser, setCurrentVendorId, setToken, type CurrentUser } from '../lib/auth';
+import { getAdminVendorSelection, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
+import { useAppReadiness } from '../lib/appReadiness';
 import { ApiError } from '../lib/api/errors';
 import { queryKeys } from '../lib/api/queryKeys';
 import type { SupportTicket } from '../lib/api/contracts';
@@ -17,6 +20,41 @@ const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | nul
 function setCurrentUser(user: CurrentUser) {
   setCachedCurrentUser(user);
   markAuthConfirmed({ restoreAttemptId: 'order-detail-test-restore' });
+  if (user.role === 'admin') setCurrentVendorId(user.defaultVendorId);
+}
+
+async function verifySelectedAdminVendorForTest() {
+  const user = getCurrentUser();
+  const selectedVendorId = getAdminVendorSelection().vendorId;
+  if (user?.role !== 'admin' || !selectedVendorId) return;
+  await verifyAdminVendorSelection(
+    async (vendorId) => {
+      const vendor = user.vendorDetails?.find((item) => item.vendorId === vendorId);
+      if (!vendor) throw new Error(`No Order Detail test Vendor fixture for ${vendorId}.`);
+      return {
+        vendorId: vendor.vendorId,
+        vendorName: vendor.vendorName,
+        status: vendor.status ?? 'active',
+        restricted: (vendor.status ?? 'active') !== 'active',
+        restrictionReason: vendor.restrictionReason ?? null,
+        changedByUserId: vendor.restrictionChangedByUserId ?? null,
+        changedByEmail: vendor.restrictionChangedByEmail ?? null,
+        changedAt: vendor.restrictionChangedAt ?? null,
+      };
+    },
+    async () => { throw new Error('Order Detail test Vendor confirmation is unavailable.'); },
+  );
+}
+
+function TestAdminVendorVerifier() {
+  const readiness = useAppReadiness();
+  const selection = getAdminVendorSelection();
+  useEffect(() => {
+    if (readiness.currentUser?.role !== 'admin' || !readiness.authConfirmed
+      || !selection.vendorId || selection.status === 'verified') return;
+    void verifySelectedAdminVendorForTest();
+  }, [readiness.authConfirmed, readiness.currentUser?.role, selection.vendorId, selection.generation]);
+  return <OrderDetailPage />;
 }
 
 const rejectOrderMock = vi.fn();
@@ -354,7 +392,7 @@ function renderOrderDetail() {
       <MemoryRouter initialEntries={['/orders/alloc-sporjinal-7621783322961']}>
         <Link to="/orders/alloc-yalispor-2099">Open Vendor B order</Link>
         <Routes>
-          <Route path="/orders/:orderId" element={<OrderDetailPage />} />
+          <Route path="/orders/:orderId" element={<TestAdminVendorVerifier />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -1258,7 +1296,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     escalateVendorSupportTicketMock.mockReset();
   });
 
-  it('renders the Order Detail frame before primary data and defers provider diagnostics', () => {
+  it('renders the Order Detail frame before primary data and defers provider diagnostics', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -1271,6 +1309,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const orderResult = deferred<OrderDetail>();
     getOrderMock.mockReturnValue(orderResult.promise);
 
+    await verifySelectedAdminVendorForTest();
     renderOrderDetail();
 
     expect(screen.getByLabelText('Order detail render frame')).toBeInTheDocument();
@@ -9967,7 +10006,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Order detail render frame')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
-    expect(getOrderMock).toHaveBeenCalledWith(orderWithShipmentSummary.id, expect.objectContaining({ vendorId: 'yalispor' }));
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(orderWithShipmentSummary.id, expect.objectContaining({ vendorId: 'yalispor' })));
 
     await act(async () => nextOrder.resolve({
       ...orderWithShipmentSummary,

@@ -142,8 +142,12 @@ describe.skipIf(!url)('Admin Vendor directory pagination on disposable PostgreSQ
 
     const { default: Fastify } = await import('../backend/node_modules/fastify/fastify.js');
     const { registerVendorDirectoryRoutes } = await import('../backend/src/modules/vendors/vendor-directory.routes.js');
+    const { registerVendorStatusRoutes } = await import('../backend/src/modules/vendors/vendor-status.routes.js');
+    const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
     app = Fastify({ logger: false });
     registerVendorDirectoryRoutes(app, env);
+    registerVendorStatusRoutes(app, env);
+    registerShippingExecutionRoutes(app, env);
     await app.ready();
   }, 120_000);
 
@@ -260,5 +264,31 @@ describe.skipIf(!url)('Admin Vendor directory pagination on disposable PostgreSQ
     for (const role of ['vendor', 'support', 'finance'] as const) {
       expect((await get({}, role)).status).toBe(403);
     }
+  });
+
+  it('validates exact Admin Vendor identity and distinguishes ambiguous status 400 from authoritative shipping 404', async () => {
+    const request = (path: string, actor?: keyof typeof userIds) => app!.inject({
+      method: 'GET', url: path,
+      headers: actor ? { authorization: `Bearer ${tokens[actor]}` } : {},
+    });
+    const activeId = vendors[0].id;
+    const restrictedId = vendors[1].id;
+    const active = await request(`/admin/vendors/${activeId}/status`, 'admin');
+    expect(active.statusCode).toBe(200);
+    expect(active.json()).toMatchObject({ vendorId: activeId, vendorName: vendors[0].name, status: 'active' });
+    const restricted = await request(`/admin/vendors/${restrictedId}/status`, 'admin');
+    expect(restricted.statusCode).toBe(200);
+    expect(restricted.json()).toMatchObject({ vendorId: restrictedId, status: 'inactive', restricted: true });
+    const absentId = 'a2-directory-pg-absent';
+    expect((await request(`/admin/vendors/${absentId}/status`, 'admin')).statusCode).toBe(400);
+    expect((await request(`/admin/vendors/${absentId}/shipping-config`, 'admin')).statusCode).toBe(404);
+    expect((await request(`/admin/vendors/${activeId}/shipping-config`, 'admin')).statusCode).toBe(200);
+    expect((await request(`/admin/vendors/${activeId}/status`)).statusCode).toBe(401);
+    expect((await request(`/admin/vendors/${activeId}/shipping-config`)).statusCode).toBe(401);
+    for (const role of ['vendor', 'support', 'finance'] as const) {
+      expect((await request(`/admin/vendors/${activeId}/status`, role)).statusCode).toBe(403);
+      expect((await request(`/admin/vendors/${activeId}/shipping-config`, role)).statusCode).toBe(403);
+    }
+    expect(await db!.vendor.count()).toBe(vendors.length);
   });
 });

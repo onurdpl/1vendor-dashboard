@@ -166,6 +166,7 @@ jobs:
                   "paginates search and status filters without duplicates or omissions",
                   "validates cursor and filter context with HTTP 400 and ends with no next cursor",
                   "enforces real authentication and Admin-only directory access",
+                  "validates exact Admin Vendor identity and distinguishes ambiguous status 400 from authoritative shipping 404",
                 ];
                 const assertions = r.testResults[0].assertionResults;
                 if (r.numPassedTests !== expected.length || !Array.isArray(assertions) ||

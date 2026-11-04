@@ -33,10 +33,18 @@ vi.mock('../services/runtime-services', () => ({
     auth: {
       logout: vi.fn(() => Promise.resolve()),
     },
+    vendors: {
+      status: vi.fn(),
+    },
+    orders: {
+      adminVendorShippingConfig: vi.fn(),
+    },
   },
 }));
 
 const logoutMock = vi.mocked(runtimeServices.auth.logout);
+const vendorStatusMock = vi.mocked(runtimeServices.vendors.status);
+const shippingConfigMock = vi.mocked(runtimeServices.orders.adminVendorShippingConfig);
 const clearCsrfTokenMock = vi.mocked(clearCsrfToken);
 const logoutQueryKey = ['logout-ordering-test'] as const;
 const initialApiMode = runtimeConfig.apiMode;
@@ -142,6 +150,11 @@ async function openAccountMenu(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   logoutMock.mockResolvedValue(undefined);
+  vendorStatusMock.mockImplementation(async (vendorId) => ({
+    vendorId, vendorName: vendorId === 'yalispor' ? 'Yalı Spor' : vendorId,
+    status: 'active', restricted: false, restrictionReason: null,
+    changedByUserId: null, changedByEmail: null, changedAt: null,
+  }));
 });
 
 afterEach(() => {
@@ -155,6 +168,71 @@ afterEach(() => {
 });
 
 describe('AppShell workspace navigation', () => {
+  it('keeps Vendor Workspace pages unmounted until the Admin target is verified', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    const pending = createDeferred();
+    vendorStatusMock.mockImplementationOnce(async (vendorId) => {
+      await pending.promise;
+      return { vendorId, vendorName: 'Sporjinal', status: 'active', restricted: false,
+        restrictionReason: null, changedByUserId: null, changedByEmail: null, changedAt: null };
+    });
+    seedSession({ ...adminUser, vendorAccess: [], vendorDetails: [], canSwitchVendors: false, defaultVendorId: '' });
+    setCurrentVendorId('sporjinal');
+    renderShell('/orders');
+    expect(screen.getByText('Select and verify a Vendor to open the Vendor workspace.')).toBeInTheDocument();
+    expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
+    pending.resolve();
+    expect(await screen.findByText('Orders workspace content')).toBeInTheDocument();
+  });
+
+  it('keeps a zero-membership Admin selection pending until exact-ID verification, then shows its identity', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    const pending = createDeferred();
+    vendorStatusMock.mockImplementationOnce(async (vendorId) => {
+      await pending.promise;
+      return { vendorId, vendorName: 'Sporjinal', status: 'active', restricted: false,
+        restrictionReason: null, changedByUserId: null, changedByEmail: null, changedAt: null };
+    });
+    seedSession({ ...adminUser, vendorAccess: [], vendorDetails: [], canSwitchVendors: false, defaultVendorId: '' });
+    setCurrentVendorId('sporjinal');
+    renderShell('/admin/operations');
+
+    expect(vendorStatusMock).toHaveBeenCalledWith('sporjinal');
+    expect(getCurrentVendorContext().vendorId).toBe('');
+    expect(screen.getByText('Admin operations content')).toBeInTheDocument();
+    expect(screen.queryByText('Vendor Yalı Spor')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Select vendor')).not.toBeInTheDocument();
+    pending.resolve();
+    await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('sporjinal'));
+    expect(screen.getByText('Vendor Sporjinal')).toBeInTheDocument();
+    expect(shippingConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('does not issue an unfiltered Admin selection request when no Vendor is selected', () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    seedSession({ ...adminUser, vendorAccess: [], vendorDetails: [], canSwitchVendors: false, defaultVendorId: '' });
+    renderShell('/admin/operations');
+    expect(screen.getByText('Admin operations content')).toBeInTheDocument();
+    expect(getCurrentVendorContext().vendorId).toBe('');
+    expect(vendorStatusMock).not.toHaveBeenCalled();
+    expect(shippingConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('retains the Admin selection on a temporary error and retries without a fallback Vendor', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    vendorStatusMock.mockRejectedValueOnce({ status: 503 });
+    seedSession(adminUser);
+    setCurrentVendorId('sporjinal');
+    renderShell('/admin/operations');
+    const retry = await screen.findByRole('button', { name: 'Vendor verification failed. Retry' });
+    expect(getCurrentVendorContext().vendorId).toBe('');
+    expect(window.localStorage.getItem('vendor-dashboard.current-vendor-id')).toBe('sporjinal');
+    expect(screen.queryByText('Vendor Yalı Spor')).not.toBeInTheDocument();
+    await userEvent.setup().click(retry);
+    await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('sporjinal'));
+    expect(vendorStatusMock).toHaveBeenCalledTimes(2);
+    expect(shippingConfigMock).not.toHaveBeenCalled();
+  });
   it('keeps Admin identity and full-width vendor controls after navigation in the intended order', async () => {
     const user = userEvent.setup();
     const longName = 'A long selected Vendor name that must remain within the Admin sidebar';
