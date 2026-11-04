@@ -527,6 +527,13 @@ describe('DashboardPage vendor launchpad', () => {
   });
 
   it('hides Vendor A order identity and link immediately while Vendor B orders are pending', async () => {
+    function selectFixtureVendor(target: 'a' | 'b') {
+      fireEvent.click(screen.getByRole('button', { name: /Demo Vendor [AB].*Admin view/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Choose Vendor' }));
+      fireEvent.click(screen.getByRole('option', {
+        name: target === 'a' ? /Demo Vendor A.*demo-vendor-a/ : /Demo Vendor B.*demo-vendor-b/,
+      }));
+    }
     sharedQueryClient.clear();
     setSession('fixture-session', {
       email: 'admin@example.test', name: 'Fixture Admin', role: 'admin',
@@ -550,20 +557,19 @@ describe('DashboardPage vendor launchpad', () => {
       <Routes><Route element={<VendorShell />}><Route path="/" element={<DashboardPage />} /></Route></Routes>
     </MemoryRouter></QueryClientProvider>);
     expect(await screen.findByText('#A-101')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Demo Vendor A.*Admin view/i }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-b' } });
+    selectFixtureVendor('b');
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Today, Demo Vendor B' })).toBeInTheDocument());
     expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-b' }));
     expect(screen.queryByText('#A-101')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open', hidden: true })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Recent changes').querySelector('.dashboard-vendor-change-row')).not.toBeNull();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-a' } });
+    selectFixtureVendor('a');
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Today, Demo Vendor A' })).toBeInTheDocument());
     expect(await screen.findByText('#A-101')).toBeInTheDocument();
     await act(async () => vendorBOrders.resolve([orderB]));
     expect(screen.getByText('#A-101')).toBeInTheDocument();
     expect(screen.queryByText('#B-202')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-b' } });
+    selectFixtureVendor('b');
     expect(await screen.findByText('#B-202')).toBeInTheDocument();
     expect(screen.queryByText('#A-101')).not.toBeInTheDocument();
   });

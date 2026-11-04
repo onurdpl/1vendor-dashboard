@@ -29,6 +29,13 @@ async function expectNoOperationalAuthError(page: Page) {
   await expect(page.getByText(/Unauthorized|Linked order unavailable|You do not have access/i)).toHaveCount(0);
 }
 
+async function chooseWorkspaceVendor(page: Page, vendorId: string) {
+  const menu = page.getByRole('menu', { name: 'Account menu' });
+  if (!await menu.isVisible()) await page.locator('.vendor-account-trigger').click();
+  await menu.getByRole('button', { name: 'Choose Vendor' }).click();
+  await menu.getByRole('option').filter({ hasText: vendorId }).click();
+}
+
 test.describe('operational browser smoke', () => {
   test('login loads dashboard without an unauthorized flash', async ({ page }) => {
     await login(page);
@@ -133,7 +140,7 @@ test.describe('operational browser smoke', () => {
 
     await expect(page.getByRole('heading', { name: '#1001', exact: true })).toBeVisible();
     await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
 
     await expect(page.getByRole('button', { name: /Demo Vendor B Admin view/ })).toBeVisible();
     await expect(page.getByRole('heading', { name: '#1001', exact: true })).toBeVisible();
@@ -161,7 +168,7 @@ test.describe('operational browser smoke', () => {
     ` });
     await page.waitForFunction(() => (window as Window & { __bug001OrdersReady?: boolean }).__bug001OrdersReady);
     await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
     await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Orders?: () => void }).__releaseBug001Orders === 'function');
     await expect(rows.filter({ hasText: '#1002' })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'View details' })).toHaveCount(0);
@@ -173,12 +180,12 @@ test.describe('operational browser smoke', () => {
     if (!await page.getByRole('menu', { name: 'Account menu' }).isVisible()) {
       await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
     }
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await chooseWorkspaceVendor(page, 'demo-vendor-a');
     await expect(rows.filter({ hasText: '#2001' })).toHaveCount(0);
     await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
     await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Orders?: () => void }).__releaseBug001Orders === 'function');
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await chooseWorkspaceVendor(page, 'demo-vendor-a');
     await expect(rows.filter({ hasText: '#2001' })).toHaveCount(0);
     await page.evaluate(() => (window as Window & { __releaseBug001Orders?: () => void }).__releaseBug001Orders?.());
     await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
@@ -202,7 +209,7 @@ test.describe('operational browser smoke', () => {
     ` });
     await page.waitForFunction(() => (window as Window & { __bug001ReturnsReady?: boolean }).__bug001ReturnsReady);
     await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
     await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Returns?: () => void }).__releaseBug001Returns === 'function');
     await expect(rows.filter({ hasText: '#1002' })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Review return' })).toHaveCount(0);
@@ -212,12 +219,12 @@ test.describe('operational browser smoke', () => {
     if (!await page.getByRole('menu', { name: 'Account menu' }).isVisible()) {
       await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
     }
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await chooseWorkspaceVendor(page, 'demo-vendor-a');
     await expect(rows.filter({ hasText: '#2002' })).toHaveCount(0);
     await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
     await page.waitForFunction(() => typeof (window as Window & { __releaseBug001Returns?: () => void }).__releaseBug001Returns === 'function');
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await chooseWorkspaceVendor(page, 'demo-vendor-a');
     await expect(rows.filter({ hasText: '#2002' })).toHaveCount(0);
     await page.evaluate(() => (window as Window & { __releaseBug001Returns?: () => void }).__releaseBug001Returns?.());
     await expect(rows.filter({ hasText: '#1002' })).toBeVisible();
@@ -236,7 +243,7 @@ test.describe('operational browser smoke', () => {
     await expect(returnRows.filter({ hasText: '#1002' })).toBeVisible();
 
     await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
 
     await expect(orderRows.filter({ hasText: '#1002' })).toHaveCount(0);
     await expect(returnRows.filter({ hasText: '#1002' })).toHaveCount(0);
@@ -281,7 +288,7 @@ test.describe('operational browser smoke', () => {
     await workspaceTab.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Settings' }).click();
     await expect(workspaceTab.getByText('Vendor A warehouse').first()).toBeVisible();
     await workspaceTab.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
-    await workspaceTab.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(workspaceTab, 'demo-vendor-b');
     await expect(workspaceTab.getByText('Vendor A warehouse')).toHaveCount(0);
     await expect(workspaceTab.getByText('Vendor B warehouse')).toHaveCount(0);
     await expect(page.getByText('Vendor ID: demo-vendor-a')).toBeVisible();
@@ -302,14 +309,14 @@ test.describe('operational browser smoke', () => {
     await expect(page.getByLabel('Commission %')).toHaveValue('44');
 
     await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
     await expect(page.getByRole('button', { name: /Demo Vendor B Admin view/ })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save finance policy' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Edit finance policy' }).click();
     await expect(page.getByLabel('Commission %')).toHaveValue('10.00');
 
     await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await chooseWorkspaceVendor(page, 'demo-vendor-a');
     await expect(page.getByRole('button', { name: /Demo Vendor A Admin view/ })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save finance policy' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Edit finance policy' }).click();
@@ -338,7 +345,7 @@ test.describe('operational browser smoke', () => {
     await page.getByLabel('Legal company name').fill('UNSAVED_VENDOR_A');
 
     await page.getByRole('button', { name: /Demo Vendor A Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-b');
+    await chooseWorkspaceVendor(page, 'demo-vendor-b');
     await expect(page.getByRole('button', { name: /Demo Vendor B Admin view/ })).toBeVisible();
     await expect(page.getByText('UNSAVED_VENDOR_A')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Save billing profile' })).toHaveCount(0);
@@ -347,7 +354,7 @@ test.describe('operational browser smoke', () => {
     await expect(page.getByLabel('Legal company name')).toHaveValue('Vendor B Ltd.');
 
     await page.getByRole('button', { name: /Demo Vendor B Admin view/ }).click();
-    await page.getByRole('menu', { name: 'Account menu' }).getByLabel('Select vendor').selectOption('demo-vendor-a');
+    await chooseWorkspaceVendor(page, 'demo-vendor-a');
     await expect(page.getByRole('button', { name: /Demo Vendor A Admin view/ })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save billing profile' })).toHaveCount(0);
     await expect(page.getByText('Vendor A Ltd.').first()).toBeVisible();

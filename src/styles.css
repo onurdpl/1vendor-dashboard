@@ -19099,6 +19099,51 @@ summary.provider-response-heading::-webkit-details-marker {
   box-shadow: 0 22px 48px rgba(15, 23, 42, 0.18);
 }
 
+.vendor-account-menu .vendor-selector__panel--embedded {
+  position: static;
+  width: 100%;
+  max-width: none;
+  max-height: min(360px, calc(100vh - 180px));
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.vendor-account-menu .vendor-account-current {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.79rem;
+  font-weight: 700;
+}
+
+.vendor-account-menu .vendor-account-current small {
+  overflow-wrap: anywhere;
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.vendor-account-menu .vendor-account-choose,
+.vendor-account-menu .vendor-account-back {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #e6eaf2;
+  border-radius: 9px;
+  background: #f8fafc;
+  color: #0f172a;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.vendor-account-menu .vendor-account-choose:focus-visible,
+.vendor-account-menu .vendor-account-back:focus-visible {
+  outline: 2px solid #4f20ff;
+  outline-offset: 2px;
+}
+
 .vendor-selector--dark .vendor-selector__panel {
   top: auto;
   right: auto;

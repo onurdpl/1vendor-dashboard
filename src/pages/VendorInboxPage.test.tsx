@@ -156,6 +156,13 @@ describe('VendorInboxPage', () => {
   });
 
   it('hides Vendor A support, order, return, finance and selected link while Vendor B loads', async () => {
+    function selectFixtureVendor(target: 'a' | 'b') {
+      fireEvent.click(screen.getByRole('button', { name: /Demo Vendor [AB].*Admin view/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Choose Vendor' }));
+      fireEvent.click(screen.getByRole('option', {
+        name: target === 'a' ? /Demo Vendor A.*demo-vendor-a/ : /Demo Vendor B.*demo-vendor-b/,
+      }));
+    }
     appReadinessOverride.useActual = true;
     sharedQueryClient.clear();
     setSession('fixture-session', { email: 'admin@example.test', name: 'Fixture Admin', role: 'admin',
@@ -219,15 +226,14 @@ describe('VendorInboxPage', () => {
     expect(screen.getByText(/#A-303/)).toBeInTheDocument();
     expect(screen.getByText(/TRY 444/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open linked record' })).toHaveAttribute('href', '/support/support-a');
-    fireEvent.click(screen.getByRole('button', { name: /Demo Vendor A.*Admin view/i }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-b' } });
+    selectFixtureVendor('b');
     await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-b'));
     expect(screen.queryByRole('heading', { name: 'A-only support' })).not.toBeInTheDocument();
     expect(screen.queryByText(/#A-101 is awaiting shipment progress/)).not.toBeInTheDocument();
     expect(screen.queryByText(/#A-303/)).not.toBeInTheDocument();
     expect(screen.queryByText(/TRY 444/)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open linked record' })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-a' } });
+    selectFixtureVendor('a');
     expect(await screen.findByRole('heading', { name: 'A-only support' })).toBeInTheDocument();
     await act(async () => {
       pendingSupport.resolve([ticket('demo-vendor-b', 'support-b', 'B-only support')]);
@@ -237,7 +243,7 @@ describe('VendorInboxPage', () => {
     });
     expect(screen.getByRole('heading', { name: 'A-only support' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'B-only support' })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Select vendor' }), { target: { value: 'demo-vendor-b' } });
+    selectFixtureVendor('b');
     expect(await screen.findByRole('heading', { name: 'B-only support' })).toBeInTheDocument();
     expect(screen.getByText(/#B-202 is awaiting shipment progress/)).toBeInTheDocument();
     expect(screen.getByText(/#B-404/)).toBeInTheDocument();

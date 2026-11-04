@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
+import { VendorSelector } from './VendorSelector';
 import { clearToken, recordAuthDiagnostic } from '../lib/auth';
 import {
   getAvailableVendors,
@@ -327,7 +328,12 @@ function useShellContext() {
 type ShellContext = ReturnType<typeof useShellContext>;
 type WorkspaceMode = 'vendor' | 'admin';
 
-function AdminDirectoryVendorSelector({ context, presentation }: { context: ShellContext; presentation: 'card' | 'menu' }) {
+function AdminDirectoryVendorSelector({ context, presentation, onDismiss, onSelected }: {
+  context: ShellContext;
+  presentation: 'card' | 'panel';
+  onDismiss?: () => void;
+  onSelected?: () => void;
+}) {
   const [search, setSearch] = useState('');
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [queryGeneration, setQueryGeneration] = useState(0);
@@ -375,10 +381,39 @@ function AdminDirectoryVendorSelector({ context, presentation }: { context: Shel
     setQueryGeneration((generation) => generation + 1);
   }
 
+  if (presentation === 'panel') {
+    return <VendorSelector
+      variant="light" embedded onDismiss={onDismiss}
+      selectedVendorId={context.selectedVendorId || null}
+      selectedVendor={context.selectedVendorId ? { vendorId: context.selectedVendorId, vendorName: selectedName } : null}
+      vendors={pageVendors}
+      searchValue={search} onSearchChange={changeSearch}
+      onSelectVendor={(vendorId) => {
+        context.handleVendorChange(vendorId, pageVendors);
+        onSelected?.();
+      }}
+      loading={(!currentResult && !error) || loading || !canLoad}
+      error={error ? 'Vendor directory failed.' : null}
+      onRetry={() => setRetry((value) => value + 1)}
+      pageNumber={cursors.length}
+      hasPrevious={cursors.length > 1}
+      hasNext={Boolean(currentResult?.hasMore && currentResult.nextCursor)}
+      onPrevious={() => {
+        setCursors((value) => value.slice(0, -1));
+        setQueryGeneration((generation) => generation + 1);
+      }}
+      onNext={() => { if (currentResult?.nextCursor) {
+        setCursors((value) => [...value, currentResult.nextCursor!]);
+        setQueryGeneration((generation) => generation + 1);
+      } }}
+      pendingVerification={context.adminSelection?.status === 'pending'}
+    />;
+  }
+
   const options = pageVendors.filter((vendor) => vendor.vendorId !== context.selectedVendorId);
   return (
-    <div className={presentation === 'card' ? 'admin-workspace-select-label' : 'vendor-account-switcher'}>
-      {presentation === 'card' ? <span>Selected Vendor</span> : null}
+    <div className="admin-workspace-select-label">
+      <span>Selected Vendor</span>
       <input
         className="admin-workspace-select"
         aria-label="Search vendors"
@@ -387,7 +422,7 @@ function AdminDirectoryVendorSelector({ context, presentation }: { context: Shel
         onChange={(event) => changeSearch(event.target.value)}
       />
       <select
-        className={presentation === 'card' ? 'admin-workspace-select admin-sidebar-vendor-select' : 'vendor-account-select'}
+        className="admin-workspace-select admin-sidebar-vendor-select"
         aria-label="Select vendor"
         value={context.selectedVendorId}
         onChange={(event) => context.handleVendorChange(event.target.value, pageVendors)}
@@ -463,7 +498,12 @@ function ShellAccountCard({
 }) {
   const menuId = useId();
   const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const chooseVendorRef = useRef<HTMLButtonElement | null>(null);
+  const focusChooseVendorRef = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuView, setMenuView] = useState<'account' | 'vendor'>('account');
+  const [membershipSearch, setMembershipSearch] = useState('');
   const accountLabel = suppressVendorContext
     ? context.currentUser?.name ?? 'Admin workspace'
     : context.currentVendor.vendorName;
@@ -477,6 +517,26 @@ function ShellAccountCard({
     && runtimeConfig.apiMode === 'real';
 
   useEffect(() => {
+    if (menuOpen && menuView === 'account' && focusChooseVendorRef.current) {
+      focusChooseVendorRef.current = false;
+      chooseVendorRef.current?.focus();
+    }
+  }, [menuOpen, menuView]);
+
+  function closeMenu(restoreFocus = false) {
+    focusChooseVendorRef.current = false;
+    setMenuOpen(false);
+    setMenuView('account');
+    setMembershipSearch('');
+    if (restoreFocus) menuTriggerRef.current?.focus();
+  }
+
+  function returnToAccount() {
+    focusChooseVendorRef.current = true;
+    setMenuView('account');
+  }
+
+  useEffect(() => {
     if (!menuOpen) {
       return undefined;
     }
@@ -486,12 +546,12 @@ function ShellAccountCard({
         return;
       }
 
-      setMenuOpen(false);
+      closeMenu();
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        setMenuOpen(false);
+        closeMenu(true);
       }
     }
 
@@ -504,50 +564,17 @@ function ShellAccountCard({
     };
   }, [menuOpen]);
 
-  const accountIdentity = (
-    <div className="vendor-account-main">
-      <span className="vendor-account-avatar" aria-hidden="true">
-        {accountInitial}
-      </span>
-      <div className="vendor-account-copy">
-        <strong>{accountLabel}</strong>
-        <span>{roleLabel}</span>
-      </div>
-      {showAdminDirectory ? <AdminDirectoryVendorSelector context={context} presentation="menu" /> : showVendorSwitcher ? (
-        <label className="vendor-account-switcher">
-          <span className="sr-only">Select vendor</span>
-          <select
-            className="vendor-account-select"
-            value={context.selectedVendorId}
-            onChange={(event) => context.handleVendorChange(event.target.value)}
-          >
-            {context.visibleVendors.map((vendor) => (
-              <option key={vendor.vendorId} value={vendor.vendorId}>
-                {vendor.vendorName}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      {!suppressVendorContext && context.adminSelection?.status === 'pending' ? (
-        <span role="status">Verifying selected Vendor…</span>
-      ) : null}
-      {!suppressVendorContext && context.adminSelection?.status === 'error' ? (
-        <button type="button" onClick={context.retryVendorVerification}>Vendor verification failed. Retry</button>
-      ) : null}
-    </div>
-  );
-
   if (presentation === 'menu') {
     return (
       <div className={`vendor-account-menu-root ${menuOpen ? 'is-open' : ''}`} ref={menuRootRef}>
         <button
+          ref={menuTriggerRef}
           type="button"
           className="vendor-account-trigger"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           aria-controls={menuId}
-          onClick={() => setMenuOpen((isOpen) => !isOpen)}
+          onClick={() => menuOpen ? closeMenu() : setMenuOpen(true)}
         >
           <span className="vendor-account-avatar" aria-hidden="true">
             {accountInitial}
@@ -562,12 +589,54 @@ function ShellAccountCard({
         </button>
         {menuOpen ? (
           <div className="vendor-account-menu shell-card" id={menuId} role="menu" aria-label="Account menu">
-            {accountIdentity}
-            <AdminWorkspaceSwitcher context={context} />
-            <button type="button" className="vendor-logout-button" onClick={context.handleLogout} disabled={context.logoutRequested}>
-              <ShellIcon name="logout" />
-              Log out
-            </button>
+            {menuView === 'account' ? <>
+              <div className="vendor-account-main">
+                <span className="vendor-account-avatar" aria-hidden="true">{getVendorInitial(context.currentUser?.name ?? '')}</span>
+                <div className="vendor-account-copy">
+                  <strong>{context.currentUser?.name ?? 'Account'}</strong>
+                  <span>{roleLabel}</span>
+                </div>
+              </div>
+              <div className="vendor-account-current">
+                <span>Selected Vendor: {getVendorContextLabel(context)}</span>
+                {context.selectedVendorId ? <small>{context.selectedVendorId}</small> : null}
+              </div>
+              {(showAdminDirectory || showVendorSwitcher) ? <button
+                ref={chooseVendorRef}
+                type="button"
+                className="vendor-account-choose"
+                onClick={() => setMenuView('vendor')}
+              >Choose Vendor</button> : null}
+              {!suppressVendorContext && context.adminSelection?.status === 'pending' ? (
+                <span role="status">Verifying selected Vendor…</span>
+              ) : null}
+              {!suppressVendorContext && context.adminSelection?.status === 'error' ? (
+                <button type="button" onClick={context.retryVendorVerification}>Vendor verification failed. Retry</button>
+              ) : null}
+              <AdminWorkspaceSwitcher context={context} />
+              <button type="button" className="vendor-logout-button" onClick={context.handleLogout} disabled={context.logoutRequested}>
+                <ShellIcon name="logout" />
+                Log out
+              </button>
+            </> : <>
+              <button type="button" className="vendor-account-back" onClick={returnToAccount}>Back to account</button>
+              {showAdminDirectory ? <AdminDirectoryVendorSelector context={context} presentation="panel"
+                onDismiss={returnToAccount} onSelected={() => closeMenu(true)} /> : (
+                <VendorSelector
+                  variant="light" embedded onDismiss={returnToAccount}
+                  selectedVendorId={context.selectedVendorId || null}
+                  selectedVendor={context.visibleVendors.find((vendor) => vendor.vendorId === context.selectedVendorId) ?? null}
+                  vendors={context.visibleVendors.filter((vendor) =>
+                    `${vendor.vendorName} ${vendor.vendorId}`.toLocaleLowerCase().includes(membershipSearch.toLocaleLowerCase()))}
+                  searchValue={membershipSearch}
+                  onSearchChange={setMembershipSearch}
+                  onSelectVendor={(vendorId) => {
+                    context.handleVendorChange(vendorId);
+                    closeMenu(true);
+                  }}
+                />
+              )}
+            </>}
           </div>
         ) : null}
       </div>

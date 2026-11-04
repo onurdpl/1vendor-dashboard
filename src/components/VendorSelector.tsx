@@ -23,6 +23,8 @@ export type VendorSelectorProps = {
   onNext?: () => void;
   pendingVerification?: boolean;
   disabled?: boolean;
+  embedded?: boolean;
+  onDismiss?: () => void;
 };
 
 export function VendorSelector({
@@ -43,6 +45,8 @@ export function VendorSelector({
   onNext,
   pendingVerification = false,
   disabled = false,
+  embedded = false,
+  onDismiss,
 }: VendorSelectorProps) {
   const [open, setOpen] = useState(false);
   const [highlightedVendorId, setHighlightedVendorId] = useState<string | null>(null);
@@ -51,7 +55,7 @@ export function VendorSelector({
   const rootRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const unavailable = disabled || pendingVerification;
-  const panelOpen = open && !unavailable;
+  const panelOpen = embedded || (open && !unavailable);
   const currentVendor = selectedVendor?.vendorId === selectedVendorId
     ? selectedVendor
     : vendors.find((vendor) => vendor.vendorId === selectedVendorId);
@@ -63,6 +67,10 @@ export function VendorSelector({
   }, [panelOpen]);
 
   function closePanel(restoreFocus: boolean) {
+    if (embedded) {
+      onDismiss?.();
+      return;
+    }
     setOpen(false);
     setHighlightedVendorId(null);
     if (restoreFocus) triggerRef.current?.focus();
@@ -71,7 +79,7 @@ export function VendorSelector({
   function selectVendor(vendorId: string) {
     if (unavailable || !vendors.some((vendor) => vendor.vendorId === vendorId)) return;
     onSelectVendor(vendorId);
-    closePanel(true);
+    if (!embedded) closePanel(true);
   }
 
   function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
@@ -97,6 +105,7 @@ export function VendorSelector({
   }
 
   function handleBlur(event: FocusEvent<HTMLDivElement>) {
+    if (embedded) return;
     if (!rootRef.current?.contains(event.relatedTarget as Node | null)) {
       closePanel(false);
     }
@@ -111,11 +120,12 @@ export function VendorSelector({
         if (event.key === 'Escape' && panelOpen) {
           event.preventDefault();
           event.stopPropagation();
-          closePanel(true);
+          if (embedded) onDismiss?.();
+          else closePanel(true);
         }
       }}
     >
-      <button
+      {!embedded ? <button
         ref={triggerRef}
         type="button"
         className="vendor-selector__trigger"
@@ -135,10 +145,10 @@ export function VendorSelector({
           {selectedVendorId ? <small title={selectedVendorId}>{selectedVendorId}</small> : null}
         </span>
         <span className="vendor-selector__chevron" aria-hidden="true">⌄</span>
-      </button>
+      </button> : null}
       {pendingVerification ? <span className="vendor-selector__pending" role="status">Verifying selected Vendor…</span> : null}
       {panelOpen ? (
-        <div className="vendor-selector__panel">
+        <div className={`vendor-selector__panel${embedded ? ' vendor-selector__panel--embedded' : ''}`}>
           <input
             ref={searchRef}
             className="vendor-selector__search"
@@ -151,6 +161,7 @@ export function VendorSelector({
             aria-activedescendant={highlightedIndex >= 0 ? `${listId}-option-${highlightedIndex}` : undefined}
             placeholder="Search vendor ID or name"
             value={searchValue}
+            disabled={unavailable}
             onChange={(event) => {
               setHighlightedVendorId(null);
               onSearchChange(event.target.value);
@@ -165,7 +176,7 @@ export function VendorSelector({
             </div>
           ) : null}
           <div id={listId} className="vendor-selector__list" role="listbox" aria-label="Vendors">
-            {!loading && !error && vendors.map((vendor, index) => (
+            {!unavailable && !loading && !error && vendors.map((vendor, index) => (
               <button
                 id={`${listId}-option-${index}`}
                 key={vendor.vendorId}
@@ -187,10 +198,10 @@ export function VendorSelector({
               </button>
             ))}
           </div>
-          {!loading && !error && vendors.length === 0 ? (
+          {!unavailable && !loading && !error && vendors.length === 0 ? (
             <span className="vendor-selector__message" role="status">No Vendors found.</span>
           ) : null}
-          {(onPrevious || onNext) ? (
+          {!unavailable && (onPrevious || onNext) ? (
             <div className="vendor-selector__pagination">
               <button type="button" disabled={!onPrevious || !hasPrevious || loading} onClick={onPrevious}>Previous Vendors</button>
               {pageNumber ? <span>Page {pageNumber}</span> : null}

@@ -247,12 +247,13 @@ describe('AppShell workspace navigation', () => {
     renderShell('/orders');
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /No vendor selected/i }));
-    const select = await within(screen.getByRole('menu', { name: 'Account menu' })).findByLabelText('Select vendor');
-    await within(select).findByRole('option', { name: /Sporjinal/ });
-    await user.selectOptions(select, 'sporjinal');
+    await user.click(within(screen.getByRole('menu', { name: 'Account menu' })).getByRole('button', { name: 'Choose Vendor' }));
+    await user.click(await screen.findByRole('option', { name: /Sporjinal.*sporjinal/ }));
     expect(getCurrentVendorContext().vendorId).toBe('');
     expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
     expect(vendorStatusMock).toHaveBeenCalledWith('sporjinal');
+    await user.click(screen.getByRole('button', { name: /Admin view/ }));
+    expect(within(screen.getByRole('menu', { name: 'Account menu' })).getByRole('status')).toHaveTextContent('Verifying selected Vendor');
     pending.resolve();
     expect(await screen.findByText('Orders workspace content')).toBeInTheDocument();
     expect(getCurrentVendorContext().vendorId).toBe('sporjinal');
@@ -461,7 +462,7 @@ describe('AppShell workspace navigation', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(trigger).toHaveAttribute('aria-controls', menu.id);
     expect(within(menu).getByLabelText('Workspace')).toHaveValue('vendor');
-    expect(within(menu).getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
+    expect(within(menu).getByText('Selected Vendor: Yalı Spor')).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: /Log out/i })).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
@@ -483,12 +484,98 @@ describe('AppShell workspace navigation', () => {
     renderShell('/finance');
 
     const menu = await openAccountMenu(user);
-    const vendorSelect = within(menu).getByLabelText('Select vendor');
-    expect(vendorSelect).toHaveValue('yalispor');
-
-    await user.selectOptions(vendorSelect, 'demo-vendor-b');
+    expect(within(menu).getByText('Selected Vendor: Yalı Spor')).toBeInTheDocument();
+    await user.click(within(menu).getByRole('button', { name: 'Choose Vendor' }));
+    await user.click(screen.getByRole('option', { name: /Demo Vendor B.*demo-vendor-b/ }));
 
     expect(await screen.findByRole('button', { name: /Demo Vendor B/i })).toBeInTheDocument();
+  });
+
+  it('opens an embedded selector, returns with focus, and resets its temporary view when closed', async () => {
+    const user = userEvent.setup();
+    seedSession(multiVendorAdminUser);
+    renderShell('/orders');
+    const menu = await openAccountMenu(user);
+    expect(within(menu).getByText('Admin User')).toBeInTheDocument();
+    expect(within(menu).getByText('Selected Vendor: Yalı Spor')).toBeInTheDocument();
+    expect(within(menu).queryByRole('listbox')).not.toBeInTheDocument();
+    await user.click(within(menu).getByRole('button', { name: 'Choose Vendor' }));
+    expect(within(menu).getByRole('listbox', { name: 'Vendors' })).toBeInTheDocument();
+    expect(within(menu).queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(within(menu).getByRole('button', { name: 'Choose Vendor' })).toHaveFocus();
+    await user.click(within(menu).getByRole('button', { name: 'Choose Vendor' }));
+    await user.click(within(menu).getByRole('button', { name: 'Back to account' }));
+    expect(within(menu).getByRole('button', { name: 'Choose Vendor' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: /Yalı Spor.*Admin view/ }));
+    expect(screen.queryByRole('menu', { name: 'Account menu' })).not.toBeInTheDocument();
+    await openAccountMenu(user);
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByRole('menu', { name: 'Account menu' })).not.toBeInTheDocument();
+  });
+
+  it('uses the existing Admin directory search, cursor and exact-ID verification in the menu', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    vendorDirectoryMock.mockImplementation(async (options) => options.search === 'Spor'
+      ? directoryPage([directoryVendor('sporjinal', 'Sporjinal')])
+      : options.cursor === 'page-two'
+        ? directoryPage([directoryVendor('sporjinal', 'Sporjinal')])
+        : directoryPage([directoryVendor('yalispor', 'Yalı Spor')], 'page-two'));
+    seedSession(adminUser);
+    renderShell('/orders');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Admin view/ }));
+    const menu = screen.getByRole('menu', { name: 'Account menu' });
+    await user.click(within(menu).getByRole('button', { name: 'Choose Vendor' }));
+    expect(await screen.findByRole('button', { name: 'Next Vendors' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Next Vendors' }));
+    expect(vendorDirectoryMock).toHaveBeenCalledWith(expect.objectContaining({ cursor: 'page-two' }));
+    await screen.findByRole('option', { name: /Sporjinal.*sporjinal/ });
+    await user.type(screen.getByRole('combobox', { name: 'Search vendors' }), 'Spor');
+    expect(vendorDirectoryMock).toHaveBeenCalledWith(expect.objectContaining({ search: 'Spor', cursor: null }));
+    await user.click(await screen.findByRole('option', { name: /Sporjinal.*sporjinal/ }));
+    await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('sporjinal'));
+    expect(vendorStatusMock).toHaveBeenCalledWith('sporjinal');
+    expect(screen.queryByRole('menu', { name: 'Account menu' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Sporjinal.*Admin view/ }));
+    const returnMenu = screen.getByRole('menu', { name: 'Account menu' });
+    await user.click(within(returnMenu).getByRole('button', { name: 'Choose Vendor' }));
+    await user.click(await screen.findByRole('option', { name: /Yalı Spor.*yalispor/ }));
+    await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('yalispor'));
+  });
+
+  it('keeps Vendor-role choices within membership and never calls the Admin directory', async () => {
+    const user = userEvent.setup();
+    seedSession({ ...vendorUser, vendorDetails: [
+      { vendorId: 'yalispor', vendorName: 'Shared Name' },
+      { vendorId: 'other-member', vendorName: 'Shared Name' },
+    ], vendorAccess: ['yalispor', 'other-member'], canSwitchVendors: true });
+    renderShell('/orders');
+    await user.click(screen.getByRole('button', { name: /Shared Name.*Vendor/ }));
+    const menu = screen.getByRole('menu', { name: 'Account menu' });
+    await user.click(within(menu).getByRole('button', { name: 'Choose Vendor' }));
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+    expect(screen.queryByText('Sporjinal')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: /Shared Name.*other-member/ }));
+    expect(getCurrentVendorContext().vendorId).toBe('other-member');
+    expect(vendorDirectoryMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps Admin directory failure separate from an empty page and retries in the selection view', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    vendorDirectoryMock.mockRejectedValueOnce(new Error('temporary directory failure'));
+    seedSession(adminUser);
+    renderShell('/orders');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Admin view/ }));
+    await user.click(screen.getByRole('button', { name: 'Choose Vendor' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Vendor directory failed.');
+    expect(screen.queryByText('No Vendors found.')).not.toBeInTheDocument();
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('option', { name: /Sporjinal.*sporjinal/ })).toBeInTheDocument();
+    expect(vendorDirectoryMock).toHaveBeenCalledTimes(2);
   });
 
   it('shows the restricted account banner for restricted vendors', () => {
@@ -520,7 +607,7 @@ describe('AppShell workspace navigation', () => {
     expect(screen.getByText('Admin view')).toBeInTheDocument();
     expect(screen.queryByText('Vendor context: Yalı Spor')).not.toBeInTheDocument();
     const menu = await openAccountMenu(user);
-    expect(within(menu).getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
+    expect(within(menu).getByText('Selected Vendor: Yalı Spor')).toBeInTheDocument();
     expect(within(menu).getByLabelText('Workspace')).toHaveValue('vendor');
     expect(screen.getByRole('link', { name: /Dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Orders/i })).toBeInTheDocument();
@@ -554,7 +641,7 @@ describe('AppShell workspace navigation', () => {
     expect(await screen.findByText('Vendor dashboard content')).toBeInTheDocument();
     const menu = await openAccountMenu(user);
     expect(within(menu).getByLabelText('Workspace')).toHaveValue('vendor');
-    expect(within(menu).getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
+    expect(within(menu).getByText('Selected Vendor: Yalı Spor')).toBeInTheDocument();
 
     const primaryNav = screen.getByRole('navigation', { name: 'Primary' });
     expect(within(primaryNav).getByRole('link', { name: /Dashboard/i })).toBeInTheDocument();

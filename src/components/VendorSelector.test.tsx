@@ -185,4 +185,20 @@ describe('VendorSelector presentation', () => {
     expect(screen.getByRole('button', { name: 'Select vendor: vendor-unknown' })).toBeTruthy();
     expect(screen.queryByText('Shared Name')).toBeNull();
   });
+
+  it('renders an embedded list without a second popup and dismisses on Escape', async () => {
+    const actor = userEvent.setup();
+    const onDismiss = vi.fn();
+    const onSelectVendor = vi.fn();
+    render(<VendorSelector {...props({ embedded: true, onDismiss, onSelectVendor })} />);
+    expect(screen.queryByRole('button', { name: /Select vendor:/ })).toBeNull();
+    expect(screen.getByRole('listbox', { name: 'Vendors' })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Search vendors' }));
+    await actor.keyboard('{ArrowDown}{Escape}');
+    expect(onSelectVendor).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    await actor.click(screen.getByRole('option', { name: /Sporjinal.*vendor-c/ }));
+    expect(onSelectVendor).toHaveBeenCalledExactlyOnceWith('vendor-c');
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
 });
