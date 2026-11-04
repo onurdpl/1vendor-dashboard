@@ -10,7 +10,7 @@ import {
 } from '../lib/auth';
 import { requestAuthRestoreRetry, useAuthRestoreSnapshot } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
-import { clearCsrfToken } from '../lib/api-client';
+import { captureSessionOwner, clearCsrfToken } from '../lib/api-client';
 import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeServices } from '../services/runtime-services';
@@ -18,6 +18,7 @@ import { ActionFeedback } from './ActionFeedback';
 import { runtimeConfig } from '../config/runtime';
 import { publishSessionTransition } from '../lib/auth/sessionTransition';
 import { getAdminVendorSelection, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
+import type { VendorDirectoryItem, VendorDirectoryResponse } from '../lib/api/contracts';
 
 type ShellIconName =
   | 'dashboard'
@@ -281,8 +282,11 @@ function useShellContext() {
     navigate('/login', { replace: true });
   }
 
-  function handleVendorChange(nextVendorId: string) {
-    if (!visibleVendors.some((vendor) => vendor.vendorId === nextVendorId)) {
+  function handleVendorChange(nextVendorId: string, directoryVendors?: readonly VendorDirectoryItem[]) {
+    const allowed = currentUser?.role === 'admin' && runtimeConfig.apiMode === 'real'
+      ? directoryVendors?.some((vendor) => vendor.vendorId === nextVendorId)
+      : visibleVendors.some((vendor) => vendor.vendorId === nextVendorId);
+    if (!allowed) {
       return;
     }
 
@@ -322,6 +326,102 @@ function useShellContext() {
 
 type ShellContext = ReturnType<typeof useShellContext>;
 type WorkspaceMode = 'vendor' | 'admin';
+
+function AdminDirectoryVendorSelector({ context, presentation }: { context: ShellContext; presentation: 'card' | 'menu' }) {
+  const [search, setSearch] = useState('');
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [queryGeneration, setQueryGeneration] = useState(0);
+  const [result, setResult] = useState<{
+    requestKey: string;
+    data: VendorDirectoryResponse;
+  } | null>(null);
+  const [requestState, setRequestState] = useState<{ key: string; loading: boolean; error: boolean } | null>(null);
+  const [retry, setRetry] = useState(0);
+  const cursor = cursors[cursors.length - 1];
+  const normalizedSearch = search.trim();
+  const sessionKey = JSON.stringify(captureSessionOwner());
+  const requestKey = JSON.stringify([sessionKey, normalizedSearch, cursor, queryGeneration, retry]);
+  const canLoad = context.currentUser?.role === 'admin' && !context.showSessionRestoreBanner;
+  const currentResult = result?.requestKey === requestKey ? result.data : null;
+  const pageVendors = currentResult?.vendors ?? [];
+  const loading = requestState?.key === requestKey && requestState.loading;
+  const error = requestState?.key === requestKey && requestState.error;
+  const selected = context.visibleVendors.find((vendor) => vendor.vendorId === context.selectedVendorId);
+  const selectedName = context.currentVendor.vendorId === context.selectedVendorId
+    ? context.currentVendor.vendorName : selected?.vendorName ?? context.selectedVendorId;
+
+  useEffect(() => {
+    if (!canLoad) return undefined;
+    const controller = new AbortController();
+    let current = true;
+    setRequestState({ key: requestKey, loading: true, error: false });
+    void runtimeServices.vendors.directory({
+      search: normalizedSearch || null,
+      cursor,
+      signal: controller.signal,
+    }).then((data) => {
+      if (current) setResult({ requestKey, data });
+    }).catch(() => {
+      if (current) setRequestState({ key: requestKey, loading: false, error: true });
+    }).finally(() => {
+      if (current) setRequestState((state) => state?.key === requestKey ? { ...state, loading: false } : state);
+    });
+    return () => { current = false; controller.abort(); };
+  }, [canLoad, sessionKey, normalizedSearch, cursor, requestKey, retry]);
+
+  function changeSearch(value: string) {
+    setSearch(value);
+    setCursors([null]);
+    setQueryGeneration((generation) => generation + 1);
+  }
+
+  const options = pageVendors.filter((vendor) => vendor.vendorId !== context.selectedVendorId);
+  return (
+    <div className={presentation === 'card' ? 'admin-workspace-select-label' : 'vendor-account-switcher'}>
+      {presentation === 'card' ? <span>Selected Vendor</span> : null}
+      <input
+        className="admin-workspace-select"
+        aria-label="Search vendors"
+        placeholder="Search vendor ID or name"
+        value={search}
+        onChange={(event) => changeSearch(event.target.value)}
+      />
+      <select
+        className={presentation === 'card' ? 'admin-workspace-select admin-sidebar-vendor-select' : 'vendor-account-select'}
+        aria-label="Select vendor"
+        value={context.selectedVendorId}
+        onChange={(event) => context.handleVendorChange(event.target.value, pageVendors)}
+      >
+        <option value="">Select a Vendor</option>
+        {context.selectedVendorId ? <option value={context.selectedVendorId}>{selectedName}</option> : null}
+        {options.map((vendor) => (
+          <option key={vendor.vendorId} value={vendor.vendorId}>
+            {vendor.vendorName} ({vendor.vendorId}) · {vendor.statusLabel}
+          </option>
+        ))}
+      </select>
+      {loading || !canLoad ? <span role="status">Loading Vendors…</span> : null}
+      {error ? <button type="button" onClick={() => setRetry((value) => value + 1)}>Vendor directory failed. Retry</button> : null}
+      {!loading && !error && currentResult && pageVendors.length === 0 ? <span>No Vendors found.</span> : null}
+      {currentResult ? (
+        <div>
+          <button type="button" disabled={cursors.length === 1} onClick={() => {
+            setCursors((value) => value.slice(0, -1));
+            setQueryGeneration((generation) => generation + 1);
+          }}>Previous Vendors</button>
+          <span>Page {cursors.length}</span>
+          <button type="button" disabled={!currentResult.hasMore || !currentResult.nextCursor}
+            onClick={() => { if (currentResult.nextCursor) {
+              setCursors((value) => [...value, currentResult.nextCursor!]);
+              setQueryGeneration((generation) => generation + 1);
+            } }}>
+            Next Vendors
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function getWorkspaceMode(pathname: string): WorkspaceMode {
   return pathname.startsWith('/admin') ? 'admin' : 'vendor';
@@ -373,6 +473,8 @@ function ShellAccountCard({
   const showVendorSwitcher = !suppressVendorContext && context.visibleVendors.length > 0
     && context.visibleVendors.some((vendor) => vendor.vendorId === context.selectedVendorId)
     && (context.currentUser?.role === 'admin' || context.currentUser?.canSwitchVendors);
+  const showAdminDirectory = !suppressVendorContext && context.currentUser?.role === 'admin'
+    && runtimeConfig.apiMode === 'real';
 
   useEffect(() => {
     if (!menuOpen) {
@@ -411,7 +513,7 @@ function ShellAccountCard({
         <strong>{accountLabel}</strong>
         <span>{roleLabel}</span>
       </div>
-      {showVendorSwitcher ? (
+      {showAdminDirectory ? <AdminDirectoryVendorSelector context={context} presentation="menu" /> : showVendorSwitcher ? (
         <label className="vendor-account-switcher">
           <span className="sr-only">Select vendor</span>
           <select
@@ -478,7 +580,7 @@ function ShellAccountCard({
         <strong>{context.currentUser?.name ?? accountLabel}</strong>
         <span>{roleLabel}</span>
       </div>
-      {showVendorSwitcher ? (
+      {showAdminDirectory ? <AdminDirectoryVendorSelector context={context} presentation="card" /> : showVendorSwitcher ? (
         <label className="admin-workspace-select-label">
           <span>Selected Vendor</span>
           <select

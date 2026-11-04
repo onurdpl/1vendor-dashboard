@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +35,7 @@ vi.mock('../services/runtime-services', () => ({
     },
     vendors: {
       status: vi.fn(),
+      directory: vi.fn(),
     },
     orders: {
       adminVendorShippingConfig: vi.fn(),
@@ -44,10 +45,21 @@ vi.mock('../services/runtime-services', () => ({
 
 const logoutMock = vi.mocked(runtimeServices.auth.logout);
 const vendorStatusMock = vi.mocked(runtimeServices.vendors.status);
+const vendorDirectoryMock = vi.mocked(runtimeServices.vendors.directory);
 const shippingConfigMock = vi.mocked(runtimeServices.orders.adminVendorShippingConfig);
 const clearCsrfTokenMock = vi.mocked(clearCsrfToken);
 const logoutQueryKey = ['logout-ordering-test'] as const;
 const initialApiMode = runtimeConfig.apiMode;
+
+function directoryVendor(vendorId: string, vendorName: string) {
+  return { vendorId, vendorName, status: 'active', statusLabel: 'Active' as const, restrictionReason: null,
+    restrictedAt: null, updatedAt: '', createdAt: '', profileUrl: `/admin/vendors/${vendorId}` };
+}
+
+function directoryPage(vendors: ReturnType<typeof directoryVendor>[], nextCursor: string | null = null) {
+  return { vendors, hasMore: Boolean(nextCursor), nextCursor, generatedAt: '',
+    filters: { search: null, status: 'all' as const, limit: 100 } };
+}
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -150,8 +162,13 @@ async function openAccountMenu(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   logoutMock.mockResolvedValue(undefined);
+  vendorDirectoryMock.mockReset();
+  vendorStatusMock.mockReset();
+  vendorDirectoryMock.mockResolvedValue(directoryPage([
+    directoryVendor('yalispor', 'Yalı Spor'), directoryVendor('sporjinal', 'Sporjinal'),
+  ]));
   vendorStatusMock.mockImplementation(async (vendorId) => ({
-    vendorId, vendorName: vendorId === 'yalispor' ? 'Yalı Spor' : vendorId,
+    vendorId, vendorName: vendorId === 'yalispor' ? 'Yalı Spor' : vendorId === 'sporjinal' ? 'Sporjinal' : vendorId,
     status: 'active', restricted: false, restrictionReason: null,
     changedByUserId: null, changedByEmail: null, changedAt: null,
   }));
@@ -201,7 +218,7 @@ describe('AppShell workspace navigation', () => {
     expect(getCurrentVendorContext().vendorId).toBe('');
     expect(screen.getByText('Admin operations content')).toBeInTheDocument();
     expect(screen.queryByText('Vendor Yalı Spor')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Select vendor')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Select vendor')).toHaveValue('sporjinal');
     pending.resolve();
     await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('sporjinal'));
     expect(screen.getByText('Vendor Sporjinal')).toBeInTheDocument();
@@ -216,6 +233,129 @@ describe('AppShell workspace navigation', () => {
     expect(getCurrentVendorContext().vendorId).toBe('');
     expect(vendorStatusMock).not.toHaveBeenCalled();
     expect(shippingConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('lets a zero-membership Admin select an unassigned Vendor while verification stays fail-closed', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    const pending = createDeferred();
+    vendorStatusMock.mockImplementationOnce(async (vendorId) => {
+      await pending.promise;
+      return { vendorId, vendorName: 'Sporjinal', status: 'active', restricted: false,
+        restrictionReason: null, changedByUserId: null, changedByEmail: null, changedAt: null };
+    });
+    seedSession({ ...adminUser, vendorAccess: [], vendorDetails: [], canSwitchVendors: false, defaultVendorId: '' });
+    renderShell('/orders');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /No vendor selected/i }));
+    const select = await within(screen.getByRole('menu', { name: 'Account menu' })).findByLabelText('Select vendor');
+    await within(select).findByRole('option', { name: /Sporjinal/ });
+    await user.selectOptions(select, 'sporjinal');
+    expect(getCurrentVendorContext().vendorId).toBe('');
+    expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
+    expect(vendorStatusMock).toHaveBeenCalledWith('sporjinal');
+    pending.resolve();
+    expect(await screen.findByText('Orders workspace content')).toBeInTheDocument();
+    expect(getCurrentVendorContext().vendorId).toBe('sporjinal');
+  });
+
+  it('reaches an unassigned Vendor on a later directory page without changing the current selection', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    vendorDirectoryMock.mockImplementation(async (options) => options.cursor === 'page-two'
+      ? directoryPage([directoryVendor('sporjinal', 'Sporjinal')])
+      : directoryPage([directoryVendor('yalispor', 'Yalı Spor')], 'page-two'));
+    seedSession(adminUser);
+    renderShell('/admin/operations');
+    const user = userEvent.setup();
+    expect(await screen.findByRole('button', { name: 'Next Vendors' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Next Vendors' }));
+    const select = screen.getByLabelText('Select vendor');
+    expect(select).toHaveValue('yalispor');
+    await within(select).findByRole('option', { name: /Sporjinal/ });
+    expect(vendorDirectoryMock).toHaveBeenCalledWith(expect.objectContaining({ cursor: 'page-two' }));
+    await user.selectOptions(select, 'sporjinal');
+    expect(await screen.findByText('Vendor Sporjinal')).toBeInTheDocument();
+    expect(vendorStatusMock).toHaveBeenCalledWith('sporjinal');
+  });
+
+  it('switches Admin Vendor A to unassigned B and back to A through one directory selector', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    seedSession(adminUser);
+    renderShell('/admin/operations');
+    const user = userEvent.setup();
+    const select = screen.getByLabelText('Select vendor');
+    await within(select).findByRole('option', { name: /Sporjinal/ });
+    await user.selectOptions(select, 'sporjinal');
+    await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('sporjinal'));
+    await user.selectOptions(select, 'yalispor');
+    await waitFor(() => expect(getCurrentVendorContext().vendorId).toBe('yalispor'));
+    expect(vendorStatusMock).toHaveBeenCalledWith('sporjinal');
+    expect(vendorStatusMock).toHaveBeenCalledWith('yalispor');
+    expect(vendorStatusMock).toHaveBeenCalledTimes(3);
+    expect(vendorDirectoryMock).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByLabelText('Select vendor')).toHaveLength(1);
+  });
+
+  it('searches the backend beyond the first directory page and keeps the selected Vendor on an empty result', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    vendorDirectoryMock.mockImplementation(async (options) => options.search === 'Spor'
+      ? directoryPage([directoryVendor('sporjinal', 'Sporjinal')])
+      : options.search === 'none' ? directoryPage([])
+        : directoryPage([directoryVendor('yalispor', 'Yalı Spor')], 'page-two'));
+    seedSession(adminUser);
+    renderShell('/admin/operations');
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Search vendors'), 'Spor');
+    const select = screen.getByLabelText('Select vendor');
+    await within(select).findByRole('option', { name: /Sporjinal/ });
+    expect(vendorDirectoryMock).toHaveBeenCalledWith(expect.objectContaining({ search: 'Spor', cursor: null }));
+    await user.clear(screen.getByLabelText('Search vendors'));
+    await user.type(screen.getByLabelText('Search vendors'), 'none');
+    expect(await screen.findByText('No Vendors found.')).toBeInTheDocument();
+    expect(select).toHaveValue('yalispor');
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
+  });
+
+  it('rejects an obsolete directory response after a search A to B to A cycle', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    let resolveFirst!: (value: ReturnType<typeof directoryPage>) => void;
+    let emptySearchCalls = 0;
+    vendorDirectoryMock.mockImplementation((options) => {
+      if (options.search === 'Spor') return Promise.resolve(directoryPage([directoryVendor('sporjinal', 'Sporjinal')]));
+      emptySearchCalls += 1;
+      if (emptySearchCalls === 1) return new Promise((resolve) => { resolveFirst = resolve; });
+      return Promise.resolve(directoryPage([directoryVendor('yalispor', 'Yalı Spor')]));
+    });
+    seedSession({ ...adminUser, vendorAccess: [], vendorDetails: [], defaultVendorId: '' });
+    renderShell('/admin/operations');
+    const search = screen.getByLabelText('Search vendors');
+    fireEvent.change(search, { target: { value: 'Spor' } });
+    await within(screen.getByLabelText('Select vendor')).findByRole('option', { name: /Sporjinal/ });
+    fireEvent.change(search, { target: { value: '' } });
+    await within(screen.getByLabelText('Select vendor')).findByRole('option', { name: /Yalı Spor/ });
+    await act(async () => resolveFirst(directoryPage([directoryVendor('old-sporjinal', 'Old Sporjinal')])));
+    expect(within(screen.getByLabelText('Select vendor')).queryByRole('option', { name: /Old Sporjinal/ })).not.toBeInTheDocument();
+    expect(emptySearchCalls).toBe(2);
+  });
+
+  it('keeps directory failures distinct from empty results and retries without a Vendor fallback', async () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    vendorDirectoryMock.mockRejectedValueOnce(new Error('temporary directory failure'));
+    seedSession({ ...adminUser, vendorAccess: [], vendorDetails: [], defaultVendorId: '' });
+    renderShell('/admin/operations');
+    expect(await screen.findByRole('button', { name: 'Vendor directory failed. Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('No Vendors found.')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Select vendor')).toHaveValue('');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Vendor directory failed. Retry' }));
+    await within(screen.getByLabelText('Select vendor')).findByRole('option', { name: /Sporjinal/ });
+    expect(vendorDirectoryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not request the Admin directory for Vendor accounts', () => {
+    Object.assign(runtimeConfig, { apiMode: 'real' });
+    seedSession(vendorUser);
+    renderShell('/orders');
+    expect(vendorDirectoryMock).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Search vendors')).not.toBeInTheDocument();
   });
 
   it('retains the Admin selection on a temporary error and retries without a fallback Vendor', async () => {

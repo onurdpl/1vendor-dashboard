@@ -35,7 +35,7 @@ export function getVendorBillingLegalSelfView(options: { signal?: AbortSignal } 
 }
 
 export function listAdminVendors(
-  options: { search?: string | null; status?: VendorDirectoryStatusFilter; limit?: number; signal?: AbortSignal } = {},
+  options: { search?: string | null; status?: VendorDirectoryStatusFilter; limit?: number; cursor?: string | null; signal?: AbortSignal } = {},
 ) {
   const searchParams = new URLSearchParams();
   const search = options.search?.trim();
@@ -47,6 +47,9 @@ export function listAdminVendors(
   }
   if (options.limit) {
     searchParams.set('limit', String(options.limit));
+  }
+  if (options.cursor) {
+    searchParams.set('cursor', options.cursor);
   }
   const query = searchParams.toString();
 
