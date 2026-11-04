@@ -4,9 +4,9 @@ import { PageHeader } from './PageHeader';
 import { clearToken, recordAuthDiagnostic } from '../lib/auth';
 import {
   getAvailableVendors,
-  getCurrentVendorContext,
   isVendorContextRestricted,
   setCurrentVendorId,
+  type VendorContext,
 } from '../lib/auth';
 import { requestAuthRestoreRetry, useAuthRestoreSnapshot } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -17,6 +17,7 @@ import { runtimeServices } from '../services/runtime-services';
 import { ActionFeedback } from './ActionFeedback';
 import { runtimeConfig } from '../config/runtime';
 import { publishSessionTransition } from '../lib/auth/sessionTransition';
+import { getAdminVendorSelection, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
 
 type ShellIconName =
   | 'dashboard'
@@ -57,7 +58,7 @@ const adminNavItems = [
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'diagnostics' },
 ] satisfies Array<{ to: string; label: string; icon: ShellIconName }>;
 
-const missingVendorContext = {
+const missingVendorContext: VendorContext = {
   vendorId: '',
   vendorName: 'No vendor selected',
   scope: 'missing-vendor-context',
@@ -189,14 +190,19 @@ function useShellContext() {
   const logoutRequestedRef = useRef(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
   const vendors = getAvailableVendors();
-  const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
+  const [verificationRetry, setVerificationRetry] = useState(0);
+  const adminSelection = currentUser?.role === 'admin' && runtimeConfig.apiMode === 'real'
+    ? getAdminVendorSelection()
+    : null;
+  const selectedVendorId = adminSelection?.vendorId ?? appReadiness.currentVendor.vendorId;
   const visibleVendors = currentUser
-    ? currentUser.canSwitchVendors
+    ? currentUser.role === 'admin' || currentUser.canSwitchVendors
       ? vendors
       : vendors.filter((vendor) => currentUser.vendorAccess.includes(vendor.vendorId))
     : vendors;
-  const currentVendor =
-    visibleVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? visibleVendors[0] ?? vendors[0] ?? missingVendorContext;
+  const currentVendor = appReadiness.currentVendor.vendorId
+    ? appReadiness.currentVendor
+    : missingVendorContext;
   const showSessionRestoreBanner = runtimeConfig.apiMode === 'real' && Boolean(currentUser) && !appReadiness.authConfirmed;
   const sessionRestoreNeedsAttention = authRestore.phase === 'restore_error' || authRestore.delayed;
   const frontendBuildLabel = [
@@ -206,8 +212,12 @@ function useShellContext() {
   ].filter(Boolean).join(' · ');
 
   useEffect(() => {
-    setSelectedVendorId(appReadiness.currentVendor.vendorId);
-  }, [appReadiness.currentVendor.vendorId]);
+    if (!adminSelection?.vendorId || !appReadiness.authConfirmed || adminSelection.status === 'verified') return;
+    void verifyAdminVendorSelection(
+      (vendorId) => runtimeServices.vendors.status(vendorId),
+      (vendorId) => runtimeServices.orders.adminVendorShippingConfig(vendorId),
+    );
+  }, [adminSelection?.vendorId, adminSelection?.generation, appReadiness.authConfirmed, verificationRetry]);
 
   async function handleLogout() {
     if (logoutRequestedRef.current) {
@@ -277,7 +287,6 @@ function useShellContext() {
     }
 
     setCurrentVendorId(nextVendorId);
-    setSelectedVendorId(nextVendorId);
     void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     void queryClient.invalidateQueries({ queryKey: ['orders'] });
     void queryClient.invalidateQueries({ queryKey: ['returns'] });
@@ -293,6 +302,8 @@ function useShellContext() {
     authRestore,
     currentUser,
     currentVendor,
+    adminSelection,
+    retryVendorVerification: () => setVerificationRetry((value) => value + 1),
     frontendBuildLabel,
     handleLogout,
     handleSignInAgain,
@@ -359,7 +370,9 @@ function ShellAccountCard({
   const accountInitial = suppressVendorContext
     ? (context.currentUser?.name ?? 'A').trim().charAt(0).toUpperCase() || 'A'
     : getVendorInitial(context.currentVendor.vendorName);
-  const showVendorSwitcher = !suppressVendorContext && context.currentUser?.canSwitchVendors && context.visibleVendors.length > 0;
+  const showVendorSwitcher = !suppressVendorContext && context.visibleVendors.length > 0
+    && context.visibleVendors.some((vendor) => vendor.vendorId === context.selectedVendorId)
+    && (context.currentUser?.role === 'admin' || context.currentUser?.canSwitchVendors);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -413,6 +426,12 @@ function ShellAccountCard({
             ))}
           </select>
         </label>
+      ) : null}
+      {!suppressVendorContext && context.adminSelection?.status === 'pending' ? (
+        <span role="status">Verifying selected Vendor…</span>
+      ) : null}
+      {!suppressVendorContext && context.adminSelection?.status === 'error' ? (
+        <button type="button" onClick={context.retryVendorVerification}>Vendor verification failed. Retry</button>
       ) : null}
     </div>
   );
@@ -473,6 +492,12 @@ function ShellAccountCard({
             ))}
           </select>
         </label>
+      ) : null}
+      {!suppressVendorContext && context.adminSelection?.status === 'pending' ? (
+        <span role="status">Verifying selected Vendor…</span>
+      ) : null}
+      {!suppressVendorContext && context.adminSelection?.status === 'error' ? (
+        <button type="button" onClick={context.retryVendorVerification}>Vendor verification failed. Retry</button>
       ) : null}
       <AdminWorkspaceSwitcher context={context} />
       <button type="button" className="vendor-logout-button" onClick={context.handleLogout} disabled={context.logoutRequested}>
@@ -641,7 +666,9 @@ export function VendorShell() {
         <SessionRestoreBanner context={context} />
         <RestrictedAccountBanner context={context} />
         <main className="page-frame">
-          <Outlet />
+          {context.currentUser?.role === 'admin' && runtimeConfig.apiMode === 'real' && !context.currentVendor.vendorId ? (
+            <section role="status">Select and verify a Vendor to open the Vendor workspace.</section>
+          ) : <Outlet />}
         </main>
       </div>
     </div>
