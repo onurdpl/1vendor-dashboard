@@ -410,50 +410,32 @@ function AdminDirectoryVendorSelector({ context, presentation, onDismiss, onSele
     />;
   }
 
-  const options = pageVendors.filter((vendor) => vendor.vendorId !== context.selectedVendorId);
   return (
     <div className="admin-workspace-select-label">
       <span>Selected Vendor</span>
-      <input
-        className="admin-workspace-select"
-        aria-label="Search vendors"
-        placeholder="Search vendor ID or name"
-        value={search}
-        onChange={(event) => changeSearch(event.target.value)}
+      <VendorSelector
+        variant="dark"
+        selectedVendorId={context.selectedVendorId || null}
+        selectedVendor={context.selectedVendorId ? { vendorId: context.selectedVendorId, vendorName: selectedName } : null}
+        vendors={pageVendors}
+        searchValue={search} onSearchChange={changeSearch}
+        onSelectVendor={(vendorId) => context.handleVendorChange(vendorId, pageVendors)}
+        loading={(!currentResult && !error) || loading || !canLoad}
+        error={error ? 'Vendor directory failed.' : null}
+        onRetry={() => setRetry((value) => value + 1)}
+        pageNumber={cursors.length}
+        hasPrevious={cursors.length > 1}
+        hasNext={Boolean(currentResult?.hasMore && currentResult.nextCursor)}
+        onPrevious={() => {
+          setCursors((value) => value.slice(0, -1));
+          setQueryGeneration((generation) => generation + 1);
+        }}
+        onNext={() => { if (currentResult?.nextCursor) {
+          setCursors((value) => [...value, currentResult.nextCursor!]);
+          setQueryGeneration((generation) => generation + 1);
+        } }}
+        pendingVerification={context.adminSelection?.status === 'pending'}
       />
-      <select
-        className="admin-workspace-select admin-sidebar-vendor-select"
-        aria-label="Select vendor"
-        value={context.selectedVendorId}
-        onChange={(event) => context.handleVendorChange(event.target.value, pageVendors)}
-      >
-        <option value="">Select a Vendor</option>
-        {context.selectedVendorId ? <option value={context.selectedVendorId}>{selectedName}</option> : null}
-        {options.map((vendor) => (
-          <option key={vendor.vendorId} value={vendor.vendorId}>
-            {vendor.vendorName} ({vendor.vendorId}) · {vendor.statusLabel}
-          </option>
-        ))}
-      </select>
-      {loading || !canLoad ? <span role="status">Loading Vendors…</span> : null}
-      {error ? <button type="button" onClick={() => setRetry((value) => value + 1)}>Vendor directory failed. Retry</button> : null}
-      {!loading && !error && currentResult && pageVendors.length === 0 ? <span>No Vendors found.</span> : null}
-      {currentResult ? (
-        <div>
-          <button type="button" disabled={cursors.length === 1} onClick={() => {
-            setCursors((value) => value.slice(0, -1));
-            setQueryGeneration((generation) => generation + 1);
-          }}>Previous Vendors</button>
-          <span>Page {cursors.length}</span>
-          <button type="button" disabled={!currentResult.hasMore || !currentResult.nextCursor}
-            onClick={() => { if (currentResult.nextCursor) {
-              setCursors((value) => [...value, currentResult.nextCursor!]);
-              setQueryGeneration((generation) => generation + 1);
-            } }}>
-            Next Vendors
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -94,17 +94,18 @@ test('Admin reviews, confirms and reopens a distinct replacement through real fi
     return response.request().method() === 'GET' && url.pathname === '/admin/vendors'
       && url.searchParams.get('search') === uncertainVendorId;
   });
-  await page.getByRole('textbox', { name: 'Search vendors' }).fill(uncertainVendorId);
+  await page.getByRole('button', { name: /^Select vendor:/ }).click();
+  await page.getByRole('combobox', { name: 'Search vendors' }).fill(uncertainVendorId);
   const directory = await directoryResponse;
   expect(directory.ok()).toBe(true);
   expect((await directory.json()).vendors).toContainEqual(expect.objectContaining({
     vendorId: uncertainVendorId, vendorName: 'Replacement uncertain Vendor',
   }));
-  const vendorSelect = page.getByRole('combobox', { name: 'Select vendor' });
-  await expect(vendorSelect.locator(`option[value="${uncertainVendorId}"]`)).toContainText('Replacement uncertain Vendor');
+  const vendorOption = page.getByRole('option', { name: new RegExp(uncertainVendorId) });
+  await expect(vendorOption).toBeVisible();
   const verificationResponse = page.waitForResponse((response) => response.request().method() === 'GET'
     && new URL(response.url()).pathname === `/admin/vendors/${uncertainVendorId}/status`);
-  await vendorSelect.selectOption(uncertainVendorId);
+  await vendorOption.click();
   const verified = await verificationResponse;
   expect(verified.ok()).toBe(true);
   expect(await verified.json()).toMatchObject({ vendorId: uncertainVendorId, vendorName: 'Replacement uncertain Vendor' });

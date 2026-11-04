@@ -114,6 +114,17 @@ describe('VendorSelector presentation', () => {
     expect(onSelectVendor).not.toHaveBeenCalled();
   });
 
+  it('closes a floating panel on an outside pointer without changing the selection', async () => {
+    const actor = userEvent.setup();
+    const onSelectVendor = vi.fn();
+    render(<><VendorSelector {...props({ variant: 'dark', onSelectVendor })} /><div data-testid="outside">Outside</div></>);
+    await actor.click(screen.getByRole('button', { name: /Select vendor:/ }));
+    expect(screen.getByRole('listbox', { name: 'Vendors' })).toBeInTheDocument();
+    await actor.pointer({ target: screen.getByTestId('outside'), keys: '[MouseLeft]' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(onSelectVendor).not.toHaveBeenCalled();
+  });
+
   it('keeps long names and IDs available to assistive technology in a narrow variant', async () => {
     const actor = userEvent.setup();
     const longName = `Vendor ${'Very Long Name '.repeat(12)}`;
