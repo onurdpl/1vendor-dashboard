@@ -398,7 +398,7 @@ export const runtimeServices = {
   },
   vendors: {
     directory: (
-      options: ReadRequestOptions & { search?: string | null; status?: VendorDirectoryStatusFilter } = {},
+      options: ReadRequestOptions & { search?: string | null; status?: VendorDirectoryStatusFilter; cursor?: string | null } = {},
     ): Promise<VendorDirectoryResponse> => {
       if (runtimeConfig.apiMode === 'real') {
         return realVendors.listAdminVendors({
@@ -406,6 +406,7 @@ export const runtimeServices = {
           search: options.search,
           status: options.status,
           limit: options.limit,
+          cursor: options.cursor,
         });
       }
 
@@ -437,6 +438,8 @@ export const runtimeServices = {
 
       return Promise.resolve({
         vendors,
+        hasMore: false,
+        nextCursor: null,
         generatedAt: now,
         filters: {
           search: search || null,

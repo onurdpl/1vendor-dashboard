@@ -2266,6 +2266,8 @@ export type VendorDirectoryItem = {
 
 export type VendorDirectoryResponse = {
   vendors: VendorDirectoryItem[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
   generatedAt: string;
   filters: {
     search: string | null;
