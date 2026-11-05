@@ -98,6 +98,7 @@ function getCurrentVendorId() {
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
 type OrdersReadRequestOptions = ReadRequestOptions & { workflow?: VendorOrdersWorkflow; search?: string };
+type ReturnsReadRequestOptions = ReadRequestOptions & { search?: string };
 type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope };
 
 const mockSupportTickets: SupportTicket[] = [];
@@ -2221,10 +2222,16 @@ export const runtimeServices = {
     },
   },
   returns: {
-    list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+    list: (vendorId = getCurrentVendorId(), options: ReturnsReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
-        : Promise.resolve(listMockReturns(vendorId)),
+        ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset, search: options.search })
+        : Promise.resolve(listMockReturns(vendorId).filter((item) =>
+            !options.search || [item.id, item.sourceShopifyOrderId, item.sourceShopifyOrderNumber,
+              item.sourceShopifyRefundId, item.sourceShopifyReturnId, item.customer, item.reason,
+              item.itemTitle, item.displayTitle, item.variantTitle, item.refundedSkus?.join(' '),
+              ...((item.refundedItems ?? []).flatMap((line) => [line.name, line.variantTitle, line.sku]))]
+              .some((field) => String(field ?? '').toLowerCase().includes(options.search!.toLowerCase())),
+          ).slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? 100))),
     dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}): Promise<DashboardReturnSummary[]> =>
       runtimeConfig.apiMode === 'real'
         ? realReturns.listDashboardReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })

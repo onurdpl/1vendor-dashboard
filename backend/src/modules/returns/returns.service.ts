@@ -683,14 +683,87 @@ function buildReturnOwnershipSummary(record: {
 
 export async function listVendorReturns(
   vendorId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; search?: string } = {},
 ): Promise<ReturnSummaryDto[]> {
+  const search = options.search?.trim() ?? '';
+  const orderNumber = search.replace(/^#/, '');
+  // Returned-item search must use the same line-item associations as the list projection.
+  // An allocation-wide Prisma relation filter can match a product that was never returned.
+  const matchedIds = search ? await withDashboardTiming('returns.vendor_return_search', () => prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT r."id"
+    FROM "ReturnRecord" r
+    JOIN "VendorAllocation" a ON a."id" = r."vendorAllocationId"
+    JOIN "ShopifyOrder" o ON o."id" = a."sourceShopifyOrderId"
+    WHERE a."assignedVendorId" = ${vendorId}
+      AND (
+        position(lower(${search}) in lower(r."id")) > 0
+        OR position(lower(${search}) in lower(r."sourceShopifyOrderId")) > 0
+        OR (${orderNumber} <> '' AND position(lower(${orderNumber}) in lower(r."sourceShopifyOrderNumber")) > 0)
+        OR position(lower(${search}) in lower(r."sourceShopifyRefundId")) > 0
+        OR position(lower(${search}) in lower(r."sourceShopifyReturnId")) > 0
+        OR position(lower(${search}) in lower(r."sourceShopifyReturnGid")) > 0
+        OR position(lower(${search}) in lower(r."sourceShopifyLineItemId")) > 0
+        OR position(lower(${search}) in lower(r."reason")) > 0
+        OR position(lower(${search.replaceAll(' ', '_')}) in lower(r."reason")) > 0
+        OR position(lower(${search}) in lower(r."returnReasonNote")) > 0
+        OR position(lower(${search}) in lower(r."returnReferenceId")) > 0
+        OR position(lower(${search}) in lower(r."returnTrackingNumber")) > 0
+        OR position(lower(${search}) in lower(o."customerName")) > 0
+        OR EXISTS (
+          SELECT 1 FROM "RefundRecord" fr
+          WHERE fr."vendorAllocationId" = a."id"
+            AND r."returnRequestSource" IS DISTINCT FROM 'shopify_return_request'
+            AND (r."sourceShopifyRefundId" IS NULL OR fr."sourceShopifyRefundId" = r."sourceShopifyRefundId")
+            AND position(lower(${search}) in lower(fr."sourceShopifyRefundId")) > 0
+        )
+        OR EXISTS (
+          SELECT 1 FROM "VendorAllocationLineItem" ali
+          JOIN "ShopifyOrderLineItem" oli ON oli."id" = ali."shopifyLineItemId"
+          WHERE ali."vendorAllocationId" = a."id"
+            AND r."returnRequestSource" = 'shopify_return_request'
+            AND r."sourceShopifyLineItemId" IS NOT NULL
+            AND (oli."sourceLineItemId" = r."sourceShopifyLineItemId"
+              OR regexp_replace(oli."sourceLineItemId", '^.*/', '') = regexp_replace(r."sourceShopifyLineItemId", '^.*/', ''))
+            AND (position(lower(${search}) in lower(oli."sku")) > 0
+              OR position(lower(${search}) in lower(oli."title")) > 0)
+        )
+        OR EXISTS (
+          SELECT 1 FROM "RefundRecord" fr
+          JOIN "ShopifyRefundLineItem" fri ON fri."refundRecordId" = fr."id"
+          JOIN "ShopifyOrderLineItem" oli ON oli."id" = fri."shopifyOrderLineItemId"
+          WHERE fr."vendorAllocationId" = a."id"
+            AND r."returnRequestSource" IS DISTINCT FROM 'shopify_return_request'
+            AND (r."sourceShopifyRefundId" IS NULL OR fr."sourceShopifyRefundId" = r."sourceShopifyRefundId")
+            AND (position(lower(${search}) in lower(fri."sku")) > 0
+              OR position(lower(${search}) in lower(fri."title")) > 0
+              OR position(lower(${search}) in lower(oli."sku")) > 0
+              OR position(lower(${search}) in lower(oli."title")) > 0)
+        )
+        OR (
+          r."returnRequestSource" IS DISTINCT FROM 'shopify_return_request'
+          AND NOT EXISTS (
+            SELECT 1 FROM "RefundRecord" fr
+            JOIN "ShopifyRefundLineItem" fri ON fri."refundRecordId" = fr."id"
+            WHERE fr."vendorAllocationId" = a."id"
+              AND (r."sourceShopifyRefundId" IS NULL OR fr."sourceShopifyRefundId" = r."sourceShopifyRefundId")
+          )
+          AND EXISTS (
+            SELECT 1 FROM "VendorAllocationLineItem" ali
+            JOIN "ShopifyOrderLineItem" oli ON oli."id" = ali."shopifyLineItemId"
+            WHERE ali."vendorAllocationId" = a."id"
+              AND (position(lower(${search}) in lower(oli."sku")) > 0
+                OR position(lower(${search}) in lower(oli."title")) > 0)
+          )
+        )
+      )
+    ORDER BY r."createdAt" DESC, r."id" DESC
+    LIMIT ${options.limit ?? 100} OFFSET ${options.offset ?? 0}
+  `) : null;
+  if (matchedIds && matchedIds.length === 0) return [];
   const records = await withDashboardTiming('returns.vendor_return_fetch', () => prisma.returnRecord.findMany({
-    where: {
-      vendorAllocation: {
-        assignedVendorId: vendorId,
-      },
-    },
+    where: matchedIds
+      ? { id: { in: matchedIds.map((row) => row.id) }, vendorAllocation: { assignedVendorId: vendorId } }
+      : { vendorAllocation: { assignedVendorId: vendorId } },
     select: {
       id: true,
       sourceShopifyOrderId: true,
@@ -752,11 +825,9 @@ export async function listVendorReturns(
         },
       },
     },
-    orderBy: {
-      createdAt: 'desc',
-    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: options.limit ?? 100,
-    skip: options.offset ?? 0,
+    skip: matchedIds ? 0 : options.offset ?? 0,
   }));
 
   return withDashboardTiming('returns.metrics_aggregation', () => records.map((record) => {

@@ -167,14 +167,22 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
     {
       preHandler: [authMiddleware.authenticateRequest, resolveReturnsReadVendor],
     },
-    async (request) => {
+    async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
       if (!vendorId) {
         return [];
       }
 
+      const rawSearch = (request.query as { search?: unknown } | undefined)?.search;
+      if (rawSearch !== undefined && (typeof rawSearch !== 'string' || rawSearch.trim().length > 100)) {
+        return reply.code(400).send({ message: 'search must be a string of 100 characters or fewer.' });
+      }
+      const search = typeof rawSearch === 'string' ? rawSearch.trim() : '';
+
       return withDashboardRouteTiming('GET /returns', () =>
-        withSlowEndpointTiming('GET /returns', () => listVendorReturns(vendorId, resolvePagination(request.query))),
+        withSlowEndpointTiming('GET /returns', () => listVendorReturns(vendorId, {
+          ...resolvePagination(request.query), ...(search ? { search } : {}),
+        })),
       );
     },
   );

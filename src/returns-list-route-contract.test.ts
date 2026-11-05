@@ -173,6 +173,20 @@ describe('backend returns list route contract', () => {
     expect(listVendorDashboardReturnsMock).not.toHaveBeenCalled();
   });
 
+  it('passes bounded search and pagination to the Vendor-scoped list service', async () => {
+    listVendorReturnsMock.mockResolvedValueOnce([]);
+    const routes = new Map<string, (request: { vendorContext?: { vendorId?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = { get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+      routes.set(path, handler as never);
+    }), post: vi.fn() };
+    registerReturnsRoutes(app as never, {} as never);
+    await routes.get('/returns')?.({ vendorContext: { vendorId: 'vendor-a' },
+      query: { limit: '101', offset: '100', search: '  SKU-150  ' } }, {});
+    expect(listVendorReturnsMock).toHaveBeenCalledWith('vendor-a', {
+      limit: 101, offset: 100, search: 'SKU-150',
+    });
+  });
+
   it('routes dashboard return reads through the projection service with pagination', async () => {
     listVendorDashboardReturnsMock.mockResolvedValueOnce([
       {

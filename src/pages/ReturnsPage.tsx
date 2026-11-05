@@ -29,6 +29,12 @@ import { isActiveReturnReviewStatus, isTerminalRefundedReturn } from '../lib/ret
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnWorkflowTabKey = 'all' | 'requested' | 'needs-action' | 'approved' | 'refunded' | 'closed';
+const RETURNS_PAGE_LIMIT = 100;
+const RETURN_TARGET_PARAMS = [
+  'returnId', 'id', 'return', 'shopifyReturnId', 'sourceShopifyReturnId',
+  'refundId', 'shopifyRefundId', 'sourceShopifyRefundId', 'orderId',
+  'shopifyOrderId', 'shopifyOrderNumber', 'orderNumber', 'order',
+] as const;
 type ReturnRowItemCandidate = {
   name?: unknown;
   title?: unknown;
@@ -305,43 +311,6 @@ function readImageUrl(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function getRowItemCandidates(summary: ReturnSummary) {
-  const record = summary as ReturnSummary & {
-    refundedItems?: ReturnRowItemCandidate[];
-    items?: ReturnRowItemCandidate[];
-    returnedItems?: ReturnRowItemCandidate[];
-    returnItems?: ReturnRowItemCandidate[];
-    lineItems?: ReturnRowItemCandidate[];
-    refundLineItems?: ReturnRowItemCandidate[];
-    item?: ReturnRowItemCandidate;
-    product?: ReturnRowItemCandidate;
-    itemTitle?: unknown;
-    displayTitle?: unknown;
-    productTitle?: unknown;
-    productName?: unknown;
-    merchandiseTitle?: unknown;
-    merchandiseName?: unknown;
-    title?: unknown;
-    name?: unknown;
-    lineItemTitle?: unknown;
-    orderLineItemTitle?: unknown;
-    variantTitle?: unknown;
-    variant?: unknown;
-    optionTitle?: unknown;
-    sku?: unknown;
-  };
-  const collections = [
-    record.refundedItems,
-    record.items,
-    record.returnedItems,
-    record.returnItems,
-    record.lineItems,
-    record.refundLineItems,
-  ];
-  const firstNestedItem = collections.find((items) => Array.isArray(items) && items.length > 0)?.[0];
-  return [firstNestedItem, record.item, record.product, record].filter(Boolean) as ReturnRowItemCandidate[];
-}
-
 function resolveCandidateTitle(item: ReturnRowItemCandidate) {
   return readFirstProductText(
     readText(item.sku),
@@ -616,6 +585,7 @@ function returnMatchesTarget(item: ReturnSummary, target: string | null) {
     sameNormalizedIdentifier(item.sourceShopifyOrderId, target) ||
     sameNormalizedIdentifier(item.sourceShopifyRefundId, target) ||
     sameNormalizedIdentifier(item.sourceShopifyReturnId, target) ||
+    sameNormalizedIdentifier(item.sourceShopifyReturnGid, target) ||
     sameNormalizedIdentifier(item.sourceShopifyOrderNumber, target)
   );
 }
@@ -681,38 +651,37 @@ export function ReturnsPage() {
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
   const authContextReady = appReadiness.ready;
+  const [searchTerm, setSearchTerm] = useState('');
+  const requestedReturnTarget = RETURN_TARGET_PARAMS.map((name) => searchParams.get(name)).find(Boolean) ?? null;
+  const workflowParam = searchParams.get('workflow');
+  const serverSearch = requestedReturnTarget ?? searchTerm.trim();
+  const pageScope = JSON.stringify([currentVendor.vendorId, workflowParam, serverSearch]);
+  const [pageState, setPageState] = useState({ scope: pageScope, page: 0 });
+  const page = pageState.scope === pageScope ? pageState.page : 0;
+  useEffect(() => {
+    if (pageState.scope !== pageScope) setPageState({ scope: pageScope, page: 0 });
+  }, [pageScope, pageState.scope]);
   const { data: returns, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
-    queryKeys.returns.list(currentVendor.vendorId),
-    ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
+    queryKeys.returns.list(currentVendor.vendorId, {
+      limit: RETURNS_PAGE_LIMIT + 1, offset: page * RETURNS_PAGE_LIMIT, search: serverSearch,
+    }),
+    ({ signal }) => listReturns({ vendorId: currentVendor.vendorId,
+      limit: RETURNS_PAGE_LIMIT + 1, offset: page * RETURNS_PAGE_LIMIT, search: serverSearch, signal }),
     { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
   );
   const returnsMissingVendorContext = appReadiness.status === 'missing_vendor_context';
   const returnsWaitingForVendorContext = !returnsMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
-  const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [vendorFilter, setVendorFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState<ReturnSourceFilter>('all');
   const [selectedReturnTarget, setSelectedReturnTarget] = useState<{ vendorId: string; id: string } | null>(null);
   const [supportTarget, setSupportTarget] = useState<{ vendorId: string; id: string } | null>(null);
   const visibleReturns = useMemo(() => authContextReady && currentVendor.vendorId
-    ? safeArray(returns)
+    ? safeArray(returns).slice(0, RETURNS_PAGE_LIMIT)
     : [], [authContextReady, currentVendor.vendorId, returns]);
-  const activeWorkflowFilter = useMemo(() => getReturnsWorkflowFilter(searchParams.get('workflow')), [searchParams]);
+  const hasNextPage = authContextReady && safeArray(returns).length > RETURNS_PAGE_LIMIT;
+  const activeWorkflowFilter = useMemo(() => getReturnsWorkflowFilter(workflowParam), [workflowParam]);
   const isAdmin = currentUser?.role === 'admin';
-  const requestedReturnTarget =
-    searchParams.get('returnId') ??
-    searchParams.get('id') ??
-    searchParams.get('return') ??
-    searchParams.get('shopifyReturnId') ??
-    searchParams.get('sourceShopifyReturnId') ??
-    searchParams.get('refundId') ??
-    searchParams.get('shopifyRefundId') ??
-    searchParams.get('sourceShopifyRefundId') ??
-    searchParams.get('orderId') ??
-    searchParams.get('shopifyOrderId') ??
-    searchParams.get('shopifyOrderNumber') ??
-    searchParams.get('orderNumber') ??
-    searchParams.get('order');
 
   useEffect(() => {
     setSelectedReturnTarget(null);
@@ -745,7 +714,10 @@ export function ReturnsPage() {
   }
 
   function handleResetFilters() {
-    clearWorkflowFilter();
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('workflow');
+    for (const key of RETURN_TARGET_PARAMS) nextParams.delete(key);
+    if (nextParams.toString() !== searchParams.toString()) setSearchParams(nextParams, { replace: true });
     setSearchTerm('');
     setStatusFilter('all');
     setVendorFilter('all');
@@ -758,67 +730,7 @@ export function ReturnsPage() {
   const effectiveSourceFilter = sourceFilter;
 
   const filteredReturns = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
     return visibleReturns.filter((item) => {
-      const matchesQuery =
-        query.length === 0 ||
-        [
-          item.id,
-          item.customer,
-          item.reason,
-          item.displayTitle ?? '',
-          item.itemTitle ?? '',
-          item.variantTitle ?? '',
-          String(item.sourceShopifyOrderNumber),
-          getRowItemCandidates(item)
-            .map((lineItem) =>
-              [
-                lineItem.displayTitle,
-                lineItem.itemTitle,
-                lineItem.productTitle,
-                lineItem.productName,
-                lineItem.product?.title,
-                lineItem.product?.name,
-                lineItem.lineItemTitle,
-                lineItem.lineItem?.productTitle,
-                lineItem.lineItem?.productName,
-                lineItem.lineItem?.title,
-                lineItem.lineItem?.name,
-                lineItem.orderLineItemTitle,
-                lineItem.orderLineItem?.productTitle,
-                lineItem.orderLineItem?.productName,
-                lineItem.orderLineItem?.title,
-                lineItem.orderLineItem?.name,
-                lineItem.shopifyOrderLineItem?.productTitle,
-                lineItem.shopifyOrderLineItem?.productName,
-                lineItem.shopifyOrderLineItem?.title,
-                lineItem.shopifyOrderLineItem?.name,
-                lineItem.merchandiseTitle,
-                lineItem.merchandiseName,
-                lineItem.merchandise?.product?.title,
-                lineItem.merchandise?.product?.name,
-                lineItem.merchandise?.title,
-                lineItem.merchandise?.name,
-                lineItem.title,
-                lineItem.name,
-                lineItem.variantTitle,
-                lineItem.variant,
-                lineItem.optionTitle,
-                lineItem.sku,
-              ]
-                .map(readText)
-                .filter(Boolean)
-                .join(' '),
-            )
-            .join(' '),
-          item.sourceShopifyOrderId,
-          item.sourceShopifyRefundId,
-          item.sourceShopifyReturnId ?? '',
-          item.refundedSkus?.join(' ') ?? '',
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(query);
       const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
       const matchesVendor = vendorFilter === 'all' || item.assignedVendorId === vendorFilter;
       const matchesSource =
@@ -826,9 +738,9 @@ export function ReturnsPage() {
         (effectiveSourceFilter === 'pending' && isPendingReturn(item)) ||
         (effectiveSourceFilter === 'refunded' && isRefundedReturn(item));
       const matchesWorkflow = activeWorkflowFilter?.matches(item) ?? true;
-      return matchesQuery && matchesStatus && matchesVendor && matchesSource && matchesWorkflow;
+      return matchesStatus && matchesVendor && matchesSource && matchesWorkflow;
     });
-  }, [activeWorkflowFilter, effectiveSourceFilter, visibleReturns, searchTerm, statusFilter, vendorFilter]);
+  }, [activeWorkflowFilter, effectiveSourceFilter, visibleReturns, statusFilter, vendorFilter]);
 
   const selectedReturn = useMemo(() => {
     const returnList = visibleReturns;
@@ -880,7 +792,7 @@ export function ReturnsPage() {
     {
       key: 'all',
       label: 'All',
-      description: 'Full return list',
+      description: 'Current page',
       count: returnRows.length,
     },
     {
@@ -952,7 +864,7 @@ export function ReturnsPage() {
               onClick={() => setWorkflowTab(tab.key)}
             >
               <span>{tab.label}</span>
-              <strong>{tab.count}</strong>
+              <strong>{tab.count} on page</strong>
               <small>{tab.description}</small>
             </button>
           );
@@ -970,9 +882,13 @@ export function ReturnsPage() {
           <OperationalToolbar>
             <SearchInput
               placeholder="Search returns by order, return #, customer or SKU..."
+              maxLength={100}
               value={searchTerm}
               onChange={(event) => {
-                clearWorkflowFilter();
+                const nextParams = new URLSearchParams(searchParams);
+                nextParams.delete('workflow');
+                for (const key of RETURN_TARGET_PARAMS) nextParams.delete(key);
+                if (nextParams.toString() !== searchParams.toString()) setSearchParams(nextParams, { replace: true });
                 setSearchTerm(event.target.value);
               }}
             />
@@ -1010,7 +926,7 @@ export function ReturnsPage() {
                     setVendorFilter(event.target.value);
                   }}
                 >
-                  <option value="all">All visible vendors</option>
+                  <option value="all">All vendors on this page</option>
                   {vendors.map((vendorId) => (
                     <option key={vendorId} value={vendorId}>
                       {getVendorName(vendorId, vendorLookup)}
@@ -1027,6 +943,7 @@ export function ReturnsPage() {
               </button>
             </FilterBar>
           </OperationalToolbar>
+          <p>Workflow, status and source filters apply to this page. Search covers the selected Vendor's full Returns dataset.</p>
 
           <OperationalTable
             columns={[
@@ -1066,7 +983,11 @@ export function ReturnsPage() {
               <OperationalTableRow>
                 <EmptyStatePanel
                   title={activeWorkflowFilter?.emptyTitle ?? 'No returns match this view'}
-                  description={activeWorkflowFilter?.emptyDescription ?? 'Adjust search or filters to find return requests and refunds.'}
+                  description={visibleReturns.length === 0 && serverSearch
+                    ? 'No returns match this search for the selected Vendor.'
+                    : visibleReturns.length === 0
+                      ? 'No returns on this page.'
+                      : 'No returns match the page filters. Try another page or adjust the filters.'}
                 />
               </OperationalTableRow>
             ) : filteredReturns.map((item) => {
@@ -1116,6 +1037,13 @@ export function ReturnsPage() {
                 );
               })}
           </OperationalTable>
+          {!returnsWaitingForVendorContext && !returnsMissingVendorContext && !isError && !isLoading ? (
+            <nav aria-label="Returns pages">
+              <button type="button" disabled={page === 0} onClick={() => setPageState({ scope: pageScope, page: page - 1 })}>Previous</button>
+              <span>Page {page + 1} · {visibleReturns.length} {visibleReturns.length === 1 ? 'return' : 'returns'} on this page</span>
+              <button type="button" disabled={!hasNextPage} onClick={() => setPageState({ scope: pageScope, page: page + 1 })}>Next</button>
+            </nav>
+          ) : null}
         </div>
 
         <SideDetailPanel

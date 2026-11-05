@@ -38,6 +38,13 @@ describe('real service pagination plumbing', () => {
     expect(apiClientGet).toHaveBeenNthCalledWith(4, '/admin/operations?limit=25&offset=50', expect.any(Object));
   });
 
+  it('passes Return search through the existing bounded array endpoint', async () => {
+    apiClientGet.mockResolvedValueOnce([]);
+    await listReturns({ vendorId: 'vendor-a', limit: 101, offset: 100, search: 'SKU-150' });
+    expect(apiClientGet).toHaveBeenCalledWith('/returns?limit=101&offset=100&search=SKU-150',
+      expect.objectContaining({ vendorId: 'vendor-a' }));
+  });
+
   it('encodes Vendor-scoped Order search with pagination', async () => {
     apiClientGet.mockResolvedValueOnce([]);
     await listOrders({ vendorId: 'vendor-a', search: '#1150', limit: 101, offset: 100 });

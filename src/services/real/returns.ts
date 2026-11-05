@@ -296,6 +296,7 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     sourceShopifyOrderNumber: dto.sourceShopifyOrderNumber,
     sourceShopifyRefundId: dto.sourceShopifyRefundId,
     sourceShopifyReturnId: dto.sourceShopifyReturnId,
+    sourceShopifyReturnGid: dto.sourceShopifyReturnGid,
     sourceType,
     status: mapStatus(dto.status, sourceType),
     relatedOrderId: dto.sourceShopifyOrderId,
@@ -335,10 +336,11 @@ function readVendorRequestOptions(options: { vendorId?: string | null; signal?: 
   return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
-export async function listReturns(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
+export async function listReturns(options: { limit?: number; offset?: number; search?: string; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
+  if (options.search) params.set('search', options.search);
   const path = `/returns${params.size ? `?${params.toString()}` : ''}`;
   const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
