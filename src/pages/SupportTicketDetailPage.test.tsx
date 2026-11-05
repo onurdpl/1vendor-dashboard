@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { queryKeys } from '../lib/api/queryKeys';
+import { RequirePermission } from '../components/RequirePermission';
 import type { SupportTicket } from '../lib/api/contracts';
 import { SupportTicketDetailPage } from './SupportTicketDetailPage';
 
@@ -81,16 +83,17 @@ function renderPage(path: string) {
     },
   });
 
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/support/:ticketId" element={<SupportTicketDetailPage />} />
-          <Route path="/admin/support/:ticketId" element={<SupportTicketDetailPage />} />
+          <Route path="/support/:ticketId" element={<RequirePermission permission="orders:read"><SupportTicketDetailPage /></RequirePermission>} />
+          <Route path="/admin/support/:ticketId" element={<RequirePermission permission="orders:write"><SupportTicketDetailPage /></RequirePermission>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe('SupportTicketDetailPage context visibility', () => {
@@ -102,6 +105,78 @@ describe('SupportTicketDetailPage context visibility', () => {
     getVendorSupportTicketMock.mockReset();
     assignAdminSupportTicketToSelfMock.mockReset();
     addVendorSupportTicketReplyMock.mockReset();
+  });
+
+  it('loads global Admin detail without selecting a Vendor', async () => {
+    setCurrentUser({ email: 'admin@example.com', name: 'Admin', role: 'admin', vendorAccess: [],
+      vendorDetails: [], canSwitchVendors: false, defaultVendorId: '' });
+    getAdminSupportTicketMock.mockResolvedValueOnce(ticket());
+
+    const { queryClient } = renderPage('/admin/support/ticket-1');
+
+    expect(await screen.findByRole('heading', { name: 'Return support' })).toBeInTheDocument();
+    expect(getAdminSupportTicketMock).toHaveBeenCalledWith('ticket-1');
+    expect(getVendorSupportTicketMock).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(queryKeys.admin.support.detail('ticket-1'))).toMatchObject({ id: 'ticket-1' });
+    expect(screen.queryByText('Loading support ticket')).not.toBeInTheDocument();
+  });
+
+  it('uses the global Admin detail query even when a different Vendor is selected', async () => {
+    setCurrentUser({ email: 'admin@example.com', name: 'Admin', role: 'admin', vendorAccess: ['vendor-b'],
+      vendorDetails: [{ vendorId: 'vendor-b', vendorName: 'Vendor B' }],
+      canSwitchVendors: true, defaultVendorId: 'vendor-b' });
+    getAdminSupportTicketMock.mockResolvedValueOnce(ticket({ vendorId: 'vendor-a', subject: 'Vendor A global ticket' }));
+
+    const { queryClient } = renderPage('/admin/support/ticket-1');
+
+    expect(await screen.findByRole('heading', { name: 'Vendor A global ticket' })).toBeInTheDocument();
+    expect(getAdminSupportTicketMock).toHaveBeenCalledWith('ticket-1');
+    expect(getVendorSupportTicketMock).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(queryKeys.admin.support.detail('ticket-1'))).toMatchObject({ vendorId: 'vendor-a' });
+    expect(queryClient.getQueryData(queryKeys.support.detail('ticket-1', 'vendor-b'))).toBeUndefined();
+  });
+
+  it('waits for Vendor context before requesting Vendor detail', () => {
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor', role: 'vendor', vendorAccess: [],
+      vendorDetails: [], canSwitchVendors: false, defaultVendorId: '' });
+
+    renderPage('/support/ticket-1');
+
+    expect(screen.getByText('Loading support ticket')).toBeInTheDocument();
+    expect(getVendorSupportTicketMock).not.toHaveBeenCalled();
+    expect(getAdminSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('loads an assigned Vendor ticket under its Vendor-scoped query key', async () => {
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor', role: 'vendor', vendorAccess: ['vendor-a'],
+      vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }],
+      canSwitchVendors: false, defaultVendorId: 'vendor-a' });
+    getVendorSupportTicketMock.mockResolvedValueOnce(ticket());
+
+    const { queryClient } = renderPage('/support/ticket-1');
+
+    expect(await screen.findByRole('heading', { name: 'Return support' })).toBeInTheDocument();
+    expect(getVendorSupportTicketMock).toHaveBeenCalledWith('ticket-1');
+    expect(getAdminSupportTicketMock).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(queryKeys.support.detail('ticket-1', 'vendor-a'))).toMatchObject({ vendorId: 'vendor-a' });
+  });
+
+  it.each(['vendor', 'support', 'finance'] as const)('blocks %s from the Admin detail route', (role) => {
+    setCurrentUser({ email: `${role}@example.com`, name: role, role, vendorAccess: ['vendor-a'],
+      vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }],
+      canSwitchVendors: false, defaultVendorId: 'vendor-a' });
+
+    renderPage('/admin/support/ticket-1');
+
+    expect(screen.getByText('Access denied')).toBeInTheDocument();
+    expect(getAdminSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks an unauthenticated actor from the Admin detail route', () => {
+    setToken('');
+    renderPage('/admin/support/ticket-1');
+    expect(screen.getByText('Access denied')).toBeInTheDocument();
+    expect(getAdminSupportTicketMock).not.toHaveBeenCalled();
   });
 
   it('hides a foreign Vendor ticket returned under the selected Vendor context', async () => {
@@ -139,6 +214,27 @@ describe('SupportTicketDetailPage context visibility', () => {
     expect(await screen.findByRole('heading', { name: 'Current A detail' })).toBeInTheDocument();
     await act(async () => resolveOldA(ticket({ subject: 'Stale A detail' })));
     expect(screen.queryByText('Stale A detail')).not.toBeInTheDocument();
+  });
+
+  it('hides a loaded Vendor A ticket while Vendor B detail is pending', async () => {
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor', role: 'vendor',
+      vendorAccess: ['vendor-a', 'vendor-b'], vendorDetails: [
+        { vendorId: 'vendor-a', vendorName: 'Vendor A' }, { vendorId: 'vendor-b', vendorName: 'Vendor B' },
+      ], canSwitchVendors: true, defaultVendorId: 'vendor-a' });
+    let resolveB!: (value: SupportTicket) => void;
+    getVendorSupportTicketMock
+      .mockResolvedValueOnce(ticket({ subject: 'Vendor A detail' }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+
+    const { queryClient } = renderPage('/support/ticket-1');
+    expect(await screen.findByRole('heading', { name: 'Vendor A detail' })).toBeInTheDocument();
+    act(() => setCurrentVendorId('vendor-b'));
+    await waitFor(() => expect(getVendorSupportTicketMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('Vendor A detail')).not.toBeInTheDocument();
+    expect(queryClient.getQueryData(queryKeys.support.detail('ticket-1', 'vendor-b'))).toBeUndefined();
+
+    await act(async () => resolveB(ticket({ vendorId: 'vendor-b', subject: 'Vendor B detail' })));
+    expect(await screen.findByRole('heading', { name: 'Vendor B detail' })).toBeInTheDocument();
   });
 
   it('renders compact ticket metadata without an operations summary', async () => {
