@@ -728,6 +728,10 @@ const CANCEL_REFUND_REVIEW_REASONS = [
 
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
+  return <AdminShopifyOrderDetail key={shopifyOrderId} shopifyOrderId={shopifyOrderId} />;
+}
+
+function AdminShopifyOrderDetail({ shopifyOrderId }: { shopifyOrderId?: string }) {
   const queryClient = useQueryClient();
   const appReadiness = useAppReadiness();
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -775,6 +779,7 @@ export function AdminShopifyOrderPage() {
     },
     {
       enabled: pageReadiness.ready && Boolean(shopifyOrderId),
+      placeholderData: () => undefined,
     },
   );
 

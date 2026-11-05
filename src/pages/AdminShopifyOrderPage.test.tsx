@@ -1,13 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { queryKeys } from '../lib/api/queryKeys';
 import type { ShopifyOrderBreakdown } from '../features/orders/api';
 import { formatDateTime } from '../services/real/formatting';
 import { AdminShopifyOrderPage } from './AdminShopifyOrderPage';
 
-const getAdminShopifyOrderBreakdownMock = vi.fn<() => Promise<ShopifyOrderBreakdown>>();
+const getAdminShopifyOrderBreakdownMock = vi.fn<(shopifyOrderId: string) => Promise<ShopifyOrderBreakdown>>();
 const sendAdminProductPanelVariantDisableDryRunMock = vi.fn();
 const previewAdminShopifyRefundMock = vi.fn();
 const executeAdminShopifyRefundMock = vi.fn();
@@ -17,7 +18,7 @@ vi.mock('../features/orders/api', async (importOriginal) => {
   return {
     ...actual,
     executeAdminShopifyRefund: (...args: unknown[]) => executeAdminShopifyRefundMock(...args),
-    getAdminShopifyOrderBreakdown: () => getAdminShopifyOrderBreakdownMock(),
+    getAdminShopifyOrderBreakdown: (shopifyOrderId: string) => getAdminShopifyOrderBreakdownMock(shopifyOrderId),
     previewAdminShopifyRefund: (...args: unknown[]) => previewAdminShopifyRefundMock(...args),
     sendAdminProductPanelVariantDisableDryRun: (shopifyOrderId: string) =>
       sendAdminProductPanelVariantDisableDryRunMock(shopifyOrderId),
@@ -282,7 +283,15 @@ async function openRefundExecutionDialog() {
   return dialog;
 }
 
-function renderPage() {
+function OrderNavigation() {
+  const navigate = useNavigate();
+  return <>
+    <button type="button" onClick={() => navigate('/admin/orders/999')}>Open order B</button>
+    <button type="button" onClick={() => navigate('/admin/orders/7817723773265')}>Open order A</button>
+  </>;
+}
+
+function renderPage(options: { navigation?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -291,15 +300,28 @@ function renderPage() {
     },
   });
 
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/admin/orders/7817723773265']}>
+        {options.navigation ? <OrderNavigation /> : null}
         <Routes>
           <Route path="/admin/orders/:shopifyOrderId" element={<AdminShopifyOrderPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
+}
+
+function identityBreakdown(id: string, orderNumber: string, customer: string, allocationId: string, active = false): ShopifyOrderBreakdown {
+  return {
+    sourceShopifyOrderId: id,
+    sourceShopifyOrderNumber: orderNumber,
+    customer,
+    createdAt: '2026-06-21T08:00:00.000Z',
+    allocations: [buildAllocation({ allocationOrderId: allocationId,
+      ...(active ? { allocationStatus: 'active', status: 'Pending', reassignmentRequired: false, splitSummary: null } : {}) })],
+  };
 }
 
 async function findLatestStatusAxes() {
@@ -346,6 +368,85 @@ describe('AdminShopifyOrderPage split visibility', () => {
     sendAdminProductPanelVariantDisableDryRunMock.mockReset();
     previewAdminShopifyRefundMock.mockReset();
     executeAdminShopifyRefundMock.mockReset();
+  });
+
+  it('hides order A and its open financial confirmation while order B is pending, then shows B only', async () => {
+    const orderA = identityBreakdown('7817723773265', '#1117', 'Customer A', 'alloc-a');
+    const orderB = identityBreakdown('999', '#999', 'Customer B', 'alloc-b', true);
+    const pendingB = createDeferred<ShopifyOrderBreakdown>();
+    getAdminShopifyOrderBreakdownMock.mockImplementation((id) => id === '999' ? pendingB.promise : Promise.resolve(orderA));
+
+    renderPage({ navigation: true });
+    expect(await screen.findByRole('heading', { name: 'Shopify Order #1117' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer economics' }));
+    expect(screen.getByRole('dialog', { name: 'Transfer economics' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open order B' }));
+    await waitFor(() => expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledWith('999'));
+    expect(screen.getByText('Loading Shopify breakdown')).toBeInTheDocument();
+    expect(screen.queryByText('Customer A')).not.toBeInTheDocument();
+    expect(screen.queryByText('alloc-a')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Transfer economics' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();
+    expect(executeAdminShopifyRefundMock).not.toHaveBeenCalled();
+
+    await act(async () => pendingB.resolve(orderB));
+    expect(await screen.findByRole('heading', { name: 'Shopify Order #999' })).toBeInTheDocument();
+    expect(screen.getByText('Customer B')).toBeInTheDocument();
+    expect(screen.queryByText('Customer A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Transfer economics' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open order A' }));
+    expect(await screen.findByRole('heading', { name: 'Shopify Order #1117' })).toBeInTheDocument();
+    expect(screen.queryByText('Customer B')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Transfer economics' })).not.toBeInTheDocument();
+  });
+
+  it('shows the existing error state for order B without restoring order A', async () => {
+    const pendingB = createDeferred<ShopifyOrderBreakdown>();
+    getAdminShopifyOrderBreakdownMock.mockImplementation((id) => id === '999'
+      ? pendingB.promise
+      : Promise.resolve(identityBreakdown('7817723773265', '#1117', 'Customer A', 'alloc-a')));
+    renderPage({ navigation: true });
+    await screen.findByRole('heading', { name: 'Shopify Order #1117' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open order B' }));
+    await waitFor(() => expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledWith('999'));
+    await act(async () => pendingB.reject(new Error('Order B unavailable')));
+
+    expect(await screen.findByText('Breakdown unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Order B unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Customer A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();
+  });
+
+  it('keeps exact-identity data visible during a same-order refetch', async () => {
+    const current = identityBreakdown('7817723773265', '#1117', 'Customer A', 'alloc-a');
+    const pendingRefresh = createDeferred<ShopifyOrderBreakdown>();
+    getAdminShopifyOrderBreakdownMock
+      .mockResolvedValueOnce(current)
+      .mockImplementationOnce(() => pendingRefresh.promise);
+    const { queryClient } = renderPage();
+    await screen.findByRole('heading', { name: 'Shopify Order #1117' });
+
+    act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.admin.orders.breakdown('7817723773265') }); });
+    await waitFor(() => expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Customer A')).toBeInTheDocument();
+    expect(screen.queryByText('Loading Shopify breakdown')).not.toBeInTheDocument();
+    await act(async () => pendingRefresh.resolve(current));
+  });
+
+  it('does not render an old order A response after order B becomes current', async () => {
+    const pendingA = createDeferred<ShopifyOrderBreakdown>();
+    getAdminShopifyOrderBreakdownMock.mockImplementation((id) => id === '999'
+      ? Promise.resolve(identityBreakdown('999', '#999', 'Customer B', 'alloc-b', true))
+      : pendingA.promise);
+    renderPage({ navigation: true });
+    await waitFor(() => expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledWith('7817723773265'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open order B' }));
+    expect(await screen.findByRole('heading', { name: 'Shopify Order #999' })).toBeInTheDocument();
+    await act(async () => pendingA.resolve(identityBreakdown('7817723773265', '#1117', 'Customer A', 'alloc-a')));
+    expect(screen.getByText('Customer B')).toBeInTheDocument();
+    expect(screen.queryByText('Customer A')).not.toBeInTheDocument();
   });
 
   it('shows item-scoped customer cancellation history and exception evidence without resolution actions', async () => {
