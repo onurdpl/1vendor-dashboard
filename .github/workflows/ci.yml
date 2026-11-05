@@ -251,7 +251,7 @@ jobs:
           SUITES
 
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -293,10 +293,6 @@ jobs:
 
       - name: Ensure PostgreSQL 16 client for baseline verification
         run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl --retry 3 --retry-all-errors --retry-delay 2 -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://apt.postgresql.org/pub/repos/apt/ACCC4CF8.asc
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-16
           /usr/lib/postgresql/16/bin/psql --version | grep -E '^psql \(PostgreSQL\) 16\.'
