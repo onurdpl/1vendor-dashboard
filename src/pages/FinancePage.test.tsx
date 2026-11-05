@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from './FinancePage';
 import type { FinanceDashboard, FinanceTransaction, SupportTicket } from '../lib/api/contracts';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { formatCurrency } from '../services/real/formatting';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const getVendorDebtHistoryMock = vi.fn();
@@ -530,6 +531,57 @@ describe('FinancePage control center', () => {
     expect(screen.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText('Finance unavailable')).not.toBeInTheDocument();
+  });
+
+  it('freezes current loaded-row search strings, amount characters, and displayed deduction signs', async () => {
+    const amount = formatCurrency(1500);
+    const searched: FinanceTransaction = {
+      ...financeDashboard.transactions[0], id: 'ledger-alpha', description: 'Special sale',
+      counterparty: 'Counterparty Alpha', amount, status: 'Recorded',
+      settlement: undefined, payoutBatch: null, shopifyOrderNumber: '8123',
+      shopifyOrderId: 'gid://shopify/Order/8123', shopifyRefundId: 'gid://shopify/Refund/98123',
+    };
+    getFinanceDashboardMock.mockResolvedValue({ ...financeDashboard, transactions: [
+      searched,
+      { ...financeDashboard.transactions[1], id: 'refund-positive', amount, shopifyOrderNumber: '8124' },
+      { ...financeDashboard.transactions[2], id: 'adjustment-positive', category: 'Adjustment', amount, shopifyOrderNumber: '8125' },
+    ] });
+    const { container } = renderFinancePage();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#8123')).toBeInTheDocument();
+    expect(amount).toBe('TRY\u00a01,500.00');
+    expect(table.getByText('#8124').closest('.op-table-row')?.textContent).toContain('-TRY\u00a01,500.00');
+    expect(table.getByText('#8125').closest('.op-table-row')?.textContent).toContain('-TRY\u00a01,500.00');
+    const input = screen.getByPlaceholderText('Search by order #, type, status, amount...');
+    for (const [query, found] of [
+      ['ledger-alpha Special sale Invoice Estimated', true],
+      ['Invoice Estimated TRY\u00a01,500.00 Counterparty Alpha Demo Vendor A demo-vendor-a 8123', true],
+      ['gid://shopify/Order/8123', true], ['gid://shopify/Refund/98123', true],
+      ['1500', false], ['1500.00', false], ['1,500.00', true],
+      ['TRY', true], ['TRY 1,500', false], ['TRY\u00a01,500', true],
+      ['500.0', true], ['  1,500.00  ', true],
+    ] as const) {
+      fireEvent.change(input, { target: { value: query } });
+      expect(Boolean(table.queryByText('#8123'))).toBe(found);
+    }
+  });
+
+  it('freezes Vendor visible Turkish status while search still uses the English status', async () => {
+    setVendorFinanceUser();
+    getFinanceDashboardMock.mockResolvedValue({ ...financeDashboard, transactions: [{
+      ...financeDashboard.transactions[0], id: 'vendor-ready-8126', shopifyOrderNumber: '8126',
+      settlement: { ...financeDashboard.transactions[0].settlement!, status: 'payable', payoutReady: true },
+      payoutBatch: null,
+    }] });
+    const { container } = renderFinancePage();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#8126')).toBeInTheDocument();
+    expect(table.getByText('#8126').closest('.op-table-row')).toHaveTextContent('Hazır');
+    const input = screen.getByPlaceholderText('Search by order #, type, status, amount...');
+    fireEvent.change(input, { target: { value: 'Pending review' } });
+    expect(table.queryByText('#8126')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'Hazır' } });
+    expect(table.queryByText('#8126')).not.toBeInTheDocument();
   });
 
   it('renders recorded and failed finance statuses with operational hierarchy', async () => {
