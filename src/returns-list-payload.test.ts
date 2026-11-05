@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
+  $queryRaw: vi.fn(),
   returnRecord: {
     findMany: vi.fn(),
     findFirst: vi.fn(),
@@ -84,6 +85,7 @@ describe('returns list payload optimization', () => {
     prismaMock.returnRecord.findMany.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.shopifyOrderLineItem.updateMany.mockReset();
+    prismaMock.$queryRaw.mockReset();
   });
 
   it('omits heavy return provider snapshots from list summaries', async () => {
@@ -109,6 +111,37 @@ describe('returns list payload optimization', () => {
       }),
     );
     expect(result[0]).not.toHaveProperty('returnProviderSnapshot');
+  });
+
+  it('applies assigned Vendor scope and search before paging 150 Returns', async () => {
+    const rows = Array.from({ length: 150 }, (_, index) => ({
+      ...buildReturnRecord(), id: `return-${index + 1001}`,
+      sourceShopifyOrderNumber: `#${index + 1001}`,
+    }));
+    rows.push({ ...buildReturnRecord(), id: 'return-other-1150',
+      vendorAllocation: { ...buildReturnRecord().vendorAllocation, assignedVendorId: 'other-vendor' } });
+    prismaMock.returnRecord.findMany.mockImplementation(async (args: {
+      where: { id?: { in?: string[] }; vendorAllocation?: { assignedVendorId?: string } };
+      take: number; skip: number;
+    }) => {
+      return rows.filter((row) => row.vendorAllocation.assignedVendorId === args.where.vendorAllocation?.assignedVendorId &&
+        (!args.where.id?.in || args.where.id.in.includes(row.id))).slice(args.skip, args.skip + args.take);
+    });
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'return-1150' }]);
+
+    const first = await listVendorReturns('sporjinal', { limit: 100, offset: 0 });
+    const second = await listVendorReturns('sporjinal', { limit: 100, offset: 100 });
+    const searched = await listVendorReturns('sporjinal', { limit: 101, offset: 0, search: 'return-1150' });
+    expect(first).toHaveLength(100);
+    expect(second).toHaveLength(50);
+    expect(searched.map((row) => row.id)).toEqual(['return-1150']);
+    expect(prismaMock.returnRecord.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { id: { in: ['return-1150'] }, vendorAllocation: { assignedVendorId: 'sporjinal' } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 101,
+      skip: 0,
+    }));
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('returns dashboard return summaries with only dashboard fields', async () => {

@@ -8,6 +8,15 @@ describe('vendor scoped query keys', () => {
     expect(queryKeys.finance.summary('demo-vendor-a')).not.toEqual(queryKeys.finance.summary('demo-vendor-b'));
   });
 
+  it('keeps Returns page and search results in separate Vendor cache entries', () => {
+    expect(queryKeys.returns.list('vendor-a', { limit: 101, offset: 0, search: 'SKU-1' }))
+      .not.toEqual(queryKeys.returns.list('vendor-a', { limit: 101, offset: 100, search: 'SKU-1' }));
+    expect(queryKeys.returns.list('vendor-a', { search: 'SKU-1' }))
+      .not.toEqual(queryKeys.returns.list('vendor-a', { search: 'SKU-2' }));
+    expect(queryKeys.returns.list('vendor-a', { search: 'SKU-1' }))
+      .not.toEqual(queryKeys.returns.list('vendor-b', { search: 'SKU-1' }));
+  });
+
   it('keeps vendor order workflow pages and summaries in distinct cache buckets', () => {
     expect(queryKeys.orders.list('vendor-a')).toEqual([
       'orders',

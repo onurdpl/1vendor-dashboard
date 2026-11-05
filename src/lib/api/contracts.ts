@@ -1503,6 +1503,7 @@ export type ReturnSummary = {
   sourceShopifyOrderNumber: string | number;
   sourceShopifyRefundId: string;
   sourceShopifyReturnId?: string | null;
+  sourceShopifyReturnGid?: string | null;
   sourceType?: 'shopify_refund' | 'shopify_return_request';
   status: ReturnStatus;
   returnLifecycleStatus?: string | null;

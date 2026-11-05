@@ -74,7 +74,8 @@ export const queryKeys = {
     detail: (orderId: string, vendorId = getCurrentVendorContext().vendorId) => ['orders', 'detail', vendorId, orderId] as const,
   },
   returns: {
-    list: (vendorId = getCurrentVendorContext().vendorId) => ['returns', 'list', vendorId] as const,
+    list: (vendorId = getCurrentVendorContext().vendorId, options: { limit?: number; offset?: number; search?: string } = {}) =>
+      ['returns', 'list', vendorId, options.limit ?? 'default', options.offset ?? 0, options.search ?? ''] as const,
     detail: (returnId: string, vendorId = getCurrentVendorContext().vendorId) => ['returns', 'detail', vendorId, returnId] as const,
   },
   finance: {

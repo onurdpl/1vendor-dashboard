@@ -1,7 +1,9 @@
 import { runtimeServices } from '../../services/runtime-services';
 
-export async function listReturns(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
-  return runtimeServices.returns.list(options.vendorId ?? undefined, { signal: options.signal });
+export async function listReturns(options: { vendorId?: string | null; limit?: number; offset?: number; search?: string; signal?: AbortSignal } = {}) {
+  return runtimeServices.returns.list(options.vendorId ?? undefined, {
+    signal: options.signal, limit: options.limit, offset: options.offset, search: options.search,
+  });
 }
 
 export async function getReturn(returnId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {

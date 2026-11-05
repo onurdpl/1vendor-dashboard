@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,14 +7,14 @@ import { ReturnsPage } from './ReturnsPage';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
 import { clearToken, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
-const listReturnsMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<ReturnSummary[]>>();
+const listReturnsMock = vi.fn<(options?: { vendorId?: string | null; limit?: number; offset?: number; search?: string }) => Promise<ReturnSummary[]>>();
 const getReturnMock = vi.fn<(returnId: string, options?: { vendorId?: string | null }) => Promise<ReturnDetail>>();
 
 vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
   return {
     ...actual,
-    listReturns: (options?: { vendorId?: string | null }) => listReturnsMock(options),
+    listReturns: (options?: { vendorId?: string | null; limit?: number; offset?: number; search?: string }) => listReturnsMock(options),
     getReturn: (returnId: string, options?: { vendorId?: string | null }) => getReturnMock(returnId, options),
   };
 });
@@ -309,6 +309,137 @@ describe('ReturnsPage control center', () => {
     });
     listReturnsMock.mockReset();
     getReturnMock.mockReset();
+  });
+
+  it('navigates 150 Returns in bounded pages and searches beyond page one', async () => {
+    const rows = Array.from({ length: 150 }, (_, index) => toSummary({
+      ...pendingReturn, id: `return-${index + 1001}`,
+      sourceShopifyOrderNumber: index + 1001,
+      sourceShopifyReturnId: `return-source-${index + 1001}`,
+    }));
+    listReturnsMock.mockImplementation(async (options) => rows
+      .filter((row) => !options?.search || [row.id, String(row.sourceShopifyOrderNumber), row.sourceShopifyReturnId]
+        .some((value) => value?.includes(options.search!)))
+      .slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100)));
+    getReturnMock.mockImplementation(async (id) => ({ ...pendingReturn, ...rows.find((row) => row.id === id), id }));
+
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+    await table.findByText('#1001');
+    expect(table.queryByText('#1150')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 1 · 100 returns on this page')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /^All/ }))
+      .toHaveTextContent('100 on page');
+    await userEvent.click(within(screen.getByLabelText('Returns pages')).getByRole('button', { name: 'Next' }));
+    await table.findByText('#1150');
+    expect(table.queryByText('#1001')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 2 · 50 returns on this page')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /^All/ }))
+      .toHaveTextContent('50 on page');
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a', limit: 101, offset: 100 }));
+
+    await userEvent.click(within(screen.getByLabelText('Returns pages')).getByRole('button', { name: 'Previous' }));
+    await table.findByText('#1001');
+    expect(table.queryByText('#1150')).not.toBeInTheDocument();
+    await userEvent.click(within(screen.getByLabelText('Returns pages')).getByRole('button', { name: 'Next' }));
+    await table.findByText('#1150');
+    fireEvent.change(screen.getByPlaceholderText('Search returns by order, return #, customer or SKU...'), { target: { value: '1025' } });
+    await table.findByText('#1025');
+    expect(screen.getByText('Page 1 · 1 return on this page')).toBeInTheDocument();
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ search: '1025', offset: 0 }));
+  });
+
+  it('finds an authorized linked Return beyond the first page and fails closed for an unknown link', async () => {
+    const target = toSummary({ ...pendingReturn, id: 'return-1150', sourceShopifyOrderNumber: 1150,
+      sourceShopifyReturnId: 'source-return-1150' });
+    listReturnsMock.mockImplementation(async (options) => options?.search === 'source-return-1150' ? [target] : []);
+    getReturnMock.mockResolvedValue({ ...pendingReturn, ...target });
+    renderReturnsPage(['/returns?shopifyReturnId=source-return-1150']);
+    expect(await screen.findByRole('link', { name: 'Review return' })).toHaveAttribute('href', '/returns/return-1150');
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ search: 'source-return-1150', offset: 0 }));
+  });
+
+  it('does not display an older search response after a newer search resolves', async () => {
+    const older = deferred<ReturnSummary[]>();
+    const newer = deferred<ReturnSummary[]>();
+    listReturnsMock.mockImplementation((options) => {
+      if (options?.search === 'older') return older.promise;
+      if (options?.search === 'newer') return newer.promise;
+      return Promise.resolve([toSummary(pendingReturn)]);
+    });
+    getReturnMock.mockResolvedValue(pendingReturn);
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+    await table.findByText('#1001');
+    const input = screen.getByPlaceholderText('Search returns by order, return #, customer or SKU...');
+    fireEvent.change(input, { target: { value: 'older' } });
+    await waitFor(() => expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ search: 'older' })));
+    fireEvent.change(input, { target: { value: 'newer' } });
+    await waitFor(() => expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ search: 'newer' })));
+    await act(async () => newer.resolve([toSummary({ ...pendingReturn, id: 'newer', sourceShopifyOrderNumber: 1200 })]));
+    await table.findByText('#1200');
+    await act(async () => older.resolve([toSummary({ ...pendingReturn, id: 'older', sourceShopifyOrderNumber: 1150 })]));
+    expect(table.queryByText('#1150')).not.toBeInTheDocument();
+    expect(table.getByText('#1200')).toBeInTheDocument();
+  });
+
+  it('resets Returns pagination and keeps A → B → A rows isolated', async () => {
+    const aRows = Array.from({ length: 101 }, (_, index) => toSummary({
+      ...pendingReturn, id: `return-a-${index + 1000}`, sourceShopifyOrderNumber: index + 1000,
+    }));
+    const bReturn = toSummary({ ...pendingReturn, id: 'return-b-2001', sourceShopifyOrderNumber: 2001,
+      vendorId: 'demo-vendor-b', assignedVendorId: 'demo-vendor-b' });
+    listReturnsMock.mockImplementation(async (options) => {
+      const rows = options?.vendorId === 'demo-vendor-b' ? [bReturn] : aRows;
+      return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100));
+    });
+    getReturnMock.mockImplementation(async (id) => ({ ...pendingReturn,
+      ...(id === bReturn.id ? bReturn : aRows.find((row) => row.id === id)), id }));
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+    await table.findByText('#1000');
+    await userEvent.click(within(screen.getByLabelText('Returns pages')).getByRole('button', { name: 'Next' }));
+    await table.findByText('#1100');
+    await act(async () => setCurrentVendorId('demo-vendor-b'));
+    await table.findByText('#2001');
+    expect(table.queryByText('#1100')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 1 · 1 return on this page')).toBeInTheDocument();
+    await act(async () => setCurrentVendorId('demo-vendor-a'));
+    await table.findByText('#1000');
+    expect(table.queryByText('#2001')).not.toBeInTheDocument();
+    expect(table.queryByText('#1100')).not.toBeInTheDocument();
+  });
+
+  it('retries a failed second page without showing first-page Returns', async () => {
+    const rows = Array.from({ length: 101 }, (_, index) => toSummary({
+      ...pendingReturn, id: `return-${index + 1000}`, sourceShopifyOrderNumber: index + 1000,
+    }));
+    let pageTwoAttempts = 0;
+    listReturnsMock.mockImplementation(async (options) => {
+      if (options?.offset === 100 && pageTwoAttempts++ === 0) throw new Error('Return page failed.');
+      return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100));
+    });
+    getReturnMock.mockResolvedValue(pendingReturn);
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+    await table.findByText('#1000');
+    await userEvent.click(within(screen.getByLabelText('Returns pages')).getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Return page failed.')).toBeInTheDocument();
+    expect(table.queryByText('#1000')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await table.findByText('#1100');
+    expect(screen.getByText('Page 2 · 1 return on this page')).toBeInTheDocument();
+  });
+
+  it('distinguishes an empty Vendor-wide search from a page-only workflow filter', async () => {
+    listReturnsMock.mockImplementation(async (options) => options?.search ? [] : [toSummary(pendingReturn)]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+    renderReturnsPage();
+    expect(await screen.findByText('#1001')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Search returns by order, return #, customer or SKU...'),
+      { target: { value: 'no-match' } });
+    expect(await screen.findByText('No returns match this search for the selected Vendor.')).toBeInTheDocument();
+    expect(screen.getByText('Page 1 · 0 returns on this page')).toBeInTheDocument();
   });
 
   it('renders filters and table frame before return data hydrates', async () => {
@@ -730,7 +861,7 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage(['/returns?workflow=pending-review']);
 
     expect(await screen.findByText('No received returns need action')).toBeInTheDocument();
-    expect(screen.getByText('Received returns that still need approval, rejection, or processing will appear here.')).toBeInTheDocument();
+    expect(screen.getByText('No returns match the page filters. Try another page or adjust the filters.')).toBeInTheDocument();
     expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /Needs Action/i })).toHaveClass('is-active');
     expect(screen.getByText('No return selected')).toBeInTheDocument();
     expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
