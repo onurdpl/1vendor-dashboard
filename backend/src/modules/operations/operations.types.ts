@@ -106,6 +106,7 @@ export type OperationsAttentionItemDto = {
   severity: OperationsAttentionSeverity;
   vendorId: string;
   vendorName: string;
+  destinationVendorId?: string | null;
   objectType: string;
   objectReference: string;
   objectId: string | null;
@@ -143,6 +144,7 @@ export type OperationsActivityDto = {
   severity: OperationsAttentionSeverity;
   vendorId: string;
   vendorName: string;
+  destinationVendorId?: string | null;
   title: string;
   description: string;
   occurredAt: string;
@@ -186,6 +188,7 @@ export type OperationsRecommendationDto = {
   };
   createdFromSignal: string;
   deepLink: string | null;
+  destinationVendorId?: string | null;
   vendorVisible: boolean;
   createdAt: string;
 };

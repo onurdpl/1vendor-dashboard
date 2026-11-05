@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import type { MouseEvent } from 'react';
 import { StatusBadge } from './OperationalPrimitives';
 import type { OperationsAttentionSeverity, OperationsRecommendation } from '../lib/api/contracts';
 
@@ -19,6 +20,7 @@ export function OperationalRecommendations({
   audience = 'admin',
   emptyMessage,
   presentation = 'default',
+  onNavigate,
 }: {
   title?: string;
   subtitle?: string;
@@ -26,6 +28,7 @@ export function OperationalRecommendations({
   audience?: 'admin' | 'vendor';
   emptyMessage?: string;
   presentation?: 'default' | 'summary';
+  onNavigate?: (recommendation: OperationsRecommendation, event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const visibleRecommendations = recommendations.filter((recommendation) => audience === 'admin' || recommendation.vendorVisible);
 
@@ -62,7 +65,8 @@ export function OperationalRecommendations({
             );
 
             return recommendation.deepLink ? (
-              <Link key={recommendation.id} to={recommendation.deepLink} className="operational-recommendation-row">
+              <Link key={recommendation.id} to={recommendation.deepLink} className="operational-recommendation-row"
+                onClick={onNavigate ? (event) => onNavigate(recommendation, event) : undefined}>
                 {body}
               </Link>
             ) : (

@@ -546,6 +546,7 @@ function createAttentionRecommendation(item: OperationsAttentionItemDto): Operat
     },
     createdFromSignal: item.id,
     deepLink: item.destinationPath,
+    destinationVendorId: item.destinationVendorId,
     vendorVisible: recommendation.vendorVisible,
     createdAt: item.createdAt,
   };
@@ -1920,6 +1921,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
       }),
       vendorId: shipment.vendorId,
       vendorName: shipment.vendor.name,
+      destinationVendorId: shipment.allocation.assignedVendorId,
       objectType: 'Shipment',
       objectReference: shipment.sourceShopifyOrderNumber
         ? `Order ${shipment.sourceShopifyOrderNumber}`
@@ -2084,6 +2086,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
       severity: item.severity,
       vendorId: item.vendorId,
       vendorName: item.vendorName,
+      destinationVendorId: item.destinationVendorId,
       title: item.title,
       description: item.objectReference,
       occurredAt: item.createdAt,

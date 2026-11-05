@@ -113,6 +113,7 @@ function buildShipmentExecution(overrides: Record<string, unknown> = {}) {
       name: 'Vendor 1',
     },
     allocation: {
+      assignedVendorId: 'vendor-1',
       order: {
         sourceShopifyOrderId: '7709129507153',
         sourceShopifyOrderNumber: '#1091',
@@ -953,6 +954,33 @@ describe('admin operations summary counts', () => {
       take: 100,
     }));
     expect(prismaMock.shipmentExecution.count).not.toHaveBeenCalled();
+  });
+
+  it('projects the current allocation owner for shipment Order navigation while retaining shipment history', async () => {
+    mockQueueSummaryCounts();
+    prismaMock.shipmentExecution.findMany.mockResolvedValueOnce([
+      buildShipmentExecution({
+        vendorId: 'vendor-a',
+        vendor: { name: 'Vendor A' },
+        allocation: {
+          assignedVendorId: 'vendor-b',
+          order: { sourceShopifyOrderId: '7709129507153', sourceShopifyOrderNumber: '#1091' },
+        },
+      }),
+    ]);
+
+    const dashboard = await getAdminOperationsAttentionCenter();
+    const shipment = dashboard.queue.find((item) => item.id === 'attention-shipment-shipment-1');
+    expect(shipment).toMatchObject({
+      vendorId: 'vendor-a',
+      vendorName: 'Vendor A',
+      destinationVendorId: 'vendor-b',
+      destinationPath: '/orders/alloc-1',
+    });
+    expect(dashboard.recommendations.find((item) => item.createdFromSignal === shipment?.id))
+      .toMatchObject({ vendor: { id: 'vendor-a' }, destinationVendorId: 'vendor-b' });
+    expect(dashboard.recentActivity.find((item) => item.id === `activity-${shipment?.id}`))
+      .toMatchObject({ vendorId: 'vendor-a', destinationVendorId: 'vendor-b' });
   });
 
   it('uses split-aware copy for vendor-blocked child allocations created by line-item split', async () => {
