@@ -124,13 +124,51 @@ describe('vendor orders list visibility', () => {
             },
           },
         }),
-        orderBy: {
-          updatedAt: 'desc',
-        },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         take: 100,
         skip: 0,
       }),
     );
+  });
+
+  it('searches within assigned Vendor ownership before paging a 150-order dataset', async () => {
+    const rows = Array.from({ length: 150 }, (_, index) => buildAllocation({
+      id: `allocation-${index + 1001}`,
+      sourceShopifyOrderNumber: `#${index + 1001}`,
+      order: {
+        sourceShopifyOrderId: `gid://shopify/Order/${index + 1001}`,
+        sourceShopifyOrderNumber: `#${index + 1001}`,
+        customerName: `Customer ${index + 1001}`,
+      },
+    }));
+    rows.push(buildAllocation({ id: 'other-vendor-1150', assignedVendorId: 'vendor-b',
+      order: { sourceShopifyOrderId: 'gid://shopify/Order/1150', sourceShopifyOrderNumber: '#1150' } }));
+    prismaMock.vendorAllocation.findMany.mockImplementation(async (args: {
+      where: { assignedVendorId?: string; AND?: Array<Record<string, unknown>> };
+      skip: number;
+      take: number;
+    }) => {
+      const scopedVendor = args.where.assignedVendorId ?? args.where.AND?.[0]?.assignedVendorId;
+      const query = args.where.AND?.[1]?.OR
+        ? String((args.where.AND[1].OR as Array<{ sourceShopifyOrderNumber?: { contains?: string } }>)[2]?.sourceShopifyOrderNumber?.contains ?? '')
+        : '';
+      return rows.filter((row) => row.assignedVendorId === scopedVendor &&
+        (!query || String(row.order.sourceShopifyOrderNumber).includes(query)))
+        .slice(args.skip, args.skip + args.take);
+    });
+
+    const first = await listVendorOrders('sporjinal', { limit: 100, offset: 0 });
+    const second = await listVendorOrders('sporjinal', { limit: 100, offset: 100 });
+    const searched = await listVendorOrders('sporjinal', { limit: 100, offset: 0, search: '#1150' });
+
+    expect(first).toHaveLength(100);
+    expect(second).toHaveLength(50);
+    expect(searched.map((row) => row.id)).toEqual(['allocation-1150']);
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { AND: [{ assignedVendorId: 'sporjinal' }, expect.objectContaining({ OR: expect.any(Array) })] },
+      take: 100,
+      skip: 0,
+    }));
   });
 
   it('keeps orders with created shipments and pending fulfillment in the Orders list summary', async () => {

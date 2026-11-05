@@ -23,12 +23,14 @@ export async function listOrders(options: {
   workflow?: VendorOrdersWorkflow;
   limit?: number;
   offset?: number;
+  search?: string;
   signal?: AbortSignal;
 } = {}) {
   return runtimeServices.orders.list(options.vendorId ?? undefined, {
     workflow: options.workflow,
     limit: options.limit,
     offset: options.offset,
+    search: options.search,
     signal: options.signal,
   });
 }

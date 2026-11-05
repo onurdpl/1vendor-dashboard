@@ -16,6 +16,7 @@ describe('vendor scoped query keys', () => {
       'all',
       'default',
       0,
+      '',
     ]);
     expect(queryKeys.orders.list('vendor-a', {
       workflow: 'awaitingShipment',
@@ -44,6 +45,8 @@ describe('vendor scoped query keys', () => {
       limit: 25,
       offset: 75,
     }));
+    expect(queryKeys.orders.list('vendor-a', { search: '#1150' }))
+      .not.toEqual(queryKeys.orders.list('vendor-a', { search: '#1151' }));
     expect(queryKeys.orders.workflowSummary('vendor-a')).toEqual([
       'orders',
       'workflow-summary',

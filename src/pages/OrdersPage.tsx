@@ -56,7 +56,6 @@ type LabelActionFeedback = {
 
 const RESTRICTED_SMART_LABEL_MESSAGE = 'Vendor account is restricted. Operational actions are disabled.';
 const ORDERS_PAGE_LIMIT = 100;
-const ORDERS_PAGE_OFFSET = 0;
 const TRACKING_HELPERS_TO_HIDE = new Set([
   'Shopify order cancelled.',
   'Review existing fulfillment evidence',
@@ -372,8 +371,7 @@ function orderMatchesTarget(order: OrderSummary, target: string | null) {
   );
 }
 
-function getRequestedOrderTargets(searchParams: URLSearchParams) {
-  return [
+const ORDER_TARGET_PARAMS = [
     'orderId',
     'shopifyOrderId',
     'sourceShopifyOrderId',
@@ -382,7 +380,10 @@ function getRequestedOrderTargets(searchParams: URLSearchParams) {
     'orderNumber',
     'id',
     'order',
-  ]
+  ] as const;
+
+function getRequestedOrderTargets(searchParams: URLSearchParams) {
+  return ORDER_TARGET_PARAMS
     .map((name) => searchParams.get(name)?.trim())
     .filter((value): value is string => Boolean(value));
 }
@@ -391,9 +392,9 @@ function getOrdersWorkflowFilter(workflow: string | null) {
   if (workflow === 'blocked-allocation') {
     return {
       label: 'Blocked allocation',
-      description: 'Showing orders with blocked or reassignment-needed vendor allocations.',
-      emptyTitle: 'No blocked allocations currently need action',
-      emptyDescription: 'This workflow queue is clear for the current vendor scope. Switch to All orders to review the full list.',
+      description: 'Showing blocked or reassignment-needed allocations on this page.',
+      emptyTitle: 'No blocked allocations on this page',
+      emptyDescription: 'No blocked allocations appear on this page. Check other pages or switch to All orders.',
       quickFilter: 'blocked' as OrderQuickFilter,
     };
   }
@@ -456,17 +457,30 @@ export function OrdersPage() {
   const isAdmin = currentUser?.role === 'admin';
   const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
   const { message, tone, showFeedback } = useActionFeedback();
+  const [searchTerm, setSearchTerm] = useState('');
+  const requestedOrderTargets = useMemo(() => getRequestedOrderTargets(searchParams), [searchParams]);
+  const hasRequestedOrderTarget = requestedOrderTargets.length > 0;
+  const requestedOrderTargetKey = requestedOrderTargets.join('|');
+  const serverSearch = hasRequestedOrderTarget ? requestedOrderTargets[0] : searchTerm.trim();
+  const pageScope = JSON.stringify([currentVendor.vendorId, workflowParam, backendWorkflow, serverSearch]);
+  const [pageState, setPageState] = useState({ scope: pageScope, page: 0 });
+  const page = pageState.scope === pageScope ? pageState.page : 0;
+  useEffect(() => {
+    if (pageState.scope !== pageScope) setPageState({ scope: pageScope, page: 0 });
+  }, [pageScope, pageState.scope]);
   const { data: orders, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId, {
       workflow: backendWorkflow,
-      limit: ORDERS_PAGE_LIMIT,
-      offset: ORDERS_PAGE_OFFSET,
+      limit: ORDERS_PAGE_LIMIT + 1,
+      offset: page * ORDERS_PAGE_LIMIT,
+      search: serverSearch,
     }),
     ({ signal }) => listOrders({
       vendorId: currentVendor.vendorId,
       workflow: backendWorkflow,
-      limit: ORDERS_PAGE_LIMIT,
-      offset: ORDERS_PAGE_OFFSET,
+      limit: ORDERS_PAGE_LIMIT + 1,
+      offset: page * ORDERS_PAGE_LIMIT,
+      search: serverSearch,
       signal,
     }),
     { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
@@ -478,7 +492,6 @@ export function OrdersPage() {
   );
   const ordersMissingVendorContext = appReadiness.status === 'missing_vendor_context';
   const ordersWaitingForVendorContext = !ordersMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
-  const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
   const [shippingFilter, setShippingFilter] = useState('all');
@@ -486,12 +499,10 @@ export function OrdersPage() {
   const [selectedOrderTarget, setSelectedOrderTarget] = useState<{ vendorId: string; id: string } | null>(null);
   const [labelActionFeedback, setLabelActionFeedback] = useState<LabelActionFeedback | null>(null);
   const activeWorkflowFilter = useMemo(() => getOrdersWorkflowFilter(workflowParam), [workflowParam]);
-  const requestedOrderTargets = useMemo(() => getRequestedOrderTargets(searchParams), [searchParams]);
-  const hasRequestedOrderTarget = requestedOrderTargets.length > 0;
-  const requestedOrderTargetKey = requestedOrderTargets.join('|');
   const visibleOrders = useMemo(() => authContextReady && currentVendor.vendorId
-    ? safeArray(orders)
+    ? safeArray(orders).slice(0, ORDERS_PAGE_LIMIT)
     : [], [authContextReady, currentVendor.vendorId, orders]);
+  const hasNextPage = authContextReady && safeArray(orders).length > ORDERS_PAGE_LIMIT;
 
   useEffect(() => {
     setSelectedOrderTarget(null);
@@ -557,7 +568,6 @@ export function OrdersPage() {
   }, [visibleOrders]);
 
   const filteredOrders = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
     const effectiveQuickFilter = activeWorkflowFilter
       ? serverFilteredForwardWorkflow ? 'all' : activeWorkflowFilter.quickFilter
       : quickFilter;
@@ -595,9 +605,9 @@ export function OrdersPage() {
       const matchesAuthoritativeActionability =
         !serverFilteredForwardWorkflow || order.operationalActionability.actionable;
 
-      return matchesAuthoritativeActionability && matchesStatus && matchesFulfillment && matchesShipping && matchesQuickFilter && (!query || searchableText.includes(query));
+      return matchesAuthoritativeActionability && matchesStatus && matchesFulfillment && matchesShipping && matchesQuickFilter;
     });
-  }, [activeWorkflowFilter, currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, searchTerm, serverFilteredForwardWorkflow, shippingFilter, statusFilter]);
+  }, [activeWorkflowFilter, currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, serverFilteredForwardWorkflow, shippingFilter, statusFilter]);
 
   const selectedOrderSummary = useMemo(() => {
     const selectedByClick = selectedOrderTarget?.vendorId === currentVendor.vendorId
@@ -698,7 +708,7 @@ export function OrdersPage() {
   const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number | string }> = [
     { key: 'all', label: 'All orders', count: workflowSummary?.all ?? '—' },
     { key: 'tracking_missing', label: 'Tracking missing', count: workflowSummary?.trackingMissing ?? '—' },
-    { key: 'high_value', label: 'High value', count: visibleOrders.filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
+    { key: 'high_value', label: 'High value (page)', count: visibleOrders.filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
   ];
   const workflowTabs: Array<{
     key: OrderWorkflowTabKey;
@@ -723,9 +733,9 @@ export function OrdersPage() {
     {
       key: 'blocked-allocation',
       workflow: 'blocked-allocation',
-      label: 'Blocked',
+      label: 'Blocked (page)',
       description: 'Needs admin resolution',
-      count: summary.blocked,
+      count: `${summary.blocked} on page`,
     },
     {
       key: 'stale-fulfillment',
@@ -882,9 +892,13 @@ export function OrdersPage() {
               <OperationalToolbar>
                 <SearchInput
                   placeholder="Search order, customer, tracking, carrier..."
+                  maxLength={100}
                   value={searchTerm}
                   onChange={(event) => {
-                    clearWorkflowFilter();
+                    const nextParams = new URLSearchParams(searchParams);
+                    nextParams.delete('workflow');
+                    for (const key of ORDER_TARGET_PARAMS) nextParams.delete(key);
+                    if (nextParams.toString() !== searchParams.toString()) setSearchParams(nextParams, { replace: true });
                     setSearchTerm(event.target.value);
                   }}
                 />
@@ -954,6 +968,7 @@ export function OrdersPage() {
                   </button>
                 ))}
               </div>
+              <p>Allocation, fulfillment, shipping, high-value and blocked filters apply to the current page. Search and the other workflow tabs cover the selected Vendor's full order list.</p>
             </div>
 
             <div className="op-main-column orders-table-shell">
@@ -988,8 +1003,10 @@ export function OrdersPage() {
                 ) : filteredOrders.length === 0 ? (
                   <OperationalTableRow>
                     <EmptyStatePanel
-                      title={activeWorkflowFilter?.emptyTitle ?? 'No orders in this view'}
-                      description={activeWorkflowFilter?.emptyDescription ?? 'Adjust the search or filters to inspect vendor-scoped Shopify orders.'}
+                      title={activeWorkflowFilter?.emptyTitle ?? (visibleOrders.length === 0 ? 'No orders in this view' : 'No orders match page filters')}
+                      description={visibleOrders.length === 0
+                        ? activeWorkflowFilter?.emptyDescription ?? 'No orders match this search or workflow for the selected Vendor.'
+                        : 'Adjust the page filters or move to another page.'}
                     />
                   </OperationalTableRow>
                 ) : filteredOrders.map((order) => {
@@ -1039,6 +1056,13 @@ export function OrdersPage() {
                   );
                 })}
               </OperationalTable>
+              {!ordersWaitingForVendorContext && !ordersMissingVendorContext && !isError && !isLoading ? (
+                <nav aria-label="Orders pages">
+                  <button type="button" disabled={page === 0} onClick={() => setPageState({ scope: pageScope, page: page - 1 })}>Previous</button>
+                  <span>Page {page + 1} · {visibleOrders.length} {visibleOrders.length === 1 ? 'order' : 'orders'} on this page</span>
+                  <button type="button" disabled={!hasNextPage} onClick={() => setPageState({ scope: pageScope, page: page + 1 })}>Next</button>
+                </nav>
+              ) : null}
             </div>
           </div>
 

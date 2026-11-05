@@ -59,7 +59,7 @@ export const queryKeys = {
   orders: {
     list: (
       vendorId = getCurrentVendorContext().vendorId,
-      options: { workflow?: VendorOrdersWorkflow; limit?: number; offset?: number } = {},
+      options: { workflow?: VendorOrdersWorkflow; limit?: number; offset?: number; search?: string } = {},
     ) => [
       'orders',
       'list',
@@ -67,6 +67,7 @@ export const queryKeys = {
       options.workflow ?? 'all',
       options.limit ?? 'default',
       options.offset ?? 0,
+      options.search ?? '',
     ] as const,
     workflowSummary: (vendorId = getCurrentVendorContext().vendorId) =>
       ['orders', 'workflow-summary', vendorId] as const,

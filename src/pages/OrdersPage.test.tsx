@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +22,7 @@ const listOrdersMock = vi.fn<(options?: {
   workflow?: VendorOrdersWorkflow;
   limit?: number;
   offset?: number;
+  search?: string;
 }) => Promise<OrderSummary[]>>();
 const getVendorOrdersWorkflowSummaryMock = vi.fn<
   (options?: { vendorId?: string | null }) => Promise<VendorOrdersWorkflowSummary>
@@ -50,6 +51,7 @@ vi.mock('../features/orders/api', async () => {
       workflow?: VendorOrdersWorkflow;
       limit?: number;
       offset?: number;
+      search?: string;
     }) => listOrdersMock(options),
     getVendorOrdersWorkflowSummary: (options?: { vendorId?: string | null }) =>
       getVendorOrdersWorkflowSummaryMock(options),
@@ -356,6 +358,133 @@ describe('OrdersPage control center', () => {
     splitAllocationMock.mockReset();
     createShipmentExecutionMock.mockReset();
     retryFailedShipmentExecutionMock.mockReset();
+  });
+
+  it('pages through 150 server rows and resets to page one for a complete-data search', async () => {
+    const rows = Array.from({ length: 150 }, (_, index) => buildSummary({
+      id: `allocation-${index + 1001}`,
+      sourceShopifyOrderId: `gid://shopify/Order/${index + 1001}`,
+      sourceShopifyOrderNumber: `#${index + 1001}`,
+    }));
+    listOrdersMock.mockImplementation(async (options) => rows
+      .filter((row) => !options?.search || row.sourceShopifyOrderNumber.includes(options.search))
+      .slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100)));
+    getOrderMock.mockImplementation(async (id) => ({
+      ...orderDetail,
+      ...rows.find((row) => row.id === id),
+      id,
+    }));
+
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1001');
+    expect(table.queryByText('#1150')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 1 · 100 orders on this page')).toBeInTheDocument();
+    await userEvent.click(within(screen.getByLabelText('Orders pages')).getByRole('button', { name: 'Next' }));
+    await table.findByText('#1150');
+    expect(table.queryByText('#1001')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 2 · 50 orders on this page')).toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a', limit: 101, offset: 100 }));
+
+    await userEvent.type(screen.getByPlaceholderText('Search order, customer, tracking, carrier...'), '#1025');
+    await table.findByText('#1025');
+    expect(table.queryByText('#1150')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 1 · 1 order on this page')).toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a', search: '#1025', offset: 0 }));
+  });
+
+  it('locates a linked order outside the first page without selecting an unrelated row', async () => {
+    const linked = buildSummary({ id: 'allocation-1150', sourceShopifyOrderNumber: '#1150' });
+    listOrdersMock.mockImplementation(async (options) => options?.search === '1150' ? [linked] : [buildSummary()]);
+    getOrderMock.mockResolvedValue({ ...orderDetail, ...linked });
+
+    renderOrdersPage(['/orders?orderNumber=1150']);
+
+    expect(await screen.findByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/allocation-1150');
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ search: '1150', offset: 0 }));
+    expect(screen.queryByText('Linked order unavailable')).not.toBeInTheDocument();
+  });
+
+  it('discards a delayed search response after a newer search renders', async () => {
+    const firstSearch = deferred<OrderSummary[]>();
+    const secondSearch = deferred<OrderSummary[]>();
+    const oldMatch = buildSummary({ id: 'allocation-1150', sourceShopifyOrderNumber: '#1150' });
+    const newMatch = buildSummary({ id: 'allocation-1200', sourceShopifyOrderNumber: '#1200' });
+    listOrdersMock.mockImplementation((options) => {
+      if (options?.search === '#1150') return firstSearch.promise;
+      if (options?.search === '#1200') return secondSearch.promise;
+      return Promise.resolve([buildSummary()]);
+    });
+    getOrderMock.mockResolvedValue(orderDetail);
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1002');
+
+    const input = screen.getByPlaceholderText('Search order, customer, tracking, carrier...');
+    fireEvent.change(input, { target: { value: '#1150' } });
+    await waitFor(() => expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ search: '#1150' })));
+    fireEvent.change(input, { target: { value: '#1200' } });
+    await waitFor(() => expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ search: '#1200' })));
+    await act(async () => secondSearch.resolve([newMatch]));
+    await table.findByText('#1200');
+    await act(async () => firstSearch.resolve([oldMatch]));
+    expect(table.queryByText('#1150')).not.toBeInTheDocument();
+    expect(table.getByText('#1200')).toBeInTheDocument();
+  });
+
+  it('resets page and keeps A → B → A results isolated', async () => {
+    setCurrentUser({ email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' }],
+      canSwitchVendors: true, defaultVendorId: 'demo-vendor-a' });
+    setCurrentVendorId('demo-vendor-a');
+    const aRows = Array.from({ length: 101 }, (_, index) => buildSummary({
+      id: `allocation-a-${index + 1000}`, sourceShopifyOrderNumber: `#${index + 1000}` }));
+    const bRow = buildSummary({ id: 'allocation-b-2001', sourceShopifyOrderNumber: '#2001',
+      assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b' });
+    listOrdersMock.mockImplementation(async (options) => {
+      const rows = options?.vendorId === 'demo-vendor-b' ? [bRow] : aRows;
+      return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100));
+    });
+    getOrderMock.mockImplementation(async (id) => ({ ...orderDetail,
+      ...(id === bRow.id ? bRow : aRows.find((row) => row.id === id)), id }));
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1000');
+    await userEvent.click(within(screen.getByLabelText('Orders pages')).getByRole('button', { name: 'Next' }));
+    await table.findByText('#1100');
+
+    await act(async () => setCurrentVendorId('demo-vendor-b'));
+    await table.findByText('#2001');
+    expect(table.queryByText('#1100')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 1 · 1 order on this page')).toBeInTheDocument();
+
+    await act(async () => setCurrentVendorId('demo-vendor-a'));
+    await table.findByText('#1000');
+    expect(table.queryByText('#2001')).not.toBeInTheDocument();
+    expect(table.queryByText('#1100')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 1 · 100 orders on this page')).toBeInTheDocument();
+  });
+
+  it('shows a page request error and retries without restoring the previous page', async () => {
+    const rows = Array.from({ length: 101 }, (_, index) => buildSummary({
+      id: `allocation-${index + 1000}`, sourceShopifyOrderNumber: `#${index + 1000}` }));
+    let pageTwoAttempts = 0;
+    listOrdersMock.mockImplementation(async (options) => {
+      if (options?.offset === 100 && pageTwoAttempts++ === 0) throw new Error('Page request failed.');
+      return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100));
+    });
+    getOrderMock.mockResolvedValue(orderDetail);
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1000');
+    await userEvent.click(within(screen.getByLabelText('Orders pages')).getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Page request failed.')).toBeInTheDocument();
+    expect(table.queryByText('#1000')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await table.findByText('#1100');
+    expect(screen.getByText('Page 2 · 1 order on this page')).toBeInTheDocument();
   });
 
   it('renders a dense operational orders table in mock-compatible mode', async () => {
@@ -1380,7 +1509,7 @@ describe('OrdersPage control center', () => {
     expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({
       vendorId: 'demo-vendor-a',
       workflow: 'awaitingShipment',
-      limit: 100,
+      limit: 101,
       offset: 0,
     }));
     expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
@@ -1455,7 +1584,7 @@ describe('OrdersPage control center', () => {
       expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({
         vendorId: 'demo-vendor-a',
         workflow: apiWorkflow,
-        limit: 100,
+        limit: 101,
         offset: 0,
       }));
       expect(listOrdersMock).not.toHaveBeenCalledWith(expect.objectContaining({ workflow: 'all' }));

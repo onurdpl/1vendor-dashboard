@@ -133,6 +133,22 @@ describe('orders route contract', () => {
     });
   });
 
+  it('passes bounded search through the existing Vendor-scoped Orders route', async () => {
+    listVendorOrdersMock.mockResolvedValueOnce([]);
+    const gets = new Map<string, (request: { vendorContext?: { vendorId?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = { get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+      gets.set(path, handler as never);
+    }), post: vi.fn() };
+    registerOrdersRoutes(app as never, {} as never);
+
+    await gets.get('/orders')?.({ vendorContext: { vendorId: 'vendor-a' },
+      query: { search: '  #1150  ', limit: '101', offset: '100' } }, {});
+
+    expect(listVendorOrdersMock).toHaveBeenCalledWith('vendor-a', {
+      workflow: 'all', search: '#1150', limit: 101, offset: 100,
+    });
+  });
+
   it('rejects unsupported vendor orders workflows with the existing 400 response convention', async () => {
     const gets = new Map<string, (request: {
       vendorContext?: { vendorId?: string };

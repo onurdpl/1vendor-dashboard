@@ -97,7 +97,7 @@ function getCurrentVendorId() {
 }
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
-type OrdersReadRequestOptions = ReadRequestOptions & { workflow?: VendorOrdersWorkflow };
+type OrdersReadRequestOptions = ReadRequestOptions & { workflow?: VendorOrdersWorkflow; search?: string };
 type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope };
 
 const mockSupportTickets: SupportTicket[] = [];
@@ -1014,9 +1014,15 @@ export const runtimeServices = {
             limit: options.limit,
             offset: options.offset,
             workflow: options.workflow,
+            search: options.search,
           })
         : Promise.resolve(
-            filterMockVendorOrdersByWorkflow(listMockOrders(vendorId), options.workflow).slice(
+            filterMockVendorOrdersByWorkflow(listMockOrders(vendorId), options.workflow).filter((order) =>
+              !options.search || [order.id, order.sourceShopifyOrderId, order.sourceShopifyOrderNumber,
+                order.customer, order.trackingNumber, order.carrier, order.allocationStatus,
+                order.fulfillmentStatus, order.shippingStatus].some((field) =>
+                String(field ?? '').toLowerCase().includes(options.search!.toLowerCase())),
+            ).slice(
               options.offset ?? 0,
               (options.offset ?? 0) + (options.limit ?? 100),
             ),
