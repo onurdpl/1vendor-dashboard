@@ -804,6 +804,7 @@ export async function listOrders(options: {
   limit?: number;
   offset?: number;
   workflow?: VendorOrdersWorkflow;
+  search?: string;
   vendorId?: string | null;
   signal?: AbortSignal;
   headers?: HeadersInit;
@@ -812,6 +813,7 @@ export async function listOrders(options: {
   if (options.workflow) params.set('workflow', options.workflow);
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
+  if (options.search) params.set('search', options.search);
   const path = `/orders${params.size ? `?${params.toString()}` : ''}`;
   const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions

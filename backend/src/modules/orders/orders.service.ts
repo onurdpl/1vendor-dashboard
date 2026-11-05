@@ -2286,11 +2286,34 @@ async function getLatestShopifyReturnSignalForOrder(shopifyOrderDbId: string): P
 
 export async function listVendorOrders(
   vendorId: string,
-  options: { limit?: number; offset?: number; workflow?: VendorOrdersWorkflow } = {},
+  options: { limit?: number; offset?: number; workflow?: VendorOrdersWorkflow; search?: string } = {},
 ): Promise<OrderSummaryDto[]> {
   const workflow = options.workflow ?? 'all';
+  const search = options.search?.trim() ?? '';
+  const orderNumber = search.replace(/^#/, '');
+  const allocationStatus = Object.values(AllocationStatus).find((value) =>
+    value.toLowerCase() === search.toLowerCase().replaceAll(' ', '_'));
+  const workflowWhere = buildVendorOrdersWorkflowWhere(vendorId, workflow);
   const allocations = await withDashboardTiming('orders.vendor_allocation_fetch', () => prisma.vendorAllocation.findMany({
-    where: buildVendorOrdersWorkflowWhere(vendorId, workflow),
+    where: search ? {
+      AND: [workflowWhere, {
+        OR: [
+          { id: { contains: search, mode: 'insensitive' } },
+          { sourceShopifyOrderId: { contains: search, mode: 'insensitive' } },
+          ...(orderNumber ? [{ sourceShopifyOrderNumber: { contains: orderNumber, mode: 'insensitive' as const } }] : []),
+          { trackingNumber: { contains: search, mode: 'insensitive' } },
+          { carrier: { contains: search, mode: 'insensitive' } },
+          { fulfillmentStatus: { contains: search, mode: 'insensitive' } },
+          { shippingStatus: { contains: search, mode: 'insensitive' } },
+          ...(allocationStatus ? [{ allocationStatus }] : []),
+          { order: { is: { OR: [
+            { customerName: { contains: search, mode: 'insensitive' } },
+            { sourceShopifyOrderId: { contains: search, mode: 'insensitive' } },
+            ...(orderNumber ? [{ sourceShopifyOrderNumber: { contains: orderNumber, mode: 'insensitive' as const } }] : []),
+          ] } } },
+        ],
+      }],
+    } : workflowWhere,
     select: {
       id: true,
       assignedVendorId: true,
@@ -2347,9 +2370,7 @@ export async function listVendorOrders(
         take: 1,
       },
     },
-    orderBy: {
-      updatedAt: 'desc',
-    },
+    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
     take: options.limit ?? 100,
     skip: options.offset ?? 0,
   }));

@@ -126,9 +126,15 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(400).send({ message: VENDOR_ORDERS_WORKFLOW_ERROR });
       }
 
+      const rawSearch = (request.query as { search?: unknown } | undefined)?.search;
+      if (rawSearch !== undefined && (typeof rawSearch !== 'string' || rawSearch.trim().length > 100)) {
+        return reply.code(400).send({ message: 'search must be a string of 100 characters or fewer.' });
+      }
+      const search = typeof rawSearch === 'string' ? rawSearch.trim() : '';
+
       return withDashboardRouteTiming('GET /orders', () =>
         withSlowEndpointTiming('GET /orders', () =>
-          listVendorOrders(vendorId, { ...resolvePagination(request.query), workflow }),
+          listVendorOrders(vendorId, { ...resolvePagination(request.query), workflow, ...(search ? { search } : {}) }),
         ),
       );
     },
