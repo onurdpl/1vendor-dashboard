@@ -251,7 +251,7 @@ jobs:
           SUITES
 
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -292,7 +292,11 @@ jobs:
         run: npm run backend:db:generate
 
       - name: Ensure PostgreSQL 16 client for baseline verification
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16
+          /usr/lib/postgresql/16/bin/psql --version | grep -E '^psql \(PostgreSQL\) 16\.'
+          /usr/lib/postgresql/16/bin/pg_dump --version | grep -E '^pg_dump \(PostgreSQL\) 16\.'
 
       - name: Install Playwright Chromium
         run: ./node_modules/.bin/playwright install --with-deps chromium
