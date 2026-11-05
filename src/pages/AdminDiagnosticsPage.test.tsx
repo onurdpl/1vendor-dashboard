@@ -165,6 +165,16 @@ const processedDetail = {
   relatedShopifyOrderId: 'gid://shopify/Order/1001',
 };
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function orderStateInspectorResult() {
   return {
     orderIdentity: {
@@ -545,6 +555,93 @@ describe('AdminDiagnosticsPage control center', () => {
       dbReachable: true,
       migrationsReachable: true,
     });
+  });
+
+  it('clears webhook A detail and its actions while webhook B loads, then shows only B', async () => {
+    const pendingB = createDeferred<typeof replayableDetail>();
+    diagnosticsMocks.webhookDetail.mockImplementation((id: string) =>
+      id === 'webhook-replayable' ? pendingB.promise : Promise.resolve(blockedDetail));
+    renderDiagnosticsPage();
+    await screen.findByText('Webhook state');
+    const panel = document.querySelector('.op-side-panel') as HTMLElement;
+    expect(within(panel).getAllByText('Payload missing').length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    await waitFor(() => expect(diagnosticsMocks.webhookDetail).toHaveBeenCalledWith('webhook-replayable', expect.anything()));
+    expect(within(panel).getByText('Select a webhook event')).toBeInTheDocument();
+    expect(within(panel).queryByText('Webhook state')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('Payload missing')).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Replay Stored Webhook' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Recover Failed Webhook' })).not.toBeInTheDocument();
+
+    await act(async () => pendingB.resolve(replayableDetail));
+    expect(await within(panel).findByText('Webhook state')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Replay Stored Webhook' })).toBeEnabled();
+    expect(within(panel).getByRole('button', { name: 'Recover Failed Webhook' })).toBeEnabled();
+    expect(within(panel).queryByText('Payload missing')).not.toBeInTheDocument();
+  });
+
+  it('keeps webhook A out of the detail panel when webhook B fails', async () => {
+    const pendingB = createDeferred<typeof replayableDetail>();
+    diagnosticsMocks.webhookDetail.mockImplementation((id: string) =>
+      id === 'webhook-replayable' ? pendingB.promise : Promise.resolve(blockedDetail));
+    renderDiagnosticsPage();
+    await screen.findByText('Webhook state');
+    const panel = document.querySelector('.op-side-panel') as HTMLElement;
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    await act(async () => pendingB.reject(new Error('Webhook B unavailable')));
+
+    expect(within(panel).getByText('Select a webhook event')).toBeInTheDocument();
+    expect(within(panel).queryByText('Payload missing')).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Recover Failed Webhook' })).not.toBeInTheDocument();
+    expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
+    expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
+  });
+
+  it('rejects mismatched webhook detail IDs and late old responses', async () => {
+    const pendingA = createDeferred<typeof blockedDetail>();
+    diagnosticsMocks.webhookDetail.mockImplementation((id: string) =>
+      id === 'webhook-blocked' ? pendingA.promise : Promise.resolve(replayableDetail));
+    renderDiagnosticsPage();
+    await waitFor(() => expect(diagnosticsMocks.webhookDetail).toHaveBeenCalledWith('webhook-blocked', expect.anything()));
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    const panel = document.querySelector('.op-side-panel') as HTMLElement;
+    expect(await within(panel).findByText('Webhook state')).toBeInTheDocument();
+    await act(async () => pendingA.resolve(blockedDetail));
+    expect(within(panel).getByRole('button', { name: 'Replay Stored Webhook' })).toBeEnabled();
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[0]!);
+    expect(await within(panel).findByText('Webhook state')).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Replay Stored Webhook' })).toBeDisabled();
+
+    diagnosticsMocks.webhookDetail.mockResolvedValueOnce(blockedDetail);
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    expect(within(panel).getByText('Select a webhook event')).toBeInTheDocument();
+  });
+
+  it('dismisses an old webhook confirmation when selection changes', async () => {
+    renderDiagnosticsPage();
+    await screen.findByText('Webhook state');
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    const panel = document.querySelector('.op-side-panel') as HTMLElement;
+    await within(panel).findByRole('button', { name: 'Replay Stored Webhook' });
+    await userEvent.click(within(panel).getByRole('button', { name: 'Replay Stored Webhook' }));
+    expect(screen.getByRole('dialog', { name: 'Replay Stored Webhook?' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[0]!);
+    expect(screen.queryByRole('dialog', { name: 'Replay Stored Webhook?' })).not.toBeInTheDocument();
+    expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
+  });
+
+  it('does not request webhook detail when the event list is empty', async () => {
+    diagnosticsMocks.webhooks.mockResolvedValueOnce({
+      summary: { total: 0, received: 0, processed: 0, failed: 0, duplicates: 0, needsAttention: 0 },
+      events: [],
+    });
+    renderDiagnosticsPage();
+    expect(await screen.findByText('No webhook events recorded')).toBeInTheDocument();
+    expect(diagnosticsMocks.webhookDetail).not.toHaveBeenCalled();
+    expect(screen.getByText('Select a webhook event')).toBeInTheDocument();
   });
 
   it('surfaces blocked replay and recover reasons in the event detail panel', async () => {

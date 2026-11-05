@@ -296,6 +296,7 @@ export function AdminDiagnosticsPage() {
 
   useEffect(() => {
     setShowPayloadPreview(false);
+    setPendingWebhookAction(null);
   }, [latestWebhookEventId]);
 
   const webhookDetailQuery = useQueryResource(
@@ -311,6 +312,7 @@ export function AdminDiagnosticsPage() {
     },
     {
       enabled: pageReadiness.ready && Boolean(latestWebhookEventId) && isRealMode,
+      placeholderData: () => undefined,
     },
   );
 
@@ -433,7 +435,7 @@ export function AdminDiagnosticsPage() {
     return Array.from(new Set((webhooksQuery.data?.events ?? []).map((event) => event.topic))).sort();
   }, [webhooksQuery.data?.events]);
 
-  const selectedWebhook = webhookDetailQuery.data;
+  const selectedWebhook = webhookDetailQuery.data?.id === latestWebhookEventId ? webhookDetailQuery.data : null;
   const canonicalRun = canonicalReconciliationQuery.data?.lastRun ?? null;
   const visibleWebhooks = filteredWebhooks.slice(0, 20);
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
@@ -894,7 +896,10 @@ export function AdminDiagnosticsPage() {
                 <OperationalTableRow
                   key={event.id}
                   selected={latestWebhookEventId === event.id}
-                  onSelect={() => setSelectedWebhookEventId(event.id)}
+                  onSelect={() => {
+                    setPendingWebhookAction(null);
+                    setSelectedWebhookEventId(event.id);
+                  }}
                 >
                   <StatusBadge tone={getStatusTone(event.status)}>{event.status}</StatusBadge>
                   <span>
@@ -916,6 +921,7 @@ export function AdminDiagnosticsPage() {
                       className="button button-secondary button-compact"
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
+                        setPendingWebhookAction(null);
                         setSelectedWebhookEventId(event.id);
                       }}
                     >
