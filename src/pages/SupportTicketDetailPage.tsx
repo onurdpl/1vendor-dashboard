@@ -6,6 +6,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import {
   addAdminSupportTicketNote,
   addAdminSupportTicketReply,
@@ -296,7 +297,10 @@ export function SupportTicketDetailPage() {
   const currentUser = appReadiness.currentUser;
   const isVendorWorkspaceAdmin = !isAdmin && currentUser?.role === 'admin';
   const currentVendor = appReadiness.currentVendor;
-  const authContextReady = appReadiness.ready;
+  const authContextReady = getPageReadinessState(appReadiness, {
+    requiresVendorContext: !isAdmin,
+    currentVendorId: currentVendor.vendorId,
+  }).ready;
   const [note, setNote] = useState('');
   const [replyMessage, setReplyMessage] = useState('');
   const [replyStatus, setReplyStatus] = useState<'keep' | 'WAITING_FOR_VENDOR'>('keep');
