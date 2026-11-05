@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   EmptyStatePanel,
   KPIStatCard,
@@ -12,7 +12,9 @@ import {
 } from '../components/OperationalPrimitives';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { useAppReadiness } from '../lib/appReadiness';
+import { getAppReadinessSnapshot, useAppReadiness } from '../lib/appReadiness';
+import { getAdminVendorSelection, getCurrentVendorContext, onVendorChange, setCurrentVendorId, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
+import { runtimeConfig } from '../config/runtime';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
@@ -95,9 +97,9 @@ function getActivityTone(item: OperationsActivity) {
   return getSeverityTone(item.severity);
 }
 
-function actionLink(destinationPath: string | null, label: string) {
+function actionLink(destinationPath: string | null, label: string, onClick?: (event: MouseEvent<HTMLAnchorElement>) => void) {
   return destinationPath ? (
-    <Link className="button button-secondary button-link button-compact" to={destinationPath}>
+    <Link className="button button-secondary button-link button-compact" to={destinationPath} onClick={onClick}>
       {label}
     </Link>
   ) : (
@@ -113,8 +115,40 @@ function getAttentionDestinationPath(item: OperationsAttentionItem) {
   return item.destinationPath;
 }
 
-function attentionLink(item: OperationsAttentionItem, label: string) {
-  return actionLink(getAttentionDestinationPath(item), label);
+function attentionLink(item: OperationsAttentionItem, label: string, onClick?: (event: MouseEvent<HTMLAnchorElement>) => void) {
+  return actionLink(getAttentionDestinationPath(item), label, onClick);
+}
+
+function waitForVerifiedAdminVendor(vendorId: string, token: string, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    let finished = false;
+    let unsubscribe = () => {};
+    const finish = (verified: boolean) => {
+      if (finished) return;
+      finished = true;
+      unsubscribe();
+      signal.removeEventListener('abort', onAbort);
+      window.clearTimeout(timeout);
+      resolve(verified);
+    };
+    const onAbort = () => finish(false);
+    const check = () => {
+      const session = getAppReadinessSnapshot();
+      const selection = getAdminVendorSelection();
+      if (signal.aborted || !session.sessionReady || !session.authConfirmed || session.token !== token
+        || session.currentUser?.role !== 'admin' || selection.vendorId !== vendorId) {
+        finish(false);
+      } else if (selection.status === 'verified' && getCurrentVendorContext().vendorId === vendorId) {
+        finish(true);
+      } else if (selection.status === 'error' || selection.status === 'empty') {
+        finish(false);
+      }
+    };
+    const timeout = window.setTimeout(() => finish(false), 20_000);
+    unsubscribe = onVendorChange(check);
+    signal.addEventListener('abort', onAbort, { once: true });
+    check();
+  });
 }
 
 function getActionLabel(item: OperationsAttentionItem) {
@@ -289,6 +323,65 @@ function getActivityContext(item: OperationsActivity) {
 }
 
 export function AdminOperationsQueuePage() {
+  const navigate = useNavigate();
+  const pendingNavigation = useRef<AbortController | null>(null);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+  useEffect(() => () => pendingNavigation.current?.abort(), []);
+
+  function handleOperationsNavigation(
+    destinationPath: string | null,
+    destinationVendorId: string | null | undefined,
+    event: MouseEvent<HTMLAnchorElement>,
+  ) {
+    pendingNavigation.current?.abort();
+    pendingNavigation.current = null;
+    setNavigationError(null);
+    if (!destinationPath || (!destinationPath.startsWith('/orders/') && !destinationPath.startsWith('/returns/'))) return;
+    event.preventDefault();
+    if (!/^\/(?:orders|returns)\/[^/?#]+$/.test(destinationPath)) {
+      setNavigationError('This record link is unavailable.');
+      return;
+    }
+
+    const vendorId = destinationVendorId?.trim();
+    const session = getAppReadinessSnapshot();
+    if (!vendorId || !session.sessionReady || !session.authConfirmed || !session.token || session.currentUser?.role !== 'admin') {
+      setNavigationError('This record cannot be opened until its Vendor ownership and Admin session are available.');
+      return;
+    }
+
+    if (runtimeConfig.apiMode !== 'real') {
+      setCurrentVendorId(vendorId);
+      if (getCurrentVendorContext().vendorId === vendorId) navigate(destinationPath);
+      else setNavigationError('This Vendor is not available for the current session.');
+      return;
+    }
+
+    const selection = getAdminVendorSelection();
+    if (selection.vendorId === vendorId && selection.status === 'verified' && getCurrentVendorContext().vendorId === vendorId) {
+      navigate(destinationPath);
+      return;
+    }
+
+    const controller = new AbortController();
+    pendingNavigation.current = controller;
+    setCurrentVendorId(vendorId);
+    const verified = waitForVerifiedAdminVendor(vendorId, session.token, controller.signal);
+    void verifyAdminVendorSelection(
+      (id) => runtimeServices.vendors.status(id),
+      (id) => runtimeServices.orders.adminVendorShippingConfig(id),
+    );
+    void verified.then((ready) => {
+      if (controller.signal.aborted || pendingNavigation.current !== controller) return;
+      pendingNavigation.current = null;
+      if (ready) navigate(destinationPath);
+      else setNavigationError('Vendor verification failed. Retry by opening the record again.');
+    });
+  }
+
+  function navigationClick(destinationPath: string | null, destinationVendorId?: string | null) {
+    return (event: MouseEvent<HTMLAnchorElement>) => handleOperationsNavigation(destinationPath, destinationVendorId, event);
+  }
   const [vendorBlockedScope, setVendorBlockedScope] = useState<VendorBlockedQueueScope>('active');
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
   const [resolvedVendorBlockedQueueOffset, setResolvedVendorBlockedQueueOffset] = useState(0);
@@ -692,6 +785,8 @@ export function AdminOperationsQueuePage() {
         </div>
       </div>
 
+      {navigationError ? <p role="alert" className="page-description">{navigationError}</p> : null}
+
       <div className="op-kpi-row attention-kpi-row">
         <KPIStatCard label="Total attention" value={dataView.summary.total} detail="Generated rows" tone="info" />
         <KPIStatCard label="Critical" value={dataView.summary.critical} detail="Highest priority" tone="danger" />
@@ -734,6 +829,15 @@ export function AdminOperationsQueuePage() {
             title="Recommended actions"
             subtitle="Highest-priority operational recommendations"
             recommendations={recommendations}
+            onNavigate={(recommendation, event) => handleOperationsNavigation(
+              recommendation.deepLink,
+              recommendation.type === 'shipment_tracking' || recommendation.type === 'shipment_stale'
+                ? recommendation.destinationVendorId
+                : recommendation.type === 'return_review' || recommendation.type === 'return_refund'
+                  ? recommendation.vendor.id
+                  : null,
+              event,
+            )}
             audience="admin"
             emptyMessage="No operational recommendations right now."
             presentation="summary"
@@ -799,7 +903,7 @@ export function AdminOperationsQueuePage() {
                       <strong title={`${getSupportSlaStateLabel(ticket)} · ${getSupportSlaLabel(ticket)}`}>{getSupportSlaLabel(ticket)}</strong>
                       <strong title={formatDate(ticket.createdAt)}>{formatAge(ticket.ageHours)}</strong>
                       <OperationalActionGroup>
-                        {actionLink(ticket.destinationPath, 'Open ticket')}
+                        {actionLink(ticket.destinationPath, 'Open ticket', navigationClick(ticket.destinationPath))}
                       </OperationalActionGroup>
                     </OperationalTableRow>
                   ))}
@@ -847,7 +951,7 @@ export function AdminOperationsQueuePage() {
                       <span><strong>{item.refundAttemptStatus ? `Attempt: ${safeStatusLabel(item.refundAttemptStatus)}` : 'No refund attempt'}</strong><small>{item.operationalJobStatus ? `Job: ${safeStatusLabel(item.operationalJobStatus)}` : 'No job'}</small></span>
                       <span><strong>Shipment: {item.shipmentHoldActive ? 'held' : 'not held'}</strong><small>Finance: {item.financeHoldActive ? 'held' : 'not held'}</small></span>
                       <strong>{formatDate(item.requestedAt ?? item.createdAt)}</strong>
-                      <OperationalActionGroup>{item.actionTo ? actionLink(item.actionTo, 'Open order') : <span className="queue-muted-action">No admin order</span>}</OperationalActionGroup>
+                      <OperationalActionGroup>{item.actionTo ? actionLink(item.actionTo, 'Open order', navigationClick(item.actionTo)) : <span className="queue-muted-action">No admin order</span>}</OperationalActionGroup>
                     </OperationalTableRow>
                   ))}
                 </OperationalTable>
@@ -961,7 +1065,7 @@ export function AdminOperationsQueuePage() {
                         </span>
                         <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
                         <OperationalActionGroup>
-                          {adminOrderPath ? actionLink(adminOrderPath, 'Open order') : <span className="queue-muted-action">No admin order</span>}
+                          {adminOrderPath ? actionLink(adminOrderPath, 'Open order', navigationClick(adminOrderPath)) : <span className="queue-muted-action">No admin order</span>}
                         </OperationalActionGroup>
                       </OperationalTableRow>
                     );
@@ -1042,7 +1146,7 @@ export function AdminOperationsQueuePage() {
                         </span>
                         <strong title={formatDate(item.createdAt)}>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
                         <OperationalActionGroup>
-                          {adminOrderPath ? actionLink(adminOrderPath, 'Open order') : <span className="queue-muted-action">No admin order</span>}
+                          {adminOrderPath ? actionLink(adminOrderPath, 'Open order', navigationClick(adminOrderPath)) : <span className="queue-muted-action">No admin order</span>}
                         </OperationalActionGroup>
                       </OperationalTableRow>
                     );
@@ -1121,7 +1225,7 @@ export function AdminOperationsQueuePage() {
                         </span>
                         <strong title={formatDate(item.createdAt)}>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
                         <OperationalActionGroup>
-                          {item.actionTo ? actionLink(item.actionTo, 'Open return') : <span className="queue-muted-action">No return link</span>}
+                          {item.actionTo ? actionLink(item.actionTo, 'Open return', navigationClick(item.actionTo, item.vendorId)) : <span className="queue-muted-action">No return link</span>}
                         </OperationalActionGroup>
                       </OperationalTableRow>
                     );
@@ -1316,7 +1420,7 @@ export function AdminOperationsQueuePage() {
                           <small>{formatDate(item.createdAt)}</small>
                         </span>
                         <OperationalActionGroup>
-                          {item.actionTo ? actionLink(item.actionTo, 'Review') : <span className="queue-muted-action">No review link</span>}
+                          {item.actionTo ? actionLink(item.actionTo, 'Review', navigationClick(item.actionTo)) : <span className="queue-muted-action">No review link</span>}
                         </OperationalActionGroup>
                       </OperationalTableRow>
                     );
@@ -1369,7 +1473,10 @@ export function AdminOperationsQueuePage() {
                               {item.objectReference} · {item.vendorName} · {formatAge(item.ageHours)}
                             </small>
                             <span>Status: {safeStatusLabel(item.status)}</span>
-                            {attentionLink(item, getActionLabel(item))}
+                            {attentionLink(item, getActionLabel(item), navigationClick(
+                              getAttentionDestinationPath(item),
+                              item.type === 'shipment' ? item.destinationVendorId : item.type === 'return' ? item.vendorId : null,
+                            ))}
                           </div>
                           <StatusBadge tone={getSectionTone(item)}>{item.severity}</StatusBadge>
                         </div>
@@ -1430,7 +1537,10 @@ export function AdminOperationsQueuePage() {
                   <div key={item.id} className="attention-activity-row">
                     <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
                     <div>
-                      {item.destinationPath ? <Link to={item.destinationPath}>{item.title}</Link> : <strong>{item.title}</strong>}
+                      {item.destinationPath ? <Link to={item.destinationPath} onClick={navigationClick(
+                        item.destinationPath,
+                        item.type === 'shipment' ? item.destinationVendorId : item.type === 'return' ? item.vendorId : null,
+                      )}>{item.title}</Link> : <strong>{item.title}</strong>}
                       <small>{getActivityContext(item)}</small>
                       <span>{formatDate(item.occurredAt)}</span>
                     </div>
