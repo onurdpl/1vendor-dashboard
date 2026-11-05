@@ -1181,6 +1181,10 @@ export async function getReturnByIdForActor(returnId: string, actor: ReturnActor
 }
 
 export async function markReturnReceived(returnId: string, actor: ReturnActorScope): Promise<ReturnDetailDto> {
+  if (actor.role !== 'admin' && actor.role !== 'vendor') {
+    throw new ReturnReviewError('Admin or Vendor access required for Return review actions.', 403);
+  }
+
   const record = await prisma.returnRecord.findUnique({
     where: { id: returnId },
     select: {
@@ -1236,6 +1240,10 @@ export async function reviewReturn(
   actor: ReturnActorScope,
   input: { decision: 'approved' | 'rejected'; reason?: string | null },
 ): Promise<ReturnDetailDto> {
+  if (actor.role !== 'admin' && actor.role !== 'vendor') {
+    throw new ReturnReviewError('Admin or Vendor access required for Return review actions.', 403);
+  }
+
   const record = await prisma.returnRecord.findUnique({
     where: { id: returnId },
     select: {
@@ -2590,6 +2598,10 @@ export async function refreshKargonomiReturnProviderData(
   env: AppEnv,
   input: KargonomiReturnProviderDataRefreshInput = {},
 ): Promise<ReturnDetailDto> {
+  if (actor.role !== 'admin') {
+    throw new ReturnReviewError('Admin access required for Kargonomi return provider data refresh.', 403);
+  }
+
   const record = await prisma.returnRecord.findUnique({
     where: { id: returnId },
     include: {
