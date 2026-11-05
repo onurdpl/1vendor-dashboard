@@ -115,6 +115,15 @@ describe('return vendor review actions', () => {
     expect(prismaMock.returnRecord.update).toHaveBeenCalled();
   });
 
+  it.each(['support', 'finance'] as const)('denies %s receive and review before database access', async (role) => {
+    const actor = { role, vendorId: 'vendor-a' };
+    await expect(markReturnReceived('return-1', actor)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(reviewReturn('return-1', actor, { decision: 'approved' })).rejects.toMatchObject({ statusCode: 403 });
+    expect(prismaMock.returnRecord.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+    expect(prismaMock.supportTicket.findFirst).not.toHaveBeenCalled();
+  });
+
   it('requires receipt before review', async () => {
     prismaMock.returnRecord.findUnique.mockResolvedValueOnce(accessRecord({ vendorReceivedAt: null }));
 

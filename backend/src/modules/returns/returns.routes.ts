@@ -301,6 +301,9 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       if (!actor.ok) {
         return actor.response;
       }
+      if (actor.actor.role !== 'admin' && actor.actor.role !== 'vendor') {
+        return reply.code(403).send({ message: 'Admin or Vendor access required for Return review actions.' });
+      }
       const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
       if (restriction) {
         return restriction;
@@ -323,6 +326,9 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       const actor = await resolveReturnActor(request, reply);
       if (!actor.ok) {
         return actor.response;
+      }
+      if (actor.actor.role !== 'admin' && actor.actor.role !== 'vendor') {
+        return reply.code(403).send({ message: 'Admin or Vendor access required for Return review actions.' });
       }
       const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
       if (restriction) {
@@ -397,6 +403,9 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       const actor = await resolveReturnActor(request, reply);
       if (!actor.ok) {
         return actor.response;
+      }
+      if (actor.actor.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required for Kargonomi return provider data refresh.' });
       }
       const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
       if (restriction) {

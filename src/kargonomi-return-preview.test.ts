@@ -32,6 +32,24 @@ const kargonomiReturnSenderTaxInput = {
   senderTaxNumber: '11111111111',
 };
 
+describe('Kargonomi refresh role authority', () => {
+  it.each(['vendor', 'support', 'finance'] as const)('denies %s before provider or database access', async (role) => {
+    prismaMock.returnRecord.findUnique.mockReset();
+    prismaMock.returnRecord.update.mockReset();
+    const refreshProviderData = vi.fn();
+    const syncReturnShipping = vi.fn();
+
+    await expect(refreshKargonomiReturnProviderData('return-1', { role, vendorId: 'yalispor' }, {} as never, {
+      adapter: { refreshProviderData } as never,
+      shopifyAdminService: { syncReturnShipping } as never,
+    })).rejects.toMatchObject({ statusCode: 403 });
+    expect(prismaMock.returnRecord.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+    expect(refreshProviderData).not.toHaveBeenCalled();
+    expect(syncReturnShipping).not.toHaveBeenCalled();
+  });
+});
+
 function buildKargonomiDestinationClient() {
   return {
     listStates: vi.fn().mockResolvedValue({
