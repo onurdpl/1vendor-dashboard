@@ -12,7 +12,7 @@ const summaries=(items:any[])=>items.map(r=>({...r,status:r.status.toLowerCase()
 const requestLog:Array<{url:string;method:string;duration?:number}>=[];
 let posts:string[]=[];
 let expectedPosts=0;
-async function vendor(page:Page,id:string){await page.getByRole('combobox',{name:'Select vendor',exact:true}).selectOption(id);await expect(page.getByLabel('Vendor',{exact:true})).toHaveValue(fixture.vendors.find((v:any)=>v.id===id).name);}
+async function vendor(page:Page,id:string){await page.getByRole('button',{name:/^Select vendor:/}).click();await page.getByRole('combobox',{name:'Search vendors'}).fill(id);await page.getByRole('option',{name:new RegExp(id)}).click();await expect(page.getByLabel('Vendor',{exact:true})).toHaveValue(fixture.vendors.find((v:any)=>v.id===id).name);}
 async function list(page:Page,query:Record<string,string>={}){
  const response=await page.request.get(`${root}?${new URLSearchParams({vendorId:'fin03-a',pagination:'cursor',limit:'20',...query})}`);
  expect(response.status()).toBe(200);return response.json();

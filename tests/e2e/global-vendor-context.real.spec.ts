@@ -65,21 +65,22 @@ async function login(email: string) {
 async function selectVendor(key: 'a' | 'b') {
   const vendorId = `context-vendor-${key}`;
   await page.goto('/admin/operations');
-  const search = page.getByRole('textbox', { name: 'Search vendors' }).first();
+  await page.getByRole('button', { name: /^Select vendor:/ }).click();
+  const search = page.getByRole('combobox', { name: 'Search vendors' }).first();
   await search.fill(`Context Vendor ${key.toUpperCase()}`);
-  const select = page.getByRole('combobox', { name: 'Select vendor' }).first();
-  await expect(select.locator(`option[value="${vendorId}"]`)).toHaveCount(1);
+  const option = page.getByRole('option', { name: new RegExp(vendorId) });
+  await expect(option).toHaveCount(1);
   const started = performance.now();
   selectionStarted = started;
   selectionRequestIndex = requests.length;
   const statusResponse = page.waitForResponse(response =>
     new URL(response.url()).pathname === `/admin/vendors/${vendorId}/status`);
-  await select.selectOption(vendorId);
+  await option.click();
   const status = await statusResponse;
   assert.equal(status.status(), 200);
   const body = await status.json();
   assert.equal(body.vendor?.id ?? body.vendorId ?? body.id, vendorId, 'F05 must verify the exact Vendor ID.');
-  await expect(select).toHaveValue(vendorId);
+  await expect(page.getByRole('button', { name: /^Select vendor:/ })).toContainText(vendorId);
   verificationMs = Math.round(performance.now() - started);
 }
 async function scopePage(path: string, key: 'a' | 'b', record: string, foreign: string, endpoint: string) {
@@ -180,16 +181,17 @@ try {
       return url.origin === backend && url.pathname === '/admin/vendors'
         && url.searchParams.get('cursor') === firstPage.nextCursor;
     });
+    await page.getByRole('button', { name: /^Select vendor:/ }).click();
     await page.getByRole('button', { name: 'Next Vendors' }).click();
     const second = await nextResponse;
     const secondPage = await second.json();
     assert.ok(secondPage.vendors.some((vendor: { vendorId: string }) => vendor.vendorId === 'context-vendor-b'));
-    const selector = page.getByRole('combobox', { name: 'Select vendor' });
-    await expect(selector.locator('option[value="context-vendor-b"]')).toHaveCount(1);
+    const option = page.getByRole('option', { name: /context-vendor-b/ });
+    await expect(option).toHaveCount(1);
     const statusResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/admin/vendors/context-vendor-b/status');
-    await selector.selectOption('context-vendor-b');
+    await option.click();
     assert.equal((await statusResponse).status(), 200);
-    await expect(selector).toHaveValue('context-vendor-b');
+    await expect(page.getByRole('button', { name: /^Select vendor:/ })).toContainText('context-vendor-b');
     console.log(`DIRECTORY page1=${firstPage.vendors.length} page2=${secondPage.vendors.length} selected=context-vendor-b`);
   });
   await check('Invalid selected Vendor fails closed after browser refresh', async () => {

@@ -66,6 +66,18 @@ export function VendorSelector({
     if (panelOpen) searchRef.current?.focus();
   }, [panelOpen]);
 
+  useEffect(() => {
+    if (!panelOpen || embedded) return undefined;
+    function handleOutsidePointer(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setHighlightedVendorId(null);
+      }
+    }
+    document.addEventListener('pointerdown', handleOutsidePointer);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointer);
+  }, [panelOpen, embedded]);
+
   function closePanel(restoreFocus: boolean) {
     if (embedded) {
       onDismiss?.();

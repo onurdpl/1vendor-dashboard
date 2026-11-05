@@ -5,7 +5,7 @@ const path='/admin/finance/settlement-approvals';
 const endpoint=(id:string,vendor='cancel-a')=>`${root}/${id}/cancellation-eligibility?vendorId=${vendor}`;
 let posts:string[]=[];let gets:Array<{url:string;status:number;body:any}>=[];
 const panel=(page:Page)=>page.getByLabel('Settlement review detail panel');
-async function vendor(page:Page,id:string){await page.getByRole('combobox',{name:'Select vendor',exact:true}).selectOption(id);}
+async function vendor(page:Page,id:string){await page.getByRole('button',{name:/^Select vendor:/}).click();await page.getByRole('combobox',{name:'Search vendors'}).fill(id);await page.getByRole('option',{name:new RegExp(id)}).click();}
 async function open(page:Page,id:string){await page.goto(path+'?approvalId='+id);await expect(panel(page)).toContainText(id);}
 test.beforeEach(async({page})=>{
  posts=[];gets=[];

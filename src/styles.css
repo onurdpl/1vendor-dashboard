@@ -336,6 +336,10 @@ a:focus-visible {
   min-width: 0;
 }
 
+.admin-app-shell .sidebar {
+  z-index: 1;
+}
+
 .admin-app-shell .sidebar > .nav-group {
   margin-bottom: 0;
 }
@@ -19149,6 +19153,20 @@ summary.provider-response-heading::-webkit-details-marker {
   right: auto;
   bottom: calc(100% + var(--space-2));
   left: 0;
+}
+
+.admin-app-shell .sidebar .vendor-selector--dark .vendor-selector__panel {
+  top: auto;
+  bottom: 0;
+  left: calc(100% + var(--space-2));
+}
+
+@media (max-width: 960px) {
+  .admin-app-shell .sidebar .vendor-selector--dark .vendor-selector__panel {
+    top: calc(100% + var(--space-2));
+    bottom: auto;
+    left: 0;
+  }
 }
 
 .vendor-selector__search {
