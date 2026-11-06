@@ -17,6 +17,7 @@ import {
   TableSkeletonRows,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
+import { runtimeConfig } from '../config/runtime';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
@@ -24,6 +25,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import {
   attachShippingCost,
   getFinanceDashboard,
+  getFinanceTransactions,
   getPayoutOffsetObligations,
   getVendorDebtHistory,
   preparePayoutBatch,
@@ -1175,11 +1177,6 @@ function getFinanceWorkflowFilter(workflow: string | null, audience: 'admin' | '
   return null;
 }
 
-function isSettlementReviewWorkflowRecord(record: FinanceTransaction, audience: 'admin' | 'vendor') {
-  const displayStatus = getPayoutActivityStatusLabel(record, audience);
-  return record.category === 'Payout' || Boolean(record.payoutBatch) || displayStatus === 'Pending review';
-}
-
 function formatDebtImpact(event: VendorDebtHistoryEvent, currency: string) {
   if (event.type === 'VENDOR_DEBT_OFFSET') {
     return `+${formatMinorCurrency(Math.abs(event.debtAmountMinor), currency)}`;
@@ -1423,6 +1420,11 @@ function VendorDebtDetailPanel({ event, currency, audience = 'admin' }: { event:
   );
 }
 
+function isSettlementReviewWorkflowRecord(record: FinanceTransaction, audience: 'admin' | 'vendor') {
+  const displayStatus = getPayoutActivityStatusLabel(record, audience);
+  return record.category === 'Payout' || Boolean(record.payoutBatch) || displayStatus === 'Pending review';
+}
+
 export function FinancePage() {
   const appReadiness = useAppReadiness();
   const [vendorGeneration, setVendorGeneration] = useState(0);
@@ -1524,6 +1526,23 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
   const isVendorUser = currentUser?.role === 'vendor';
   const financeAudience = isAdmin ? 'admin' : 'vendor';
   const activeWorkflowFilter = useMemo(() => getFinanceWorkflowFilter(searchParams.get('workflow'), financeAudience), [financeAudience, searchParams]);
+  const workflow = activeWorkflowFilter ? 'settlement-review' : 'all';
+  const paginationKey = JSON.stringify([currentVendor.vendorId, vendorGeneration, financeAudience, searchTerm.trim().toLowerCase(), statusFilter, categoryFilter, workflow]);
+  const [pagination, setPagination] = useState<{ key: string; cursors: Array<string | null>; index: number }>({ key: '', cursors: [null], index: 0 });
+  const currentPageIndex = pagination.key === paginationKey ? pagination.index : 0;
+  const currentCursor = pagination.key === paginationKey ? pagination.cursors[currentPageIndex] : null;
+  const transactionsResource = useQueryResource<Awaited<ReturnType<typeof getFinanceTransactions>>>(
+    [...queryKeys.finance.transactions(currentVendor.vendorId), paginationKey, currentCursor],
+    ({ signal }) => isCurrentVendorContext()
+      ? getFinanceTransactions({ vendorId: currentVendor.vendorId, audience: financeAudience, search: searchTerm,
+          status: statusFilter, category: categoryFilter, workflow, cursor: currentCursor, signal })
+      : Promise.reject(new Error('Vendor context changed.')),
+    { enabled: runtimeConfig.apiMode === 'real' && authContextReady && activeFinanceTab === 'transactions', placeholderData: () => undefined },
+  );
+  const transactionsPage = runtimeConfig.apiMode === 'real'
+    ? isCurrentVendorContext() && transactionsResource.data?.vendorId === currentVendor.vendorId
+      ? transactionsResource.data : null
+    : finance ? { vendorId: currentVendor.vendorId, records: finance.transactions, hasNextPage: false, nextCursor: null } : null;
   const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
   const [shippingCostAmount, setShippingCostAmount] = useState('');
@@ -1572,12 +1591,14 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
     {
       invalidateQueryKeys: [
         queryKeys.finance.summary(currentVendor.vendorId),
+        queryKeys.finance.transactions(currentVendor.vendorId),
         queryKeys.finance.vendorDebtHistory(currentVendor.vendorId),
       ],
       onSuccess: async (batch) => {
         if (!isCurrentVendorContext()) return;
         await Promise.all([refetch(), refetchVendorDebtHistory()]);
         if (!isCurrentVendorContext()) return;
+        setPagination({ key: '', cursors: [null], index: 0 });
         showFeedback(`Draft settlement payment review ${batch.id} prepared.`, 'success');
       },
       onError: (mutationError) => {
@@ -1594,7 +1615,9 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
       shippingCost: number;
       shippingVatAmount: number | null;
     }) => {
-      if (!authContextReady || !isCurrentVendorContext() || !finance?.transactions.some((record) => record.id === input.financeLedgerEntryId)) {
+      if (!authContextReady || !isCurrentVendorContext() ||
+          !(transactionsPage?.records.some((record) => record.id === input.financeLedgerEntryId) ||
+            finance?.transactions.some((record) => record.id === input.financeLedgerEntryId))) {
         return Promise.reject(new Error('Current vendor finance record is unavailable.'));
       }
       return attachShippingCost({
@@ -1609,11 +1632,12 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
       });
     },
     {
-      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
+      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId), queryKeys.finance.transactions(currentVendor.vendorId)],
       onSuccess: async () => {
         if (!isCurrentVendorContext()) return;
         await refetch();
         if (!isCurrentVendorContext()) return;
+        setPagination({ key: '', cursors: [null], index: 0 });
         showFeedback('Shipping cost saved for future settlement context.', 'success');
       },
       onError: (mutationError) => {
@@ -1644,19 +1668,16 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
     }
   }
 
-  const filteredRecords = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    return safeArray(finance?.transactions).filter((record) => {
-      const displayStatus = getPayoutActivityStatusLabel(record, financeAudience);
-      const matchesWorkflow =
-        !activeWorkflowFilter || isSettlementReviewWorkflowRecord(record, financeAudience);
-      const matchesStatus = statusFilter === 'all' || displayStatus === statusFilter;
-      const matchesCategory = categoryFilter === 'all' || record.category === categoryFilter;
-      const searchableText = getFinanceSearchableText(record, financeAudience, currentVendor);
-
-      return matchesWorkflow && matchesStatus && matchesCategory && (!query || searchableText.includes(query));
-    });
-  }, [activeWorkflowFilter, categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, financeAudience, searchTerm, statusFilter]);
+  const filteredRecords = runtimeConfig.apiMode === 'real'
+    ? safeArray(transactionsPage?.records)
+    : safeArray(transactionsPage?.records).filter((record) => {
+        const query = searchTerm.trim().toLowerCase();
+        const displayStatus = getPayoutActivityStatusLabel(record, financeAudience);
+        return (!activeWorkflowFilter || isSettlementReviewWorkflowRecord(record, financeAudience)) &&
+          (statusFilter === 'all' || displayStatus === statusFilter) &&
+          (categoryFilter === 'all' || record.category === categoryFilter) &&
+          (!query || getFinanceSearchableText(record, financeAudience, currentVendor).includes(query));
+      });
 
   const selectedRecord = useMemo(() => {
     const selectedByClick = selectedRecordId ? filteredRecords.find((record) => record.id === selectedRecordId) : null;
@@ -1664,6 +1685,8 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
       return selectedByClick;
     }
     if (requestedFinanceTarget) {
+      const inPage = filteredRecords.find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget));
+      if (inPage) return inPage;
       return safeArray(finance?.transactions).find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget)) ?? null;
     }
     if (!filteredRecords.length) {
@@ -2207,7 +2230,15 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
               <OperationalTableRow>
                 <EmptyStatePanel title="Sign in required" description="Sign in before loading finance activity." />
               </OperationalTableRow>
-            ) : isLoading ? (
+            ) : transactionsResource.isError ? (
+              <OperationalTableRow>
+                <SectionErrorRetry
+                  title="Finance transactions unavailable"
+                  description={transactionsResource.error ?? 'Transactions could not be loaded.'}
+                  onRetry={() => void transactionsResource.refetch()}
+                />
+              </OperationalTableRow>
+            ) : transactionsResource.isLoading || !transactionsPage ? (
               <TableSkeletonRows columns={7} rows={6} />
             ) : filteredRecords.length === 0 ? (
               <OperationalTableRow>
@@ -2285,6 +2316,27 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
               );
             })}
           </OperationalTable>
+
+          {runtimeConfig.apiMode === 'real' && transactionsPage ? (
+            <nav className="pagination-controls" aria-label="Finance transaction pages">
+              <button type="button" className="button button-secondary button-compact" disabled={currentPageIndex === 0}
+                onClick={() => { setSelectedRecordId(null); setPagination((state) => ({ ...state, index: Math.max(0, state.index - 1) })); }}>
+                Previous
+              </button>
+              <span>Page {currentPageIndex + 1} · {filteredRecords.length} transactions</span>
+              <button type="button" className="button button-secondary button-compact" disabled={!transactionsPage.hasNextPage || !transactionsPage.nextCursor}
+                onClick={() => {
+                  if (!transactionsPage.nextCursor) return;
+                  setSelectedRecordId(null);
+                  setPagination((state) => {
+                    const cursors = state.key === paginationKey ? state.cursors.slice(0, state.index + 1) : [null];
+                    return { key: paginationKey, cursors: [...cursors, transactionsPage.nextCursor], index: cursors.length };
+                  });
+                }}>
+                Next
+              </button>
+            </nav>
+          ) : null}
 
           <div className="finance-info-footer">
             <section className="finance-footer-card">

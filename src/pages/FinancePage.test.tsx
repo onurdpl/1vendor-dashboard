@@ -4,11 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from './FinancePage';
+import { runtimeConfig } from '../config/runtime';
 import type { FinanceDashboard, FinanceTransaction, SupportTicket } from '../lib/api/contracts';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
+import { verifyAdminVendorSelection } from '../lib/auth/vendorContext';
 import { formatCurrency } from '../services/real/formatting';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
+const getFinanceTransactionsMock = vi.fn();
 const getVendorDebtHistoryMock = vi.fn();
 const getPayoutOffsetObligationsMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
@@ -21,6 +24,7 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
+    getFinanceTransactions: (...args: unknown[]) => getFinanceTransactionsMock(...args),
     getVendorDebtHistory: (...args: unknown[]) => getVendorDebtHistoryMock(...args),
     getPayoutOffsetObligations: (...args: unknown[]) => getPayoutOffsetObligationsMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
@@ -443,6 +447,12 @@ function setVendorFinanceUser() {
   });
 }
 
+async function verifyTestAdminVendor(vendorId: string) {
+  await verifyAdminVendorSelection(async () => ({ vendorId, vendorName: vendorId === 'demo-vendor-b' ? 'Demo Vendor B' : 'Demo Vendor A',
+    status: 'active', restricted: false, restrictionReason: null, changedByUserId: null,
+    changedByEmail: null, changedAt: null }), async () => undefined);
+}
+
 function FinanceNavigationHarness({ target }: { target: string }) {
   const navigate = useNavigate();
 
@@ -487,6 +497,7 @@ function getSidePanel(container: HTMLElement) {
 describe('FinancePage control center', () => {
   beforeEach(() => {
     cleanup();
+    runtimeConfig.apiMode = 'mock';
     window.localStorage.clear();
     setToken('test-token');
     setCurrentUser({
@@ -502,6 +513,7 @@ describe('FinancePage control center', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getFinanceDashboardMock.mockReset();
+    getFinanceTransactionsMock.mockReset();
     getVendorDebtHistoryMock.mockReset();
     getVendorDebtHistoryMock.mockResolvedValue(emptyVendorDebtHistory);
     getPayoutOffsetObligationsMock.mockReset();
@@ -3696,6 +3708,60 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('$3,059.10')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads real-mode Finance pages from the server and resets to page one on search', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    const rows = Array.from({ length: 230 }, (_, index) => ({
+      ...financeDashboard.transactions[0], id: `page-ledger-${String(index).padStart(3, '0')}`,
+      shopifyOrderNumber: String(8000 + index),
+      description: index === 210 ? 'Historical needle' : `Sale ${index}`,
+    }));
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockImplementation(async ({ vendorId, search, cursor }: {
+      vendorId: string; search?: string; cursor?: string | null;
+    }) => {
+      const matches = search ? rows.filter((row) => row.description.toLowerCase().includes(search.trim().toLowerCase())) : rows;
+      const offset = Number(cursor ?? 0);
+      return { vendorId, records: matches.slice(offset, offset + 100), hasNextPage: matches.length > offset + 100,
+        nextCursor: matches.length > offset + 100 ? String(offset + 100) : null };
+    });
+    const { container } = renderFinancePage();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#8000')).toBeInTheDocument();
+    expect(table.queryByText('#8100')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await table.findByText('#8100')).toBeInTheDocument();
+    expect(table.queryByText('#8000')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(await table.findByText('#8000')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Search by order #, type, status, amount...'), { target: { value: 'Historical needle' } });
+    expect(await table.findByText('#8210')).toBeInTheDocument();
+    expect(screen.getByText(/Page 1 · 1 transactions/)).toBeInTheDocument();
+    expect(getFinanceTransactionsMock).toHaveBeenCalledWith(expect.objectContaining({ search: 'Historical needle', cursor: null }));
+  });
+
+  it('hides real-mode A transactions during B transition and rejects a late A response', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => Promise.resolve(vendorId === 'demo-vendor-b' ? financeDashboardB : financeDashboard));
+    const pendingA = deferred<{ vendorId: string; records: FinanceTransaction[]; hasNextPage: boolean; nextCursor: null }>();
+    getFinanceTransactionsMock.mockImplementation(({ vendorId }: { vendorId: string }) => vendorId === 'demo-vendor-a'
+      ? pendingA.promise : Promise.resolve({ vendorId: 'demo-vendor-b', records: financeDashboardB.transactions,
+        hasNextPage: false, nextCursor: null }));
+    const { container } = renderFinancePage();
+    await act(async () => { setCurrentVendorId('demo-vendor-b'); await verifyTestAdminVendor('demo-vendor-b'); });
+    showFinanceTransactions();
+    await waitFor(() => expect(within(container.querySelector('.finance-op-table') as HTMLElement).getAllByText('$8,888.00').length).toBeGreaterThan(0));
+    await act(async () => pendingA.resolve({ vendorId: 'demo-vendor-a', records: financeDashboard.transactions,
+      hasNextPage: false, nextCursor: null }));
+    expect(within(container.querySelector('.finance-op-table') as HTMLElement).queryByText('$3,399.00')).not.toBeInTheDocument();
+    await act(async () => { setCurrentVendorId('demo-vendor-a'); await verifyTestAdminVendor('demo-vendor-a'); });
+    showFinanceTransactions();
+    expect(await within(container.querySelector('.finance-op-table') as HTMLElement).findByText('$3,399.00')).toBeInTheDocument();
   });
 
   it('submits shipping cost against the selected A ledger and never retargets its pending POST to B', async () => {

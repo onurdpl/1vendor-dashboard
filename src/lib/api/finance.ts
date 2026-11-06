@@ -15,6 +15,13 @@ export function getFinanceDashboard(options: { vendorId?: string | null; signal?
   return runtimeServices.finance.dashboard(options.vendorId ?? undefined, { signal: options.signal });
 }
 
+export function getFinanceTransactions(options: {
+  vendorId?: string | null; search?: string; status?: string; category?: string;
+  workflow?: string; cursor?: string | null; audience: 'admin' | 'vendor'; signal?: AbortSignal;
+}) {
+  return runtimeServices.finance.transactions(options.vendorId ?? undefined, options);
+}
+
 export function getFinanceProfile(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.finance.profile(options.vendorId ?? undefined, { signal: options.signal });
 }
