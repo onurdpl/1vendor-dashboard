@@ -30,6 +30,7 @@ Diğer Package 4 işleri için bu belge yeni tamamlanma iddiası kurmaz. GitHub 
 | P2C | MORE_EVIDENCE_REQUIRED | Kanıtları toplu yükleme: 10 binde 3.22 s, 100 binde 35.71 s; keyset devamı gösterildi. |
 | P2D | MORE_EVIDENCE_REQUIRED | İndeksli kanonik projeksiyon statikte 92/92 eşleme ve 100 bin satırda yaklaşık 0.08 ms PostgreSQL no-match sorgusu; kurulum yaklaşık 43.40 s/21,003 SQL sorgusu. Ölçüm kurulum/yenileme maliyetini içermez. Zamanla değişen statü ve yenilenmeyen void kayıt bayat kalabilir. |
 | P2E | MORE_EVIDENCE_REQUIRED | Gerçek Settlement DRAFT/APPROVED ve Payout DRAFT/REVIEW/PAID yazıcıları, ledger satırını değiştirmeden aranabilir durumu değiştirdi. Ayrı commit edilmiş yenileme hatası false negative üretti; eski yenileme bayat metni geri koyabildi. |
+| P2F | **PARTIAL_CONSISTENCY_PROVEN** (2026-11-06, yalnız disposable deney) | Gerçek Settlement/Payout servisleriyle sınırlı trigger-journal, rollback ve sürüm-fenced refresh çalıştı. Eksik projeksiyon kaydı journal boşken saptanamadı; bütün yazıcılar kapsanmadı. Üretim arama sözleşmesi hazır değil. |
 
 P2E deneyinde kanonik kanıttan İngilizce ve Vendor Türkçe etiketleri hesaplandı. Canlı sahiplik/aktif-ledger join'i bazı false positive'leri engelledi; eksik veya yanlış indekslenmiş eşleşmeyi geri getirmedi. Settlement delay eşiği ledger yazısı olmadan aşıldı; tek zaman fixture'ında sınır-tabanlı sorgu geçti. Refund kanıtının tam ilişkilendirilmesi kısmen doğrulandı. Tüm yazıcı/yaşam döngüsü kapanışı ve üretime güvenli indeksli arama **kanıtlanmadı**. Bunlar geçici yerel PostgreSQL deneyleridir, üretim hatası iddiası değildir.
 
@@ -59,10 +60,29 @@ P2E deneyinde kanonik kanıttan İngilizce ve Vendor Türkçe etiketleri hesapla
 
 `PASS` bir deney kapsamı dışına taşınmaz. `FAIL` burada üretim kusuru anlamına gelmez. `RISK` ve `UNKNOWN` doğrulanmış hata değildir.
 
+## P2F — disposable tutarlılık kanıtı
+
+**Sonuç:** `P4_06C_P2F_PARTIAL_CONSISTENCY_PROVEN`. Bu, üretim projection/index kararı değildir. Temel `main` `0e64049e` yalnız bu belgenin ilk sürümünü ekledi; uygulama kodu Finance P1 revizyonu `a842d9e` idi. Yerel PostgreSQL 18.3 `127.0.0.1:55439`, rol `sporgym_p2a`, yeni `sporgym_p2f_disposable_20261106` veritabanı kullanıldı. Önceki P2E disposable veritabanından sentetik fixture'lar kopyalandı; veritabanı başlangıcı boş değildi. 251,432 ledger ve 211,007 statik arama satırı (415 MB veritabanı) vardı. Üretim verisi veya performans ölçümü değildir.
+
+Gerçek `createAdminManualDraftApproval`, `approveSettlementApproval`, `preparePayoutBatch`, `markPayoutBatchReview`, `markPayoutBatchPaid` servisleri yeni sentetik Vendor/allocation/ledger fixture'ında çalıştırıldı (`backend/src/modules/finance/settlement-approval.service.ts`, `finance.service.ts`). DRAFT ve APPROVED ile Payout DRAFT/REVIEW/PAID aşamalarının her biri kanonik sunumu değiştirdi; depolanmış eski arama metni her aşamada güncel olmadı. Bu işlemler kendi Prisma transaction'larını açar; dışarıdaki bir refresh'i aynı mevcut servis transaction'ına sokmak **kanıtlanmadı**. Geçici **yalnız disposable DB** trigger'ları `SettlementApprovalLine`, `SettlementApproval.status`, `PayoutBatchLine`, `PayoutBatch.status` ve `FinanceLedgerEntry` için aynı commit içinde `ledger_id,revision` dirty satırı yazdı. Test fixture'ında DRAFT sonrası revision 2, tüm real workflow sonrasında revision 7 görüldü. Bu, **yalnız listelenen olaylar** için commit ile marker atomikliğini gösterir; bütün finans yazıcılarını kapsamaz.
+
+| Sonuç | Deney ve sınır |
+| --- | --- |
+| PASS — sınırlı | Kirli ledger için sorgu `SEARCH_UNAVAILABLE` benzeri açık hata vermek üzere reddedilebilir; refresh ile marker temizleme aynı ayrı transaction'da yapıldı. Commit öncesi enjekte edilen hata hem source hem marker'ı geri aldı. Commit sonrası source değişimi marker bıraktı; ayrı refresh hatası marker'ı korudu. Bu uygulama davranışı değil, geçici prototip sözleşmesidir. |
+| PASS — sınırlı | `revision` koşullu UPSERT eski refresh'in yeni metni ezmesini önledi; duplicate refresh idempotent sınıra uygundur. Eşzamanlı gerçek writer/worker yarışlarının tam interleaving matrisi **UNKNOWN**. |
+| PASS — sınırlı | Kanonik settlement-delay fixture'ında eşikten **1 ms önce / tam eşikte / 1 ms sonra** sırasıyla Admin `Estimated / Pending review / Pending review`, Vendor `Hesaplanıyor / Hazır / Hazır`; iki alternatif tam birleşik metin query-time sınırla eşleşti, ledger `updatedAt` değişmedi. Başka finans olayının sınır dalını geçersiz kıldığı fixture **UNKNOWN**. |
+| PASS/FAIL | Canlı `FinanceLedgerEntry.vendorId` + `voidedAt` join'i yanlış projected owner/void false positive'ini engelledi. Yanlış projected owner doğru Vendor için false negative bıraktı. Marker boşken projeksiyon satırı silinince aktif kanonik ledger eksik kaldı ve guard bunu **tespit edemedi**. Bu nedenle genel fail-closed ve completeness **FAIL**. |
+| PASS — statik | 1,000 kanonik işlem, 10 sayfalı DTO okuması, 32/32 sıralı Admin/Vendor arama ID-set karşılaştırması; İngilizce/Türkçe etiket, NBSP, `%`, `_`, order/refund ve Vendor referansları dahil. Bu 211 bin satırın tamamı için parity kanıtı değildir. |
+| PASS — live keyset fixture | 100+100 satır, 0 overlap; ilk sayfadan sonra yeni insert ikinci sayfayı değiştirmedi (0 ID farkı). İkinci sayfada void veya eşleşme üyeliği değişince 100 satır kaldı, 1 yer değiştiren ID görüldü. Bunlar rollback edilen sentetik işlemlerdir; katı snapshot iddiası değildir. Yeni successor ledger'ın gerçek ekonomik transfer servisiyle üretimi **UNKNOWN**. |
+
+`EXPLAIN (ANALYZE, BUFFERS)` ile 1,000 projected satırlı Vendor'da `%zz-no-match%` sorgusunun PostgreSQL yürütme süresi **0.244 ms** (planlama 1.621 ms) ölçüldü; trigram ve Vendor/order indeksleri kullanıldı. Bu ölçüm refresh, HTTP, eşzamanlılık veya 100 binlik Vendor gecikmesini içermez. Tek Vitest consistency testinin 133 ms test süresi, tek refresh maliyeti değildir. Testler disposable fixture ile **9 ayrı tek-test Vitest çalıştırmasında PASS** (trigger öncesi 3 real workflow, trigger sonrası 3 real workflow, zaman, parity, consistency); ayrıca 2 SQL keyset deneyi PASS. Kod geçici olarak ayrı proje worktree'sine kopyalandı ve test sonrası kaldırıldı; kalıcı yeniden çalıştırılabilir test eklenmedi. Deney SQL/JSON dosyaları `/private/tmp/sporgym-p2f-20261106/` altında geçicidir, kalıcı kaynak bağlantısı değildir.
+
+**Sınır ve sonraki iş:** Dirty journal'ın tüm dolaylı writer'ları (refund adjustment, komisyon faturası, shipping, hold/cancellation, Vendor adı, ekonomik transfer, ardıl ledger) işaretlediği gösterilmedi. Eksik/yanlış projeksiyon satırı için tamlık sertifikası veya güvenli tespit yok. Time-only sınırın bütün etiket öncelikleriyle geçerliliği de kanıtlanmadı. En küçük sonraki kontrollü görev: **read-only writer→ledger kapanışı ve completeness/fail-closed sözleşmesi tasarımı**; her writer için transaction ve invalidation haritası, başlangıç/backfill doğrulaması, eksik satır tespiti ve eşzamanlı refresh interleaving test planı çıkarılmalı. Üretim Finance arama API'si, migration veya scheduler bu kanıttan otomatik başlatılmamalı.
+
 ## Sıradaki kontrollü işler
 
-1. P2F: disposable PostgreSQL üzerinde tutarlılık sözleşmesi kanıtı.
-2. Gerekirse eksik writer/lifecycle closure.
+1. P2F disposable PostgreSQL kanıtı: **kısmi tamamlandı**, yukarıdaki FAIL/UNKNOWN kayıtları açık.
+2. Eksik writer/lifecycle closure ve completeness/fail-closed sözleşmesi.
 3. Doğrudan sorgu, hibrit veya projection mimarisi kararı.
 4. Sınırlı backend Finance tam-geçmiş arama.
 5. Tarihsel ledger lookup.
