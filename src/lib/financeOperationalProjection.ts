@@ -56,7 +56,7 @@ export function normalizeFinanceStatus(status: string | null | undefined) {
   return value;
 }
 
-function isRefundRecord(record: FinanceTransaction) {
+export function isRefundRecord(record: FinanceTransaction) {
   return record.category === 'Refund';
 }
 
@@ -76,7 +76,7 @@ function isSettlementReviewPendingRecord(record: FinanceTransaction) {
   return Boolean(record.settlement?.payoutReady || record.settlement?.status === 'partially_refunded');
 }
 
-function isRefundDeductionSettlementReviewPending(record: FinanceTransaction) {
+export function isRefundDeductionSettlementReviewPending(record: FinanceTransaction) {
   return isRefundRecord(record) && isSettlementReviewPendingRecord(record);
 }
 

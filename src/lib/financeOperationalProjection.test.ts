@@ -6,6 +6,9 @@ import {
   getFinanceOperationalProjection,
   getPayoutBatchStatusLabel,
 } from './financeOperationalProjection';
+import { formatCurrency } from '../services/real/formatting';
+import { evaluateSaleSettlementDelay } from '../../backend/src/modules/finance/settlement-delay-eligibility.service';
+import { getFinancePresentation, getFinanceSearchableText, getVendorFinanceScenario, hasReliablePaidEvidence } from './financePresentation';
 
 const baseSale: FinanceTransaction = {
   id: 'ledger-sale',
@@ -43,6 +46,139 @@ const baseSale: FinanceTransaction = {
 };
 
 describe('financeOperationalProjection', () => {
+  it('freezes reachable Admin row status precedence before presentation extraction', () => {
+    const plain = { ...baseSale, settlement: undefined, payoutBatch: null };
+    const batch = (status: NonNullable<FinanceTransaction['payoutBatch']>['status']) => ({
+      id: `batch-${status}`, status, netAmount: 'TRY 900.00', createdAt: baseSale.date,
+    });
+    const review = (approvalStatus: 'draft' | 'approved', commissionInvoiceStatus: string | null = null) => ({
+      approvalId: 'approval-1', approvalStatus, commissionInvoiceId: null,
+      commissionInvoiceStatus, invoiceNo: null, providerUuid: null,
+    });
+    const cases: Array<[FinanceTransaction, string]> = [
+      [plain, 'Estimated'],
+      [baseSale, 'Pending review'],
+      [{ ...plain, payoutBatch: batch('draft') }, 'Estimated'],
+      [{ ...plain, payoutBatch: batch('review') }, 'Pending review'],
+      [{ ...plain, payoutBatch: batch('approved') }, 'Approved'],
+      [{ ...plain, payoutBatch: batch('execution_pending') }, 'Scheduled'],
+      [{ ...plain, status: 'Failed' }, 'Blocked'],
+      [{ ...baseSale, settlement: { ...baseSale.settlement!, status: 'held', holdReason: VENDOR_BLOCKED_FINANCE_HOLD_REASON } }, 'On hold'],
+      [{ ...plain, category: 'Refund' }, 'Refund impact'],
+      [{ ...baseSale, settlement: { ...baseSale.settlement!, review: review('draft') } }, 'Settlement draft locked'],
+      [{ ...baseSale, settlement: { ...baseSale.settlement!, review: review('approved') } }, 'Settlement approved'],
+      [{ ...baseSale, settlement: { ...baseSale.settlement!, review: review('approved', 'created') } }, 'Commission invoiced'],
+      [{ ...plain, payoutBatch: batch('paid') }, 'Paid'],
+      [{ ...plain, payoutBatch: batch('cashless_completed') }, 'Completed by verified offsets (no EFT)'],
+      [{ ...plain, payoutBatch: batch('paid_placeholder') }, 'Payment evidence pending'],
+      [{ ...plain, payoutBatch: batch('cancelled') }, 'Blocked'],
+    ];
+    for (const [record, expected] of cases) {
+      expect(getFinanceOperationalProjection(record, { audience: 'admin' }).legacyStatusLabel).toBe(expected);
+    }
+    expect(getFinanceOperationalProjection({ ...plain, payoutBatch: batch('paid_placeholder') }, { audience: 'vendor' }).legacyStatusLabel)
+      .toBe('Pending review');
+  });
+
+  it('preserves Vendor scenario statuses across Sale, Refund, Adjustment, Payout and Shipping evidence', () => {
+    const plain = { ...baseSale, settlement: undefined, payoutBatch: null };
+    const adjustment: NonNullable<FinanceTransaction['settlementRefundAdjustments']>[number] = {
+      id: 'adjustment-1', status: 'applied', amountMinor: 1000, originalAmountMinor: 1000,
+      appliedAmountMinor: 1000, remainingAmountMinor: 0, currencyCode: 'TRY', reason: 'Refund offset',
+      originalSettlementApprovalId: null, originalSettlementApprovalLineId: null,
+      originalSettlementCommissionInvoiceId: null, appliedSettlementApprovalId: null,
+      appliedSettlementApprovalLineId: null, blockedReason: null, createdAt: baseSale.date, updatedAt: baseSale.date,
+    };
+    const cases: Array<[FinanceTransaction, string, string]> = [
+      [plain, 'Hesaplanıyor', 'Sipariş Geliri'],
+      [baseSale, 'Hazır', 'Sipariş Geliri'],
+      [{ ...baseSale, settlement: { ...baseSale.settlement!, status: 'held' } }, 'Askıda', 'Sipariş Geliri'],
+      [{ ...plain, status: 'Failed' }, 'Beklemede', 'Sipariş Geliri'],
+      [{ ...baseSale, settlement: { ...baseSale.settlement!, status: 'partially_refunded' } }, 'İncelemede', 'Sipariş Geliri'],
+      [{ ...plain, category: 'Refund' }, 'İncelemede', 'İade'],
+      [{ ...plain, category: 'Refund', settlementRefundAdjustments: [adjustment] }, 'Hazır', 'İade'],
+      [{ ...plain, category: 'Adjustment', settlementRefundAdjustments: [adjustment] }, 'Hazır', 'Bakiye Düzeltmesi'],
+      [{ ...plain, category: 'Payout', payoutBatch: { id: 'batch-approved', status: 'approved', netAmount: 'TRY 900.00', createdAt: baseSale.date } }, 'Hazır', 'Ödeme'],
+      [{ ...plain, category: 'Payout', payoutBatch: { id: 'batch-draft', status: 'draft', netAmount: 'TRY 900.00', createdAt: baseSale.date } }, 'Beklemede', 'Ödeme'],
+      [{ ...plain, payoutCalculation: { ...baseSale.payoutCalculation!, shippingCostStatus: 'pending_provider_cost' } }, 'Beklemede', 'Kargo'],
+      [{ ...plain, payoutCalculation: { ...baseSale.payoutCalculation!, shippingApplied: true } }, 'Hazır', 'Kargo'],
+    ];
+    for (const [record, status, type] of cases) {
+      expect(getVendorFinanceScenario(record)).toMatchObject({ status, typeLabel: type });
+      const view = getFinancePresentation(record, 'vendor', { vendorId: 'vendor-a', vendorName: 'Vendor A' });
+      expect(view.vendorDisplayedStatus).toBe(status);
+      expect(view.searchableStatus).toBe(getFinanceOperationalProjection(record, { audience: 'vendor' }).legacyStatusLabel);
+    }
+  });
+
+  it('keeps paid evidence distinct from draft, approval, placeholder and cashless completion', () => {
+    const paid = { ...baseSale, payoutStatus: 'paid', settlement: { ...baseSale.settlement!, status: 'settled' as const, settledAt: baseSale.date },
+      payoutBatch: { id: 'batch-paid', status: 'paid' as const, netAmount: 'TRY 900.00', createdAt: baseSale.date, paidAt: baseSale.date } };
+    expect(hasReliablePaidEvidence(paid)).toBe(true);
+    expect(getVendorFinanceScenario(paid).status).toBe('Ödendi');
+    for (const status of ['draft', 'approved', 'paid_placeholder', 'cashless_completed'] as const) {
+      const record = { ...paid, payoutStatus: status, settlement: { ...paid.settlement, status: 'payable' as const, settledAt: null },
+        payoutBatch: { ...paid.payoutBatch, status, paidAt: null } };
+      expect(hasReliablePaidEvidence(record)).toBe(false);
+      expect(getVendorFinanceScenario(record).status).not.toBe('Ödendi');
+    }
+    expect(getFinancePresentation({ ...paid, payoutStatus: 'cashless_completed',
+      settlement: { ...paid.settlement, status: 'cashless_completed', settledAt: null },
+      payoutBatch: { ...paid.payoutBatch, status: 'cashless_completed', paidAt: null } }, 'vendor',
+    { vendorId: 'vendor-a', vendorName: 'Vendor A' }).searchableStatus)
+      .toBe('Completed by verified offsets (no EFT)');
+  });
+
+  it('keeps the exact joined search string, case folding, context and formatted amount behavior', () => {
+    const record: FinanceTransaction = { ...baseSale, id: 'ledger-alpha', description: 'Special Sale',
+      counterparty: 'Counterparty Alpha', settlement: undefined, payoutBatch: null,
+      amount: formatCurrency(1500), shopifyOrderNumber: '8123', shopifyOrderId: 'gid://shopify/Order/8123',
+      shopifyRefundId: 'gid://shopify/Refund/98123' };
+    const vendor = { vendorId: 'vendor-a', vendorName: 'Vendor A' };
+    const text = getFinanceSearchableText(record, 'admin', vendor);
+    expect(text).toBe('ledger-alpha special sale invoice estimated try\u00a01,500.00 counterparty alpha vendor a vendor-a 8123 gid://shopify/order/8123 gid://shopify/refund/98123');
+    for (const [query, found] of [['1500', false], ['1500.00', false], ['1,500.00', true],
+      ['TRY', true], ['TRY 1,500', false], ['TRY\u00a01,500', true], ['500.0', true],
+      ['  1,500.00  ', true]] as const) {
+      expect(text.includes(query.trim().toLowerCase())).toBe(found);
+    }
+    expect(getFinanceSearchableText(record, 'admin', { vendorId: 'vendor-b', vendorName: 'Vendor B' }))
+      .not.toContain('vendor-a');
+    expect(getFinancePresentation({ ...record, category: 'Refund' }, 'admin', vendor).displayedAmount)
+      .toBe('-TRY\u00a01,500.00');
+    expect(getFinancePresentation({ ...record, category: 'Adjustment' }, 'admin', vendor).displayedAmount)
+      .toBe('-TRY\u00a01,500.00');
+    expect(getFinancePresentation({ ...record, amount: formatCurrency(-1500) }, 'admin', vendor).formattedAmount)
+      .toBe('-TRY\u00a01,500.00');
+    expect(getFinanceSearchableText({ ...record, category: 'Refund' }, 'admin', vendor)).not.toContain('-try');
+  });
+
+  it('freezes the settlement delay before, at and after its exact time boundary', () => {
+    const deliveredAt = new Date('2026-09-09T23:59:59.999Z');
+    const input = { entryType: 'SALE', settlementDelayDaysSnapshot: 21, vendorAllocation: {
+      id: 'allocation-a', outboundMethodSnapshot: 'KARGONOMI', outboundIntegrationProviderSnapshot: null,
+      deliveredObservation: { vendorAllocationId: 'allocation-a', outboundMethod: 'KARGONOMI',
+        outboundIntegrationProvider: null, firstObservedDeliveredAt: deliveredAt },
+    } };
+    const boundary = new Date('2026-09-30T23:59:59.999Z');
+    expect(evaluateSaleSettlementDelay(input, new Date(boundary.getTime() - 1)).eligible).toBe(false);
+    expect(evaluateSaleSettlementDelay(input, boundary).eligible).toBe(true);
+    expect(evaluateSaleSettlementDelay(input, new Date(boundary.getTime() + 1)).eligible).toBe(true);
+    const vendor = { vendorId: 'vendor-a', vendorName: 'Vendor A' };
+    for (const [now, expectedAdmin, expectedVendor] of [
+      [new Date(boundary.getTime() - 1), 'Estimated', 'Hesaplanıyor'],
+      [boundary, 'Pending review', 'Hazır'],
+      [new Date(boundary.getTime() + 1), 'Pending review', 'Hazır'],
+    ] as const) {
+      const eligible = evaluateSaleSettlementDelay(input, now).eligible;
+      const record: FinanceTransaction = { ...baseSale, payoutBatch: null, settlement: {
+        ...baseSale.settlement!, status: eligible ? 'payable' : 'accruing', payoutReady: eligible,
+      } };
+      expect(getFinancePresentation(record, 'admin', vendor).adminDisplayedStatus).toBe(expectedAdmin);
+      expect(getFinancePresentation(record, 'vendor', vendor).vendorDisplayedStatus).toBe(expectedVendor);
+    }
+  });
+
   it('labels cashless completion as an offset, never as an EFT payment', () => {
     expect(getPayoutBatchStatusLabel('cashless_completed', 'vendor'))
       .toBe('Completed by verified offsets (no EFT)');
