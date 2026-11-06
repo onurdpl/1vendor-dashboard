@@ -2681,6 +2681,19 @@ describe('FinancePage control center', () => {
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
+  it('resolves an Admin Support ledger link from the selected Vendor B dataset', async () => {
+    setCurrentVendorId('demo-vendor-b');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboardB);
+    getFinanceTransactionsMock.mockResolvedValue({ items: financeDashboardB.transactions, hasNextPage: false, nextCursor: null });
+
+    renderFinancePage(['/finance?ledgerId=ledger-vendor-b']);
+
+    expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
+    expect(screen.getAllByText('$8,888.00').length).toBeGreaterThan(0);
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-b' }));
+    expect(screen.queryByText('Linked transaction unavailable')).not.toBeInTheDocument();
+  });
+
   it('selects a finance row by Shopify refund id numeric tail', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 

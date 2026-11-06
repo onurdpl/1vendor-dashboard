@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -94,6 +94,20 @@ function renderPage(path: string) {
     </QueryClientProvider>,
   );
   return { ...view, queryClient };
+}
+
+function renderSwitchablePage() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={queryClient}>
+    <MemoryRouter initialEntries={['/support/a1']}>
+      <Link to="/support/a1">Ticket A1</Link>
+      <Link to="/support/a2">Ticket A2</Link>
+      <Link to="/support/b1">Ticket B1</Link>
+      <Routes><Route path="/support/:ticketId" element={
+        <RequirePermission permission="orders:read"><SupportTicketDetailPage /></RequirePermission>
+      } /></Routes>
+    </MemoryRouter>
+  </QueryClientProvider>);
 }
 
 describe('SupportTicketDetailPage context visibility', () => {
@@ -235,6 +249,73 @@ describe('SupportTicketDetailPage context visibility', () => {
 
     await act(async () => resolveB(ticket({ vendorId: 'vendor-b', subject: 'Vendor B detail' })));
     expect(await screen.findByRole('heading', { name: 'Vendor B detail' })).toBeInTheDocument();
+  });
+
+  it('keeps a same-Vendor reply draft on its original ticket', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor', role: 'vendor', vendorAccess: ['vendor-a'],
+      vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }], canSwitchVendors: false, defaultVendorId: 'vendor-a' });
+    getVendorSupportTicketMock.mockImplementation(async (id) => ticket({ id, subject: `Subject ${id}` }));
+    addVendorSupportTicketReplyMock.mockImplementation(async (id) => ticket({ id }));
+    renderSwitchablePage();
+    await screen.findByRole('heading', { name: 'Subject a1' });
+    await user.type(screen.getByPlaceholderText('Write a public reply...'), 'A1 draft');
+    await user.click(screen.getByRole('link', { name: 'Ticket A2' }));
+    await screen.findByRole('heading', { name: 'Subject a2' });
+    expect(screen.getByPlaceholderText('Write a public reply...')).toHaveValue('');
+    await user.type(screen.getByPlaceholderText('Write a public reply...'), 'A2 reply');
+    await user.click(screen.getByRole('button', { name: 'Post reply' }));
+    await waitFor(() => expect(addVendorSupportTicketReplyMock).toHaveBeenCalledWith('a2', 'A2 reply'));
+    expect(addVendorSupportTicketReplyMock).not.toHaveBeenCalledWith('a2', 'A1 draft');
+  });
+
+  it('isolates drafts across A to B to A and a delayed B detail', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor', role: 'vendor',
+      vendorAccess: ['vendor-a', 'vendor-b'], vendorDetails: [
+        { vendorId: 'vendor-a', vendorName: 'Vendor A' }, { vendorId: 'vendor-b', vendorName: 'Vendor B' },
+      ], canSwitchVendors: true, defaultVendorId: 'vendor-a' });
+    let resolveB!: (value: SupportTicket) => void;
+    getVendorSupportTicketMock.mockImplementation((id) => id === 'b1'
+      ? new Promise((resolve) => { resolveB = resolve; })
+      : Promise.resolve(ticket({ id, subject: `Subject ${id}` })));
+    renderSwitchablePage();
+    await screen.findByRole('heading', { name: 'Subject a1' });
+    await user.type(screen.getByPlaceholderText('Write a public reply...'), 'A1 private draft');
+    act(() => setCurrentVendorId('vendor-b'));
+    await user.click(screen.getByRole('link', { name: 'Ticket B1' }));
+    await waitFor(() => expect(getVendorSupportTicketMock).toHaveBeenCalledWith('b1'));
+    expect(screen.queryByPlaceholderText('Write a public reply...')).not.toBeInTheDocument();
+    await act(async () => resolveB(ticket({ id: 'b1', vendorId: 'vendor-b', subject: 'Subject b1' })));
+    await screen.findByRole('heading', { name: 'Subject b1' });
+    expect(screen.getByPlaceholderText('Write a public reply...')).toHaveValue('');
+    act(() => setCurrentVendorId('vendor-a'));
+    await user.click(screen.getByRole('link', { name: 'Ticket A1' }));
+    await screen.findByRole('heading', { name: 'Subject a1' });
+    expect(screen.getByPlaceholderText('Write a public reply...')).toHaveValue('');
+    expect(addVendorSupportTicketReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('does not clear the next ticket draft when an earlier reply finishes', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({ email: 'vendor@example.com', name: 'Vendor', role: 'vendor', vendorAccess: ['vendor-a'],
+      vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }], canSwitchVendors: false, defaultVendorId: 'vendor-a' });
+    getVendorSupportTicketMock.mockImplementation(async (id) => ticket({ id, subject: `Subject ${id}` }));
+    let finishA!: (value: SupportTicket) => void;
+    addVendorSupportTicketReplyMock.mockImplementation((id) => new Promise((resolve) => {
+      if (id === 'a1') finishA = resolve;
+    }));
+    renderSwitchablePage();
+    await screen.findByRole('heading', { name: 'Subject a1' });
+    await user.type(screen.getByPlaceholderText('Write a public reply...'), 'A1 reply');
+    await user.click(screen.getByRole('button', { name: 'Post reply' }));
+    await waitFor(() => expect(addVendorSupportTicketReplyMock).toHaveBeenCalledWith('a1', 'A1 reply'));
+    await user.click(screen.getByRole('link', { name: 'Ticket A2' }));
+    await screen.findByRole('heading', { name: 'Subject a2' });
+    await user.type(screen.getByPlaceholderText('Write a public reply...'), 'A2 unsent draft');
+    await act(async () => finishA(ticket({ id: 'a1' })));
+    expect(screen.getByPlaceholderText('Write a public reply...')).toHaveValue('A2 unsent draft');
+    expect(addVendorSupportTicketReplyMock).not.toHaveBeenCalledWith('a2', expect.anything());
   });
 
   it('renders compact ticket metadata without an operations summary', async () => {

@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Link, useLocation, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { EmptyStatePanel, SectionErrorRetry, SectionSkeleton, StatusBadge } from '../components/OperationalPrimitives';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
-import { useAppReadiness } from '../lib/appReadiness';
+import { getAppReadinessSnapshot, useAppReadiness, type AppReadinessState } from '../lib/appReadiness';
+import { getAdminVendorSelection, getCurrentVendorContext, onVendorChange, setCurrentVendorId, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
+import { runtimeConfig } from '../config/runtime';
+import { runtimeServices } from '../services/runtime-services';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import {
   addAdminSupportTicketNote,
@@ -289,11 +292,54 @@ function getSlaBadgeTone(ticket: SupportTicket) {
   return 'neutral' as const;
 }
 
+function waitForVerifiedAdminVendor(vendorId: string, token: string, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    let finished = false;
+    let unsubscribe = () => {};
+    const finish = (verified: boolean) => {
+      if (finished) return;
+      finished = true;
+      unsubscribe();
+      signal.removeEventListener('abort', onAbort);
+      window.clearTimeout(timeout);
+      resolve(verified);
+    };
+    const onAbort = () => finish(false);
+    const check = () => {
+      const session = getAppReadinessSnapshot();
+      const selection = getAdminVendorSelection();
+      if (signal.aborted || !session.sessionReady || !session.authConfirmed || session.token !== token
+        || session.currentUser?.role !== 'admin' || selection.vendorId !== vendorId) {
+        finish(false);
+      } else if (selection.status === 'verified' && getCurrentVendorContext().vendorId === vendorId) {
+        finish(true);
+      } else if (selection.status === 'error' || selection.status === 'empty') {
+        finish(false);
+      }
+    };
+    const timeout = window.setTimeout(() => finish(false), 20_000);
+    unsubscribe = onVendorChange(check);
+    signal.addEventListener('abort', onAbort, { once: true });
+    check();
+  });
+}
+
 export function SupportTicketDetailPage() {
   const { ticketId } = useParams();
   const location = useLocation();
-  const isAdmin = location.pathname.startsWith('/admin/');
   const appReadiness = useAppReadiness();
+  const scope = location.pathname.startsWith('/admin/') ? 'admin' : appReadiness.currentVendor.vendorId;
+  return <SupportTicketDetailContent key={`${scope}:${ticketId ?? ''}`} appReadiness={appReadiness} />;
+}
+
+function SupportTicketDetailContent({ appReadiness }: { appReadiness: AppReadinessState }) {
+  const { ticketId } = useParams();
+  const location = useLocation();
+  const isAdmin = location.pathname.startsWith('/admin/');
+  const navigate = useNavigate();
+  const pendingNavigation = useRef<AbortController | null>(null);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+  useEffect(() => () => pendingNavigation.current?.abort(), []);
   const currentUser = appReadiness.currentUser;
   const isVendorWorkspaceAdmin = !isAdmin && currentUser?.role === 'admin';
   const currentVendor = appReadiness.currentVendor;
@@ -442,6 +488,50 @@ export function SupportTicketDetailPage() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(currentVendor.vendorId) });
   }, [currentVendor.vendorId, isAdmin, ticket?.id]);
 
+  function handleContextNavigation(href: string | undefined, event: MouseEvent<HTMLAnchorElement>) {
+    if (!isAdmin) return;
+    event.preventDefault();
+    pendingNavigation.current?.abort();
+    pendingNavigation.current = null;
+    setNavigationError(null);
+
+    const vendorId = ticket?.vendorId?.trim();
+    const session = getAppReadinessSnapshot();
+    if (!href || !vendorId || !session.sessionReady || !session.authConfirmed || !session.token
+      || session.currentUser?.role !== 'admin') {
+      setNavigationError('This record cannot be opened until its Vendor ownership and Admin session are available.');
+      return;
+    }
+
+    if (runtimeConfig.apiMode !== 'real') {
+      setCurrentVendorId(vendorId);
+      if (getCurrentVendorContext().vendorId === vendorId) navigate(href);
+      else setNavigationError('This Vendor is not available for the current session.');
+      return;
+    }
+
+    const selection = getAdminVendorSelection();
+    if (selection.vendorId === vendorId && selection.status === 'verified' && getCurrentVendorContext().vendorId === vendorId) {
+      navigate(href);
+      return;
+    }
+
+    const controller = new AbortController();
+    pendingNavigation.current = controller;
+    setCurrentVendorId(vendorId);
+    const verified = waitForVerifiedAdminVendor(vendorId, session.token, controller.signal);
+    void verifyAdminVendorSelection(
+      (id) => runtimeServices.vendors.status(id),
+      (id) => runtimeServices.orders.adminVendorShippingConfig(id),
+    );
+    void verified.then((ready) => {
+      if (controller.signal.aborted || pendingNavigation.current !== controller) return;
+      pendingNavigation.current = null;
+      if (ready) navigate(href);
+      else setNavigationError('Vendor verification failed. Retry by opening the record again.');
+    });
+  }
+
   if (!authContextReady || (!isAdmin && !currentVendor.vendorId) || (isLoading && !ticket)) {
     return (
       <section className="op-page support-detail-page">
@@ -581,6 +671,7 @@ export function SupportTicketDetailPage() {
       </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
+      {navigationError ? <ActionFeedback tone="error" message={navigationError} /> : null}
 
       <div className={`support-detail-grid${hasSideContent ? '' : ' support-detail-grid-single'}`}>
         <main className="support-detail-main">
@@ -673,7 +764,8 @@ export function SupportTicketDetailPage() {
               </div>
               <div className="support-context-link-list">
                 {contextLinks.map((link) => (
-                  <Link key={link.id} to={link.href ?? '#'} className="support-context-link-row">
+                  <Link key={link.id} to={link.href ?? '#'} className="support-context-link-row"
+                    onClick={(event) => handleContextNavigation(link.href, event)}>
                     <div>
                       <span>{link.eyebrow}</span>
                       <strong>{link.title}</strong>
