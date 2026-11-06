@@ -4,6 +4,7 @@ export {
   createSettlementScheduleDrafts,
   createSettlementReplacementDraft,
   getFinanceDashboard,
+  getFinanceTransactions,
   getAdminVendorFinancialProfile,
   getFinanceProfile,
   getReturnFinanceRecords,

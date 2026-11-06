@@ -53,6 +53,8 @@ import {
   getVendorBalanceSummary,
 } from './vendor-balance.service.js';
 import { mapLinkedSettlementRefundAdjustments } from './settlement-refund-adjustment.service.js';
+import { mapFinanceRecords } from './finance-search-record.js';
+import { getFinanceSearchableText, getPayoutActivityStatusLabel, getVendorFinanceScenario } from './financePresentation.js';
 import {
   activeFinanceLedgerWhere,
   assertLedgerActiveForMoneyMovement,
@@ -1466,198 +1468,18 @@ function mapPayoutBatchReference(line?: {
   };
 }
 
-export async function getVendorFinanceDashboard(
+async function findVendorFinanceEntries(
   vendorId: string,
-  options: { limit?: number; offset?: number } = {},
-): Promise<FinanceDashboardDto> {
-  const [summaryEntries, entries, storedProfile, latestBatch, vendorBalance, eligibleCreditLines] = await Promise.all([
-    withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
+  options: { limit?: number; offset?: number; keyset?: boolean; cursor?: { createdAt: Date; id: string } } = {},
+) {
+  return withDashboardTiming('finance.records_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
         ...activeFinanceLedgerWhere,
-      },
-      select: {
-        id: true,
-        entryType: true,
-        amount: true,
-        payoutStatus: true,
-        commissionPercentSnapshot: true,
-        commissionVatPercentSnapshot: true,
-        deductShippingEnabledSnapshot: true,
-        shippingModeSnapshot: true,
-        fixedShippingFeeSnapshot: true,
-        shippingCostSnapshot: true,
-        shippingVatAmountSnapshot: true,
-        shippingCostSourceSnapshot: true,
-        shippingCostProviderSnapshot: true,
-        settlementDelayDaysSnapshot: true,
-        settlementStatus: true,
-        settlementEligibleAt: true,
-        accruedAt: true,
-        payableAt: true,
-        settledAt: true,
-        settlementHoldReason: true,
-        createdAt: true,
-        vendorAllocation: {
-          select: {
-            id: true,
-            allocationStatus: true,
-            cancelRefundReviewStatus: true,
-            customerCancellationRequestItems: {
-              select: customerCancellationFinanceHoldSelect,
-            },
-            fulfillmentStatus: true,
-            shippingStatus: true,
-            outboundMethodSnapshot: true,
-            outboundIntegrationProviderSnapshot: true,
-            deliveredObservation: true,
-            order: {
-              select: {
-                cancelledAt: true,
-              },
-            },
-            fulfillment: {
-              select: {
-                fulfilledAt: true,
-                shipmentUpdatedAt: true,
-              },
-            },
-            refundRecords: {
-              select: {
-                id: true,
-                sourceShopifyRefundId: true,
-                amount: true,
-              },
-            },
-            financeEntries: {
-              where: activeFinanceLedgerWhere,
-              select: {
-                id: true,
-                vendorId: true,
-                entryType: true,
-                refundEvidenceSnapshot: {
-                  select: {
-                    refundFinanceLedgerEntryId: true,
-                    refundRecordId: true,
-                    sourceShopifyRefundId: true,
-                    vendorAllocationId: true,
-                    historicalEconomicVendorId: true,
-                    historicalSaleFinanceLedgerEntryId: true,
-                  },
-                },
-                refundAdjustments: {
-                  select: { status: true, remainingAmountMinor: true },
-                },
-                payoutStatus: true,
-                settlementStatus: true,
-                commissionPercentSnapshot: true,
-                commissionVatPercentSnapshot: true,
-                payoutBatchLines: {
-                  where: {
-                    payoutBatch: {
-                      status: {
-                        in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
-                      },
-                    },
-                  },
-                  select: {
-                    payoutBatch: {
-                      select: {
-                        status: true,
-                      },
-                    },
-                  },
-                },
-                settlementApprovalLines: {
-                  where: {
-                    settlementApproval: {
-                      status: {
-                        in: ['DRAFT', 'APPROVED'],
-                      },
-                    },
-                  },
-                  select: {
-                    settlementApproval: {
-                      select: {
-                        id: true,
-                        status: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            returnRecords: {
-              select: {
-                id: true,
-                status: true,
-                returnLifecycleStatus: true,
-                sourceShopifyRefundId: true,
-              },
-            },
-          },
-        },
-        payoutBatchLines: {
-          where: {
-            payoutBatch: {
-              status: {
-                in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
-              },
-            },
-          },
-          select: {
-            id: true,
-            payoutBatch: {
-              select: {
-                status: true,
-              },
-            },
-          },
-          take: 1,
-        },
-        settlementApprovalLines: {
-          where: {
-            settlementApproval: {
-              status: {
-                in: ['DRAFT', 'APPROVED'],
-              },
-            },
-          },
-          select: {
-            settlementApproval: {
-              select: {
-                id: true,
-                status: true,
-                commissionInvoices: {
-                  where: {
-                    status: {
-                      not: 'CANCELLED',
-                    },
-                  },
-                  select: {
-                    id: true,
-                    status: true,
-                    invoiceNo: true,
-                    providerUuid: true,
-                  },
-                  orderBy: {
-                    createdAt: 'desc',
-                  },
-                  take: 1,
-                },
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    })),
-    withDashboardTiming('finance.records_fetch', () => prisma.financeLedgerEntry.findMany({
-      where: {
-        vendorId,
-        ...activeFinanceLedgerWhere,
+        ...(options.cursor ? { OR: [
+          { createdAt: { lt: options.cursor.createdAt } },
+          { createdAt: options.cursor.createdAt, id: { lt: options.cursor.id } },
+        ] } : {}),
       },
       select: {
         id: true,
@@ -1953,12 +1775,336 @@ export async function getVendorFinanceDashboard(
           take: 1,
         },
       },
+      orderBy: options.keyset ? [{ createdAt: 'desc' }, { id: 'desc' }] : { createdAt: 'desc' },
+      take: options.limit ?? 100,
+      skip: options.offset ?? 0,
+    }));
+}
+
+function mapFinanceEntries(
+  entries: Awaited<ReturnType<typeof findVendorFinanceEntries>>,
+  profile: ReturnType<typeof mapProfile>,
+): FinanceRecordDto[] {
+  const records: FinanceRecordDto[] = entries.map((entry) => {
+    const references = mapRelatedReferences(entry);
+    const type = normalizeType(entry.entryType);
+    const entryProfile = resolveCalculationProfile(entry, profile);
+    const settlement = buildSettlement(entry);
+    const fulfilled = isFulfilledForShipping(entry.vendorAllocation);
+    const payoutCalculation = calculateVendorPayout({
+      grossAmount: type === 'refund' ? 0 : toNumber(entry.amount),
+      refundAmount:
+        type === 'refund'
+          ? toNumber(entry.amount)
+          : sumRefundImpact(entry.vendorAllocation?.refundRecords),
+      fulfilled,
+      profile: entryProfile,
+    });
+
+    return {
+      id: entry.id,
+      type,
+      amount: toAmountString(toNumber(entry.amount)),
+      status: mapStatus(entry.payoutStatus),
+      payoutStatus: mapStatus(entry.payoutStatus),
+      description: entry.description,
+      relatedOrderId: references.relatedOrderId,
+      relatedOrderNumber: references.relatedOrderNumber,
+      relatedReturnId: references.relatedReturnId,
+      relatedRefundId: references.relatedRefundId,
+      createdAt: entry.createdAt.toISOString(),
+      payoutCalculation: mapCalculation(payoutCalculation, entryProfile, entry, fulfilled),
+      settlement,
+      payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
+      settlementRefundAdjustments: mapLinkedSettlementRefundAdjustments(entry.refundAdjustments),
+      splitFinanceSummary: mapSplitFinanceSummary(entry),
+    };
+  });
+  return records;
+}
+
+export class FinanceTransactionsCursorError extends Error {}
+
+export type FinanceTransactionsSearchOptions = {
+  search?: string;
+  status?: string;
+  category?: string;
+  workflow?: string;
+  cursor?: string;
+  audience: 'admin' | 'vendor';
+  vendorName: string;
+};
+
+type FinanceTransactionsCursor = {
+  version: 1;
+  vendorId: string;
+  audience: 'admin' | 'vendor';
+  search: string;
+  status: string;
+  category: string;
+  workflow: string;
+  createdAt: string;
+  id: string;
+};
+
+function decodeFinanceTransactionsCursor(encoded: string, expected: Omit<FinanceTransactionsCursor, 'createdAt' | 'id'>) {
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded) || encoded.length > 4096) throw new Error('Invalid encoding');
+    const value: unknown = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    if (!value || typeof value !== 'object') throw new Error('Invalid cursor');
+    const cursor = value as FinanceTransactionsCursor;
+    if (cursor.version !== expected.version || cursor.vendorId !== expected.vendorId ||
+        cursor.audience !== expected.audience || cursor.search !== expected.search ||
+        cursor.status !== expected.status || cursor.category !== expected.category ||
+        cursor.workflow !== expected.workflow || typeof cursor.id !== 'string' || !cursor.id ||
+        typeof cursor.createdAt !== 'string' || !cursor.createdAt ||
+        !Number.isFinite(Date.parse(cursor.createdAt)) || new Date(cursor.createdAt).toISOString() !== cursor.createdAt) {
+      throw new Error('Cursor does not match the current Finance query');
+    }
+    return { createdAt: new Date(cursor.createdAt), id: cursor.id };
+  } catch {
+    throw new FinanceTransactionsCursorError('Invalid Finance Transactions cursor.');
+  }
+}
+
+export async function getVendorFinanceTransactionsPage(vendorId: string, options: FinanceTransactionsSearchOptions) {
+  const search = (options.search ?? '').trim().toLowerCase();
+  const status = options.status ?? 'all';
+  const category = options.category ?? 'all';
+  const workflow = options.workflow ?? 'all';
+  const binding = { version: 1 as const, vendorId, audience: options.audience, search, status, category, workflow };
+  let cursor = options.cursor ? decodeFinanceTransactionsCursor(options.cursor, binding) : undefined;
+  const profile = mapProfile(await prisma.vendorFinancialProfile.findFirst({ where: { vendorId, active: true } }), vendorId);
+  const matches: Array<{ record: FinanceRecordDto; createdAt: string; id: string }> = [];
+  let scanned = 0;
+  let exhausted = false;
+  const batchSize = 250;
+
+  while (matches.length < 101 && !exhausted) {
+    const entries = await findVendorFinanceEntries(vendorId, { limit: batchSize, keyset: true, cursor });
+    scanned += entries.length;
+    if (entries.length < batchSize) exhausted = true;
+    if (!entries.length) break;
+    const canonical = mapFinanceEntries(entries, profile);
+    const presented = mapFinanceRecords(canonical);
+    for (let index = 0; index < entries.length; index += 1) {
+      const record = presented[index];
+      const displayStatus = getPayoutActivityStatusLabel(record, options.audience);
+      if (status !== 'all' && displayStatus !== status) continue;
+      if (category !== 'all' && record.category !== category) continue;
+      if (workflow === 'settlement-review' &&
+          record.category !== 'Payout' && !record.payoutBatch && displayStatus !== 'Pending review') continue;
+      const searchable = getFinanceSearchableText(record, options.audience, { vendorId, vendorName: options.vendorName });
+      const vendorLabel = options.audience === 'vendor' ? getVendorFinanceScenario(record).status.toLowerCase() : '';
+      if (search && !searchable.includes(search) && !vendorLabel.includes(search)) continue;
+      matches.push({ record: canonical[index], createdAt: canonical[index].createdAt, id: canonical[index].id });
+      if (matches.length === 101) break;
+    }
+    const last = entries[entries.length - 1];
+    cursor = { createdAt: last.createdAt, id: last.id };
+  }
+
+  const hasNextPage = matches.length > 100;
+  const page = matches.slice(0, 100);
+  const last = page[page.length - 1];
+  return {
+    vendorId,
+    records: page.map((item) => item.record),
+    hasNextPage,
+    nextCursor: hasNextPage && last ? Buffer.from(JSON.stringify({ ...binding, createdAt: last.createdAt, id: last.id })).toString('base64url') : null,
+    scanned,
+  };
+}
+
+export async function getVendorFinanceDashboard(
+  vendorId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<FinanceDashboardDto> {
+  const [summaryEntries, entries, storedProfile, latestBatch, vendorBalance, eligibleCreditLines] = await Promise.all([
+    withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
+      where: {
+        vendorId,
+        ...activeFinanceLedgerWhere,
+      },
+      select: {
+        id: true,
+        entryType: true,
+        amount: true,
+        payoutStatus: true,
+        commissionPercentSnapshot: true,
+        commissionVatPercentSnapshot: true,
+        deductShippingEnabledSnapshot: true,
+        shippingModeSnapshot: true,
+        fixedShippingFeeSnapshot: true,
+        shippingCostSnapshot: true,
+        shippingVatAmountSnapshot: true,
+        shippingCostSourceSnapshot: true,
+        shippingCostProviderSnapshot: true,
+        settlementDelayDaysSnapshot: true,
+        settlementStatus: true,
+        settlementEligibleAt: true,
+        accruedAt: true,
+        payableAt: true,
+        settledAt: true,
+        settlementHoldReason: true,
+        createdAt: true,
+        vendorAllocation: {
+          select: {
+            id: true,
+            allocationStatus: true,
+            cancelRefundReviewStatus: true,
+            customerCancellationRequestItems: {
+              select: customerCancellationFinanceHoldSelect,
+            },
+            fulfillmentStatus: true,
+            shippingStatus: true,
+            outboundMethodSnapshot: true,
+            outboundIntegrationProviderSnapshot: true,
+            deliveredObservation: true,
+            order: {
+              select: {
+                cancelledAt: true,
+              },
+            },
+            fulfillment: {
+              select: {
+                fulfilledAt: true,
+                shipmentUpdatedAt: true,
+              },
+            },
+            refundRecords: {
+              select: {
+                id: true,
+                sourceShopifyRefundId: true,
+                amount: true,
+              },
+            },
+            financeEntries: {
+              where: activeFinanceLedgerWhere,
+              select: {
+                id: true,
+                vendorId: true,
+                entryType: true,
+                refundEvidenceSnapshot: {
+                  select: {
+                    refundFinanceLedgerEntryId: true,
+                    refundRecordId: true,
+                    sourceShopifyRefundId: true,
+                    vendorAllocationId: true,
+                    historicalEconomicVendorId: true,
+                    historicalSaleFinanceLedgerEntryId: true,
+                  },
+                },
+                refundAdjustments: {
+                  select: { status: true, remainingAmountMinor: true },
+                },
+                payoutStatus: true,
+                settlementStatus: true,
+                commissionPercentSnapshot: true,
+                commissionVatPercentSnapshot: true,
+                payoutBatchLines: {
+                  where: {
+                    payoutBatch: {
+                      status: {
+                        in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                      },
+                    },
+                  },
+                  select: {
+                    payoutBatch: {
+                      select: {
+                        status: true,
+                      },
+                    },
+                  },
+                },
+                settlementApprovalLines: {
+                  where: {
+                    settlementApproval: {
+                      status: {
+                        in: ['DRAFT', 'APPROVED'],
+                      },
+                    },
+                  },
+                  select: {
+                    settlementApproval: {
+                      select: {
+                        id: true,
+                        status: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            returnRecords: {
+              select: {
+                id: true,
+                status: true,
+                returnLifecycleStatus: true,
+                sourceShopifyRefundId: true,
+              },
+            },
+          },
+        },
+        payoutBatchLines: {
+          where: {
+            payoutBatch: {
+              status: {
+                in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+              },
+            },
+          },
+          select: {
+            id: true,
+            payoutBatch: {
+              select: {
+                status: true,
+              },
+            },
+          },
+          take: 1,
+        },
+        settlementApprovalLines: {
+          where: {
+            settlementApproval: {
+              status: {
+                in: ['DRAFT', 'APPROVED'],
+              },
+            },
+          },
+          select: {
+            settlementApproval: {
+              select: {
+                id: true,
+                status: true,
+                commissionInvoices: {
+                  where: {
+                    status: {
+                      not: 'CANCELLED',
+                    },
+                  },
+                  select: {
+                    id: true,
+                    status: true,
+                    invoiceNo: true,
+                    providerUuid: true,
+                  },
+                  orderBy: {
+                    createdAt: 'desc',
+                  },
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
+      },
       orderBy: {
         createdAt: 'desc',
       },
-      take: options.limit ?? 100,
-      skip: options.offset ?? 0,
     })),
+    findVendorFinanceEntries(vendorId, options),
     withDashboardTiming('finance.vendor_profile_fetch', () => prisma.vendorFinancialProfile.findFirst({
       where: {
         vendorId,
@@ -2125,41 +2271,7 @@ export async function getVendorFinanceDashboard(
     outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
   });
 
-  const records: FinanceRecordDto[] = entries.map((entry) => {
-    const references = mapRelatedReferences(entry);
-    const type = normalizeType(entry.entryType);
-    const entryProfile = resolveCalculationProfile(entry, profile);
-    const settlement = buildSettlement(entry);
-    const fulfilled = isFulfilledForShipping(entry.vendorAllocation);
-    const payoutCalculation = calculateVendorPayout({
-      grossAmount: type === 'refund' ? 0 : toNumber(entry.amount),
-      refundAmount:
-        type === 'refund'
-          ? toNumber(entry.amount)
-          : sumRefundImpact(entry.vendorAllocation?.refundRecords),
-      fulfilled,
-      profile: entryProfile,
-    });
-
-    return {
-      id: entry.id,
-      type,
-      amount: toAmountString(toNumber(entry.amount)),
-      status: mapStatus(entry.payoutStatus),
-      payoutStatus: mapStatus(entry.payoutStatus),
-      description: entry.description,
-      relatedOrderId: references.relatedOrderId,
-      relatedOrderNumber: references.relatedOrderNumber,
-      relatedReturnId: references.relatedReturnId,
-      relatedRefundId: references.relatedRefundId,
-      createdAt: entry.createdAt.toISOString(),
-      payoutCalculation: mapCalculation(payoutCalculation, entryProfile, entry, fulfilled),
-      settlement,
-      payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
-      settlementRefundAdjustments: mapLinkedSettlementRefundAdjustments(entry.refundAdjustments),
-      splitFinanceSummary: mapSplitFinanceSummary(entry),
-    };
-  });
+  const records = mapFinanceEntries(entries, profile);
 
   const dashboard: FinanceDashboardDto = {
     summary: {

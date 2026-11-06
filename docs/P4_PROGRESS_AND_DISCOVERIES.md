@@ -111,6 +111,18 @@ Zaman fixture'ında eligibility eşiğinden 1 ms önce / tam eşikte / 1 ms sonr
 
 Hiçbiri yalnız bu listede olduğu için tamamlanmış sayılmaz.
 
+## P4-06C pratik tam-geçmiş arama uygulaması — açık PR
+
+**Karar (2026-11-06):** Kullanıcı 100.000 satır optimizasyonunu ve kalıcı arama projection/index tasarımını bu aşamada erteledi. Önceki P2A–P2I deneylerinin devamı istenmiyor. Mevcut kanonik ledger DTO/presentation verisiyle, Vendor'a bağlı canlı keyset ve 100 sonuç/sayfa uygulaması onaylandı. Bu karar yukarıdaki eski P2I takip planının yerini alır; mali otorite değişmez.
+
+Yeni `GET /finance/transactions` endpoint'i mevcut Finance okuma yetki sınırını kullanır. Aktif ledger kayıtlarını `(createdAt DESC, id DESC)` ile 250'lik gruplar halinde okur, mevcut DTO ve sunum eşlemesini kullanarak arama, durum, kategori ve workflow koşullarını sayfalamadan önce uygular. 101 eşleşme ya da tarihin sonuna ulaşılana dek sürer. Sonuç 100 satır, `hasNextPage` ve Vendor/rol/filtreye bağlı cursor içerir. Arama İngilizce eski metni ve Vendor Türkçe görünen durum etiketini kapsar. `%`, `_`, NBSP ve çapraz alan substring davranışı string üzerinde korunur. Yeni kayıt eklenmesi arasında katı snapshot sağlanmaz; yenileme en güncel sorguyu başlatır.
+
+Finance Overview mevcut `GET /finance` verisini ve hesaplarını kullanmaya devam eder. Transactions kendi sorgu/cache anahtarına sahiptir; arama ve sayfa değişimi Overview tutarlarını yeniden hesaplamaz. İlk 100 dışındaki eski deep linkler için yeni lookup eklenmedi; bu ayrı takip işidir. Tam sıfır sonuç için sunucu yetkili geçmişin tümünü okur; 100.000 kayıt performansı ve üretim veri hacmi **UNKNOWN** kalır. Tam tarama gerektiğinde süre artabilir; başarısız tarama sıfır sonuç olarak gösterilmez.
+
+Yerel ayrılmış PostgreSQL 18.3 fixture'ında 100, 300 ve 1.002 aktif kayıtlı Vendor geçmişleri sınandı. Ölçüm önceki 1.001 aktif kayıtlı fixture ile yapıldı: ilk sayfa 75 ms/8 SQL/250 taranan; ikinci sayfa 40 ms/8 SQL/250; eski eşleşme 157 ms/36 SQL/1.001 taranan; bulunmayan arama 152 ms/36 SQL/1.001 taranan. Ölçümler sentetik, tek makine, uygulama profiler değil; üretim SLA'sı değildir. Yerel odaklı Finance testleri 117/117, yeni ayrılmış PostgreSQL 18.3 testleri 7/7; genel test paketi 4.385 geçti / 680 atlandı (mevcut koşullu testler). Ön yüz ve arka uç build PASS, backend smoke PASS (DB olmadan güvenli kontroller). GitHub CI sonucu Draft PR açıldıktan sonra ayrıca doğrulanmalıdır.
+
+Kalan Package 4 adımları: pratik arama PR'ının CI doğrulaması ve ayrı onayla merge; eski ledger deep link lookup kararı; P4-07 Support izolasyonu; P4-08 final entegrasyon ve kapanış. Bu satır PR merge veya üretim doğrulaması iddia etmez.
+
 ## HOW TO CONTINUE IN A NEW CHAT
 
-Önce bu dosyayı, `AGENTS.md`, `docs/SHOPIFY_DISCOVERIES.md` ve ilgili Finance dokümanlarını oku. Güncel `origin/main`, PR ve CI durumunu doğrula. Kullanıcının live keyset/100 sonuç kararını koru. P2I sonucu `P4_06C_P2I_INDEXED_APPROACH_NOT_SAFE`: ilgili writer dirty olsa bile journal'ı atlayan aynı-ID bayat metin yanlış `READY` verir; mevcut indeksli tasarımı üretime taşıma. Sonraki tek kontrollü hedef yukarıdaki writer-closure/freshness protokolü kanıtıdır; ayrı onay olmadan başlatma. Birleştirilmiş kodu disposable deneyden ayır. Shopify veya finans kuralı uydurma; finansal otoriteyi ve Vendor izolasyonunu koru. `UNKNOWN` maddeleri başarı diye kapatma.
+Önce bu dosyayı, `AGENTS.md` ve `docs/SHOPIFY_DISCOVERIES.md` oku. Güncel `origin/main` ve pratik Finance arama PR durumunu doğrula. Kullanıcının 100/sayfa canlı keyset kararını ve 100.000 kayıt optimizasyonunu erteleme kararını koru. Finansal otoriteyi ve Vendor izolasyonunu değiştirme. PR test ve CI durumu doğrulanmadan Finance tamamlandı deme. Sonraki işler ayrı onayla tarihsel ledger lookup, P4-07 Support izolasyonu ve P4-08 kapanıştır.

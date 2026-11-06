@@ -22,6 +22,8 @@ import {
   adminVendorFinancialProfileTargetExists,
   getAdminVendorFinancialProfile,
   getVendorFinanceDashboard,
+  getVendorFinanceTransactionsPage,
+  FinanceTransactionsCursorError,
   getVendorFinanceSummary,
   getVendorFinancialProfile,
   getVendorReturnFinanceRecords,
@@ -480,6 +482,38 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       const vendorId = request.vendorContext?.vendorId;
       if (!vendorId) return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       return getPayoutOffsetObligationSummary(vendorId);
+    },
+  );
+
+  app.get(
+    '/finance/transactions',
+    { preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor] },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      const query = request.query;
+      if (!isRecord(query) || Object.values(query).some((value) => typeof value !== 'string' || value.length > 4096)) {
+        return reply.code(400).send({ message: 'Invalid Finance Transactions query.' });
+      }
+      const search = readOptionalQueryString(query, 'search') ?? '';
+      const status = readOptionalQueryString(query, 'status') ?? 'all';
+      const category = readOptionalQueryString(query, 'category') ?? 'all';
+      const workflow = readOptionalQueryString(query, 'workflow') ?? 'all';
+      const cursor = readOptionalQueryString(query, 'cursor') ?? undefined;
+      if (search.length > 200 || status.length > 100 || !['all', 'Payout', 'Refund', 'Invoice', 'Adjustment'].includes(category) ||
+          !['all', 'settlement-review'].includes(workflow)) {
+        return reply.code(400).send({ message: 'Invalid Finance Transactions filters.' });
+      }
+      try {
+        return await getVendorFinanceTransactionsPage(vendorId, {
+          search, status, category, workflow, cursor,
+          audience: request.authUser?.role === 'admin' ? 'admin' : 'vendor',
+          vendorName: request.vendorContext?.vendorName ?? vendorId,
+        });
+      } catch (error) {
+        if (error instanceof FinanceTransactionsCursorError) return reply.code(400).send({ message: error.message });
+        throw error;
+      }
     },
   );
 

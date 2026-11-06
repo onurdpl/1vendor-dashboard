@@ -145,6 +145,78 @@ function readVendorRequestOptions(options: { vendorId?: string | null; signal?: 
   return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
+export function mapFinanceRecords(records: FinanceDashboardDto['records']): FinanceTransaction[] {
+  return records.map((record) => ({
+      id: record.id,
+      date: record.createdAt,
+      description:
+        record.description ??
+        `Backend ${record.type} record${record.relatedOrderId ? ` for order ${record.relatedOrderId}` : ''}`,
+      counterparty: record.relatedRefundId ?? record.relatedReturnId ?? record.relatedOrderId ?? 'Platform ledger',
+      category: mapTransactionCategory(record.type),
+      amount: formatCurrency(record.amount),
+      status: mapRecordStatusLabel(record.status),
+      payoutStatus: record.payoutStatus ?? record.status,
+      shopifyOrderNumber: record.relatedOrderNumber ?? undefined,
+      shopifyOrderId: record.relatedOrderId ?? undefined,
+      shopifyRefundId: record.relatedRefundId ?? undefined,
+      settlement: record.settlement,
+      settlementRefundAdjustments: record.settlementRefundAdjustments ?? [],
+      splitFinanceSummary: record.splitFinanceSummary ?? null,
+      payoutBatch: record.payoutBatch
+        ? {
+            ...record.payoutBatch,
+            netAmount: formatCurrency(record.payoutBatch.netAmount),
+          }
+        : null,
+      payoutCalculation: record.payoutCalculation
+        ? {
+            grossAmount: formatCurrency(record.payoutCalculation.grossAmount),
+            commission: formatCurrency(record.payoutCalculation.commission),
+            commissionVat: formatCurrency(record.payoutCalculation.commissionVat),
+            shippingDeduction: formatCurrency(record.payoutCalculation.shippingDeduction),
+            shippingVatAmount: record.payoutCalculation.shippingVatAmount
+              ? formatCurrency(record.payoutCalculation.shippingVatAmount)
+              : undefined,
+            shippingDeductionSource: record.payoutCalculation.shippingDeductionSource,
+            shippingCostProvider: record.payoutCalculation.shippingCostProvider,
+            shippingCostSnapshot: record.payoutCalculation.shippingCostSnapshot
+              ? formatCurrency(record.payoutCalculation.shippingCostSnapshot)
+              : record.payoutCalculation.shippingCostSnapshot,
+            shippingCostStatus: record.payoutCalculation.shippingCostStatus,
+            refundImpact: formatCurrency(record.payoutCalculation.refundImpact),
+            estimatedPayout: formatCurrency(record.payoutCalculation.estimatedPayout),
+            shippingApplied: record.payoutCalculation.shippingApplied,
+            shippingMode: record.payoutCalculation.shippingMode,
+            profileSource: record.payoutCalculation.profileSource,
+            commissionPercent: record.payoutCalculation.commissionPercent,
+            commissionVatPercent: record.payoutCalculation.commissionVatPercent,
+          }
+        : null,
+    }));
+}
+
+export async function getFinanceTransactions(options: {
+  vendorId?: string | null;
+  search?: string;
+  status?: string;
+  category?: string;
+  workflow?: string;
+  cursor?: string | null;
+  signal?: AbortSignal;
+}): Promise<{ vendorId: string; records: FinanceTransaction[]; hasNextPage: boolean; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (options.search) params.set('search', options.search);
+  if (options.status && options.status !== 'all') params.set('status', options.status);
+  if (options.category && options.category !== 'all') params.set('category', options.category);
+  if (options.workflow && options.workflow !== 'all') params.set('workflow', options.workflow);
+  if (options.cursor) params.set('cursor', options.cursor);
+  const response = await apiClient.get<{
+    vendorId: string; records: FinanceDashboardDto['records']; hasNextPage: boolean; nextCursor: string | null;
+  }>(`/finance/transactions?${params.toString()}`, readVendorRequestOptions(options));
+  return { ...response, records: mapFinanceRecords(response.records) };
+}
+
 export async function getFinanceDashboard(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<FinanceDashboard> {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
@@ -232,54 +304,7 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
             : null,
         }
       : undefined,
-    transactions: response.records.map((record) => ({
-      id: record.id,
-      date: record.createdAt,
-      description:
-        record.description ??
-        `Backend ${record.type} record${record.relatedOrderId ? ` for order ${record.relatedOrderId}` : ''}`,
-      counterparty: record.relatedRefundId ?? record.relatedReturnId ?? record.relatedOrderId ?? 'Platform ledger',
-      category: mapTransactionCategory(record.type),
-      amount: formatCurrency(record.amount),
-      status: mapRecordStatusLabel(record.status),
-      payoutStatus: record.payoutStatus ?? record.status,
-      shopifyOrderNumber: record.relatedOrderNumber ?? undefined,
-      shopifyOrderId: record.relatedOrderId ?? undefined,
-      shopifyRefundId: record.relatedRefundId ?? undefined,
-      settlement: record.settlement,
-      settlementRefundAdjustments: record.settlementRefundAdjustments ?? [],
-      splitFinanceSummary: record.splitFinanceSummary ?? null,
-      payoutBatch: record.payoutBatch
-        ? {
-            ...record.payoutBatch,
-            netAmount: formatCurrency(record.payoutBatch.netAmount),
-          }
-        : null,
-      payoutCalculation: record.payoutCalculation
-        ? {
-            grossAmount: formatCurrency(record.payoutCalculation.grossAmount),
-            commission: formatCurrency(record.payoutCalculation.commission),
-            commissionVat: formatCurrency(record.payoutCalculation.commissionVat),
-            shippingDeduction: formatCurrency(record.payoutCalculation.shippingDeduction),
-            shippingVatAmount: record.payoutCalculation.shippingVatAmount
-              ? formatCurrency(record.payoutCalculation.shippingVatAmount)
-              : undefined,
-            shippingDeductionSource: record.payoutCalculation.shippingDeductionSource,
-            shippingCostProvider: record.payoutCalculation.shippingCostProvider,
-            shippingCostSnapshot: record.payoutCalculation.shippingCostSnapshot
-              ? formatCurrency(record.payoutCalculation.shippingCostSnapshot)
-              : record.payoutCalculation.shippingCostSnapshot,
-            shippingCostStatus: record.payoutCalculation.shippingCostStatus,
-            refundImpact: formatCurrency(record.payoutCalculation.refundImpact),
-            estimatedPayout: formatCurrency(record.payoutCalculation.estimatedPayout),
-            shippingApplied: record.payoutCalculation.shippingApplied,
-            shippingMode: record.payoutCalculation.shippingMode,
-            profileSource: record.payoutCalculation.profileSource,
-            commissionPercent: record.payoutCalculation.commissionPercent,
-            commissionVatPercent: record.payoutCalculation.commissionVatPercent,
-          }
-        : null,
-    })),
+    transactions: mapFinanceRecords(response.records),
   };
 }
 

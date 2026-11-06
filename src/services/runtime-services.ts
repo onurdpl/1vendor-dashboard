@@ -11,6 +11,7 @@ import { getCurrentVendorContext } from '../lib/auth/vendorContext';
 import { ApiError } from '../lib/api/errors';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { getMockFinanceDashboard, getMockVendorDebtHistory } from '../lib/api/mockFinance';
+import { getFinanceSearchableText, getPayoutActivityStatusLabel, getVendorFinanceScenario } from '../lib/financePresentation';
 import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
 import { getMockOrder, getShopifyOrderBreakdown, listMockOrders, rejectMockOrder } from '../lib/api/mockOrders';
 import { getMockReturn, listMockReturns } from '../lib/api/mockReturns';
@@ -2549,6 +2550,27 @@ export const runtimeServices = {
     },
   },
   finance: {
+    transactions: (vendorId = getCurrentVendorId(), options: {
+      search?: string; status?: string; category?: string; workflow?: string;
+      cursor?: string | null; signal?: AbortSignal; audience?: 'admin' | 'vendor';
+    } = {}) => {
+      if (runtimeConfig.apiMode === 'real') return realFinance.getFinanceTransactions({ vendorId, ...options });
+      const audience = options.audience ?? 'vendor';
+      const vendorName = getCurrentVendorContext().vendorName;
+      const search = (options.search ?? '').trim().toLowerCase();
+      const filtered = getMockFinanceDashboard(vendorId).transactions.filter((record) => {
+        const displayStatus = getPayoutActivityStatusLabel(record, audience);
+        return (options.status === undefined || options.status === 'all' || options.status === displayStatus) &&
+          (options.category === undefined || options.category === 'all' || options.category === record.category) &&
+          (options.workflow !== 'settlement-review' || record.category === 'Payout' || Boolean(record.payoutBatch) || displayStatus === 'Pending review') &&
+          (!search || getFinanceSearchableText(record, audience, { vendorId, vendorName }).includes(search) ||
+            (audience === 'vendor' && getVendorFinanceScenario(record).status.toLowerCase().includes(search)));
+      });
+      const start = Math.max(0, Number(options.cursor ?? 0) || 0);
+      const records = filtered.slice(start, start + 100);
+      const hasNextPage = filtered.length > start + 100;
+      return Promise.resolve({ vendorId, records, hasNextPage, nextCursor: hasNextPage ? String(start + 100) : null });
+    },
     summary: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) => {
       const finance = getMockFinanceDashboard(vendorId);
       return runtimeConfig.apiMode === 'real'
