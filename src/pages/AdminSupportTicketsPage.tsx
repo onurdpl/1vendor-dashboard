@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -220,6 +220,9 @@ export function AdminSupportTicketsPage() {
     unresolvedOnly, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
   const signature = JSON.stringify({ ...filters, actor: currentUser?.name ?? '' });
   const [pagination, setPagination] = useState<{ signature: string; cursors: Array<string | null>; index: number }>({ signature: '', cursors: [null], index: 0 });
+  useEffect(() => {
+    setPagination({ signature, cursors: [null], index: 0 });
+  }, [signature]);
   const activePagination = pagination.signature === signature ? pagination : { signature, cursors: [null], index: 0 };
   const cursor = activePagination.cursors[activePagination.index];
   const { data: page, isLoading, isError, error, refetch } = useQueryResource(
