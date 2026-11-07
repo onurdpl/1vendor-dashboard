@@ -5,7 +5,9 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
+import { captureSessionOwner, isCurrentSessionOwner } from '../lib/api-client';
 import { getAppReadinessSnapshot, useAppReadiness, type AppReadinessState } from '../lib/appReadiness';
+import { onAuthRestoreStateChange } from '../lib/auth/restoreState';
 import { getAdminVendorSelection, getCurrentVendorContext, onVendorChange, setCurrentVendorId, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
@@ -292,14 +294,16 @@ function getSlaBadgeTone(ticket: SupportTicket) {
   return 'neutral' as const;
 }
 
-function waitForVerifiedAdminVendor(vendorId: string, token: string, signal: AbortSignal): Promise<boolean> {
+function waitForVerifiedAdminVendor(vendorId: string, owner: ReturnType<typeof captureSessionOwner>, signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
     let finished = false;
-    let unsubscribe = () => {};
+    let unsubscribeVendor = () => {};
+    let unsubscribeAuth = () => {};
     const finish = (verified: boolean) => {
       if (finished) return;
       finished = true;
-      unsubscribe();
+      unsubscribeVendor();
+      unsubscribeAuth();
       signal.removeEventListener('abort', onAbort);
       window.clearTimeout(timeout);
       resolve(verified);
@@ -308,7 +312,7 @@ function waitForVerifiedAdminVendor(vendorId: string, token: string, signal: Abo
     const check = () => {
       const session = getAppReadinessSnapshot();
       const selection = getAdminVendorSelection();
-      if (signal.aborted || !session.sessionReady || !session.authConfirmed || session.token !== token
+      if (signal.aborted || !session.sessionReady || !session.authConfirmed || !isCurrentSessionOwner(owner)
         || session.currentUser?.role !== 'admin' || selection.vendorId !== vendorId) {
         finish(false);
       } else if (selection.status === 'verified' && getCurrentVendorContext().vendorId === vendorId) {
@@ -318,7 +322,8 @@ function waitForVerifiedAdminVendor(vendorId: string, token: string, signal: Abo
       }
     };
     const timeout = window.setTimeout(() => finish(false), 20_000);
-    unsubscribe = onVendorChange(check);
+    unsubscribeVendor = onVendorChange(check);
+    unsubscribeAuth = onAuthRestoreStateChange(check);
     signal.addEventListener('abort', onAbort, { once: true });
     check();
   });
@@ -497,11 +502,12 @@ function SupportTicketDetailContent({ appReadiness }: { appReadiness: AppReadine
 
     const vendorId = ticket?.vendorId?.trim();
     const session = getAppReadinessSnapshot();
-    if (!href || !vendorId || !session.sessionReady || !session.authConfirmed || !session.token
+    if (!href || !vendorId || !session.sessionReady || !session.authConfirmed
       || session.currentUser?.role !== 'admin') {
       setNavigationError('This record cannot be opened until its Vendor ownership and Admin session are available.');
       return;
     }
+    const owner = captureSessionOwner();
 
     if (runtimeConfig.apiMode !== 'real') {
       setCurrentVendorId(vendorId);
@@ -511,7 +517,8 @@ function SupportTicketDetailContent({ appReadiness }: { appReadiness: AppReadine
     }
 
     const selection = getAdminVendorSelection();
-    if (selection.vendorId === vendorId && selection.status === 'verified' && getCurrentVendorContext().vendorId === vendorId) {
+    if (selection.vendorId === vendorId && selection.status === 'verified' && getCurrentVendorContext().vendorId === vendorId
+      && isCurrentSessionOwner(owner)) {
       navigate(href);
       return;
     }
@@ -519,7 +526,7 @@ function SupportTicketDetailContent({ appReadiness }: { appReadiness: AppReadine
     const controller = new AbortController();
     pendingNavigation.current = controller;
     setCurrentVendorId(vendorId);
-    const verified = waitForVerifiedAdminVendor(vendorId, session.token, controller.signal);
+    const verified = waitForVerifiedAdminVendor(vendorId, owner, controller.signal);
     void verifyAdminVendorSelection(
       (id) => runtimeServices.vendors.status(id),
       (id) => runtimeServices.orders.adminVendorShippingConfig(id),
@@ -527,7 +534,7 @@ function SupportTicketDetailContent({ appReadiness }: { appReadiness: AppReadine
     void verified.then((ready) => {
       if (controller.signal.aborted || pendingNavigation.current !== controller) return;
       pendingNavigation.current = null;
-      if (ready) navigate(href);
+      if (ready && isCurrentSessionOwner(owner) && getAppReadinessSnapshot().sessionReady) navigate(href);
       else setNavigationError('Vendor verification failed. Retry by opening the record again.');
     });
   }
