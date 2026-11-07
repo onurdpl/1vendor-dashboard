@@ -12,6 +12,7 @@ import { ApiError } from '../lib/api/errors';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { getMockFinanceDashboard, getMockVendorDebtHistory } from '../lib/api/mockFinance';
 import { getFinanceSearchableText, getPayoutActivityStatusLabel, getVendorFinanceScenario } from '../lib/financePresentation';
+import { getSupportOperationalStory, ticketMatchesSupportActionBucket, type SupportActionBucket } from '../lib/supportOperationalStory';
 import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
 import { getMockOrder, getShopifyOrderBreakdown, listMockOrders, rejectMockOrder } from '../lib/api/mockOrders';
 import { getMockReturn, listMockReturns } from '../lib/api/mockReturns';
@@ -53,6 +54,8 @@ import type {
   VendorBlockedQueueScope,
   SupportAnalytics,
   SupportAttentionTicketsPage,
+  SupportTicketsPage,
+  SupportPageFilters,
   SupportTicket,
   SupportTicketCategory,
   SupportTicketContextSummary,
@@ -95,6 +98,49 @@ import type {
 
 function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
+}
+
+function mockSupportPage(tickets: SupportTicket[], filters: SupportPageFilters, scope: 'admin' | 'vendor'): SupportTicketsPage {
+  const search = filters.search?.trim().toLowerCase() ?? '';
+  const bucketNames: SupportActionBucket[] = ['all', 'needs_assignment', 'needs_response', 'escalated', 'overdue', 'waiting_vendor', 'resolved'];
+  const bucketCounts = scope === 'admin' ? Object.fromEntries(bucketNames.map((bucket) => [bucket, tickets.filter((ticket) =>
+    bucket === 'all' ? !filters.unresolvedOnly || (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED')
+      : ticketMatchesSupportActionBucket(ticket, bucket)).length])) as NonNullable<SupportTicketsPage['bucketCounts']> : undefined;
+  const matches = tickets.filter((ticket) => {
+    if (scope === 'vendor') {
+      if (ticket.vendorId !== getCurrentVendorId() || (filters.unreadOnly && ticket.vendorUnreadCount <= 0)) return false;
+      if (filters.workflow === 'open-support-issues' && (ticket.closedAt || ticket.resolvedAt || ticket.status === 'CLOSED' || ticket.status === 'RESOLVED')) return false;
+    } else {
+      if (!ticketMatchesSupportActionBucket(ticket, (filters.bucket ?? 'all') as SupportActionBucket)) return false;
+      if (filters.unresolvedOnly && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) return false;
+      if (filters.status && filters.status !== 'all' && ticket.status !== filters.status) return false;
+      if (filters.category && filters.category !== 'all' && ticket.category !== filters.category) return false;
+      if (filters.priority && filters.priority !== 'all' && ticket.priority !== filters.priority) return false;
+      if (filters.assignee === 'unassigned' && ticket.assigneeUserId) return false;
+      if (filters.assignee === 'me' && ticket.assigneeName !== getCurrentUser()?.name) return false;
+    }
+    if (!search) return true;
+    const fields = scope === 'admin'
+      ? [ticket.id, ticket.subject, ticket.vendorId, ticket.vendorName, ticket.assigneeName, ticket.assigneeUserId, ticket.contextId, JSON.stringify(ticket.contextSnapshot ?? {})]
+      : [ticket.id, ticket.subject, ticket.message, ticket.vendorId, ticket.vendorName, ticket.contextType, ticket.contextId,
+        ticket.assigneeName, ticket.assigneeUserId, ticket.lastReplyByRole, ticket.lastReplyAt, ticket.firstResponseDueAt,
+        ticket.nextResponseDueAt, ticket.escalationReason, JSON.stringify(ticket.contextSnapshot ?? {}), JSON.stringify(ticket.contextSummary ?? {})];
+    return fields.filter(Boolean).join(' ').toLowerCase().includes(search);
+  }).sort((left, right) => {
+    if (scope === 'admin') {
+      const rank = (ticket: SupportTicket) => {
+        const story = getSupportOperationalStory(ticket);
+        return story.isEscalated ? 0 : story.isOverdue ? 1 : story.needsAssignment ? 2 : story.needsAdminResponse ? 3 : 4;
+      };
+      if (rank(left) !== rank(right)) return rank(left) - rank(right);
+    }
+    return right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id);
+  });
+  const offset = filters.cursor ? Number(filters.cursor) : 0;
+  const items = matches.slice(offset, offset + 100);
+  const hasNextPage = offset + 100 < matches.length;
+  return { items, total: matches.length, hasNextPage, nextCursor: hasNextPage ? String(offset + 100) : null,
+    ...(bucketCounts ? { bucketCounts } : {}) };
 }
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
@@ -3223,6 +3269,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realSupport.listAdminSupportTickets({ signal: options.signal, headers: options.headers })
         : Promise.resolve(mockSupportTickets),
+    listAdminPage: (filters: SupportPageFilters, options: ReadRequestOptions = {}): Promise<SupportTicketsPage> =>
+      runtimeConfig.apiMode === 'real'
+        ? realSupport.listAdminSupportTicketsPage(filters, { signal: options.signal })
+        : Promise.resolve(mockSupportPage(mockSupportTickets, filters, 'admin')),
     listAdminAttention: (options: ReadRequestOptions = {}): Promise<SupportAttentionTicketsPage> => {
       if (runtimeConfig.apiMode === 'real') {
         return realSupport.listAdminSupportAttentionTickets({
@@ -3297,6 +3347,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realSupport.listVendorSupportTickets({ signal: options.signal, headers: options.headers })
         : Promise.resolve(mockSupportTickets.filter((ticket) => ticket.vendorId === getCurrentVendorId()).map(toMockVendorSupportTicket)),
+    listVendorPage: (filters: SupportPageFilters, options: ReadRequestOptions = {}): Promise<SupportTicketsPage> =>
+      runtimeConfig.apiMode === 'real'
+        ? realSupport.listVendorSupportTicketsPage(filters, { signal: options.signal })
+        : Promise.resolve(mockSupportPage(mockSupportTickets.filter((ticket) => ticket.vendorId === getCurrentVendorId()).map(toMockVendorSupportTicket), filters, 'vendor')),
     async detailAdmin(ticketId: string, options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
         return realSupport.getAdminSupportTicket(ticketId, { signal: options.signal });

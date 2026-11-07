@@ -19,6 +19,7 @@ import {
   listAdminSupportAttentionTickets,
   listAdminSupportTickets,
   listVendorSupportTickets,
+  listSupportTicketsPage,
   SupportTicketError,
   unassignSupportTicket,
   updateAdminSupportTicketStatus,
@@ -32,9 +33,10 @@ import type {
 } from './support.types.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import { resolvePagination } from '../../lib/pagination.js';
+import { SupportPageQueryError } from './support-page.js';
 
 function sendSupportError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
-  if (error instanceof SupportTicketError) {
+  if (error instanceof SupportTicketError || error instanceof SupportPageQueryError) {
     return reply.code(error.statusCode).send({ message: error.message });
   }
 
@@ -139,6 +141,24 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
+  app.get<{ Querystring: SupportTicketFilters }>(
+    '/support/tickets/page',
+    { preHandler: [authMiddleware.authenticateRequest, async (request, reply) => {
+      if (request.authUser?.role !== 'admin') await requireVendorAccess(request, reply);
+    }] },
+    async (request, reply) => {
+      if (request.authUser?.role === 'admin') {
+        const target = await resolveAdminVendorTarget(request, readAdminVendorTargetHeader(request));
+        if (!target.ok) return reply.code(target.code).send({ message: target.message });
+        try { return await listSupportTicketsPage('vendor', target.vendor.id, request.query ?? {}); }
+        catch (error) { return sendSupportError(error, reply); }
+      }
+      if (!request.vendorContext) return reply.code(401).send({ message: 'Unauthorized' });
+      try { return await listSupportTicketsPage('vendor', request.vendorContext.vendorId, request.query ?? {}); }
+      catch (error) { return sendSupportError(error, reply); }
+    },
+  );
+
   app.get<{ Params: { ticketId: string } }>(
     '/support/tickets/:ticketId',
     {
@@ -237,6 +257,16 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
       } catch (error) {
         return sendSupportError(error, reply);
       }
+    },
+  );
+
+  app.get<{ Querystring: SupportTicketFilters }>(
+    '/admin/support/tickets/page',
+    { preHandler: [authMiddleware.authenticateRequest] },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+      try { return await listSupportTicketsPage('admin', null, request.query ?? {}, request.authUser.name ?? ''); }
+      catch (error) { return sendSupportError(error, reply); }
     },
   );
 

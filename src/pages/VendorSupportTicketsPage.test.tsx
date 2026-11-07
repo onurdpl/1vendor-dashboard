@@ -14,7 +14,15 @@ vi.mock('../features/support/api', async () => {
   const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
   return {
     ...actual,
-    listVendorSupportTickets: () => listVendorSupportTicketsMock(),
+    listVendorSupportTicketsPage: async (filters: { unreadOnly?: boolean; workflow?: string; search?: string; cursor?: string | null }) => {
+      const tickets = await listVendorSupportTicketsMock();
+      const items = tickets.filter((ticket) => (!filters.unreadOnly || ticket.vendorUnreadCount > 0)
+        && (filters.workflow !== 'open-support-issues' || (!ticket.closedAt && !ticket.resolvedAt && ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED'))
+        && (!filters.search || `${ticket.id} ${ticket.subject} ${ticket.message}`.toLowerCase().includes(filters.search.trim().toLowerCase())));
+      const offset = filters.cursor ? Number(filters.cursor) : 0;
+      return { items: items.slice(offset, offset + 100), total: items.length,
+        hasNextPage: offset + 100 < items.length, nextCursor: offset + 100 < items.length ? String(offset + 100) : null };
+    },
   };
 });
 
@@ -234,5 +242,21 @@ describe('VendorSupportTicketsPage workflow filtering', () => {
     await act(async () => resolveOldA([supportTicket({ id: 'ticket-a-old', subject: 'Stale A support' })]));
     expect(screen.getByRole('link', { name: 'Current A support' })).toBeInTheDocument();
     expect(screen.queryByText('Stale A support')).not.toBeInTheDocument();
+  });
+
+  it('resets to page one after a search changes and then returns to its prior value', async () => {
+    const user = userEvent.setup();
+    listVendorSupportTicketsMock.mockResolvedValue(Array.from({ length: 120 }, (_, index) => supportTicket({
+      id: `ticket-${index}`, subject: index === 119 ? 'Needle history' : `Support ${index}`,
+    })));
+    renderSupportPage();
+    expect(await screen.findByRole('link', { name: 'Support 0' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next', exact: true }));
+    expect(await screen.findByRole('link', { name: 'Support 100' })).toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'Needle');
+    expect(await screen.findByRole('link', { name: 'Needle history' })).toBeInTheDocument();
+    await user.clear(screen.getByRole('searchbox', { name: 'Search' }));
+    expect(await screen.findByRole('link', { name: 'Support 0' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Support 100' })).not.toBeInTheDocument();
   });
 });

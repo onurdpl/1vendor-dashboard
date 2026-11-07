@@ -4,6 +4,8 @@ import type {
   SupportAnalytics,
   SupportAttentionTicketsPage,
   SupportTicket,
+  SupportTicketsPage,
+  SupportPageFilters,
   SupportTicketNote,
   SupportTicketStatus,
 } from './contracts';
@@ -44,6 +46,14 @@ export async function getAdminSupportAnalytics(options: { signal?: AbortSignal }
 
 export async function listVendorSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
   return runtimeServices.support.listVendor({ signal: options.signal });
+}
+
+export async function listAdminSupportTicketsPage(filters: SupportPageFilters, options: { signal?: AbortSignal } = {}): Promise<SupportTicketsPage> {
+  return runtimeServices.support.listAdminPage(filters, options);
+}
+
+export async function listVendorSupportTicketsPage(filters: SupportPageFilters, options: { signal?: AbortSignal } = {}): Promise<SupportTicketsPage> {
+  return runtimeServices.support.listVendorPage(filters, options);
 }
 
 export async function getAdminSupportTicket(ticketId: string, options: { signal?: AbortSignal } = {}): Promise<SupportTicket> {

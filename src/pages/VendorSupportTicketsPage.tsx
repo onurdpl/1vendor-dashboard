@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -7,6 +7,7 @@ import {
   OperationalTableRow,
   OperationalToolbar,
   SectionErrorRetry,
+  SearchInput,
   SectionSkeleton,
   StatusBadge,
 } from '../components/OperationalPrimitives';
@@ -14,9 +15,9 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
 import { getPageReadinessState } from '../lib/pageReadiness';
-import { listVendorSupportTickets, type SupportTicket } from '../features/support/api';
+import { listVendorSupportTicketsPage, type SupportTicket } from '../features/support/api';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
-import { formatDateTime, safeArray } from '../services/real/formatting';
+import { formatDateTime } from '../services/real/formatting';
 
 function formatDate(value: string | null | undefined) {
   return formatDateTime(value, {
@@ -39,11 +40,6 @@ export function isVendorSupportUnread(ticket: SupportTicket) {
   return ticket.vendorUnreadCount > 0;
 }
 
-function isOpenSupportIssue(ticket: SupportTicket) {
-  const status = String(ticket.status ?? '').toUpperCase();
-  return !ticket.closedAt && !ticket.resolvedAt && !['CLOSED', 'RESOLVED'].includes(status);
-}
-
 export function VendorSupportTicketsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
@@ -54,20 +50,28 @@ export function VendorSupportTicketsPage() {
   });
   const [unreadOnly, setUnreadOnly] = useState(false);
   const workflowOpenSupportIssues = searchParams.get('workflow') === 'open-support-issues';
-  const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
-    queryKeys.support.tickets(currentVendor.vendorId),
-    ({ signal }) => listVendorSupportTickets({ signal }),
-    { enabled: pageReadiness.ready, placeholderData: () => undefined },
+  const [searchTerm, setSearchTerm] = useState('');
+  const filters = { search: searchTerm, unreadOnly, workflow: workflowOpenSupportIssues ? 'open-support-issues' : 'all' };
+  const signature = JSON.stringify({ ...filters, vendorId: currentVendor.vendorId });
+  const [pagination, setPagination] = useState<{ signature: string; cursors: Array<string | null>; index: number }>({ signature: '', cursors: [null], index: 0 });
+  useEffect(() => {
+    setPagination({ signature, cursors: [null], index: 0 });
+  }, [signature]);
+  const activePagination = pagination.signature === signature ? pagination : { signature, cursors: [null], index: 0 };
+  const cursor = activePagination.cursors[activePagination.index];
+  const { data: page, isLoading, isError, error, refetch } = useQueryResource(
+    [...queryKeys.support.tickets(currentVendor.vendorId), 'page', signature, cursor],
+    ({ signal }) => listVendorSupportTicketsPage({ ...filters, cursor }, { signal }),
+    { enabled: pageReadiness.ready, placeholderData: () => undefined, timeoutMs: 60000 },
   );
-
-  const filteredTickets = useMemo(() => {
-    return safeArray(tickets).filter((ticket) => {
-      if (!pageReadiness.ready || ticket.vendorId !== currentVendor.vendorId) return false;
-      const matchesWorkflow = !workflowOpenSupportIssues || isOpenSupportIssue(ticket);
-      const matchesUnread = !unreadOnly || isVendorSupportUnread(ticket);
-      return matchesWorkflow && matchesUnread;
-    });
-  }, [tickets, unreadOnly, workflowOpenSupportIssues, currentVendor.vendorId, pageReadiness.ready]);
+  const filteredTickets = page?.items?.filter((ticket) => ticket.vendorId === currentVendor.vendorId) ?? [];
+  function nextPage() {
+    if (!page?.nextCursor) return;
+    setPagination({ signature, cursors: [...activePagination.cursors.slice(0, activePagination.index + 1), page.nextCursor], index: activePagination.index + 1 });
+  }
+  function previousPage() {
+    setPagination({ ...activePagination, index: Math.max(0, activePagination.index - 1) });
+  }
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
@@ -88,6 +92,10 @@ export function VendorSupportTicketsPage() {
       </div>
 
       <OperationalToolbar>
+        <label className="support-search-field" htmlFor="vendor-support-search">
+          <span>Search</span>
+          <SearchInput id="vendor-support-search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search support history..." />
+        </label>
         <FilterBar>
           <label className="support-toggle">
             <input
@@ -116,7 +124,7 @@ export function VendorSupportTicketsPage() {
         </div>
       ) : null}
 
-      {isError && !tickets ? (
+      {isError && !page ? (
         <SectionErrorRetry
           title="Support requests unavailable"
           description={error ?? 'Unable to load support requests.'}
@@ -168,6 +176,11 @@ export function VendorSupportTicketsPage() {
           }
         />
       )}
+      {page && page.total > 0 ? <nav aria-label="Support ticket pages" className="pagination-controls">
+        <button type="button" onClick={previousPage} disabled={activePagination.index === 0}>Previous</button>
+        <span>Page {activePagination.index + 1} · {page.total} matching tickets</span>
+        <button type="button" onClick={nextPage} disabled={!page.hasNextPage}>Next</button>
+      </nav> : null}
     </section>
   );
 }

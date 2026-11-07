@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ticketMatchesSupportActionBucket } from '../lib/supportOperationalStory';
 import type { SupportTicket } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { AdminSupportTicketsPage } from './AdminSupportTicketsPage';
@@ -18,8 +19,21 @@ vi.mock('../features/support/api', async () => {
   return {
     ...actual,
     assignAdminSupportTicketToSelf: (ticketId: string) => assignAdminSupportTicketToSelfMock(ticketId),
-    listAdminSupportTickets: () => listAdminSupportTicketsMock(),
-    listVendorSupportTickets: () => listVendorSupportTicketsMock(),
+    listAdminSupportTicketsPage: async (filters: { bucket?: string; unresolvedOnly?: boolean; search?: string }) => {
+      const tickets = await listAdminSupportTicketsMock();
+      const counts = Object.fromEntries(['all', 'needs_assignment', 'needs_response', 'escalated', 'overdue', 'waiting_vendor', 'resolved']
+        .map((bucket) => [bucket, tickets.filter((ticket) => bucket === 'all'
+          ? !filters.unresolvedOnly || (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED')
+          : ticketMatchesSupportActionBucket(ticket, bucket as 'all')).length]));
+      const items = tickets.filter((ticket) => ticketMatchesSupportActionBucket(ticket, (filters.bucket ?? 'all') as 'all')
+        && (!filters.unresolvedOnly || (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED'))
+        && (!filters.search || ticket.subject.toLowerCase().includes(filters.search.toLowerCase())));
+      return { items, total: items.length, hasNextPage: false, nextCursor: null, bucketCounts: counts };
+    },
+    listVendorSupportTicketsPage: async () => {
+      const items = await listVendorSupportTicketsMock();
+      return { items, total: items.length, hasNextPage: false, nextCursor: null };
+    },
   };
 });
 
