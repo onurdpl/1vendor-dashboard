@@ -4,6 +4,8 @@ import type {
   SupportAnalytics,
   SupportAttentionTicketsPage,
   SupportTicket,
+  SupportTicketsPage,
+  SupportPageFilters,
   SupportTicketNote,
   SupportTicketStatus,
 } from '../../lib/api/contracts';
@@ -55,6 +57,22 @@ export async function getAdminSupportAnalytics(options: { signal?: AbortSignal }
 
 export async function listVendorSupportTickets(options: { signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<SupportTicket[]> {
   return apiClient.get<SupportTicket[]>('/support/tickets', { signal: options.signal, headers: options.headers });
+}
+
+function pagePath(path: string, filters: SupportPageFilters) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+  }
+  return `${path}?${params.toString()}`;
+}
+
+export async function listAdminSupportTicketsPage(filters: SupportPageFilters, options: { signal?: AbortSignal } = {}): Promise<SupportTicketsPage> {
+  return apiClient.get<SupportTicketsPage>(pagePath('/admin/support/tickets/page', filters), { signal: options.signal });
+}
+
+export async function listVendorSupportTicketsPage(filters: SupportPageFilters, options: { signal?: AbortSignal } = {}): Promise<SupportTicketsPage> {
+  return apiClient.get<SupportTicketsPage>(pagePath('/support/tickets/page', filters), { signal: options.signal });
 }
 
 export async function getAdminSupportTicket(ticketId: string, options: { signal?: AbortSignal } = {}): Promise<SupportTicket> {

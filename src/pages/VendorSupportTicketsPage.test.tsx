@@ -14,7 +14,13 @@ vi.mock('../features/support/api', async () => {
   const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
   return {
     ...actual,
-    listVendorSupportTickets: () => listVendorSupportTicketsMock(),
+    listVendorSupportTicketsPage: async (filters: { unreadOnly?: boolean; workflow?: string; search?: string }) => {
+      const tickets = await listVendorSupportTicketsMock();
+      const items = tickets.filter((ticket) => (!filters.unreadOnly || ticket.vendorUnreadCount > 0)
+        && (filters.workflow !== 'open-support-issues' || (!ticket.closedAt && !ticket.resolvedAt && ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED'))
+        && (!filters.search || `${ticket.id} ${ticket.subject} ${ticket.message}`.toLowerCase().includes(filters.search.trim().toLowerCase())));
+      return { items, total: items.length, hasNextPage: false, nextCursor: null };
+    },
   };
 });
 

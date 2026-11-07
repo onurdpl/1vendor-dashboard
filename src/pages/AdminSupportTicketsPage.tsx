@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -19,17 +19,16 @@ import { useAppReadiness } from '../lib/appReadiness';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import {
   assignAdminSupportTicketToSelf,
-  listAdminSupportTickets,
+  listAdminSupportTicketsPage,
   type SupportTicket,
   type SupportTicketCategory,
   type SupportTicketStatus,
 } from '../features/support/api';
 import {
   getSupportOperationalStory,
-  ticketMatchesSupportActionBucket,
   type SupportActionBucket,
 } from '../lib/supportOperationalStory';
-import { formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
+import { formatDateTime, safeStatusLabel } from '../services/real/formatting';
 
 const ALL_STATUSES: Array<SupportTicketStatus | 'all'> = ['all', 'OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
 const ALL_CATEGORIES: Array<SupportTicketCategory | 'all'> = ['all', 'ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
@@ -175,28 +174,6 @@ function getLastUpdateTone(ticket: SupportTicket) {
   return 'neutral' as const;
 }
 
-function ticketMatchesSearch(ticket: SupportTicket, searchTerm: string) {
-  const query = searchTerm.trim().toLowerCase();
-  if (!query) {
-    return true;
-  }
-
-  return [
-    ticket.id,
-    ticket.subject,
-    ticket.vendorId,
-    ticket.vendorName,
-    ticket.assigneeName,
-    ticket.assigneeUserId,
-    ticket.contextId,
-    JSON.stringify(ticket.contextSnapshot ?? {}),
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-    .includes(query);
-}
-
 export function isAdminSupportNeedsResponse(ticket: SupportTicket) {
   return ticket.adminUnreadCount > 0 || (ticket.status === 'OPEN' && !ticket.assigneeUserId && !ticket.assigneeName);
 }
@@ -214,11 +191,6 @@ export function AdminSupportTicketsPage() {
   });
   const [searchParams, setSearchParams] = useSearchParams();
   const initialBucket = (searchParams.get('filter') ?? 'all') as SupportActionBucket;
-  const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
-    queryKeys.admin.support.tickets(),
-    ({ signal }) => listAdminSupportTickets({ signal }),
-    { enabled: pageReadiness.ready },
-  );
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<(typeof ALL_STATUSES)[number]>('all');
   const [categoryFilter, setCategoryFilter] = useState<(typeof ALL_CATEGORIES)[number]>('all');
@@ -243,23 +215,28 @@ export function AdminSupportTicketsPage() {
     },
   );
 
-  const allTickets = safeArray(tickets);
-  const bucketCounts = useMemo(() => {
-    return WORKFLOW_TABS.reduce<Record<SupportActionBucket, number>>((counts, bucket) => {
-      counts[bucket.key] = bucket.key === 'all'
-        ? allTickets.filter((ticket) => !unresolvedOnly || (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED')).length
-        : allTickets.filter((ticket) => ticketMatchesSupportActionBucket(ticket, bucket.key)).length;
-      return counts;
-    }, {
-      all: allTickets.filter((ticket) => !unresolvedOnly || (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED')).length,
-      needs_assignment: 0,
-      needs_response: 0,
-      escalated: 0,
-      overdue: 0,
-      waiting_vendor: 0,
-      resolved: 0,
-    });
-  }, [allTickets, unresolvedOnly]);
+  const filters = { search: searchTerm, bucket: actionBucket, status: statusFilter,
+    category: categoryFilter, priority: priorityFilter, assignee: assigneeFilter,
+    unresolvedOnly, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  const signature = JSON.stringify({ ...filters, actor: currentUser?.name ?? '' });
+  const [pagination, setPagination] = useState<{ signature: string; cursors: Array<string | null>; index: number }>({ signature: '', cursors: [null], index: 0 });
+  const activePagination = pagination.signature === signature ? pagination : { signature, cursors: [null], index: 0 };
+  const cursor = activePagination.cursors[activePagination.index];
+  const { data: page, isLoading, isError, error, refetch } = useQueryResource(
+    [...queryKeys.admin.support.tickets(), 'page', signature, cursor],
+    ({ signal }) => listAdminSupportTicketsPage({ ...filters, cursor }, { signal }),
+    { enabled: pageReadiness.ready, placeholderData: () => undefined, timeoutMs: 60000 },
+  );
+  const filteredTickets = page?.items ?? [];
+  const bucketCounts = page?.bucketCounts ?? { all: 0, needs_assignment: 0, needs_response: 0,
+    escalated: 0, overdue: 0, waiting_vendor: 0, resolved: 0 };
+  function nextPage() {
+    if (!page?.nextCursor) return;
+    setPagination({ signature, cursors: [...activePagination.cursors.slice(0, activePagination.index + 1), page.nextCursor], index: activePagination.index + 1 });
+  }
+  function previousPage() {
+    setPagination({ ...activePagination, index: Math.max(0, activePagination.index - 1) });
+  }
 
   function selectActionBucket(bucket: SupportActionBucket) {
     setActionBucket(bucket);
@@ -272,45 +249,6 @@ export function AdminSupportTicketsPage() {
     }
     setSearchParams(nextParams, { replace: true });
   }
-
-  const filteredTickets = useMemo(() => {
-    return allTickets.filter((ticket) => {
-      if (!ticketMatchesSupportActionBucket(ticket, actionBucket)) {
-        return false;
-      }
-      if (unresolvedOnly && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) {
-        return false;
-      }
-      if (statusFilter !== 'all' && ticket.status !== statusFilter) {
-        return false;
-      }
-      if (categoryFilter !== 'all' && ticket.category !== categoryFilter) {
-        return false;
-      }
-      if (priorityFilter !== 'all' && ticket.priority !== priorityFilter) {
-        return false;
-      }
-      if (assigneeFilter === 'unassigned' && ticket.assigneeUserId) {
-        return false;
-      }
-      if (assigneeFilter === 'me' && currentUser?.name && ticket.assigneeName !== currentUser.name) {
-        return false;
-      }
-      if (assigneeFilter === 'me' && !currentUser?.name) {
-        return false;
-      }
-      return ticketMatchesSearch(ticket, searchTerm);
-    }).sort((left, right) => {
-      const leftStory = getSupportOperationalStory(left);
-      const rightStory = getSupportOperationalStory(right);
-      const leftRank = leftStory.isEscalated ? 0 : leftStory.isOverdue ? 1 : leftStory.needsAssignment ? 2 : leftStory.needsAdminResponse ? 3 : 4;
-      const rightRank = rightStory.isEscalated ? 0 : rightStory.isOverdue ? 1 : rightStory.needsAssignment ? 2 : rightStory.needsAdminResponse ? 3 : 4;
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank;
-      }
-      return getSafeTimestamp(right.updatedAt, 0) - getSafeTimestamp(left.updatedAt, 0);
-    });
-  }, [actionBucket, allTickets, assigneeFilter, categoryFilter, currentUser?.name, priorityFilter, searchTerm, statusFilter, unresolvedOnly]);
 
   return (
     <section className="op-page support-ops-page">
@@ -393,7 +331,7 @@ export function AdminSupportTicketsPage() {
       </OperationalToolbar>
       {assignmentError ? <p className="support-inline-error" role="alert">{assignmentError}</p> : null}
 
-      {isError && !tickets ? (
+      {isError && !page ? (
         <SectionErrorRetry
           title="Support tickets unavailable"
           description={error ?? 'Unable to load support tickets.'}
@@ -462,6 +400,11 @@ export function AdminSupportTicketsPage() {
       ) : (
         <EmptyStatePanel title="No support tickets" description="No tickets match the current filters." />
       )}
+      {page && page.total > 0 ? <nav aria-label="Support ticket pages" className="pagination-controls">
+        <button type="button" onClick={previousPage} disabled={activePagination.index === 0}>Previous</button>
+        <span>Page {activePagination.index + 1} · {page.total} matching tickets</span>
+        <button type="button" onClick={nextPage} disabled={!page.hasNextPage}>Next</button>
+      </nav> : null}
     </section>
   );
 }

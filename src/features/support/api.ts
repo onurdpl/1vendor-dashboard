@@ -11,7 +11,9 @@ export {
   getVendorSupportTicket,
   listAdminSupportAttentionTickets,
   listAdminSupportTickets,
+  listAdminSupportTicketsPage,
   listVendorSupportTickets,
+  listVendorSupportTicketsPage,
   unassignAdminSupportTicket,
   updateAdminSupportTicketStatus,
 } from '../../lib/api/support';
@@ -22,6 +24,8 @@ export type {
   SupportAttentionTicketsPage,
   SupportAnalyticsCategoryInsight,
   SupportTicket,
+  SupportTicketsPage,
+  SupportPageFilters,
   SupportTicketCategory,
   SupportTicketContextType,
   SupportTicketNote,

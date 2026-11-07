@@ -48,6 +48,7 @@ const {
   listAdminSupportAttentionTickets,
   listAdminSupportTickets,
   listVendorSupportTickets,
+  listSupportTicketsPage,
   sanitizeSupportContextSnapshot,
   unassignSupportTicket,
   updateAdminSupportTicketStatus,
@@ -801,5 +802,58 @@ describe('support tickets', () => {
       },
       take: 1000,
     });
+  });
+});
+
+describe('support full-history pages', () => {
+  beforeEach(() => prismaMock.supportTicket.findMany.mockReset());
+
+  it('searches after the first 300 records and returns no false empty result', async () => {
+    const rows = Array.from({ length: 350 }, (_, index) => ticketRecord({
+      id: `ticket-${String(index).padStart(3, '0')}`,
+      updatedAt: new Date(Date.UTC(2026, 5, 1, 0, 0, 0) - index * 1000),
+      subject: index === 320 ? 'Needle beyond first 300' : 'Other request',
+    }));
+    prismaMock.supportTicket.findMany.mockImplementation(async ({ cursor, take }: { cursor?: { id: string }; take: number } = { take: 250 }) => {
+      const start = cursor ? rows.findIndex((row) => row.id === cursor.id) + 1 : 0;
+      return rows.slice(start, start + take);
+    });
+    const result = await listSupportTicketsPage('vendor', 'vendor-a', { search: 'needle' });
+    expect(result.items.map((ticket) => ticket.id)).toEqual(['ticket-320']);
+    expect(result.total).toBe(1);
+    expect(result.hasNextPage).toBe(false);
+    expect(prismaMock.supportTicket.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('pages 100 matching records, preserves order, and rejects cross-vendor or changed-filter cursors', async () => {
+    const rows = Array.from({ length: 205 }, (_, index) => ticketRecord({
+      id: `ticket-${String(index).padStart(3, '0')}`,
+      updatedAt: new Date('2026-06-01T00:00:00Z'), subject: 'match',
+    })).reverse();
+    prismaMock.supportTicket.findMany.mockImplementation(async ({ cursor, take }: { cursor?: { id: string }; take: number } = { take: 250 }) => {
+      const start = cursor ? rows.findIndex((row) => row.id === cursor.id) + 1 : 0;
+      return rows.slice(start, start + take);
+    });
+    const first = await listSupportTicketsPage('vendor', 'vendor-a', { search: 'match' });
+    expect(first.items).toHaveLength(100);
+    expect(first.total).toBe(205);
+    expect(first.hasNextPage).toBe(true);
+    const second = await listSupportTicketsPage('vendor', 'vendor-a', { search: 'match', cursor: first.nextCursor });
+    expect(second.items).toHaveLength(100);
+    expect(new Set([...first.items, ...second.items].map((ticket) => ticket.id)).size).toBe(200);
+    await expect(listSupportTicketsPage('vendor', 'vendor-b', { search: 'match', cursor: first.nextCursor })).rejects.toThrow('Invalid Support page cursor');
+    await expect(listSupportTicketsPage('vendor', 'vendor-a', { search: 'other', cursor: first.nextCursor })).rejects.toThrow('Invalid Support page cursor');
+  });
+
+  it('preserves Admin cross-field substring and literal special-character search', async () => {
+    const rows = [ticketRecord({ id: 'ticket-percent', subject: 'Refund %_ review', vendorId: 'vendor-a', vendor: { name: 'Vendor A' },
+      assigneeName: 'Admin Alice', contextSnapshot: { orderNumber: '#1042', route: '/returns/return-1' } })];
+    prismaMock.supportTicket.findMany.mockResolvedValue(rows);
+    expect((await listSupportTicketsPage('admin', null, { search: 'vendor-a vendor a' })).items.map((ticket) => ticket.id)).toEqual(['ticket-percent']);
+    expect((await listSupportTicketsPage('admin', null, { search: '%_' })).items.map((ticket) => ticket.id)).toEqual(['ticket-percent']);
+    expect((await listSupportTicketsPage('admin', null, { search: 'ADMIN ALICE' })).items.map((ticket) => ticket.id)).toEqual(['ticket-percent']);
+    expect((await listSupportTicketsPage('admin', null, { search: '#1042' })).items.map((ticket) => ticket.id)).toEqual(['ticket-percent']);
+    expect((await listSupportTicketsPage('admin', null, { search: '/returns/return-1' })).items.map((ticket) => ticket.id)).toEqual(['ticket-percent']);
+    expect((await listSupportTicketsPage('admin', null, { search: 'does-not-exist' })).items).toEqual([]);
   });
 });

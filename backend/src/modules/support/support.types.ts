@@ -22,6 +22,20 @@ export type SupportTicketFilters = {
   attention?: unknown;
   limit?: unknown;
   offset?: unknown;
+  cursor?: unknown;
+  workflow?: unknown;
+  unreadOnly?: unknown;
+  bucket?: unknown;
+  assignee?: unknown;
+  timeZone?: unknown;
+};
+
+export type SupportTicketsPageDto = {
+  items: SupportTicketDto[];
+  total: number;
+  hasNextPage: boolean;
+  nextCursor: string | null;
+  bucketCounts?: Record<'all' | 'needs_assignment' | 'needs_response' | 'escalated' | 'overdue' | 'waiting_vendor' | 'resolved', number>;
 };
 
 export type UpdateSupportTicketStatusInput = {

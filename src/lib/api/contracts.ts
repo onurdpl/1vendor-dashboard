@@ -1700,6 +1700,28 @@ export type SupportAttentionTicketsPage = {
   items: SupportAttentionTicket[];
 };
 
+export type SupportTicketsPage = {
+  items: SupportTicket[];
+  total: number;
+  hasNextPage: boolean;
+  nextCursor: string | null;
+  bucketCounts?: Record<'all' | 'needs_assignment' | 'needs_response' | 'escalated' | 'overdue' | 'waiting_vendor' | 'resolved', number>;
+};
+
+export type SupportPageFilters = {
+  search?: string;
+  cursor?: string | null;
+  bucket?: string;
+  status?: string;
+  category?: string;
+  priority?: string;
+  assignee?: string;
+  unresolvedOnly?: boolean;
+  unreadOnly?: boolean;
+  workflow?: string;
+  timeZone?: string;
+};
+
 export type SupportAnalyticsKpis = {
   openTickets: number;
   overdueTickets: number;

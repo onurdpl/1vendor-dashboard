@@ -11,6 +11,7 @@ const listAdminSupportTicketsMock = vi.hoisted(() => vi.fn());
 const listAdminSupportAttentionTicketsMock = vi.hoisted(() => vi.fn());
 const getAdminSupportAnalyticsMock = vi.hoisted(() => vi.fn());
 const listVendorSupportTicketsMock = vi.hoisted(() => vi.fn());
+const listSupportTicketsPageMock = vi.hoisted(() => vi.fn());
 const getAdminSupportTicketMock = vi.hoisted(() => vi.fn());
 const getVendorSupportTicketMock = vi.hoisted(() => vi.fn());
 const getAdminVendorSupportTicketMock = vi.hoisted(() => vi.fn());
@@ -35,6 +36,7 @@ vi.mock('../backend/src/modules/support/support.service.js', () => ({
   listAdminSupportAttentionTickets: listAdminSupportAttentionTicketsMock,
   listAdminSupportTickets: listAdminSupportTicketsMock,
   listVendorSupportTickets: listVendorSupportTicketsMock,
+  listSupportTicketsPage: listSupportTicketsPageMock,
   unassignSupportTicket: unassignSupportTicketMock,
   updateAdminSupportTicketStatus: updateAdminSupportTicketStatusMock,
   SupportTicketError: class SupportTicketError extends Error {
@@ -73,9 +75,27 @@ vi.mock('../backend/src/modules/vendor-access/vendor-access.middleware.js', () =
 describe('support route contract', () => {
   afterEach(() => {
     listVendorSupportTicketsMock.mockReset();
+    listSupportTicketsPageMock.mockReset();
     getVendorSupportTicketMock.mockReset();
     getAdminVendorSupportTicketMock.mockReset();
     resolveAdminVendorTargetMock.mockReset();
+  });
+  it('keeps the existing list contract while exposing separate paginated Admin and Vendor reads', async () => {
+    const gets = new Map<string, (request: any, reply: any) => unknown>();
+    registerSupportRoutes({ get: (path: string, _options: unknown, handler: (request: any, reply: any) => unknown) => gets.set(path, handler), post: vi.fn() } as never, {} as never);
+    const reply = { code: (status: number) => ({ send: (body: unknown) => ({ status, body }) }) };
+    resolveAdminVendorTargetMock.mockResolvedValue({ ok: true, vendor: { id: 'vendor-b' } });
+    listSupportTicketsPageMock.mockResolvedValue({ items: [{ id: 'ticket-b' }], total: 1, hasNextPage: false, nextCursor: null });
+    expect(await gets.get('/support/tickets/page')?.({ authUser: { role: 'admin' }, headers: { 'x-vendor-id': 'vendor-b' }, query: { search: 'ticket' } }, reply))
+      .toMatchObject({ total: 1 });
+    expect(listSupportTicketsPageMock).toHaveBeenCalledWith('vendor', 'vendor-b', { search: 'ticket' });
+    expect(await gets.get('/admin/support/tickets/page')?.({ authUser: { role: 'vendor' }, query: {} }, reply))
+      .toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(await gets.get('/admin/support/tickets/page')?.({ authUser: { role: 'admin', name: 'Admin' }, query: {} }, reply))
+      .toMatchObject({ total: 1 });
+    expect(listSupportTicketsPageMock).toHaveBeenCalledWith('admin', null, {}, 'Admin');
+    expect(gets.has('/support/tickets')).toBe(true);
+    expect(gets.has('/admin/support/tickets')).toBe(true);
   });
   it('lets a non-member Admin list only the explicitly selected Vendor tickets', async () => {
     const gets = new Map<string, (request: any, reply: any) => unknown>();

@@ -16,6 +16,7 @@ import type {
   SupportTicketContextSummaryDto,
   SupportTicketDto,
   SupportTicketFilters,
+  SupportTicketsPageDto,
   SupportTicketNoteDto,
   SupportTicketPriority,
   SupportTicketReplyDto,
@@ -24,6 +25,7 @@ import type {
   SupportAnalyticsDto,
   UpdateSupportTicketStatusInput,
 } from './support.types.js';
+import { compareSupportRows, encodeSupportCursor, matchesSupportPage, parseSupportPageQuery, supportBucketCounts } from './support-page.js';
 
 const VALID_PRIORITIES = new Set<SupportTicketPriority>(['low', 'normal', 'high']);
 const VALID_CONTEXT_TYPES = new Set<SupportTicketContextType>(['order', 'return', 'shipment', 'general']);
@@ -718,7 +720,7 @@ function mapTicket(ticket: {
     message: string;
     createdAt: Date;
   }>;
-}, options: { includeNotes?: boolean; includeReplies?: boolean; includeSla?: boolean; includeContextSnapshot?: boolean } = {}): SupportTicketDto {
+}, options: { includeNotes?: boolean; includeReplies?: boolean; includeSla?: boolean; includeContextSnapshot?: boolean; now?: Date } = {}): SupportTicketDto {
   const includeSla = options.includeSla ?? false;
   const dto: SupportTicketDto = {
     id: ticket.id,
@@ -749,7 +751,7 @@ function mapTicket(ticket: {
       nextResponseDueAt: ticket.nextResponseDueAt,
       escalatedAt: ticket.escalatedAt,
       escalationReason: ticket.escalationReason,
-    }) : null,
+    }, options.now) : null,
     contextType: ticket.contextType as SupportTicketContextType,
     contextId: ticket.contextId,
     contextSummary: buildContextSummary(ticket.contextSnapshot),
@@ -1032,6 +1034,61 @@ export async function listVendorSupportTickets(vendorId: string, filters: Suppor
   const result = applyFilters(tickets.map((ticket) => mapVendorTicket(ticket)), filters);
   logDashboardTiming('support.vendor_ticket_aggregation', aggregationStartedAt);
   return result;
+}
+
+export async function listSupportTicketsPage(
+  scope: 'admin' | 'vendor',
+  vendorId: string | null,
+  filters: SupportTicketFilters = {},
+  actorName = '',
+): Promise<SupportTicketsPageDto> {
+  if (scope === 'vendor' && !vendorId) throw new SupportTicketError('Vendor scope is required.', 400);
+  const query = parseSupportPageQuery(filters, scope, vendorId, actorName);
+  const now = new Date();
+  const pageSize = 100;
+  const scanSize = 250;
+  const matches: Array<{ ticket: SupportTicketDto; row: NonNullable<ReturnType<typeof matchesSupportPage>> }> = [];
+  const bucketCounts = scope === 'admin' ? supportBucketCounts([], query.unresolvedOnly, now, query.timeZone) : undefined;
+  let total = 0;
+  let scanCursor: string | undefined;
+  for (;;) {
+    const batch = await prisma.supportTicket.findMany({
+      where: vendorId ? { vendorId } : undefined,
+      include: { vendor: { select: { name: true } } },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: scanSize,
+      ...(scanCursor ? { cursor: { id: scanCursor }, skip: 1 } : {}),
+    });
+    if (!batch.length) break;
+    for (const ticket of batch) {
+      const dto = scope === 'admin'
+        ? mapAdminTicket(ticket, { includeSla: true, now })
+        : mapVendorTicket(ticket);
+      if (bucketCounts) {
+        const one = supportBucketCounts([dto], query.unresolvedOnly, now, query.timeZone);
+        if (one) for (const key of Object.keys(bucketCounts) as Array<keyof typeof bucketCounts>) bucketCounts[key] += one[key];
+      }
+      const row = matchesSupportPage(dto, query, now);
+      if (!row) continue;
+      total++;
+      if (query.after && compareSupportRows(row, query.after) <= 0) continue;
+      const entry = { ticket: dto, row };
+      const index = matches.findIndex((current) => compareSupportRows(row, current.row) < 0);
+      if (index < 0) matches.push(entry);
+      else matches.splice(index, 0, entry);
+      if (matches.length > pageSize + 1) matches.pop();
+    }
+    if (batch.length < scanSize) break;
+    scanCursor = batch[batch.length - 1].id;
+  }
+  const items = matches.slice(0, pageSize).map(({ ticket }) => ticket);
+  return {
+    items,
+    total,
+    hasNextPage: matches.length > pageSize,
+    nextCursor: matches.length > pageSize ? encodeSupportCursor(query.binding, matches[pageSize - 1].row) : null,
+    ...(bucketCounts ? { bucketCounts } : {}),
+  };
 }
 
 export async function getAdminSupportTicket(ticketId: string): Promise<SupportTicketDto | null> {
