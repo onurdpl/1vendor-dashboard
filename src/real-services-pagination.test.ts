@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
-import { getFinanceDashboard, getFinanceProfile, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
+import { getFinanceDashboard, getFinanceProfile, getFinanceRecordById, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
+import { ApiError } from './lib/api/errors';
 import { getAdminShopifyOrderBreakdown, getOrder, getVendorOrdersWorkflowSummary, listOrders } from './services/real/orders';
 import { getAdminOperationsQueueDashboard, listAdminOperationsQueue } from './services/real/operations';
 import { queryKeys } from './lib/api/queryKeys';
@@ -359,6 +360,24 @@ describe('real service pagination plumbing', () => {
     await getFinanceDashboard({ limit: 50 });
 
     expect(apiClientGet).toHaveBeenCalledWith('/finance?limit=50');
+  });
+
+  it('maps an exact Finance ledger through the canonical record mapper and distinguishes 404 from failure', async () => {
+    const record = { id: 'ledger/a', type: 'sale', amount: '1500.00', status: 'recorded',
+      description: 'Historical sale', relatedOrderId: null, relatedOrderNumber: null,
+      relatedReturnId: null, relatedRefundId: null, createdAt: '2026-11-01T00:00:00.000Z' };
+    apiClientGet.mockResolvedValueOnce({ vendorId: 'vendor-a', record });
+    const result = await getFinanceRecordById({ vendorId: 'vendor-a', ledgerId: 'ledger/a' });
+    expect(apiClientGet).toHaveBeenCalledWith('/finance/transactions/ledger%2Fa',
+      expect.objectContaining({ vendorId: 'vendor-a' }));
+    expect(result.record).toMatchObject({ id: 'ledger/a', description: 'Historical sale', category: 'Invoice' });
+
+    apiClientGet.mockRejectedValueOnce(new ApiError('Not found', 'server', { status: 404 }));
+    expect(await getFinanceRecordById({ vendorId: 'vendor-a', ledgerId: 'missing' }))
+      .toEqual({ vendorId: 'vendor-a', record: null });
+    apiClientGet.mockRejectedValueOnce(new ApiError('Unavailable', 'server', { status: 503 }));
+    await expect(getFinanceRecordById({ vendorId: 'vendor-a', ledgerId: 'missing' }))
+      .rejects.toMatchObject({ status: 503 });
   });
 
   it('preserves finance split summaries on mapped dashboard records', async () => {

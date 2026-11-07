@@ -104,6 +104,36 @@ describe.skipIf(!url || process.env.P4_06C_SEARCH_PG_ISOLATED !== '1')('Finance 
     } };
   }
 
+  async function getRecord(ledgerId: string, vendorId = vendorA, token = adminToken) {
+    return app.inject({ method: 'GET', url: `/finance/transactions/${encodeURIComponent(ledgerId)}`,
+      headers: { authorization: `Bearer ${token}`, 'x-vendor-id': vendorId } });
+  }
+
+  it('reads a ledger beyond page 300 by exact ID with canonical DTO and Vendor isolation', async () => {
+    const ledgerCountBefore = await db.financeLedgerEntry.count();
+    const historical = await getRecord('p4-search-ledger-0350');
+    expect(historical.statusCode).toBe(200);
+    expect(historical.json()).toMatchObject({ vendorId: vendorA, record: { id: 'p4-search-ledger-0350' } });
+    const canonical = await get({ search: 'Needle after page 300' });
+    expect(historical.json().record).toEqual(canonical.body.records[0]);
+    expect((await getRecord('p4-search-ledger-0350', vendorA, vendorToken)).statusCode).toBe(200);
+    expect((await getRecord('p4-search-b-only', vendorA, vendorToken)).statusCode).toBe(404);
+    expect((await getRecord('p4-search-ledger-0350', vendorB)).statusCode).toBe(404);
+    expect((await getRecord('p4-search-b-only', vendorB)).statusCode).toBe(200);
+    expect((await getRecord('p4-search-void')).statusCode).toBe(404);
+    const unknown = await getRecord('no-such-ledger');
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.json()).toEqual((await getRecord('p4-search-b-only')).json());
+    const missingTarget = await app.inject({ method: 'GET', url: '/finance/transactions/p4-search-ledger-0350',
+      headers: { authorization: `Bearer ${adminToken}` } });
+    expect(missingTarget.statusCode).not.toBe(200);
+    expect((await getRecord('p4-search-ledger-0350', vendorB, vendorToken)).statusCode).not.toBe(200);
+    const unauthenticated = await app.inject({ method: 'GET', url: '/finance/transactions/p4-search-ledger-0350',
+      headers: { 'x-vendor-id': vendorA } });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(await db.financeLedgerEntry.count()).toBe(ledgerCountBefore);
+  });
+
   it('returns 100 ordered records per page, with no repeats at equal timestamps', async () => {
     const start = performance.now();
     const first = await get();

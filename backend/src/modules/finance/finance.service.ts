@@ -1470,11 +1470,12 @@ function mapPayoutBatchReference(line?: {
 
 async function findVendorFinanceEntries(
   vendorId: string,
-  options: { limit?: number; offset?: number; keyset?: boolean; cursor?: { createdAt: Date; id: string } } = {},
+  options: { limit?: number; offset?: number; keyset?: boolean; cursor?: { createdAt: Date; id: string }; ledgerId?: string } = {},
 ) {
   return withDashboardTiming('finance.records_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
+        ...(options.ledgerId ? { id: options.ledgerId } : {}),
         ...activeFinanceLedgerWhere,
         ...(options.cursor ? { OR: [
           { createdAt: { lt: options.cursor.createdAt } },
@@ -1821,6 +1822,13 @@ function mapFinanceEntries(
     };
   });
   return records;
+}
+
+export async function getVendorFinanceRecordById(vendorId: string, ledgerId: string): Promise<FinanceRecordDto | null> {
+  const entries = await findVendorFinanceEntries(vendorId, { ledgerId, limit: 1 });
+  if (!entries.length) return null;
+  const profile = mapProfile(await prisma.vendorFinancialProfile.findFirst({ where: { vendorId, active: true } }), vendorId);
+  return mapFinanceEntries(entries, profile)[0] ?? null;
 }
 
 export class FinanceTransactionsCursorError extends Error {}

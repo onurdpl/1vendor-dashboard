@@ -1,4 +1,5 @@
 import { apiClient } from '../../lib/api-client';
+import { ApiError } from '../../lib/api/errors';
 import type {
   FinanceDashboard,
   FinanceDashboardSummary,
@@ -215,6 +216,23 @@ export async function getFinanceTransactions(options: {
     vendorId: string; records: FinanceDashboardDto['records']; hasNextPage: boolean; nextCursor: string | null;
   }>(`/finance/transactions?${params.toString()}`, readVendorRequestOptions(options));
   return { ...response, records: mapFinanceRecords(response.records) };
+}
+
+export async function getFinanceRecordById(options: {
+  vendorId: string; ledgerId: string; signal?: AbortSignal;
+}): Promise<{ vendorId: string; record: FinanceTransaction | null }> {
+  try {
+    const response = await apiClient.get<{ vendorId: string; record: FinanceDashboardDto['records'][number] }>(
+      `/finance/transactions/${encodeURIComponent(options.ledgerId)}`,
+      readVendorRequestOptions(options),
+    );
+    return { vendorId: response.vendorId, record: mapFinanceRecords([response.record])[0] ?? null };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return { vendorId: options.vendorId, record: null };
+    }
+    throw error;
+  }
 }
 
 export async function getFinanceDashboard(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<FinanceDashboard> {

@@ -79,6 +79,7 @@ export const queryKeys = {
     detail: (returnId: string, vendorId = getCurrentVendorContext().vendorId) => ['returns', 'detail', vendorId, returnId] as const,
   },
   finance: {
+    record: (vendorId: string, ledgerId: string) => ['finance', 'record', vendorId, ledgerId] as const,
     transactions: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'transactions', vendorId] as const,
     summary: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'summary', vendorId] as const,
     records: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'records', vendorId] as const,

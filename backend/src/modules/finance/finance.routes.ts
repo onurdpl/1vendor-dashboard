@@ -23,6 +23,7 @@ import {
   getAdminVendorFinancialProfile,
   getVendorFinanceDashboard,
   getVendorFinanceTransactionsPage,
+  getVendorFinanceRecordById,
   FinanceTransactionsCursorError,
   getVendorFinanceSummary,
   getVendorFinancialProfile,
@@ -514,6 +515,20 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         if (error instanceof FinanceTransactionsCursorError) return reply.code(400).send({ message: error.message });
         throw error;
       }
+    },
+  );
+
+  app.get<{ Params: { ledgerId: string } }>(
+    '/finance/transactions/:ledgerId',
+    { preHandler: [authMiddleware.authenticateRequest, resolveFinanceReadVendor] },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      const ledgerId = request.params.ledgerId;
+      if (!ledgerId || ledgerId.length > 200) return reply.code(400).send({ message: 'Invalid Finance ledger ID.' });
+      const record = await getVendorFinanceRecordById(vendorId, ledgerId);
+      if (!record) return reply.code(404).send({ message: 'Finance transaction not found.' });
+      return { vendorId, record };
     },
   );
 
