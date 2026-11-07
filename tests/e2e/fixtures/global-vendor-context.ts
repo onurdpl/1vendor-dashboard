@@ -49,10 +49,22 @@ try {
     id: `context-page-${String(index).padStart(3, '0')}`,
     name: `Context Page Vendor ${String(index).padStart(3, '0')}`,
   })) });
-  await upsertSeedUser(db, { email: 'context-admin@demo.test', name: 'Context Admin',
+  const admin = await upsertSeedUser(db, { email: 'context-admin@demo.test', name: 'Context Admin',
     role: 'ADMIN', vendorIds: [] });
   await upsertSeedUser(db, { email: 'context-vendor-a@demo.test', name: 'Context Vendor A User',
     role: 'VENDOR', vendorIds: ['context-vendor-a'] });
+  for (const [id, vendorId, contextType, contextId, category, snapshot] of [
+    ['context-ticket-a1', 'context-vendor-a', 'order', 'context-allocation-a', 'ORDER', { orderNumber: '#CTX-A' }],
+    ['context-ticket-a2', 'context-vendor-a', 'order', 'context-allocation-a', 'ORDER', { orderNumber: '#CTX-A' }],
+    ['context-ticket-b-order', 'context-vendor-b', 'order', 'context-allocation-b', 'ORDER', { orderNumber: '#CTX-B' }],
+    ['context-ticket-b-return', 'context-vendor-b', 'return', 'context-return-b', 'REFUND', { returnNumber: 'CTX-B-RETURN' }],
+    ['context-ticket-b-finance', 'context-vendor-b', 'order', 'context-allocation-b', 'REFUND',
+      { orderNumber: '#CTX-B', financeLedgerEntryId: 'context-ledger-b' }],
+  ] as const) {
+    await db.supportTicket.create({ data: { id, createdByUserId: admin.id, createdByRole: 'admin',
+      vendorId, subject: id, message: 'Disposable navigation fixture', contextType, contextId,
+      category, contextSnapshot: snapshot } });
+  }
   console.log('Vendor context fixture verified: two distinct record-owning Vendors, 101 pagination Vendors, zero-membership Admin.');
 } finally {
   await db.$disconnect();

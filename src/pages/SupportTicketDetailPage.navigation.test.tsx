@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeConfig } from '../config/runtime';
 import { useAppReadiness } from '../lib/appReadiness';
 import { clearCurrentUser, setSession } from '../lib/auth/session';
+import { markAuthConfirmed } from '../lib/auth/restoreState';
+import { publishSessionTransition } from '../lib/auth/sessionTransition';
 import { getCurrentVendorContext, setCurrentVendorId, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
 import type { SupportTicket } from '../lib/api/contracts';
 import { SupportTicketDetailPage } from './SupportTicketDetailPage';
@@ -19,6 +21,7 @@ vi.mock('../services/runtime-services', () => ({ runtimeServices: {
 } }));
 
 const initialApiMode = runtimeConfig.apiMode;
+const initialAppEnvironment = runtimeConfig.appEnvironment;
 const admin = { email: 'admin@example.test', name: 'Admin', role: 'admin' as const,
   vendorAccess: [], vendorDetails: [], canSwitchVendors: false, defaultVendorId: '' };
 const vendorStatus = (id: string) => ({ vendorId: id, vendorName: id, status: 'active', restricted: false,
@@ -72,13 +75,15 @@ async function open(href: string) {
 
 describe('Admin Support verified Vendor navigation', () => {
   beforeEach(() => {
-    Object.assign(runtimeConfig, { apiMode: 'real' });
+    Object.assign(runtimeConfig, { apiMode: 'real', appEnvironment: 'development' });
     window.localStorage.clear();
-    setSession('admin-token', admin);
+    setSession(null, admin);
+    publishSessionTransition('login');
+    markAuthConfirmed();
     mocks.detail.mockReset(); mocks.status.mockReset(); mocks.fallback.mockReset();
     mocks.status.mockImplementation(async (id: string) => vendorStatus(id));
   });
-  afterEach(() => { cleanup(); clearCurrentUser(); Object.assign(runtimeConfig, { apiMode: initialApiMode }); });
+  afterEach(() => { cleanup(); clearCurrentUser(); Object.assign(runtimeConfig, { apiMode: initialApiMode, appEnvironment: initialAppEnvironment }); });
 
   it('waits for B verification before opening B Order from selected A', async () => {
     setCurrentVendorId('vendor-a');
@@ -176,4 +181,20 @@ describe('Admin Support verified Vendor navigation', () => {
     await act(async () => pending.resolve(vendorStatus('vendor-b')));
     expect(screen.queryByRole('heading', { name: 'Order allocation-b' })).not.toBeInTheDocument();
   });
+
+  it('stops pending navigation after a different Admin session replaces the cookie session', async () => {
+    const pending = deferred<ReturnType<typeof vendorStatus>>();
+    mocks.status.mockReturnValue(pending.promise);
+    mocks.detail.mockResolvedValue(ticket());
+    renderPage();
+    await open('/orders/allocation-b');
+    act(() => {
+      publishSessionTransition('login');
+      setSession(null, { ...admin, email: 'replacement@example.test' });
+      markAuthConfirmed();
+    });
+    await act(async () => pending.resolve(vendorStatus('vendor-b')));
+    expect(screen.queryByRole('heading', { name: 'Order allocation-b' })).not.toBeInTheDocument();
+  });
+
 });

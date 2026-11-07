@@ -133,6 +133,8 @@ async function delayedSwitch(from: 'a' | 'b', to: 'a' | 'b') {
 
 try {
   await login('context-admin@demo.test');
+  // Keep the focused Support run independent of unrelated workspace response timing checks.
+  if (process.env.AUTH_BROWSER_SUPPORT_ONLY !== '1') {
   for (const key of ['a', 'b', 'a'] as const) {
     await check(`${key.toUpperCase()} directory selection and exact F05 verification`, () => selectVendor(key));
     const foreign = key === 'a' ? 'b' : 'a';
@@ -202,6 +204,107 @@ try {
     const selected = await page.evaluate(() => localStorage.getItem('vendor-dashboard.current-vendor-id'));
     assert.notEqual(selected, 'context-vendor-a', 'Invalid selection must not silently restore A.');
   });
+  }
+  if (process.env.AUTH_BROWSER_SUPPORT_ONLY === '1') {
+  for (const [kind, ticketId, href, destination] of [
+    ['Order', 'context-ticket-b-order', '/orders/context-allocation-b', 'Order #CTX-B'],
+    ['Return', 'context-ticket-b-return', '/returns/context-return-b', 'Return request'],
+    ['Finance', 'context-ticket-b-finance', '/finance?ledgerId=context-ledger-b', 'Finance'],
+  ] as const) {
+    await check(`Cookie Admin Support B ${kind} navigation from A`, async () => {
+      await selectVendor('a');
+      await page.goto(`/admin/support/${ticketId}`);
+      await expect(page.getByRole('heading', { name: ticketId })).toBeVisible();
+      assert.equal(await page.evaluate(() => localStorage.getItem('vendor-dashboard.session-token')), null);
+      assert.ok((await context.cookies(backend)).some(cookie => cookie.httpOnly), 'Real authentication must use HttpOnly cookie.');
+      const verification = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/admin/vendors/context-vendor-b/status');
+      await page.locator(`a[href="${href}"]`).click();
+      assert.equal((await verification).status(), 200);
+      await expect(page).toHaveURL(new RegExp(href.replace(/[?]/g, '\\?')));
+      await expect.poll(() => page.evaluate(() => localStorage.getItem('vendor-dashboard.current-vendor-id')))
+        .toBe('context-vendor-b');
+      const selected = await page.evaluate(async () =>
+        (await import('/src/lib/auth/vendorContext.ts')).getAdminVendorSelection());
+      assert.equal(selected.status, 'verified');
+      assert.equal(selected.vendorId, 'context-vendor-b');
+      await expect(page.getByRole('heading', { name: destination, exact: kind !== 'Finance' }).first()).toBeVisible();
+      if (kind === 'Finance') {
+        await expect(page.getByText('222.22', { exact: false }).first()).toBeVisible();
+      } else {
+        await expect(page.getByText('#CTX-B', { exact: false }).first()).toBeVisible();
+      }
+      await expect(page.getByText('#CTX-A', { exact: false })).toHaveCount(0);
+    });
+  }
+  await check('Cookie Admin opens already verified B Support destination', async () => {
+    await page.goto('/admin/support/context-ticket-b-order');
+    await expect(page.getByRole('heading', { name: 'context-ticket-b-order' })).toBeVisible();
+    await page.locator('a[href="/orders/context-allocation-b"]').click();
+    await expect(page).toHaveURL(/\/orders\/context-allocation-b/);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('vendor-dashboard.current-vendor-id')))
+      .toBe('context-vendor-b');
+    assert.equal(await page.evaluate(async () =>
+      (await import('/src/lib/auth/vendorContext.ts')).getAdminVendorSelection().status), 'verified');
+  });
+  await check('Support navigation fails closed when Vendor verification fails', async () => {
+    await selectVendor('a');
+    await page.goto('/admin/support/context-ticket-b-order');
+    await expect(page.getByRole('heading', { name: 'context-ticket-b-order' })).toBeVisible();
+    await page.route('**/admin/vendors/context-vendor-b/status', route => route.fulfill({ status: 503, body: 'Unavailable' }));
+    try {
+      await page.locator('a[href="/orders/context-allocation-b"]').click();
+      await expect(page.getByText('Vendor verification failed. Retry by opening the record again.')).toBeVisible();
+      await expect(page).toHaveURL(/\/admin\/support\/context-ticket-b-order/);
+    } finally {
+      await page.unroute('**/admin/vendors/context-vendor-b/status');
+    }
+  });
+  await check('Cookie Admin logout cancels pending Support navigation', async () => {
+    await selectVendor('a');
+    await page.goto('/admin/support/context-ticket-b-order');
+    await expect(page.getByRole('heading', { name: 'context-ticket-b-order' })).toBeVisible();
+    let release!: () => void;
+    let seen!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { seen = resolve; });
+    await page.route('**/admin/vendors/context-vendor-b/status', async route => {
+      seen();
+      await held;
+      await route.continue().catch(() => {});
+    });
+    try {
+      await page.locator('a[href="/orders/context-allocation-b"]').click();
+      await started;
+      await page.getByRole('button', { name: /Log out/ }).click();
+      await expect(page).toHaveURL(/\/login(?:$|[?#])/);
+      release();
+      await expect(page).not.toHaveURL(/\/orders\/context-allocation-b/);
+    } finally {
+      release();
+      await page.unroute('**/admin/vendors/context-vendor-b/status');
+    }
+    await login('context-admin@demo.test');
+  });
+  await check('Admin A1 to A2 to B1 Support drafts remain isolated', async () => {
+    await page.goto('/admin/support/context-ticket-a1');
+    await expect(page.getByRole('heading', { name: 'context-ticket-a1' })).toBeVisible();
+    await page.getByPlaceholder('Add an internal note...').fill('A1 private draft');
+    await page.evaluate(() => {
+      history.pushState({}, '', '/admin/support/context-ticket-a2');
+      dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByRole('heading', { name: 'context-ticket-a2' })).toBeVisible();
+    await expect(page.getByPlaceholder('Add an internal note...')).toHaveValue('');
+    await page.getByPlaceholder('Add an internal note...').fill('A2 private draft');
+    await page.evaluate(() => {
+      history.pushState({}, '', '/admin/support/context-ticket-b-order');
+      dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByRole('heading', { name: 'context-ticket-b-order' })).toBeVisible();
+    await expect(page.getByPlaceholder('Add an internal note...')).toHaveValue('');
+  });
+  }
   await check('Vendor user cannot request another Vendor', async () => {
     const vendorContext = await browser.newContext({ baseURL: frontend, serviceWorkers: 'block' });
     try {
@@ -219,6 +322,13 @@ try {
         return response.status;
       });
       assert.equal(status, 403);
+      const supportStatus = await vendorPage.evaluate(async () => {
+        const response = await fetch('http://localhost:4000/support/tickets/context-ticket-b-order', {
+          credentials: 'include', headers: { 'X-Vendor-Id': 'context-vendor-b' },
+        });
+        return response.status;
+      });
+      assert.equal(supportStatus, 403);
     } finally {
       await vendorContext.close();
     }
