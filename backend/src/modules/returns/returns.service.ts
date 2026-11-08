@@ -25,6 +25,7 @@ import type {
   ReturnSummaryDto,
 } from './returns.types.js';
 import { mapLinkedSettlementRefundAdjustments } from '../finance/settlement-refund-adjustment.service.js';
+import { displayReturnStatus, matchesReturnsListFilters, type ReturnsListFilters } from './returns-list-filters.js';
 import {
   backfillMissingLineItemImages,
   type ShopifyLineItemImageLookupService,
@@ -683,8 +684,28 @@ function buildReturnOwnershipSummary(record: {
 
 export async function listVendorReturns(
   vendorId: string,
-  options: { limit?: number; offset?: number; search?: string } = {},
+  options: { limit?: number; offset?: number; search?: string } & ReturnsListFilters = {},
 ): Promise<ReturnSummaryDto[]> {
+  if (options.workflow || options.status || options.source) {
+    const limit = options.limit ?? 100;
+    const offset = options.offset ?? 0;
+    const matches: ReturnSummaryDto[] = [];
+    let matchedBeforePage = 0;
+    let sourceOffset = 0;
+    const batchSize = 250;
+    while (matches.length < limit) {
+      const batch = await listVendorReturns(vendorId, { limit: batchSize, offset: sourceOffset, search: options.search });
+      for (const row of batch) {
+        if (!matchesReturnsListFilters(row, options)) continue;
+        if (matchedBeforePage < offset) matchedBeforePage += 1;
+        else matches.push(row);
+        if (matches.length === limit) break;
+      }
+      if (batch.length < batchSize || matches.length === limit) break;
+      sourceOffset += batch.length;
+    }
+    return matches;
+  }
   const search = options.search?.trim() ?? '';
   const orderNumber = search.replace(/^#/, '');
   // Returned-item search must use the same line-item associations as the list projection.
@@ -901,6 +922,17 @@ export async function listVendorReturns(
       updatedAt: record.updatedAt.toISOString(),
     };
   }));
+}
+
+export async function listVendorReturnStatusOptions(vendorId: string): Promise<string[]> {
+  const states = await prisma.returnRecord.findMany({
+    where: { vendorAllocation: { assignedVendorId: vendorId } },
+    select: { status: true, returnLifecycleStatus: true, returnRequestSource: true },
+    distinct: ['status', 'returnLifecycleStatus', 'returnRequestSource'],
+  });
+  return Array.from(new Set(states.map((row) => displayReturnStatus(
+    getLifecycleStatus(row.status, row.returnLifecycleStatus), row.returnRequestSource,
+  )))).sort((a, b) => a.localeCompare(b));
 }
 
 export async function listVendorDashboardReturns(

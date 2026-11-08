@@ -15,6 +15,13 @@ describe('vendor scoped query keys', () => {
       .not.toEqual(queryKeys.returns.list('vendor-a', { search: 'SKU-2' }));
     expect(queryKeys.returns.list('vendor-a', { search: 'SKU-1' }))
       .not.toEqual(queryKeys.returns.list('vendor-b', { search: 'SKU-1' }));
+    expect(queryKeys.returns.list('vendor-a', { workflow: 'requested' }))
+      .not.toEqual(queryKeys.returns.list('vendor-a', { workflow: 'approved' }));
+    expect(queryKeys.returns.list('vendor-a', { status: 'Requested' }))
+      .not.toEqual(queryKeys.returns.list('vendor-a', { status: 'Approved' }));
+    expect(queryKeys.returns.list('vendor-a', { source: 'pending' }))
+      .not.toEqual(queryKeys.returns.list('vendor-a', { source: 'refunded' }));
+    expect(queryKeys.returns.statusOptions('vendor-a')).not.toEqual(queryKeys.returns.statusOptions('vendor-b'));
   });
 
   it('keeps vendor order workflow pages and summaries in distinct cache buckets', () => {

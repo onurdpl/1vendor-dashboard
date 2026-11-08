@@ -16,7 +16,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type ReturnSummary } from '../features/returns/api';
+import { getReturn, listReturns, listReturnStatusOptions, type ReturnsListFilters, type ReturnDetail, type ReturnLineItem, type ReturnSummary } from '../features/returns/api';
 import { getAvailableVendors } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
@@ -24,8 +24,10 @@ import { SupportTicketModal } from '../components/SupportTicketModal';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { safeArray } from '../services/real/formatting';
+import { isTerminalRefundedReturn } from '../lib/returnOperationalState';
 import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
-import { isActiveReturnReviewStatus, isTerminalRefundedReturn } from '../lib/returnOperationalState';
+import { getRefundStatusLabel, isApprovedReturn, isClosedReturn, isRefundedReturn, isPendingReturn,
+  isRequestedReturn, needsAttention } from '../lib/returnsListFilters';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnWorkflowTabKey = 'all' | 'requested' | 'needs-action' | 'approved' | 'refunded' | 'closed';
@@ -102,10 +104,6 @@ function formatTableRequestedDate(value: string | null | undefined) {
   return `${datePart} · ${timePart}`;
 }
 
-function getRefundStatusLabel(item: ReturnSummary) {
-  return item.sourceType === 'shopify_return_request' && !item.sourceShopifyRefundId ? 'Refund pending' : 'Refunded';
-}
-
 function getVendorReason(reason: string | null | undefined, fallback = 'Return requested') {
   const value = reason?.trim();
   if (!value) {
@@ -156,72 +154,6 @@ function getStatusTone(item: ReturnSummary) {
     return 'attention' as const;
   }
   return 'info' as const;
-}
-
-function isPendingReturn(item: ReturnSummary) {
-  return item.sourceType === 'shopify_return_request' && isActiveReturnReviewStatus(item);
-}
-
-function isRefundedReturn(item: ReturnSummary) {
-  return (
-    item.sourceType !== 'shopify_return_request' ||
-    isTerminalRefundedReturn({
-      status: item.status,
-      returnLifecycleStatus: item.returnLifecycleStatus,
-      sourceType: item.sourceType,
-      refundStatus: getRefundStatusLabel(item),
-      sourceShopifyRefundId: item.sourceShopifyRefundId,
-      vendorReceivedAt: item.vendorReceivedAt,
-      vendorReviewedAt: item.vendorReviewedAt,
-      vendorDecision: item.vendorDecision,
-      refundedItems: item.refundedItems,
-    })
-  );
-}
-
-function needsAttention(item: ReturnSummary) {
-  return isRequestedLikeReturn(item) && hasVendorReceivedReturn(item) && !hasVendorDecision(item);
-}
-
-function normalizeReturnStatus(value: string | null | undefined) {
-  return String(value ?? '').toLowerCase().replace(/[_-]+/g, ' ').trim();
-}
-
-function getReturnLifecycleStatus(item: ReturnSummary) {
-  return (item as ReturnSummary & { returnLifecycleStatus?: string | null }).returnLifecycleStatus ?? null;
-}
-
-function getNormalizedReturnStates(item: ReturnSummary) {
-  return [item.status, getReturnLifecycleStatus(item)].map(normalizeReturnStatus).filter(Boolean);
-}
-
-function hasVendorReceivedReturn(item: ReturnSummary) {
-  return Boolean(item.vendorReceivedAt?.trim());
-}
-
-function hasVendorDecision(item: ReturnSummary) {
-  return Boolean(item.vendorDecision?.trim());
-}
-
-function isRequestedLikeReturn(item: ReturnSummary) {
-  return getNormalizedReturnStates(item).some((state) => ['requested', 'awaiting review', 'pending', 'in review'].includes(state));
-}
-
-function isRequestedReturn(item: ReturnSummary) {
-  return isRequestedLikeReturn(item) && !hasVendorReceivedReturn(item);
-}
-
-function isClosedStatusReturn(item: ReturnSummary) {
-  return getNormalizedReturnStates(item).some((state) => ['closed', 'cancelled', 'declined', 'rejected'].includes(state));
-}
-
-function isApprovedReturn(item: ReturnSummary) {
-  const approved = getNormalizedReturnStates(item).includes('approved') || normalizeReturnStatus(item.vendorDecision) === 'approved';
-  return approved && !isRefundedReturn(item) && !isClosedStatusReturn(item);
-}
-
-function isClosedReturn(item: ReturnSummary) {
-  return isClosedStatusReturn(item) && !isRefundedReturn(item);
 }
 
 function getVendorName(vendorId: string, vendorLookup: Map<string, string>) {
@@ -654,8 +586,18 @@ export function ReturnsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const requestedReturnTarget = RETURN_TARGET_PARAMS.map((name) => searchParams.get(name)).find(Boolean) ?? null;
   const workflowParam = searchParams.get('workflow');
+  const activeWorkflowFilter = useMemo(() => getReturnsWorkflowFilter(workflowParam), [workflowParam]);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState<ReturnSourceFilter>('all');
+  const [vendorFilterState, setVendorFilterState] = useState({ vendorId: currentVendor.vendorId, value: 'all' });
+  const vendorFilter = vendorFilterState.vendorId === currentVendor.vendorId ? vendorFilterState.value : 'all';
+  const serverFilters: ReturnsListFilters = {
+    workflow: activeWorkflowFilter?.key === 'all' ? undefined : activeWorkflowFilter?.key,
+    status: statusFilter === 'all' ? undefined : statusFilter,
+    source: sourceFilter === 'all' ? undefined : sourceFilter,
+  };
   const serverSearch = requestedReturnTarget ?? searchTerm.trim();
-  const pageScope = JSON.stringify([currentVendor.vendorId, workflowParam, serverSearch]);
+  const pageScope = JSON.stringify([currentVendor.vendorId, workflowParam, serverSearch, statusFilter, sourceFilter, vendorFilter]);
   const [pageState, setPageState] = useState({ scope: pageScope, page: 0 });
   const page = pageState.scope === pageScope ? pageState.page : 0;
   useEffect(() => {
@@ -663,24 +605,26 @@ export function ReturnsPage() {
   }, [pageScope, pageState.scope]);
   const { data: returns, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId, {
-      limit: RETURNS_PAGE_LIMIT + 1, offset: page * RETURNS_PAGE_LIMIT, search: serverSearch,
+      limit: RETURNS_PAGE_LIMIT + 1, offset: page * RETURNS_PAGE_LIMIT, search: serverSearch, ...serverFilters,
     }),
     ({ signal }) => listReturns({ vendorId: currentVendor.vendorId,
-      limit: RETURNS_PAGE_LIMIT + 1, offset: page * RETURNS_PAGE_LIMIT, search: serverSearch, signal }),
+      limit: RETURNS_PAGE_LIMIT + 1, offset: page * RETURNS_PAGE_LIMIT, search: serverSearch, ...serverFilters, signal }),
+    { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
+  );
+  const { data: statusOptions, isLoading: statusOptionsLoading, isError: statusOptionsError,
+    error: statusOptionsErrorMessage, refetch: retryStatusOptions } = useQueryResource(
+    queryKeys.returns.statusOptions(currentVendor.vendorId),
+    ({ signal }) => listReturnStatusOptions({ vendorId: currentVendor.vendorId, signal }),
     { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
   );
   const returnsMissingVendorContext = appReadiness.status === 'missing_vendor_context';
   const returnsWaitingForVendorContext = !returnsMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [vendorFilter, setVendorFilter] = useState('all');
-  const [sourceFilter, setSourceFilter] = useState<ReturnSourceFilter>('all');
   const [selectedReturnTarget, setSelectedReturnTarget] = useState<{ vendorId: string; id: string } | null>(null);
   const [supportTarget, setSupportTarget] = useState<{ vendorId: string; id: string } | null>(null);
   const visibleReturns = useMemo(() => authContextReady && currentVendor.vendorId
     ? safeArray(returns).slice(0, RETURNS_PAGE_LIMIT)
     : [], [authContextReady, currentVendor.vendorId, returns]);
   const hasNextPage = authContextReady && safeArray(returns).length > RETURNS_PAGE_LIMIT;
-  const activeWorkflowFilter = useMemo(() => getReturnsWorkflowFilter(workflowParam), [workflowParam]);
   const isAdmin = currentUser?.role === 'admin';
 
   useEffect(() => {
@@ -690,6 +634,7 @@ export function ReturnsPage() {
   useEffect(() => {
     setSelectedReturnTarget(null);
     setSupportTarget(null);
+    setVendorFilterState({ vendorId: currentVendor.vendorId, value: 'all' });
   }, [currentVendor.vendorId]);
 
   function clearWorkflowFilter() {
@@ -720,7 +665,7 @@ export function ReturnsPage() {
     if (nextParams.toString() !== searchParams.toString()) setSearchParams(nextParams, { replace: true });
     setSearchTerm('');
     setStatusFilter('all');
-    setVendorFilter('all');
+    setVendorFilterState({ vendorId: currentVendor.vendorId, value: 'all' });
     setSourceFilter('all');
   }
 
@@ -730,17 +675,8 @@ export function ReturnsPage() {
   const effectiveSourceFilter = sourceFilter;
 
   const filteredReturns = useMemo(() => {
-    return visibleReturns.filter((item) => {
-      const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
-      const matchesVendor = vendorFilter === 'all' || item.assignedVendorId === vendorFilter;
-      const matchesSource =
-        effectiveSourceFilter === 'all' ||
-        (effectiveSourceFilter === 'pending' && isPendingReturn(item)) ||
-        (effectiveSourceFilter === 'refunded' && isRefundedReturn(item));
-      const matchesWorkflow = activeWorkflowFilter?.matches(item) ?? true;
-      return matchesStatus && matchesVendor && matchesSource && matchesWorkflow;
-    });
-  }, [activeWorkflowFilter, effectiveSourceFilter, visibleReturns, statusFilter, vendorFilter]);
+    return visibleReturns.filter((item) => vendorFilter === 'all' || item.assignedVendorId === vendorFilter);
+  }, [visibleReturns, vendorFilter]);
 
   const selectedReturn = useMemo(() => {
     const returnList = visibleReturns;
@@ -781,7 +717,7 @@ export function ReturnsPage() {
   const processedCount = returnRows.filter(isRefundedReturn).length;
   const attentionCount = returnRows.filter(needsAttention).length;
   const closedCount = returnRows.filter(isClosedReturn).length;
-  const statuses = Array.from(new Set(returnRows.map((item) => item.status)));
+  const statuses = safeArray(statusOptions);
   const vendors = Array.from(new Set(returnRows.map((item) => item.assignedVendorId)));
   const workflowTabs: Array<{
     key: ReturnWorkflowTabKey;
@@ -895,6 +831,7 @@ export function ReturnsPage() {
             <FilterBar>
               <select
                 value={statusFilter}
+                disabled={statusOptionsLoading || statusOptionsError}
                 onChange={(event) => {
                   clearWorkflowFilter();
                   setStatusFilter(event.target.value);
@@ -923,7 +860,7 @@ export function ReturnsPage() {
                   value={vendorFilter}
                   onChange={(event) => {
                     clearWorkflowFilter();
-                    setVendorFilter(event.target.value);
+                    setVendorFilterState({ vendorId: currentVendor.vendorId, value: event.target.value });
                   }}
                 >
                   <option value="all">All vendors on this page</option>
@@ -943,7 +880,10 @@ export function ReturnsPage() {
               </button>
             </FilterBar>
           </OperationalToolbar>
-          <p>Workflow, status and source filters apply to this page. Search covers the selected Vendor's full Returns dataset.</p>
+          <p>Workflow, status, source and search filter the selected Vendor's full Returns dataset before pagination.</p>
+          {statusOptionsError ? <SectionErrorRetry title="Return statuses unavailable"
+            description={statusOptionsErrorMessage ?? 'Unable to load return statuses.'}
+            onRetry={() => void retryStatusOptions()} /> : null}
 
           <OperationalTable
             columns={[
@@ -983,11 +923,13 @@ export function ReturnsPage() {
               <OperationalTableRow>
                 <EmptyStatePanel
                   title={activeWorkflowFilter?.emptyTitle ?? 'No returns match this view'}
-                  description={visibleReturns.length === 0 && serverSearch
+                  description={visibleReturns.length === 0 && page === 0 && serverSearch && !serverFilters.workflow && !serverFilters.status && !serverFilters.source
                     ? 'No returns match this search for the selected Vendor.'
-                    : visibleReturns.length === 0
-                      ? 'No returns on this page.'
-                      : 'No returns match the page filters. Try another page or adjust the filters.'}
+                    : visibleReturns.length === 0 && page === 0 && (serverSearch || serverFilters.workflow || serverFilters.status || serverFilters.source)
+                      ? 'No returns match these filters for the selected Vendor.'
+                      : visibleReturns.length === 0
+                        ? 'No returns on this page.'
+                        : 'No returns match the vendors on this page.'}
                 />
               </OperationalTableRow>
             ) : filteredReturns.map((item) => {

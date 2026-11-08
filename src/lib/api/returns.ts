@@ -1,9 +1,20 @@
 import { runtimeServices } from '../../services/runtime-services';
 
-export async function listReturns(options: { vendorId?: string | null; limit?: number; offset?: number; search?: string; signal?: AbortSignal } = {}) {
+export type ReturnsListFilters = {
+  workflow?: 'requested' | 'needs-action' | 'approved' | 'refunded' | 'closed';
+  status?: string;
+  source?: 'pending' | 'refunded';
+};
+
+export async function listReturns(options: { vendorId?: string | null; limit?: number; offset?: number; search?: string; signal?: AbortSignal } & ReturnsListFilters = {}) {
   return runtimeServices.returns.list(options.vendorId ?? undefined, {
     signal: options.signal, limit: options.limit, offset: options.offset, search: options.search,
+    workflow: options.workflow, status: options.status, source: options.source,
   });
+}
+
+export async function listReturnStatusOptions(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.returns.statusOptions(options.vendorId ?? undefined, { signal: options.signal });
 }
 
 export async function getReturn(returnId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {

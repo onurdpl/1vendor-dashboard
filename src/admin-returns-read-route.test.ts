@@ -7,6 +7,7 @@ const prismaMock = vi.hoisted(() => ({
   userVendorAccess: { findMany: vi.fn() },
 }));
 const listReturns = vi.hoisted(() => vi.fn());
+const statusOptions = vi.hoisted(() => vi.fn());
 const dashboardReturns = vi.hoisted(() => vi.fn());
 const returnDetail = vi.hoisted(() => vi.fn());
 const reviewReturn = vi.hoisted(() => vi.fn());
@@ -28,6 +29,7 @@ vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
   getVendorReturnById: returnDetail,
   listVendorDashboardReturns: dashboardReturns,
   listVendorReturns: listReturns,
+  listVendorReturnStatusOptions: statusOptions,
   markReturnReceived,
   reviewReturn,
   ReturnReviewError: class extends Error {},
@@ -43,7 +45,7 @@ const { registerReturnsRoutes } = await import('../backend/src/modules/returns/r
 const createFastify = createRequire(`${process.cwd()}/backend/package.json`)('fastify');
 const vendorA = { id: 'vendor-a', name: 'Vendor A', status: 'active' };
 const vendorB = { id: 'vendor-b', name: 'Vendor B', status: 'restricted' };
-const paths = ['/returns', '/returns/dashboard', '/returns/return-a'] as const;
+const paths = ['/returns', '/returns/status-options', '/returns/dashboard', '/returns/return-a'] as const;
 
 function appForTest() {
   const app = createFastify();
@@ -62,6 +64,7 @@ describe('Admin Returns read target isolation', () => {
       [vendorA, vendorB].find(vendor => vendor.id === where.id) ?? null);
     prismaMock.userVendorAccess.findMany.mockResolvedValue([{ vendorId: vendorA.id, vendor: vendorA }]);
     listReturns.mockImplementation(async (vendorId: string) => [{ id: `return-${vendorId}`, vendorId }]);
+    statusOptions.mockImplementation(async (vendorId: string) => [`status-${vendorId}`]);
     dashboardReturns.mockImplementation(async (vendorId: string) => [{ id: `return-${vendorId}`, status: 'requested' }]);
     returnDetail.mockImplementation(async (vendorId: string, returnId: string) =>
       returnId === `return-${vendorId}` ? { id: returnId, vendorId } : null);
@@ -73,10 +76,12 @@ describe('Admin Returns read target isolation', () => {
     try {
       for (const vendor of [vendorA, vendorB]) {
         const list = await app.inject({ method: 'GET', url: '/returns', headers: headers('admin', vendor.id) });
+        const statuses = await app.inject({ method: 'GET', url: '/returns/status-options', headers: headers('admin', vendor.id) });
         const dashboard = await app.inject({ method: 'GET', url: '/returns/dashboard', headers: headers('admin', vendor.id) });
         const detail = await app.inject({ method: 'GET', url: `/returns/return-${vendor.id}`, headers: headers('admin', vendor.id) });
         expect(list.statusCode).toBe(200);
         expect(list.json()).toEqual([{ id: `return-${vendor.id}`, vendorId: vendor.id }]);
+        expect(statuses.json()).toEqual([`status-${vendor.id}`]);
         expect(dashboard.statusCode).toBe(200);
         expect(dashboard.json()).toEqual([{ id: `return-${vendor.id}`, status: 'requested' }]);
         expect(detail.statusCode).toBe(200);
@@ -85,6 +90,23 @@ describe('Admin Returns read target isolation', () => {
       expect(prismaMock.userVendorAccess.findMany).not.toHaveBeenCalled();
       expect(reviewReturn).not.toHaveBeenCalled();
       expect(markReturnReceived).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it('validates Returns filters before calling the Vendor-scoped list service', async () => {
+    const app = appForTest();
+    try {
+      const valid = await app.inject({ method: 'GET',
+        url: '/returns?workflow=needs-action&status=In%20Review&source=pending&search=shoe&limit=101&offset=100',
+        headers: headers('admin', vendorA.id) });
+      expect(valid.statusCode).toBe(200);
+      expect(listReturns).toHaveBeenCalledWith(vendorA.id, {
+        workflow: 'needs-action', status: 'In Review', source: 'pending', search: 'shoe', limit: 101, offset: 100,
+      });
+      for (const query of ['workflow=invalid', 'source=unknown', 'status=', 'status=%20']) {
+        expect((await app.inject({ method: 'GET', url: `/returns?${query}`,
+          headers: headers('admin', vendorA.id) })).statusCode).toBe(400);
+      }
     } finally { await app.close(); }
   });
 

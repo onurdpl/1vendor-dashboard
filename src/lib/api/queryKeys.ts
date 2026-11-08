@@ -1,5 +1,6 @@
 import { getCurrentVendorContext } from '../auth/vendorContext';
 import type { VendorOrdersListFilters, VendorOrdersWorkflow } from './contracts';
+import type { ReturnsListFilters } from './returns';
 
 export const queryKeys = {
   admin: {
@@ -79,8 +80,10 @@ export const queryKeys = {
     detail: (orderId: string, vendorId = getCurrentVendorContext().vendorId) => ['orders', 'detail', vendorId, orderId] as const,
   },
   returns: {
-    list: (vendorId = getCurrentVendorContext().vendorId, options: { limit?: number; offset?: number; search?: string } = {}) =>
-      ['returns', 'list', vendorId, options.limit ?? 'default', options.offset ?? 0, options.search ?? ''] as const,
+    list: (vendorId = getCurrentVendorContext().vendorId, options: { limit?: number; offset?: number; search?: string } & ReturnsListFilters = {}) =>
+      ['returns', 'list', vendorId, options.limit ?? 'default', options.offset ?? 0, options.search ?? '',
+        options.workflow ?? 'all', options.status ?? 'all', options.source ?? 'all'] as const,
+    statusOptions: (vendorId = getCurrentVendorContext().vendorId) => ['returns', 'status-options', vendorId] as const,
     detail: (returnId: string, vendorId = getCurrentVendorContext().vendorId) => ['returns', 'detail', vendorId, returnId] as const,
   },
   finance: {

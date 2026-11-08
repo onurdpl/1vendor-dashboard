@@ -14,6 +14,7 @@ import {
   getVendorReturnById,
   createKargonomiReturnShipmentForReturn,
   listVendorDashboardReturns,
+  listVendorReturnStatusOptions,
   listVendorReturns,
   markReturnReceived,
   previewKargonomiReturnShipmentForReturn,
@@ -24,6 +25,7 @@ import {
   syncKargonomiReturnToShopify,
 } from './returns.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
+import { parseReturnsListFilters } from './returns-list-filters.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { backfillShopifyReturnReasons } from './return-reason-backfill.service.js';
 import { cleanupDuplicateReturnRecords } from './duplicate-return-cleanup.service.js';
@@ -178,14 +180,27 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(400).send({ message: 'search must be a string of 100 characters or fewer.' });
       }
       const search = typeof rawSearch === 'string' ? rawSearch.trim() : '';
+      let filters;
+      try {
+        filters = parseReturnsListFilters(request.query);
+      } catch (error) {
+        return reply.code(400).send({ message: error instanceof Error ? error.message : 'Invalid Returns filters.' });
+      }
 
       return withDashboardRouteTiming('GET /returns', () =>
         withSlowEndpointTiming('GET /returns', () => listVendorReturns(vendorId, {
-          ...resolvePagination(request.query), ...(search ? { search } : {}),
+          ...resolvePagination(request.query), ...(search ? { search } : {}), ...filters,
         })),
       );
     },
   );
+
+  app.get('/returns/status-options', {
+    preHandler: [authMiddleware.authenticateRequest, resolveReturnsReadVendor],
+  }, async (request) => {
+    const vendorId = request.vendorContext?.vendorId;
+    return vendorId ? listVendorReturnStatusOptions(vendorId) : [];
+  });
 
   app.get(
     '/returns/dashboard',
