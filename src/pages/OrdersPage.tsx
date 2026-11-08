@@ -44,7 +44,7 @@ import { useActionFeedback } from '../lib/ui';
 import { isVendorContextRestricted } from '../lib/auth';
 import { getLatestVendorBlockedAt } from '../lib/orderAssignmentMetadata';
 
-type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
+type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'returns';
 type OrderWorkflowTabKey = 'all' | 'awaiting-shipment' | 'blocked-allocation' | 'stale-fulfillment' | 'tracking-missing';
 type LabelActionFeedback = {
   tone: 'success' | 'warning' | 'error';
@@ -344,21 +344,6 @@ function getLineItemImageAlt(item: OrderDetail['lineItems'][number]) {
   return item.name ? `${item.name} product image` : item.sku ? `${item.sku} product image` : 'Product image';
 }
 
-function parseOperationalAmount(amount: string) {
-  const numeric = amount.replace(/[^\d.,-]/g, '');
-  const hasComma = numeric.includes(',');
-  const hasDot = numeric.includes('.');
-  const normalized = hasComma && hasDot
-    ? numeric.lastIndexOf('.') > numeric.lastIndexOf(',')
-      ? numeric.replace(/,/g, '')
-      : numeric.replace(/\./g, '').replace(',', '.')
-    : hasComma
-      ? numeric.replace(',', '.')
-      : numeric;
-  const value = Number.parseFloat(normalized);
-  return Number.isFinite(value) ? value : 0;
-}
-
 function orderMatchesTarget(order: OrderSummary, target: string | null) {
   if (!target) {
     return false;
@@ -599,7 +584,6 @@ export function OrdersPage() {
         (effectiveQuickFilter === 'blocked' && !order.isCancelled && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
         (effectiveQuickFilter === 'awaiting' && !order.isCancelled && order.shippingStatus === 'Awaiting Shipment') ||
         (effectiveQuickFilter === 'tracking_missing' && !order.isCancelled && !order.trackingNumber && !order.carrier) ||
-        (effectiveQuickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
         (effectiveQuickFilter === 'returns' && searchableText.includes('return'));
 
       const matchesAuthoritativeActionability =
@@ -708,7 +692,6 @@ export function OrdersPage() {
   const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number | string }> = [
     { key: 'all', label: 'All orders', count: workflowSummary?.all ?? '—' },
     { key: 'tracking_missing', label: 'Tracking missing', count: workflowSummary?.trackingMissing ?? '—' },
-    { key: 'high_value', label: 'High value (page)', count: visibleOrders.filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
   ];
   const workflowTabs: Array<{
     key: OrderWorkflowTabKey;
@@ -968,7 +951,7 @@ export function OrdersPage() {
                   </button>
                 ))}
               </div>
-              <p>Allocation, fulfillment, shipping, high-value and blocked filters apply to the current page. Search and the other workflow tabs cover the selected Vendor's full order list.</p>
+              <p>Allocation, fulfillment, shipping and blocked filters apply to the current page. Search and the other workflow tabs cover the selected Vendor's full order list.</p>
             </div>
 
             <div className="op-main-column orders-table-shell">

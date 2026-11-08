@@ -1535,21 +1535,22 @@ describe('OrdersPage control center', () => {
       screen.getAllByRole('combobox');
     const workflowTabs = screen.getByLabelText('Orders workflow tabs');
     const quickFilters = screen.getByLabelText('Order quick filters');
-    const highValueQuickFilter = within(quickFilters).getByRole('button', {
-      name: /High value/i,
+    const trackingMissingQuickFilter = within(quickFilters).getByRole('button', {
+      name: /Tracking missing/i,
     });
+    expect(within(quickFilters).queryByRole('button', { name: /High value/i })).not.toBeInTheDocument();
 
     await userEvent.type(searchInput, 'DHL');
     await userEvent.selectOptions(allocationFilter, 'fulfilled');
     await userEvent.selectOptions(fulfillmentFilter, 'Fulfilled');
     await userEvent.selectOptions(shippingFilter, 'Delivered');
-    await userEvent.click(highValueQuickFilter);
+    await userEvent.click(trackingMissingQuickFilter);
 
     expect(searchInput).toHaveValue('DHL');
     expect(allocationFilter).toHaveValue('fulfilled');
     expect(fulfillmentFilter).toHaveValue('Fulfilled');
     expect(shippingFilter).toHaveValue('Delivered');
-    expect(highValueQuickFilter).toHaveClass('is-active');
+    expect(trackingMissingQuickFilter).toHaveClass('is-active');
 
     await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
 
@@ -1565,8 +1566,29 @@ describe('OrdersPage control center', () => {
     expect(within(quickFilters).getByRole('button', { name: /All orders/i })).toHaveClass(
       'is-active'
     );
-    expect(highValueQuickFilter).not.toHaveClass('is-active');
+    expect(trackingMissingQuickFilter).not.toHaveClass('is-active');
     expect(screen.queryByRole('button', { name: 'Filters' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the tracking-missing quick filter working without a High value control', async () => {
+    listOrdersMock.mockResolvedValue([
+      buildSummary(),
+      buildSummary({ id: 'ORD-A-1003', sourceShopifyOrderNumber: '#1003', trackingNumber: undefined, carrier: undefined }),
+    ]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1003');
+    const quickFilters = within(screen.getByLabelText('Order quick filters'));
+    expect(quickFilters.queryByRole('button', { name: /High value/i })).not.toBeInTheDocument();
+
+    await userEvent.click(quickFilters.getByRole('button', { name: /Tracking missing/i }));
+    expect(table.getByText('#1003')).toBeInTheDocument();
+    expect(table.queryByText('#1002')).not.toBeInTheDocument();
+
+    await userEvent.click(quickFilters.getByRole('button', { name: /All orders/i }));
+    expect(table.getByText('#1002')).toBeInTheDocument();
   });
 
   it.each([
