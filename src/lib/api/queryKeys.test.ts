@@ -26,6 +26,11 @@ describe('vendor scoped query keys', () => {
       'default',
       0,
       '',
+      'all',
+      'all',
+      'all',
+      false,
+      false,
     ]);
     expect(queryKeys.orders.list('vendor-a', {
       workflow: 'awaitingShipment',
@@ -56,10 +61,25 @@ describe('vendor scoped query keys', () => {
     }));
     expect(queryKeys.orders.list('vendor-a', { search: '#1150' }))
       .not.toEqual(queryKeys.orders.list('vendor-a', { search: '#1151' }));
+    const filterVariants = [
+      {},
+      { allocationStatus: 'active' },
+      { fulfillmentStatus: 'Pending' },
+      { shippingStatus: 'In Transit' },
+      { blocked: true },
+      { trackingMissing: true },
+      { allocationStatus: 'active', fulfillmentStatus: 'Pending', shippingStatus: 'In Transit',
+        blocked: true, trackingMissing: true },
+    ] as const;
+    const filterKeys = filterVariants.map((filters) => queryKeys.orders.list('vendor-a', {
+      workflow: 'awaitingShipment', limit: 101, offset: 100, search: '#1150', ...filters,
+    }));
+    expect(new Set(filterKeys.map((key) => JSON.stringify(key))).size).toBe(filterVariants.length);
     expect(queryKeys.orders.workflowSummary('vendor-a')).toEqual([
       'orders',
       'workflow-summary',
       'vendor-a',
     ]);
+    expect(queryKeys.orders.workflowSummary('vendor-a')).not.toEqual(queryKeys.orders.list('vendor-a'));
   });
 });
