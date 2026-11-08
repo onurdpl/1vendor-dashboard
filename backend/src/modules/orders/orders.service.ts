@@ -95,6 +95,11 @@ import { isPendingCustomerCancellationHoldState } from './customer-cancellation-
 import { assertAllocationActionable } from './allocation-actionability-guard.service.js';
 import { evaluateAllocationActionability } from './allocation-actionability-policy.service.js';
 import { buildVendorOrdersWorkflowWhere } from './vendor-orders-workflow.js';
+import {
+  buildVendorOrdersListWhere,
+  matchesVendorOrdersDisplayFilters,
+  type VendorOrdersListFilters,
+} from './vendor-orders-list-filters.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -2286,17 +2291,25 @@ async function getLatestShopifyReturnSignalForOrder(shopifyOrderDbId: string): P
 
 export async function listVendorOrders(
   vendorId: string,
-  options: { limit?: number; offset?: number; workflow?: VendorOrdersWorkflow; search?: string } = {},
+  options: { limit?: number; offset?: number; workflow?: VendorOrdersWorkflow; search?: string } & VendorOrdersListFilters = {},
 ): Promise<OrderSummaryDto[]> {
   const workflow = options.workflow ?? 'all';
   const search = options.search?.trim() ?? '';
   const orderNumber = search.replace(/^#/, '');
   const allocationStatus = Object.values(AllocationStatus).find((value) =>
     value.toLowerCase() === search.toLowerCase().replaceAll(' ', '_'));
-  const workflowWhere = buildVendorOrdersWorkflowWhere(vendorId, workflow);
+  const filters: VendorOrdersListFilters = {
+    allocationStatus: options.allocationStatus,
+    fulfillmentStatus: options.fulfillmentStatus,
+    shippingStatus: options.shippingStatus,
+    blocked: options.blocked,
+    trackingMissing: options.trackingMissing,
+  };
+  const listWhere = buildVendorOrdersListWhere(vendorId, workflow, filters);
+  const loadBatch = async (limit: number, offset: number): Promise<OrderSummaryDto[]> => {
   const allocations = await withDashboardTiming('orders.vendor_allocation_fetch', () => prisma.vendorAllocation.findMany({
     where: search ? {
-      AND: [workflowWhere, {
+      AND: [listWhere, {
         OR: [
           { id: { contains: search, mode: 'insensitive' } },
           { sourceShopifyOrderId: { contains: search, mode: 'insensitive' } },
@@ -2313,7 +2326,7 @@ export async function listVendorOrders(
           ] } } },
         ],
       }],
-    } : workflowWhere,
+    } : listWhere,
     select: {
       id: true,
       assignedVendorId: true,
@@ -2371,8 +2384,8 @@ export async function listVendorOrders(
       },
     },
     orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-    take: options.limit ?? 100,
-    skip: options.offset ?? 0,
+    take: limit,
+    skip: offset,
   }));
 
   return withDashboardTiming('orders.metrics_aggregation', () => allocations.map((allocation) => {
@@ -2416,6 +2429,35 @@ export async function listVendorOrders(
       updatedAt: allocation.updatedAt.toISOString(),
     };
   }));
+  };
+
+  if (!filters.fulfillmentStatus && !filters.shippingStatus) {
+    return loadBatch(options.limit ?? 100, options.offset ?? 0);
+  }
+
+  // Display-normalized states cannot be filtered by comparing raw database
+  // strings. Scan bounded Vendor-scoped batches, then offset the matched rows.
+  const matched: OrderSummaryDto[] = [];
+  const requestedOffset = options.offset ?? 0;
+  const requestedLimit = options.limit ?? 100;
+  let scanned = 0;
+  let skippedMatches = 0;
+  const batchSize = 250;
+  while (matched.length < requestedLimit) {
+    const batch = await loadBatch(batchSize, scanned);
+    for (const order of batch) {
+      if (!matchesVendorOrdersDisplayFilters(order, filters)) continue;
+      if (skippedMatches < requestedOffset) {
+        skippedMatches += 1;
+      } else {
+        matched.push(order);
+        if (matched.length === requestedLimit) break;
+      }
+    }
+    scanned += batch.length;
+    if (batch.length < batchSize) break;
+  }
+  return matched;
 }
 
 export async function getVendorOrdersWorkflowSummary(

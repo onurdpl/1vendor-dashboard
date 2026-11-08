@@ -41,4 +41,18 @@ describe('real orders service authorization', () => {
     expect(headers.get('Authorization')).toBe('Bearer orders-token');
     expect(headers.get('X-Vendor-Id')).toBe('sporjinal');
   });
+
+  it('sends all existing full-history filters with the selected Vendor and pagination', async () => {
+    await listOrders({ vendorId: 'sporjinal', workflow: 'awaitingShipment', search: '#1300',
+      limit: 101, offset: 100, allocationStatus: 'active', fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment', blocked: true, trackingMissing: true });
+    const [rawUrl, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    const url = new URL(rawUrl, 'http://localhost');
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      workflow: 'awaitingShipment', search: '#1300', limit: '101', offset: '100',
+      allocationStatus: 'active', fulfillmentStatus: 'Pending', shippingStatus: 'Awaiting Shipment',
+      blocked: 'true', trackingMissing: 'true',
+    });
+    expect((init.headers as Headers).get('X-Vendor-Id')).toBe('sporjinal');
+  });
 });

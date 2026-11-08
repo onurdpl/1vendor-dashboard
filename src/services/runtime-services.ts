@@ -80,6 +80,7 @@ import type {
   VendorIntegrationTokenCreateResult,
   SopyoCredentialState,
   VendorOrdersWorkflow,
+  VendorOrdersListFilters,
   VendorOrdersWorkflowSummary,
 } from '../lib/api/contracts';
 import type {
@@ -144,7 +145,7 @@ function mockSupportPage(tickets: SupportTicket[], filters: SupportPageFilters, 
 }
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
-type OrdersReadRequestOptions = ReadRequestOptions & { workflow?: VendorOrdersWorkflow; search?: string };
+type OrdersReadRequestOptions = ReadRequestOptions & VendorOrdersListFilters & { workflow?: VendorOrdersWorkflow; search?: string };
 type ReturnsReadRequestOptions = ReadRequestOptions & { search?: string };
 type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope };
 
@@ -202,6 +203,18 @@ function filterMockVendorOrdersByWorkflow(orders: OrderSummary[], workflow: Vend
     return orders.filter((order) => !order.isCancelled && !order.trackingNumber && !order.carrier);
   }
   return orders.filter((order) => !order.isCancelled && order.shippingStatus === 'Awaiting Shipment');
+}
+
+function filterMockVendorOrdersByListFilters(orders: OrderSummary[], options: VendorOrdersListFilters) {
+  const trackingScope = options.trackingMissing ? new Set(filterMockVendorOrdersByWorkflow(orders, 'trackingMissing').map((order) => order.id)) : null;
+  return orders.filter((order) =>
+    (!options.allocationStatus || order.allocationStatus === options.allocationStatus) &&
+    (!options.fulfillmentStatus || order.fulfillmentStatus === options.fulfillmentStatus) &&
+    (!options.shippingStatus || order.shippingStatus === options.shippingStatus) &&
+    (!options.blocked || (!order.isCancelled &&
+      (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment'))) &&
+    (!trackingScope || trackingScope.has(order.id)),
+  );
 }
 
 function buildMockVendorOrdersWorkflowSummary(vendorId: string): VendorOrdersWorkflowSummary {
@@ -1063,9 +1076,14 @@ export const runtimeServices = {
             offset: options.offset,
             workflow: options.workflow,
             search: options.search,
+            allocationStatus: options.allocationStatus,
+            fulfillmentStatus: options.fulfillmentStatus,
+            shippingStatus: options.shippingStatus,
+            blocked: options.blocked,
+            trackingMissing: options.trackingMissing,
           })
         : Promise.resolve(
-            filterMockVendorOrdersByWorkflow(listMockOrders(vendorId), options.workflow).filter((order) =>
+            filterMockVendorOrdersByListFilters(filterMockVendorOrdersByWorkflow(listMockOrders(vendorId), options.workflow), options).filter((order) =>
               !options.search || [order.id, order.sourceShopifyOrderId, order.sourceShopifyOrderNumber,
                 order.customer, order.trackingNumber, order.carrier, order.allocationStatus,
                 order.fulfillmentStatus, order.shippingStatus].some((field) =>
