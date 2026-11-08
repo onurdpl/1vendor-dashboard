@@ -27,6 +27,7 @@ import type {
   ReturnOwnershipSummary,
   VendorAllocationSummary,
   VendorOrdersWorkflow,
+  VendorOrdersListFilters,
   VendorOrdersWorkflowSummary,
   KargonomiWarehouseSyncResult,
   VendorShippingConfig,
@@ -800,7 +801,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
   };
 }
 
-export async function listOrders(options: {
+export async function listOrders(options: VendorOrdersListFilters & {
   limit?: number;
   offset?: number;
   workflow?: VendorOrdersWorkflow;
@@ -814,6 +815,11 @@ export async function listOrders(options: {
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
   if (options.search) params.set('search', options.search);
+  if (options.allocationStatus) params.set('allocationStatus', options.allocationStatus);
+  if (options.fulfillmentStatus) params.set('fulfillmentStatus', options.fulfillmentStatus);
+  if (options.shippingStatus) params.set('shippingStatus', options.shippingStatus);
+  if (options.blocked) params.set('blocked', 'true');
+  if (options.trackingMissing) params.set('trackingMissing', 'true');
   const path = `/orders${params.size ? `?${params.toString()}` : ''}`;
   const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions

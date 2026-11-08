@@ -149,6 +149,40 @@ describe('orders route contract', () => {
     });
   });
 
+  it('validates and forwards the five existing full-history filters together', async () => {
+    listVendorOrdersMock.mockResolvedValueOnce([]);
+    const gets = new Map<string, (request: { vendorContext?: { vendorId?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = { get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+      gets.set(path, handler as never);
+    }), post: vi.fn() };
+    registerOrdersRoutes(app as never, {} as never);
+    await gets.get('/orders')?.({ vendorContext: { vendorId: 'vendor-a' }, query: {
+      workflow: 'awaitingShipment', search: ' #1300 ', limit: '101', offset: '100',
+      allocationStatus: 'active', fulfillmentStatus: 'Pending', shippingStatus: 'Awaiting Shipment',
+      blocked: 'true', trackingMissing: 'true',
+    } }, {});
+    expect(listVendorOrdersMock).toHaveBeenCalledWith('vendor-a', {
+      workflow: 'awaitingShipment', search: '#1300', limit: 101, offset: 100,
+      allocationStatus: 'active', fulfillmentStatus: 'Pending', shippingStatus: 'Awaiting Shipment',
+      blocked: true, trackingMissing: true,
+    });
+  });
+
+  it('rejects invalid filter values before listing', async () => {
+    const gets = new Map<string, (request: { vendorContext?: { vendorId?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = { get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+      gets.set(path, handler as never);
+    }), post: vi.fn() };
+    registerOrdersRoutes(app as never, {} as never);
+    const reply = { code: (statusCode: number) => ({ send: (payload: unknown) => ({ statusCode, payload }) }) };
+    for (const query of [{ fulfillmentStatus: 'fulfilled-ish' }, { shippingStatus: 'shipped' },
+      { allocationStatus: 'REASSIGNED' }, { blocked: 'maybe' }, { trackingMissing: ['true'] }]) {
+      const result = await gets.get('/orders')?.({ vendorContext: { vendorId: 'vendor-a' }, query }, reply);
+      expect(result).toMatchObject({ statusCode: 400 });
+    }
+    expect(listVendorOrdersMock).not.toHaveBeenCalled();
+  });
+
   it('rejects unsupported vendor orders workflows with the existing 400 response convention', async () => {
     const gets = new Map<string, (request: {
       vendorContext?: { vendorId?: string };

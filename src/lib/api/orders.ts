@@ -2,6 +2,7 @@ import { runtimeServices } from '../../services/runtime-services';
 import type {
   ShipmentCustomerOverrides,
   ShippingProvider,
+  VendorOrdersListFilters,
   VendorOrdersWorkflow,
   VendorShippingConfigUpdate,
 } from './contracts';
@@ -18,7 +19,7 @@ import type {
   UpdateNavlungoShipmentPayload,
 } from '../../services/real/orders';
 
-export async function listOrders(options: {
+export async function listOrders(options: VendorOrdersListFilters & {
   vendorId?: string | null;
   workflow?: VendorOrdersWorkflow;
   limit?: number;
@@ -31,6 +32,11 @@ export async function listOrders(options: {
     limit: options.limit,
     offset: options.offset,
     search: options.search,
+    allocationStatus: options.allocationStatus,
+    fulfillmentStatus: options.fulfillmentStatus,
+    shippingStatus: options.shippingStatus,
+    blocked: options.blocked,
+    trackingMissing: options.trackingMissing,
     signal: options.signal,
   });
 }

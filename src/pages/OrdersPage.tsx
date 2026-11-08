@@ -19,6 +19,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
+import type { VendorOrdersListFilters } from '../lib/api/contracts';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
   createShipmentExecution,
@@ -44,7 +45,7 @@ import { useActionFeedback } from '../lib/ui';
 import { isVendorContextRestricted } from '../lib/auth';
 import { getLatestVendorBlockedAt } from '../lib/orderAssignmentMetadata';
 
-type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'returns';
+type OrderQuickFilter = 'all' | 'tracking_missing';
 type OrderWorkflowTabKey = 'all' | 'awaiting-shipment' | 'blocked-allocation' | 'stale-fulfillment' | 'tracking-missing';
 type LabelActionFeedback = {
   tone: 'success' | 'warning' | 'error';
@@ -377,10 +378,9 @@ function getOrdersWorkflowFilter(workflow: string | null) {
   if (workflow === 'blocked-allocation') {
     return {
       label: 'Blocked allocation',
-      description: 'Showing blocked or reassignment-needed allocations on this page.',
-      emptyTitle: 'No blocked allocations on this page',
-      emptyDescription: 'No blocked allocations appear on this page. Check other pages or switch to All orders.',
-      quickFilter: 'blocked' as OrderQuickFilter,
+      description: 'Showing blocked or reassignment-needed allocations in the selected Vendor history.',
+      emptyTitle: 'No blocked allocations',
+      emptyDescription: 'No blocked allocations match this workflow for the selected Vendor.',
     };
   }
   if (workflow === 'awaiting-shipment') {
@@ -389,7 +389,6 @@ function getOrdersWorkflowFilter(workflow: string | null) {
       description: 'Showing orders that need shipment creation or provider progress.',
       emptyTitle: 'No shipments currently awaiting action',
       emptyDescription: 'This workflow queue is clear for the current vendor scope. Switch to All orders to review the full list.',
-      quickFilter: 'awaiting' as OrderQuickFilter,
     };
   }
   if (workflow === 'stale-fulfillment') {
@@ -398,7 +397,6 @@ function getOrdersWorkflowFilter(workflow: string | null) {
       description: 'Showing fulfillment work that still needs shipment progress.',
       emptyTitle: 'No stale fulfillment work in this queue',
       emptyDescription: 'No stale fulfillment items match this workflow right now. Switch to All orders to inspect the full list.',
-      quickFilter: 'awaiting' as OrderQuickFilter,
     };
   }
   if (workflow === 'tracking-missing') {
@@ -407,7 +405,6 @@ function getOrdersWorkflowFilter(workflow: string | null) {
       description: 'Showing orders without carrier or tracking evidence.',
       emptyTitle: 'No orders missing tracking',
       emptyDescription: 'Tracking evidence is present for the current workflow queue. Switch to All orders to review the full list.',
-      quickFilter: 'tracking_missing' as OrderQuickFilter,
     };
   }
   return null;
@@ -443,11 +440,22 @@ export function OrdersPage() {
   const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
   const { message, tone, showFeedback } = useActionFeedback();
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
+  const [shippingFilter, setShippingFilter] = useState('all');
+  const [quickFilter, setQuickFilter] = useState<OrderQuickFilter>('all');
   const requestedOrderTargets = useMemo(() => getRequestedOrderTargets(searchParams), [searchParams]);
   const hasRequestedOrderTarget = requestedOrderTargets.length > 0;
   const requestedOrderTargetKey = requestedOrderTargets.join('|');
   const serverSearch = hasRequestedOrderTarget ? requestedOrderTargets[0] : searchTerm.trim();
-  const pageScope = JSON.stringify([currentVendor.vendorId, workflowParam, backendWorkflow, serverSearch]);
+  const serverFilters: VendorOrdersListFilters = {
+    allocationStatus: statusFilter === 'all' ? undefined : statusFilter as VendorOrdersListFilters['allocationStatus'],
+    fulfillmentStatus: fulfillmentFilter === 'all' ? undefined : fulfillmentFilter as VendorOrdersListFilters['fulfillmentStatus'],
+    shippingStatus: shippingFilter === 'all' ? undefined : shippingFilter as VendorOrdersListFilters['shippingStatus'],
+    blocked: workflowParam === 'blocked-allocation',
+    trackingMissing: quickFilter === 'tracking_missing',
+  };
+  const pageScope = JSON.stringify([currentVendor.vendorId, workflowParam, backendWorkflow, serverSearch, serverFilters]);
   const [pageState, setPageState] = useState({ scope: pageScope, page: 0 });
   const page = pageState.scope === pageScope ? pageState.page : 0;
   useEffect(() => {
@@ -459,6 +467,7 @@ export function OrdersPage() {
       limit: ORDERS_PAGE_LIMIT + 1,
       offset: page * ORDERS_PAGE_LIMIT,
       search: serverSearch,
+      ...serverFilters,
     }),
     ({ signal }) => listOrders({
       vendorId: currentVendor.vendorId,
@@ -466,6 +475,7 @@ export function OrdersPage() {
       limit: ORDERS_PAGE_LIMIT + 1,
       offset: page * ORDERS_PAGE_LIMIT,
       search: serverSearch,
+      ...serverFilters,
       signal,
     }),
     { enabled: authContextReady && Boolean(currentVendor.vendorId), placeholderData: () => undefined },
@@ -477,10 +487,6 @@ export function OrdersPage() {
   );
   const ordersMissingVendorContext = appReadiness.status === 'missing_vendor_context';
   const ordersWaitingForVendorContext = !ordersMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
-  const [shippingFilter, setShippingFilter] = useState('all');
-  const [quickFilter, setQuickFilter] = useState<OrderQuickFilter>('all');
   const [selectedOrderTarget, setSelectedOrderTarget] = useState<{ vendorId: string; id: string } | null>(null);
   const [labelActionFeedback, setLabelActionFeedback] = useState<LabelActionFeedback | null>(null);
   const activeWorkflowFilter = useMemo(() => getOrdersWorkflowFilter(workflowParam), [workflowParam]);
@@ -553,45 +559,8 @@ export function OrdersPage() {
   }, [visibleOrders]);
 
   const filteredOrders = useMemo(() => {
-    const effectiveQuickFilter = activeWorkflowFilter
-      ? serverFilteredForwardWorkflow ? 'all' : activeWorkflowFilter.quickFilter
-      : quickFilter;
-
-    return rankedOrders.filter((order) => {
-      const matchesStatus = statusFilter === 'all' || order.allocationStatus === statusFilter || order.status === statusFilter;
-      const matchesFulfillment = fulfillmentFilter === 'all' || order.fulfillmentStatus === fulfillmentFilter;
-      const matchesShipping = shippingFilter === 'all' || order.shippingStatus === shippingFilter;
-      const searchableText = [
-        order.id,
-        order.sourceShopifyOrderId,
-        String(order.sourceShopifyOrderNumber),
-        getCustomerLabel(order.customer),
-        order.status,
-        order.allocationStatus,
-        order.fulfillmentStatus,
-        order.shippingStatus,
-        order.trackingNumber ?? '',
-        order.carrier ?? '',
-        order.amount,
-        currentVendor.vendorName,
-        currentVendor.vendorId,
-      ]
-        .join(' ')
-        .toLowerCase();
-
-      const matchesQuickFilter =
-        effectiveQuickFilter === 'all' ||
-        (effectiveQuickFilter === 'blocked' && !order.isCancelled && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
-        (effectiveQuickFilter === 'awaiting' && !order.isCancelled && order.shippingStatus === 'Awaiting Shipment') ||
-        (effectiveQuickFilter === 'tracking_missing' && !order.isCancelled && !order.trackingNumber && !order.carrier) ||
-        (effectiveQuickFilter === 'returns' && searchableText.includes('return'));
-
-      const matchesAuthoritativeActionability =
-        !serverFilteredForwardWorkflow || order.operationalActionability.actionable;
-
-      return matchesAuthoritativeActionability && matchesStatus && matchesFulfillment && matchesShipping && matchesQuickFilter;
-    });
-  }, [activeWorkflowFilter, currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, serverFilteredForwardWorkflow, shippingFilter, statusFilter]);
+    return rankedOrders.filter((order) => !serverFilteredForwardWorkflow || order.operationalActionability.actionable);
+  }, [rankedOrders, serverFilteredForwardWorkflow]);
 
   const selectedOrderSummary = useMemo(() => {
     const selectedByClick = selectedOrderTarget?.vendorId === currentVendor.vendorId
@@ -716,7 +685,7 @@ export function OrdersPage() {
     {
       key: 'blocked-allocation',
       workflow: 'blocked-allocation',
-      label: 'Blocked (page)',
+      label: 'Blocked',
       description: 'Needs admin resolution',
       count: `${summary.blocked} on page`,
     },
@@ -737,9 +706,7 @@ export function OrdersPage() {
   const activeWorkflowKey: OrderWorkflowTabKey = workflowTabs.some((tab) => tab.key === workflowParam)
     ? (workflowParam as OrderWorkflowTabKey)
     : 'all';
-  const effectiveQuickFilter = activeWorkflowFilter
-    ? serverFilteredForwardWorkflow ? 'all' : activeWorkflowFilter.quickFilter
-    : quickFilter;
+  const effectiveQuickFilter = quickFilter;
 
   async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
     const shipmentExecution = (order as OrderDetail).shipmentExecution;
@@ -879,7 +846,6 @@ export function OrdersPage() {
                   value={searchTerm}
                   onChange={(event) => {
                     const nextParams = new URLSearchParams(searchParams);
-                    nextParams.delete('workflow');
                     for (const key of ORDER_TARGET_PARAMS) nextParams.delete(key);
                     if (nextParams.toString() !== searchParams.toString()) setSearchParams(nextParams, { replace: true });
                     setSearchTerm(event.target.value);
@@ -889,7 +855,6 @@ export function OrdersPage() {
                   <select
                     value={statusFilter}
                     onChange={(event) => {
-                      clearWorkflowFilter();
                       setStatusFilter(event.target.value);
                     }}
                   >
@@ -902,7 +867,6 @@ export function OrdersPage() {
                   <select
                     value={fulfillmentFilter}
                     onChange={(event) => {
-                      clearWorkflowFilter();
                       setFulfillmentFilter(event.target.value);
                     }}
                   >
@@ -915,7 +879,6 @@ export function OrdersPage() {
                   <select
                     value={shippingFilter}
                     onChange={(event) => {
-                      clearWorkflowFilter();
                       setShippingFilter(event.target.value);
                     }}
                   >
@@ -942,7 +905,6 @@ export function OrdersPage() {
                     type="button"
                     className={effectiveQuickFilter === filter.key ? 'is-active' : ''}
                     onClick={() => {
-                      clearWorkflowFilter();
                       setQuickFilter(filter.key);
                     }}
                   >
@@ -951,7 +913,7 @@ export function OrdersPage() {
                   </button>
                 ))}
               </div>
-              <p>Allocation, fulfillment, shipping and blocked filters apply to the current page. Search and the other workflow tabs cover the selected Vendor's full order list.</p>
+              <p>Search, workflow and filters cover the selected Vendor's full order list. Counts marked “on page” describe the current page.</p>
             </div>
 
             <div className="op-main-column orders-table-shell">
@@ -986,7 +948,7 @@ export function OrdersPage() {
                 ) : filteredOrders.length === 0 ? (
                   <OperationalTableRow>
                     <EmptyStatePanel
-                      title={activeWorkflowFilter?.emptyTitle ?? (visibleOrders.length === 0 ? 'No orders in this view' : 'No orders match page filters')}
+                      title={activeWorkflowFilter?.emptyTitle ?? 'No orders in this view'}
                       description={visibleOrders.length === 0
                         ? activeWorkflowFilter?.emptyDescription ?? 'No orders match this search or workflow for the selected Vendor.'
                         : 'Adjust the page filters or move to another page.'}

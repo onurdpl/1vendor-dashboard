@@ -23,6 +23,11 @@ const listOrdersMock = vi.fn<(options?: {
   limit?: number;
   offset?: number;
   search?: string;
+  allocationStatus?: string;
+  fulfillmentStatus?: string;
+  shippingStatus?: string;
+  blocked?: boolean;
+  trackingMissing?: boolean;
 }) => Promise<OrderSummary[]>>();
 const getVendorOrdersWorkflowSummaryMock = vi.fn<
   (options?: { vendorId?: string | null }) => Promise<VendorOrdersWorkflowSummary>
@@ -52,6 +57,11 @@ vi.mock('../features/orders/api', async () => {
       limit?: number;
       offset?: number;
       search?: string;
+      allocationStatus?: string;
+      fulfillmentStatus?: string;
+      shippingStatus?: string;
+      blocked?: boolean;
+      trackingMissing?: boolean;
     }) => listOrdersMock(options),
     getVendorOrdersWorkflowSummary: (options?: { vendorId?: string | null }) =>
       getVendorOrdersWorkflowSummaryMock(options),
@@ -1571,10 +1581,11 @@ describe('OrdersPage control center', () => {
   });
 
   it('keeps the tracking-missing quick filter working without a High value control', async () => {
-    listOrdersMock.mockResolvedValue([
+    const rows = [
       buildSummary(),
       buildSummary({ id: 'ORD-A-1003', sourceShopifyOrderNumber: '#1003', trackingNumber: undefined, carrier: undefined }),
-    ]);
+    ];
+    listOrdersMock.mockImplementation(async (options) => options?.trackingMissing ? rows.slice(1) : rows);
     getOrderMock.mockResolvedValue(orderDetail);
 
     const { container } = renderOrdersPage();
@@ -1589,6 +1600,86 @@ describe('OrdersPage control center', () => {
 
     await userEvent.click(quickFilters.getByRole('button', { name: /All orders/i }));
     expect(table.getByText('#1002')).toBeInTheDocument();
+  });
+
+  it.each([
+    { name: 'blocked workflow', expected: { blocked: true }, activate: async () =>
+      userEvent.click(within(screen.getByLabelText('Orders workflow tabs')).getByRole('button', { name: /Blocked/i })) },
+    { name: 'allocation status', expected: { allocationStatus: 'vendor_blocked' }, activate: async () =>
+      userEvent.selectOptions(screen.getAllByRole('combobox')[0], 'vendor_blocked') },
+    { name: 'fulfillment status', expected: { fulfillmentStatus: 'Pending' }, activate: async () =>
+      userEvent.selectOptions(screen.getAllByRole('combobox')[1], 'Pending') },
+    { name: 'shipping status', expected: { shippingStatus: 'In Transit' }, activate: async () =>
+      userEvent.selectOptions(screen.getAllByRole('combobox')[2], 'In Transit') },
+    { name: 'tracking missing quick filter', expected: { trackingMissing: true }, activate: async () =>
+      userEvent.click(within(screen.getByLabelText('Order quick filters')).getByRole('button', { name: /Tracking missing/i })) },
+  ])('requests $name before pagination and renders a match after row 300', async ({ expected, activate }) => {
+    const rows = Array.from({ length: 350 }, (_, index) => buildSummary({
+      id: `allocation-${index + 1000}`, sourceShopifyOrderNumber: `#${index + 1000}`,
+    }));
+    const late = rows[340];
+    listOrdersMock.mockImplementation(async (options) => {
+      const hasFilter = Object.entries(expected).every(([key, value]) =>
+        (options as Record<string, unknown> | undefined)?.[key] === value);
+      const result = hasFilter ? [late] : rows;
+      return result.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100));
+    });
+    getOrderMock.mockResolvedValue(orderDetail);
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1000');
+    await activate();
+    expect(await table.findByText('#1340')).toBeInTheDocument();
+    expect(table.queryByText('#1000')).not.toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a', limit: 101, offset: 0, ...expected,
+    }));
+  });
+
+  it('combines workflow, search and selects, then resets pagination when a filter changes', async () => {
+    const rows = Array.from({ length: 130 }, (_, index) => buildSummary({
+      id: `allocation-${index + 1000}`, sourceShopifyOrderNumber: `#${index + 1000}`,
+    }));
+    listOrdersMock.mockImplementation(async (options) => {
+      const filtered = options?.shippingStatus === 'In Transit' ? rows.slice(120, 121) : rows;
+      return filtered.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 101));
+    });
+    getOrderMock.mockResolvedValue(orderDetail);
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await table.findByText('#1000');
+    await userEvent.click(within(screen.getByLabelText('Orders pages')).getByRole('button', { name: 'Next' }));
+    await table.findByText('#1100');
+    await userEvent.click(within(screen.getByLabelText('Orders workflow tabs')).getByRole('button', { name: /Blocked/i }));
+    await userEvent.type(screen.getByPlaceholderText('Search order, customer, tracking, carrier...'), '1300');
+    const [allocation, fulfillment, shipping] = screen.getAllByRole('combobox');
+    await userEvent.selectOptions(allocation, 'vendor_blocked');
+    await userEvent.selectOptions(fulfillment, 'Pending');
+    await userEvent.selectOptions(shipping, 'In Transit');
+    await userEvent.click(within(screen.getByLabelText('Order quick filters')).getByRole('button', { name: /Tracking missing/i }));
+    expect(await table.findByText('#1120')).toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a', offset: 0, search: '1300', blocked: true,
+      allocationStatus: 'vendor_blocked', fulfillmentStatus: 'Pending',
+      shippingStatus: 'In Transit', trackingMissing: true,
+    }));
+  });
+
+  it('ignores a delayed unfiltered response after a full-history filter changes', async () => {
+    const delayed = deferred<OrderSummary[]>();
+    const oldRow = buildSummary({ id: 'allocation-old', sourceShopifyOrderNumber: '#1000' });
+    const filteredRow = buildSummary({ id: 'allocation-filtered', sourceShopifyOrderNumber: '#1340' });
+    listOrdersMock.mockImplementation(async (options) => options?.shippingStatus === 'In Transit'
+      ? [filteredRow] : delayed.promise);
+    getOrderMock.mockResolvedValue(orderDetail);
+    const { container } = renderOrdersPage();
+    const table = within(container.querySelector('.orders-op-table') as HTMLElement);
+    await waitFor(() => expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ shippingStatus: undefined })));
+    await userEvent.selectOptions(screen.getAllByRole('combobox')[2], 'In Transit');
+    expect(await table.findByText('#1340')).toBeInTheDocument();
+    await act(async () => delayed.resolve([oldRow]));
+    expect(table.queryByText('#1000')).not.toBeInTheDocument();
+    expect(table.getByText('#1340')).toBeInTheDocument();
   });
 
   it.each([
@@ -1780,7 +1871,8 @@ describe('OrdersPage control center', () => {
       customer: 'Delivered Customer',
       date: '2026-05-08T09:20:00Z',
     };
-    listOrdersMock.mockResolvedValue([toSummary(blockedOrder), toSummary(deliveredOrder)]);
+    listOrdersMock.mockImplementation(async (options) => options?.blocked
+      ? [toSummary(blockedOrder)] : [toSummary(blockedOrder), toSummary(deliveredOrder)]);
     getOrderMock.mockImplementation(async (orderId) => (orderId === blockedOrder.id ? blockedOrder : deliveredOrder));
 
     renderOrdersPage(['/orders?workflow=blocked-allocation']);

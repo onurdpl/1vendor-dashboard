@@ -104,6 +104,8 @@ Webhook processing lifecycle states:
 - Vendor scoping rule: only orders for the authenticated user’s allowed vendor scope may be returned.
 - Expected success response shape: `OrderSummary[]`.
 - Optional `workflow` query values are `all`, `awaitingShipment`, `shipmentReview`, and `trackingMissing`; omitted `workflow` is equivalent to `all`.
+- Optional validated list filters: `allocationStatus` (`active`, `pending_reassignment`, `vendor_blocked`, `fulfilled`), `fulfillmentStatus` (`Pending`, `Processing`, `Partially Fulfilled`, `Fulfilled`), `shippingStatus` (`Awaiting Shipment`, `Label Created`, `In Transit`, `Delivered`), `blocked` and `trackingMissing` (`true` or `false`). Unknown values return `400`. Filters combine with workflow and text search within the authorized Vendor scope before offset pagination. The response remains an array; clients can request 101 rows to detect a next page while displaying 100.
+- Fulfillment/shipping filters match the existing normalized display labels, including cancellation evidence. This may require bounded server-side scans across the authorized history; an absent match is returned only after that history is exhausted. The `blocked` filter excludes cancelled orders. `trackingMissing=true` reuses the authoritative tracking-missing workflow predicate. The workflow summary counts remain global and are not counts for combined filters.
 - `all` preserves historical visibility, including allocations with an authoritative full-refund terminal fact.
 - Forward workflow modes exclude allocations with an authoritative full-refund terminal fact before `limit`/`offset` pagination. `shipmentReview` intentionally shares the current `awaitingShipment` predicate.
 - Unsupported `workflow` values return `400 Bad Request`.

@@ -759,6 +759,14 @@ export type OrderSummary = {
 
 export type VendorOrdersWorkflow = 'all' | 'awaitingShipment' | 'shipmentReview' | 'trackingMissing';
 
+export type VendorOrdersListFilters = {
+  allocationStatus?: 'active' | 'pending_reassignment' | 'vendor_blocked' | 'fulfilled';
+  fulfillmentStatus?: 'Pending' | 'Processing' | 'Partially Fulfilled' | 'Fulfilled';
+  shippingStatus?: 'Awaiting Shipment' | 'Label Created' | 'In Transit' | 'Delivered';
+  blocked?: boolean;
+  trackingMissing?: boolean;
+};
+
 export type VendorOrdersWorkflowSummary = {
   all: number;
   awaitingShipment: number;

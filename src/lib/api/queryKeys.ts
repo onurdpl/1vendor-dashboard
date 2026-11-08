@@ -1,5 +1,5 @@
 import { getCurrentVendorContext } from '../auth/vendorContext';
-import type { VendorOrdersWorkflow } from './contracts';
+import type { VendorOrdersListFilters, VendorOrdersWorkflow } from './contracts';
 
 export const queryKeys = {
   admin: {
@@ -59,7 +59,7 @@ export const queryKeys = {
   orders: {
     list: (
       vendorId = getCurrentVendorContext().vendorId,
-      options: { workflow?: VendorOrdersWorkflow; limit?: number; offset?: number; search?: string } = {},
+      options: VendorOrdersListFilters & { workflow?: VendorOrdersWorkflow; limit?: number; offset?: number; search?: string } = {},
     ) => [
       'orders',
       'list',
@@ -68,6 +68,11 @@ export const queryKeys = {
       options.limit ?? 'default',
       options.offset ?? 0,
       options.search ?? '',
+      options.allocationStatus ?? 'all',
+      options.fulfillmentStatus ?? 'all',
+      options.shippingStatus ?? 'all',
+      options.blocked ?? false,
+      options.trackingMissing ?? false,
     ] as const,
     workflowSummary: (vendorId = getCurrentVendorContext().vendorId) =>
       ['orders', 'workflow-summary', vendorId] as const,

@@ -40,6 +40,7 @@ import {
   resolveVendorOrdersWorkflow,
   VENDOR_ORDERS_WORKFLOW_ERROR,
 } from './vendor-orders-workflow.js';
+import { parseVendorOrdersListFilters } from './vendor-orders-list-filters.js';
 
 function replyWithAllocationTerminalError(reply: FastifyReply, error: unknown) {
   if (
@@ -125,6 +126,12 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
       } catch {
         return reply.code(400).send({ message: VENDOR_ORDERS_WORKFLOW_ERROR });
       }
+      let filters;
+      try {
+        filters = parseVendorOrdersListFilters(request.query);
+      } catch (error) {
+        return reply.code(400).send({ message: error instanceof Error ? error.message : 'Invalid Orders filters.' });
+      }
 
       const rawSearch = (request.query as { search?: unknown } | undefined)?.search;
       if (rawSearch !== undefined && (typeof rawSearch !== 'string' || rawSearch.trim().length > 100)) {
@@ -134,7 +141,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
 
       return withDashboardRouteTiming('GET /orders', () =>
         withSlowEndpointTiming('GET /orders', () =>
-          listVendorOrders(vendorId, { ...resolvePagination(request.query), workflow, ...(search ? { search } : {}) }),
+          listVendorOrders(vendorId, { ...resolvePagination(request.query), workflow, ...filters, ...(search ? { search } : {}) }),
         ),
       );
     },
