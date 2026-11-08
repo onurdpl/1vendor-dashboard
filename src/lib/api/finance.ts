@@ -22,6 +22,10 @@ export function getFinanceTransactions(options: {
   return runtimeServices.finance.transactions(options.vendorId ?? undefined, options);
 }
 
+export function getFinanceRecordById(options: { vendorId: string; ledgerId: string; signal?: AbortSignal }) {
+  return runtimeServices.finance.recordById(options.vendorId, options.ledgerId, { signal: options.signal });
+}
+
 export function getFinanceProfile(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.finance.profile(options.vendorId ?? undefined, { signal: options.signal });
 }

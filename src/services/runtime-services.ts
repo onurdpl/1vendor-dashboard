@@ -2596,6 +2596,13 @@ export const runtimeServices = {
     },
   },
   finance: {
+    recordById: (vendorId: string, ledgerId: string, options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getFinanceRecordById({ vendorId, ledgerId, signal: options.signal })
+        : Promise.resolve({
+            vendorId,
+            record: getMockFinanceDashboard(vendorId).transactions.find((record) => record.id === ledgerId) ?? null,
+          }),
     transactions: (vendorId = getCurrentVendorId(), options: {
       search?: string; status?: string; category?: string; workflow?: string;
       cursor?: string | null; signal?: AbortSignal; audience?: 'admin' | 'vendor';

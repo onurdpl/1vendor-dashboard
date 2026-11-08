@@ -25,6 +25,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import {
   attachShippingCost,
   getFinanceDashboard,
+  getFinanceRecordById,
   getFinanceTransactions,
   getPayoutOffsetObligations,
   getVendorDebtHistory,
@@ -214,12 +215,7 @@ function financeRecordMatchesTarget(record: FinanceTransaction, target: FinanceD
   }
 
   if (target.type === 'ledger') {
-    return [
-      record.id,
-      readFinanceString(record, 'ledgerId'),
-      readFinanceString(record, 'financeLedgerEntryId'),
-      readFinanceString(record, 'financeRecordId'),
-    ].some((value) => sameNormalizedIdentifier(value, target.value));
+    return record.id === target.value;
   }
 
   if (target.type === 'refund') {
@@ -1544,6 +1540,7 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
       ? transactionsResource.data : null
     : finance ? { vendorId: currentVendor.vendorId, records: finance.transactions, hasNextPage: false, nextCursor: null } : null;
   const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
+  const linkedLedgerId = requestedFinanceTarget?.type === 'ledger' ? requestedFinanceTarget.value : null;
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
   const [shippingCostAmount, setShippingCostAmount] = useState('');
   const [shippingVatAmount, setShippingVatAmount] = useState('');
@@ -1617,7 +1614,8 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
     }) => {
       if (!authContextReady || !isCurrentVendorContext() ||
           !(transactionsPage?.records.some((record) => record.id === input.financeLedgerEntryId) ||
-            finance?.transactions.some((record) => record.id === input.financeLedgerEntryId))) {
+            finance?.transactions.some((record) => record.id === input.financeLedgerEntryId) ||
+            linkedLedger?.id === input.financeLedgerEntryId)) {
         return Promise.reject(new Error('Current vendor finance record is unavailable.'));
       }
       return attachShippingCost({
@@ -1632,7 +1630,8 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
       });
     },
     {
-      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId), queryKeys.finance.transactions(currentVendor.vendorId)],
+      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId), queryKeys.finance.transactions(currentVendor.vendorId),
+        queryKeys.finance.record(currentVendor.vendorId, linkedLedgerId ?? '')],
       onSuccess: async () => {
         if (!isCurrentVendorContext()) return;
         await refetch();
@@ -1679,21 +1678,36 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
           (!query || getFinanceSearchableText(record, financeAudience, currentVendor).includes(query));
       });
 
+  const locallyResolvedTarget = requestedFinanceTarget
+    ? filteredRecords.find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget)) ??
+      safeArray(finance?.transactions).find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget)) ?? null
+    : null;
+  const linkedLedgerResource = useQueryResource<Awaited<ReturnType<typeof getFinanceRecordById>>>(
+    [...queryKeys.finance.record(currentVendor.vendorId, linkedLedgerId ?? ''), vendorGeneration],
+    ({ signal }) => isCurrentVendorContext() && linkedLedgerId
+      ? getFinanceRecordById({ vendorId: currentVendor.vendorId, ledgerId: linkedLedgerId, signal })
+      : Promise.reject(new Error('Vendor context changed.')),
+    { enabled: runtimeConfig.apiMode === 'real' && authContextReady && Boolean(linkedLedgerId) && !locallyResolvedTarget,
+      placeholderData: () => undefined },
+  );
+  const linkedLedger = isCurrentVendorContext() &&
+    linkedLedgerResource.data?.vendorId === currentVendor.vendorId &&
+    linkedLedgerResource.data.record?.id === linkedLedgerId
+      ? linkedLedgerResource.data.record : null;
+
   const selectedRecord = useMemo(() => {
     const selectedByClick = selectedRecordId ? filteredRecords.find((record) => record.id === selectedRecordId) : null;
     if (selectedByClick) {
       return selectedByClick;
     }
     if (requestedFinanceTarget) {
-      const inPage = filteredRecords.find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget));
-      if (inPage) return inPage;
-      return safeArray(finance?.transactions).find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget)) ?? null;
+      return locallyResolvedTarget ?? (requestedFinanceTarget.type === 'ledger' ? linkedLedger : null);
     }
     if (!filteredRecords.length) {
       return null;
     }
     return filteredRecords[0];
-  }, [filteredRecords, finance?.transactions, requestedFinanceTarget, selectedRecordId]);
+  }, [filteredRecords, linkedLedger, locallyResolvedTarget, requestedFinanceTarget, selectedRecordId]);
   const selectedOperationalProjection = selectedRecord
     ? getFinanceOperationalProjection(selectedRecord, { audience: financeAudience })
     : null;
@@ -2887,6 +2901,16 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
                 emptyMessage="No notes"
               />
             </>
+          ) : linkedLedgerId && !authContextReady && !locallyResolvedTarget ? (
+            <EmptyStatePanel title="Waiting for vendor context" description="The linked transaction will load after the vendor scope is verified." />
+          ) : linkedLedgerId && linkedLedgerResource.isError && !locallyResolvedTarget ? (
+            <SectionErrorRetry
+              title="Linked transaction could not be loaded"
+              description={linkedLedgerResource.error ?? 'The transaction lookup failed.'}
+              onRetry={() => void linkedLedgerResource.refetch()}
+            />
+          ) : linkedLedgerId && linkedLedgerResource.isLoading && !locallyResolvedTarget ? (
+            <EmptyStatePanel title="Loading linked transaction" description="Checking the current vendor's Finance ledger." />
           ) : (
             <EmptyStatePanel
               title={requestedFinanceTarget ? 'Linked transaction unavailable' : 'Select a transaction'}

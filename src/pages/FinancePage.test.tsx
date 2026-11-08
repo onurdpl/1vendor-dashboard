@@ -12,6 +12,7 @@ import { formatCurrency } from '../services/real/formatting';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const getFinanceTransactionsMock = vi.fn();
+const getFinanceRecordByIdMock = vi.fn();
 const getVendorDebtHistoryMock = vi.fn();
 const getPayoutOffsetObligationsMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
@@ -25,6 +26,7 @@ vi.mock('../features/finance/api', async () => {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
     getFinanceTransactions: (...args: unknown[]) => getFinanceTransactionsMock(...args),
+    getFinanceRecordById: (...args: unknown[]) => getFinanceRecordByIdMock(...args),
     getVendorDebtHistory: (...args: unknown[]) => getVendorDebtHistoryMock(...args),
     getPayoutOffsetObligations: (...args: unknown[]) => getPayoutOffsetObligationsMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
@@ -514,6 +516,7 @@ describe('FinancePage control center', () => {
     });
     getFinanceDashboardMock.mockReset();
     getFinanceTransactionsMock.mockReset();
+    getFinanceRecordByIdMock.mockReset();
     getVendorDebtHistoryMock.mockReset();
     getVendorDebtHistoryMock.mockResolvedValue(emptyVendorDebtHistory);
     getPayoutOffsetObligationsMock.mockReset();
@@ -2727,6 +2730,70 @@ describe('FinancePage control center', () => {
     expect(await screen.findByText('Linked transaction unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Order #1021' })).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+  });
+
+  it('opens a historical exact ledger outside loaded records without changing Overview or Transactions', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    const historical = { ...financeDashboard.transactions[0], id: 'historical-ledger-0350',
+      shopifyOrderNumber: '9350', description: 'Historical direct link' };
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockResolvedValue({ vendorId: 'demo-vendor-a', records: financeDashboard.transactions,
+      hasNextPage: true, nextCursor: 'next-page' });
+    getFinanceRecordByIdMock.mockResolvedValue({ vendorId: 'demo-vendor-a', record: historical });
+
+    const { container } = renderFinancePage(['/finance?ledgerId=historical-ledger-0350']);
+    expect(await getSidePanel(container).findByRole('heading', { name: 'Order #9350' })).toBeInTheDocument();
+    expect(getFinanceRecordByIdMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a', ledgerId: 'historical-ledger-0350',
+    }));
+    expect(within(container.querySelector('.finance-op-table') as HTMLElement).queryByText('#9350')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+    expect(getFinanceDashboardMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a retryable lookup error separately from an exact-ledger not-found result', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockResolvedValue({ vendorId: 'demo-vendor-a', records: financeDashboard.transactions,
+      hasNextPage: false, nextCursor: null });
+    getFinanceRecordByIdMock.mockRejectedValueOnce(new Error('Lookup unavailable'))
+      .mockResolvedValueOnce({ vendorId: 'demo-vendor-a', record: null });
+
+    const { container } = renderFinancePage(['/finance?ledgerId=missing-historical']);
+    expect(await getSidePanel(container).findByText('Linked transaction could not be loaded')).toBeInTheDocument();
+    await userEvent.click(getSidePanel(container).getByRole('button', { name: 'Retry' }));
+    expect(await getSidePanel(container).findByText('Linked transaction unavailable')).toBeInTheDocument();
+    expect(getSidePanel(container).queryByRole('heading', { name: 'Order #1021' })).not.toBeInTheDocument();
+  });
+
+  it('ignores a late A exact-ledger response through A → B → A Vendor changes', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    const pendingA = deferred<{ vendorId: string; record: FinanceTransaction | null }>();
+    const aRecord = { ...financeDashboard.transactions[0], id: 'shared-historical-id', shopifyOrderNumber: '9101' };
+    const bRecord = { ...financeDashboardB.transactions[0], id: 'shared-historical-id', shopifyOrderNumber: '9202' };
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) =>
+      Promise.resolve(vendorId === 'demo-vendor-b' ? financeDashboardB : financeDashboard));
+    getFinanceTransactionsMock.mockImplementation(({ vendorId }) => Promise.resolve({
+      vendorId, records: [], hasNextPage: false, nextCursor: null,
+    }));
+    getFinanceRecordByIdMock.mockImplementation(({ vendorId }) => vendorId === 'demo-vendor-b'
+      ? Promise.resolve({ vendorId, record: bRecord })
+      : getFinanceRecordByIdMock.mock.calls.length === 1 ? pendingA.promise : Promise.resolve({ vendorId, record: aRecord }));
+    const { container } = renderFinancePage(['/finance?ledgerId=shared-historical-id']);
+    await waitFor(() => expect(getFinanceRecordByIdMock).toHaveBeenCalledTimes(1));
+    await act(async () => { setCurrentVendorId('demo-vendor-b'); await verifyTestAdminVendor('demo-vendor-b'); });
+    expect(await getSidePanel(container).findByRole('heading', { name: 'Order #9202' })).toBeInTheDocument();
+    await act(async () => pendingA.resolve({ vendorId: 'demo-vendor-a', record: aRecord }));
+    expect(getSidePanel(container).queryByRole('heading', { name: 'Order #9101' })).not.toBeInTheDocument();
+    await act(async () => { setCurrentVendorId('demo-vendor-a'); await verifyTestAdminVendor('demo-vendor-a'); });
+    expect(await getSidePanel(container).findByRole('heading', { name: 'Order #9101' })).toBeInTheDocument();
+    expect(getSidePanel(container).queryByRole('heading', { name: 'Order #9202' })).not.toBeInTheDocument();
   });
 
   it('clears stale selected finance state when a linked target changes', async () => {
