@@ -16,6 +16,8 @@ import { getSupportOperationalStory, ticketMatchesSupportActionBucket, type Supp
 import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
 import { getMockOrder, getShopifyOrderBreakdown, listMockOrders, rejectMockOrder } from '../lib/api/mockOrders';
 import { getMockReturn, listMockReturns } from '../lib/api/mockReturns';
+import { matchesReturnListFilters } from '../lib/returnsListFilters';
+import type { ReturnsListFilters } from '../lib/api/returns';
 import {
   getMockAdminOperationsAttention,
   listAdminOperationsQueue as listMockAdminOperationsQueue,
@@ -146,7 +148,7 @@ function mockSupportPage(tickets: SupportTicket[], filters: SupportPageFilters, 
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
 type OrdersReadRequestOptions = ReadRequestOptions & VendorOrdersListFilters & { workflow?: VendorOrdersWorkflow; search?: string };
-type ReturnsReadRequestOptions = ReadRequestOptions & { search?: string };
+type ReturnsReadRequestOptions = ReadRequestOptions & ReturnsListFilters & { search?: string };
 type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope };
 
 const mockSupportTickets: SupportTicket[] = [];
@@ -2289,14 +2291,20 @@ export const runtimeServices = {
   returns: {
     list: (vendorId = getCurrentVendorId(), options: ReturnsReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset, search: options.search })
+        ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit,
+            offset: options.offset, search: options.search, workflow: options.workflow, status: options.status, source: options.source })
         : Promise.resolve(listMockReturns(vendorId).filter((item) =>
             !options.search || [item.id, item.sourceShopifyOrderId, item.sourceShopifyOrderNumber,
               item.sourceShopifyRefundId, item.sourceShopifyReturnId, item.customer, item.reason,
               item.itemTitle, item.displayTitle, item.variantTitle, item.refundedSkus?.join(' '),
               ...((item.refundedItems ?? []).flatMap((line) => [line.name, line.variantTitle, line.sku]))]
               .some((field) => String(field ?? '').toLowerCase().includes(options.search!.toLowerCase())),
-          ).slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? 100))),
+          ).filter((item) => matchesReturnListFilters(item, options))
+            .slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? 100))),
+    statusOptions: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realReturns.listReturnStatusOptions({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve(Array.from(new Set(listMockReturns(vendorId).map((item) => item.status))).sort()),
     dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}): Promise<DashboardReturnSummary[]> =>
       runtimeConfig.apiMode === 'real'
         ? realReturns.listDashboardReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })

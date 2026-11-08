@@ -830,6 +830,14 @@ Sanitized repair/reconciliation diagnostics may expose `classification`, exact d
 - Return records should expose lifecycle/source metadata so pending return requests and processed refunds stay distinguishable.
 - Backend implementation note: route is protected by auth + vendor access middleware, and scoped by backend-resolved vendor context (`request.vendorContext.vendorId`).
 
+Optional `search` (up to 100 characters), `limit` (default 100, maximum 250), and nonnegative `offset` retain the array response and `(createdAt DESC, id DESC)` ordering. Optional validated `workflow=requested|needs-action|approved|refunded|closed`, `status=<existing displayed status>` (nonempty string), and `source=pending|refunded` apply within the authorized Vendor history, together with search, **before** offset and limit. Omit a parameter for its All state. Invalid filter values return `400`.
+
+The Returns page displays 100 rows and requests 101 for Next-page lookahead. Offset pagination is live rather than snapshot-stable; no global filtered count is returned.
+
+### GET /returns/status-options
+
+Read-only sorted `string[]` of displayed status labels present in the current authorized Vendor's complete return history. Empty history returns `[]`. It uses the same authentication and Admin selected-Vendor/Vendor membership resolution as `GET /returns`. Free-form persisted statuses are not replaced by a hard-coded enum, and no global cross-Vendor status vocabulary is exposed.
+
 ### GET /returns/:returnId
 
 - Purpose: return a single return request detail record.

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getReturn, listReturns } from './returns';
+import { getReturn, listReturns, listReturnStatusOptions } from './returns';
+import { displayReturnStatus, matchesReturnsListFilters } from '../../../backend/src/modules/returns/returns-list-filters';
+import { matchesReturnListFilters } from '../../lib/returnsListFilters';
 
 const apiClientGet = vi.hoisted(() => vi.fn());
 
@@ -12,6 +14,53 @@ vi.mock('../../lib/api-client', () => ({
 describe('real returns service item title mapping', () => {
   beforeEach(() => {
     apiClientGet.mockReset();
+  });
+
+  it('preserves frontend/backend display and filter classification for canonical list DTOs', async () => {
+    const base = {
+      id: 'return-parity', sourceShopifyOrderId: 'gid://shopify/Order/1', sourceShopifyOrderNumber: '#1',
+      sourceShopifyRefundId: '', sourceShopifyReturnId: null, sourceShopifyReturnGid: null,
+      returnLifecycleStatus: null, returnRequestSource: 'shopify_return_request',
+      vendorId: 'vendor-a', assignedVendorId: 'vendor-a', status: 'requested',
+      refundAmount: '0.00', refundedItemCount: 0, refundedSkus: [], refundedItems: [],
+      createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z',
+      vendorReceivedAt: null, vendorReviewedAt: null, vendorDecision: null,
+    };
+    const fixtures = [
+      base,
+      { ...base, status: 'requested', vendorReceivedAt: '2026-11-02T00:00:00Z' },
+      { ...base, status: 'approved', vendorDecision: 'approved' },
+      { ...base, status: 'closed' },
+      { ...base, status: 'closed', sourceShopifyRefundId: 'refund-1' },
+      { ...base, status: 'closed', refundedSkus: ['SKU-1'] },
+      { ...base, status: 'processed', returnRequestSource: 'shopify_refund' },
+      { ...base, status: 'in_review' },
+      { ...base, status: 'late_status' },
+    ];
+    const filters = [
+      { workflow: 'requested' as const }, { workflow: 'needs-action' as const },
+      { workflow: 'approved' as const }, { workflow: 'refunded' as const },
+      { workflow: 'closed' as const }, { source: 'pending' as const },
+      { source: 'refunded' as const }, { status: 'In Review' },
+      { workflow: 'needs-action' as const, source: 'pending' as const },
+    ];
+    for (const dto of fixtures) {
+      apiClientGet.mockResolvedValueOnce([dto]);
+      const [summary] = await listReturns();
+      expect(summary.status).toBe(displayReturnStatus(dto.status, dto.returnRequestSource));
+      for (const filter of filters) {
+        expect(matchesReturnsListFilters(dto, filter)).toBe(matchesReturnListFilters(summary, filter));
+      }
+    }
+  });
+
+  it('sends validated list filters and reads Vendor-scoped status options', async () => {
+    apiClientGet.mockResolvedValueOnce([]).mockResolvedValueOnce(['Late Status']);
+    await listReturns({ vendorId: 'vendor-a', workflow: 'needs-action', status: 'In Review',
+      source: 'pending', search: 'shoe', limit: 101, offset: 100 });
+    expect(apiClientGet.mock.calls[0][0]).toBe('/returns?limit=101&offset=100&search=shoe&workflow=needs-action&status=In+Review&source=pending');
+    expect(await listReturnStatusOptions({ vendorId: 'vendor-a' })).toEqual(['Late Status']);
+    expect(apiClientGet.mock.calls[1][0]).toBe('/returns/status-options');
   });
 
   it('maps returned item titles from the backend response', async () => {

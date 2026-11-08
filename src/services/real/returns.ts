@@ -336,11 +336,14 @@ function readVendorRequestOptions(options: { vendorId?: string | null; signal?: 
   return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
-export async function listReturns(options: { limit?: number; offset?: number; search?: string; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
+export async function listReturns(options: { limit?: number; offset?: number; search?: string; workflow?: string; status?: string; source?: string; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
   if (options.search) params.set('search', options.search);
+  if (options.workflow) params.set('workflow', options.workflow);
+  if (options.status) params.set('status', options.status);
+  if (options.source) params.set('source', options.source);
   const path = `/returns${params.size ? `?${params.toString()}` : ''}`;
   const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
@@ -348,6 +351,13 @@ export async function listReturns(options: { limit?: number; offset?: number; se
     : apiClient.get<ReturnSummaryDto[]>(path));
   const mapped = response.map(mapSummary);
   return mapped;
+}
+
+export async function listReturnStatusOptions(options: { vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
+  const requestOptions = readVendorRequestOptions(options);
+  return requestOptions
+    ? apiClient.get<string[]>('/returns/status-options', requestOptions)
+    : apiClient.get<string[]>('/returns/status-options');
 }
 
 export async function listDashboardReturns(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<DashboardReturnSummary[]> {

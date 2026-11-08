@@ -5,16 +5,21 @@ import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnsPage } from './ReturnsPage';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
+import type { ReturnsListFilters } from '../features/returns/api';
+import { matchesReturnListFilters } from '../lib/returnsListFilters';
 import { clearToken, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
-const listReturnsMock = vi.fn<(options?: { vendorId?: string | null; limit?: number; offset?: number; search?: string }) => Promise<ReturnSummary[]>>();
+const listReturnsMock = vi.fn<(options?: { vendorId?: string | null; limit?: number; offset?: number; search?: string } & ReturnsListFilters) => Promise<ReturnSummary[]>>();
+const listReturnStatusOptionsMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<string[]>>();
 const getReturnMock = vi.fn<(returnId: string, options?: { vendorId?: string | null }) => Promise<ReturnDetail>>();
 
 vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
   return {
     ...actual,
-    listReturns: (options?: { vendorId?: string | null; limit?: number; offset?: number; search?: string }) => listReturnsMock(options),
+    listReturns: async (options?: { vendorId?: string | null; limit?: number; offset?: number; search?: string } & ReturnsListFilters) =>
+      (await listReturnsMock(options)).filter((row) => matchesReturnListFilters(row, options ?? {})),
+    listReturnStatusOptions: (options?: { vendorId?: string | null }) => listReturnStatusOptionsMock(options),
     getReturn: (returnId: string, options?: { vendorId?: string | null }) => getReturnMock(returnId, options),
   };
 });
@@ -308,6 +313,8 @@ describe('ReturnsPage control center', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     listReturnsMock.mockReset();
+    listReturnStatusOptionsMock.mockReset();
+    listReturnStatusOptionsMock.mockResolvedValue(['Approved', 'Cancelled', 'Closed', 'Declined', 'In Review', 'Pending', 'Processed', 'Requested']);
     getReturnMock.mockReset();
   });
 
@@ -347,6 +354,48 @@ describe('ReturnsPage control center', () => {
     await table.findByText('#1025');
     expect(screen.getByText('Page 1 · 1 return on this page')).toBeInTheDocument();
     expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ search: '1025', offset: 0 }));
+  });
+
+  it('requests full-history status, source and workflow filters before paging and resets the page', async () => {
+    const rows = Array.from({ length: 360 }, (_, index) => toSummary({
+      ...pendingReturn, id: `return-${index + 1000}`, sourceShopifyOrderNumber: index + 1000,
+      status: index === 330 ? 'Late Status' : index === 350 ? 'Approved' : 'Requested',
+    }));
+    listReturnStatusOptionsMock.mockResolvedValue(['Approved', 'Late Status', 'Requested']);
+    listReturnsMock.mockImplementation(async (options) => rows
+      .filter((row) => !options?.search || row.id.includes(options.search))
+      .filter((row) => matchesReturnListFilters(row, options ?? {}))
+      .slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100)));
+    getReturnMock.mockImplementation(async (id) => ({ ...pendingReturn, ...rows.find((row) => row.id === id), id }));
+
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+    await table.findByText('#1000');
+    await userEvent.click(within(screen.getByLabelText('Returns pages')).getByRole('button', { name: 'Next' }));
+    await table.findByText('#1100');
+    await userEvent.selectOptions(screen.getByRole('option', { name: 'Late Status' }).closest('select')!, 'Late Status');
+    await table.findByText('#1330');
+    expect(screen.getByText('Page 1 · 1 return on this page')).toBeInTheDocument();
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ status: 'Late Status', offset: 0 }));
+
+    await userEvent.selectOptions(screen.getByRole('option', { name: 'All statuses' }).closest('select')!, 'all');
+    await userEvent.click(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /^Approved/ }));
+    await table.findByText('#1350');
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'approved', offset: 0 }));
+    await userEvent.selectOptions(screen.getByRole('option', { name: 'Pending returns' }).closest('select')!, 'pending');
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ source: 'pending', workflow: undefined, offset: 0 }));
+  });
+
+  it('shows a retry when Vendor-scoped status choices fail to load', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn)]);
+    listReturnStatusOptionsMock.mockRejectedValueOnce(new Error('Statuses unavailable.'))
+      .mockResolvedValue(['Requested', 'Late Status']);
+    getReturnMock.mockResolvedValue(pendingReturn);
+    renderReturnsPage();
+    expect(await screen.findByText('Return statuses unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'All statuses' }).closest('select')).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('option', { name: 'Late Status' })).toBeInTheDocument();
   });
 
   it('finds an authorized linked Return beyond the first page and fails closed for an unknown link', async () => {
@@ -400,8 +449,10 @@ describe('ReturnsPage control center', () => {
     await table.findByText('#1000');
     await userEvent.click(within(screen.getByLabelText('Returns pages')).getByRole('button', { name: 'Next' }));
     await table.findByText('#1100');
+    await userEvent.selectOptions(screen.getByRole('option', { name: 'Demo Vendor A' }).closest('select')!, 'demo-vendor-a');
     await act(async () => setCurrentVendorId('demo-vendor-b'));
     await table.findByText('#2001');
+    expect(screen.getByRole('option', { name: 'All vendors on this page' }).closest('select')).toHaveValue('all');
     expect(table.queryByText('#1100')).not.toBeInTheDocument();
     expect(screen.getByText('Page 1 · 1 return on this page')).toBeInTheDocument();
     await act(async () => setCurrentVendorId('demo-vendor-a'));
@@ -861,7 +912,7 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage(['/returns?workflow=pending-review']);
 
     expect(await screen.findByText('No received returns need action')).toBeInTheDocument();
-    expect(screen.getByText('No returns match the page filters. Try another page or adjust the filters.')).toBeInTheDocument();
+    expect(screen.getByText('No returns match these filters for the selected Vendor.')).toBeInTheDocument();
     expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /Needs Action/i })).toHaveClass('is-active');
     expect(screen.getByText('No return selected')).toBeInTheDocument();
     expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
