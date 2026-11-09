@@ -65,6 +65,7 @@ describe.skipIf(!url || process.env.P4_14_REFERENCE_PG_ISOLATED !== '1')('Financ
       { id: 'p4-14-other-sale', vendorId: vendorA, vendorAllocationId: 'p4-14-other-a', entryType: 'sale', amount: '40.00' },
       { id: 'p4-14-null-sale', vendorId: vendorA, entryType: 'sale', amount: '50.00' },
       { id: 'p4-14-void-sale', vendorId: vendorA, vendorAllocationId: 'p4-14-a1', entryType: 'sale', amount: '60.00', voidedAt: new Date() },
+      { id: 'p4-14-void-historical-sale', vendorId: vendorA, vendorAllocationId: 'p4-14-a1', entryType: 'sale', amount: '9.00', voidedAt: new Date() },
       { id: 'p4-14-a-refund-1', vendorId: vendorA, vendorAllocationId: 'p4-14-a1', entryType: 'refund', amount: '5.00' },
       { id: 'p4-14-a-refund-2', vendorId: vendorA, vendorAllocationId: 'p4-14-a1', entryType: 'refund', amount: '6.00' },
       { id: 'p4-14-b-refund-1', vendorId: vendorB, vendorAllocationId: 'p4-14-b1', entryType: 'refund', amount: '7.00' },
@@ -72,7 +73,7 @@ describe.skipIf(!url || process.env.P4_14_REFERENCE_PG_ISOLATED !== '1')('Financ
     ] });
     const refunds = [
       { id: 'p4-14-r1-a', allocation: 'p4-14-a1', external: 'gid://shopify/Refund/one', vendor: vendorA, sale: 'p4-14-target-001', ledger: 'p4-14-a-refund-1' },
-      { id: 'p4-14-r2-a', allocation: 'p4-14-a1', external: 'gid://shopify/Refund/two', vendor: vendorA, sale: 'p4-14-target-001', ledger: 'p4-14-a-refund-2' },
+      { id: 'p4-14-r2-a', allocation: 'p4-14-a1', external: 'gid://shopify/Refund/two', vendor: vendorA, sale: 'p4-14-void-historical-sale', ledger: 'p4-14-a-refund-2' },
       { id: 'p4-14-r1-b', allocation: 'p4-14-b1', external: 'gid://shopify/Refund/one', vendor: vendorB, sale: 'p4-14-b-sale', ledger: 'p4-14-b-refund-1' },
     ];
     for (const refund of refunds) {

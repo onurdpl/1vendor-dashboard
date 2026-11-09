@@ -1856,16 +1856,19 @@ function financeTransactionsReferenceWhere(
 
 function hasExactRefundTransactionReference(
   entry: Awaited<ReturnType<typeof findVendorFinanceEntries>>[number],
-  reference: FinanceTransactionsReference,
+  reference: FinanceTransactionsReference, vendorId: string,
 ) {
   if (normalizeType(entry.entryType) !== 'refund') return false;
   const allocation = entry.vendorAllocation;
   const ledger = allocation?.financeEntries?.find((item) => item.id === entry.id);
-  const evidence = resolveExactRefundEvidence(allocation, ledger ?? {});
-  if (!evidence) return false;
+  const evidence = ledger?.refundEvidenceSnapshot;
+  if (!allocation?.id || !evidence || evidence.refundFinanceLedgerEntryId !== entry.id ||
+      evidence.vendorAllocationId !== allocation.id || evidence.historicalEconomicVendorId !== vendorId) return false;
+  const record = allocation.refundRecords?.find((item) => item.id === evidence.refundRecordId);
+  if (!record || record.sourceShopifyRefundId !== evidence.sourceShopifyRefundId) return false;
   return reference.type === 'refundRecordId'
-    ? evidence.record.id === reference.id
-    : evidence.record.sourceShopifyRefundId === reference.id;
+    ? record.id === reference.id
+    : record.sourceShopifyRefundId === reference.id;
 }
 
 export type FinanceTransactionsSearchOptions = {
@@ -1936,7 +1939,7 @@ export async function getVendorFinanceTransactionsPage(vendorId: string, options
     if (!entries.length) break;
     const scopedEntries = options.reference &&
       (options.reference.type === 'refundRecordId' || options.reference.type === 'sourceShopifyRefundId')
-      ? entries.filter((entry) => hasExactRefundTransactionReference(entry, options.reference!)) : entries;
+      ? entries.filter((entry) => hasExactRefundTransactionReference(entry, options.reference!, vendorId)) : entries;
     const canonical = mapFinanceEntries(scopedEntries, profile);
     const presented = mapFinanceRecords(canonical);
     for (let index = 0; index < scopedEntries.length; index += 1) {
