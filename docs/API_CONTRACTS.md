@@ -55,6 +55,12 @@ The frontend currently uses mock transport in local/demo mode, but the same rout
 
 ## Implied Endpoints
 
+### Finance Transactions exact relationship scope (backend read contract)
+
+`GET /finance/transactions` accepts at most one of `localOrderId`, `sourceShopifyOrderId`, `refundRecordId`, or `sourceShopifyRefundId` as an optional exact reference filter. `localOrderId` is `ShopifyOrder.id`; `sourceShopifyOrderId` is the external Shopify Order ID. `refundRecordId` is `RefundRecord.id`; `sourceShopifyRefundId` is the external Shopify Refund ID. Multiple reference parameters, empty values, and invalid values return 400. Unknown or foreign references return an empty page without exposing the record.
+
+The selected authorized Vendor's active ledger rows are filtered before the existing search, status, category, workflow, and 100-row keyset pagination. Order scope follows the ledger's allocation to the local Order; ledger `vendorId` remains the historical economic ownership boundary. Refund scope includes only refund ledgers with an exact, valid persisted `RefundEvidenceSnapshot`; sale rows that merely display a refund reference and legacy refund rows without such evidence are excluded. Reference type and value bind the continuation cursor. Requests without a reference retain the existing contract. Display order numbers and untyped Support snapshot references are not resolved by this contract.
+
 The current frontend directly or indirectly expects the following read endpoints:
 
 - `GET /orders`
