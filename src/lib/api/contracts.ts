@@ -2757,6 +2757,11 @@ export type SplitFinanceSummary = {
   refundOffsetStatus?: 'settlement_review_pending' | null;
 };
 
+export type FinanceTransactionReference = {
+  type: 'localOrderId' | 'sourceShopifyOrderId' | 'refundRecordId' | 'sourceShopifyRefundId';
+  id: string;
+};
+
 export type FinanceTransaction = {
   id: string;
   date: string;

@@ -4,6 +4,7 @@ import type {
   FinanceDashboard,
   FinanceDashboardSummary,
   FinanceTransaction,
+  FinanceTransactionReference,
   VendorDebtHistory,
   PayoutBatch,
   ReturnFinanceRecordsResponse,
@@ -204,6 +205,7 @@ export async function getFinanceTransactions(options: {
   category?: string;
   workflow?: string;
   cursor?: string | null;
+  reference?: FinanceTransactionReference;
   signal?: AbortSignal;
 }): Promise<{ vendorId: string; records: FinanceTransaction[]; hasNextPage: boolean; nextCursor: string | null }> {
   const params = new URLSearchParams();
@@ -212,6 +214,7 @@ export async function getFinanceTransactions(options: {
   if (options.category && options.category !== 'all') params.set('category', options.category);
   if (options.workflow && options.workflow !== 'all') params.set('workflow', options.workflow);
   if (options.cursor) params.set('cursor', options.cursor);
+  if (options.reference) params.set(options.reference.type, options.reference.id);
   const response = await apiClient.get<{
     vendorId: string; records: FinanceDashboardDto['records']; hasNextPage: boolean; nextCursor: string | null;
   }>(`/finance/transactions?${params.toString()}`, readVendorRequestOptions(options));

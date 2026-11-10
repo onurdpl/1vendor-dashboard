@@ -35,7 +35,7 @@ import { useAppReadiness } from '../lib/appReadiness';
 import type { AppReadinessState } from '../lib/appReadiness';
 import { getCurrentVendorContext, onSessionReset, onVendorChange } from '../lib/auth';
 import { getPageReadinessState } from '../lib/pageReadiness';
-import type { FinanceDashboard, FinanceTransaction, SupportTicket, VendorDebtHistory, VendorDebtHistoryEvent } from '../lib/api/contracts';
+import type { FinanceDashboard, FinanceTransaction, FinanceTransactionReference, SupportTicket, VendorDebtHistory, VendorDebtHistoryEvent } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
@@ -68,6 +68,26 @@ type FinanceDeepLinkTarget = {
   type: 'ledger' | 'refund' | 'order' | 'shopifyOrder';
   value: string;
 };
+
+type FinanceReferenceScope = { kind: 'valid'; reference: FinanceTransactionReference } | { kind: 'invalid' };
+const FINANCE_REFERENCE_KEYS = ['localOrderId', 'sourceShopifyOrderId', 'refundRecordId', 'sourceShopifyRefundId'] as const;
+const LEGACY_FINANCE_TARGET_KEYS = [
+  'ledgerId', 'financeLedgerEntryId', 'financeRecordId', 'ledger', 'id',
+  'refundId', 'shopifyRefundId', 'shopifyOrderId', 'orderId',
+  'order', 'orderNumber', 'shopifyOrderNumber', 'sourceShopifyOrderNumber',
+];
+
+function getFinanceReferenceScope(searchParams: URLSearchParams): FinanceReferenceScope | null {
+  const supplied = FINANCE_REFERENCE_KEYS.filter((key) => searchParams.has(key));
+  if (!supplied.length && !['reference', 'referenceType', 'referenceId'].some((key) => searchParams.has(key))) return null;
+  if (supplied.length !== 1 || LEGACY_FINANCE_TARGET_KEYS.some((key) => searchParams.has(key))) return { kind: 'invalid' };
+  const type = supplied[0];
+  const values = searchParams.getAll(type);
+  const id = values[0]?.trim();
+  if (values.length !== 1 || !id || id.length > 200 ||
+      ['reference', 'referenceType', 'referenceId'].some((key) => searchParams.has(key))) return { kind: 'invalid' };
+  return { kind: 'valid', reference: { type, id } };
+}
 
 type FinanceWorkspaceTab = 'overview' | 'transactions';
 
@@ -1521,9 +1541,14 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
   const isAdmin = currentUser?.role === 'admin';
   const isVendorUser = currentUser?.role === 'vendor';
   const financeAudience = isAdmin ? 'admin' : 'vendor';
+  const referenceScope = useMemo(() => getFinanceReferenceScope(searchParams), [searchParams]);
+  const reference = referenceScope?.kind === 'valid' ? referenceScope.reference : undefined;
+  const requestedFinanceTarget = useMemo(() => referenceScope ? null : getFinanceDeepLinkTarget(searchParams), [referenceScope, searchParams]);
+  const linkedLedgerId = requestedFinanceTarget?.type === 'ledger' ? requestedFinanceTarget.value : null;
   const activeWorkflowFilter = useMemo(() => getFinanceWorkflowFilter(searchParams.get('workflow'), financeAudience), [financeAudience, searchParams]);
   const workflow = activeWorkflowFilter ? 'settlement-review' : 'all';
-  const paginationKey = JSON.stringify([currentVendor.vendorId, vendorGeneration, financeAudience, searchTerm.trim().toLowerCase(), statusFilter, categoryFilter, workflow]);
+  const paginationKey = JSON.stringify([currentVendor.vendorId, vendorGeneration, financeAudience, searchTerm.trim().toLowerCase(), statusFilter, categoryFilter, workflow,
+    reference?.type ?? null, reference?.id ?? null]);
   const [pagination, setPagination] = useState<{ key: string; cursors: Array<string | null>; index: number }>({ key: '', cursors: [null], index: 0 });
   const currentPageIndex = pagination.key === paginationKey ? pagination.index : 0;
   const currentCursor = pagination.key === paginationKey ? pagination.cursors[currentPageIndex] : null;
@@ -1531,16 +1556,15 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
     [...queryKeys.finance.transactions(currentVendor.vendorId), paginationKey, currentCursor],
     ({ signal }) => isCurrentVendorContext()
       ? getFinanceTransactions({ vendorId: currentVendor.vendorId, audience: financeAudience, search: searchTerm,
-          status: statusFilter, category: categoryFilter, workflow, cursor: currentCursor, signal })
+          status: statusFilter, category: categoryFilter, workflow, cursor: currentCursor, reference, signal })
       : Promise.reject(new Error('Vendor context changed.')),
-    { enabled: runtimeConfig.apiMode === 'real' && authContextReady && activeFinanceTab === 'transactions', placeholderData: () => undefined },
+    { enabled: (runtimeConfig.apiMode === 'real' || Boolean(reference)) && referenceScope?.kind !== 'invalid' &&
+        authContextReady && activeFinanceTab === 'transactions', placeholderData: () => undefined },
   );
-  const transactionsPage = runtimeConfig.apiMode === 'real'
+  const transactionsPage = runtimeConfig.apiMode === 'real' || reference
     ? isCurrentVendorContext() && transactionsResource.data?.vendorId === currentVendor.vendorId
       ? transactionsResource.data : null
     : finance ? { vendorId: currentVendor.vendorId, records: finance.transactions, hasNextPage: false, nextCursor: null } : null;
-  const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
-  const linkedLedgerId = requestedFinanceTarget?.type === 'ledger' ? requestedFinanceTarget.value : null;
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
   const [shippingCostAmount, setShippingCostAmount] = useState('');
   const [shippingVatAmount, setShippingVatAmount] = useState('');
@@ -1548,17 +1572,24 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
   useEffect(() => {
     setSelectedRecordId(null);
     setSelectedDebtEventId(null);
-  }, [requestedFinanceTarget?.type, requestedFinanceTarget?.value]);
+  }, [requestedFinanceTarget?.type, requestedFinanceTarget?.value, referenceScope?.kind, reference?.type, reference?.id]);
 
   useEffect(() => {
     setSelectedDebtEventId(null);
   }, [currentVendor.vendorId]);
 
   useEffect(() => {
-    if (requestedFinanceTarget || activeWorkflowFilter) {
+    if (requestedFinanceTarget || referenceScope || activeWorkflowFilter) {
       setActiveFinanceTab('transactions');
     }
-  }, [activeWorkflowFilter, requestedFinanceTarget]);
+  }, [activeWorkflowFilter, requestedFinanceTarget, referenceScope]);
+
+  function clearReferenceScope() {
+    const nextParams = new URLSearchParams(searchParams);
+    FINANCE_REFERENCE_KEYS.forEach((key) => nextParams.delete(key));
+    setSearchParams(nextParams);
+    setSelectedRecordId(null);
+  }
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
@@ -1667,7 +1698,7 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
     }
   }
 
-  const filteredRecords = runtimeConfig.apiMode === 'real'
+  const filteredRecords = runtimeConfig.apiMode === 'real' || reference
     ? safeArray(transactionsPage?.records)
     : safeArray(transactionsPage?.records).filter((record) => {
         const query = searchTerm.trim().toLowerCase();
@@ -1700,6 +1731,7 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
     if (selectedByClick) {
       return selectedByClick;
     }
+    if (referenceScope) return null;
     if (requestedFinanceTarget) {
       return locallyResolvedTarget ?? (requestedFinanceTarget.type === 'ledger' ? linkedLedger : null);
     }
@@ -1707,7 +1739,7 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
       return null;
     }
     return filteredRecords[0];
-  }, [filteredRecords, linkedLedger, locallyResolvedTarget, requestedFinanceTarget, selectedRecordId]);
+  }, [filteredRecords, linkedLedger, locallyResolvedTarget, referenceScope, requestedFinanceTarget, selectedRecordId]);
   const selectedOperationalProjection = selectedRecord
     ? getFinanceOperationalProjection(selectedRecord, { audience: financeAudience })
     : null;
@@ -2212,13 +2244,31 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
             </div>
           ) : null}
 
+          {reference ? (
+            <div className="workflow-filter-banner" role="region" aria-label="Finance reference scope">
+              <div>
+                <span>{reference.type === 'localOrderId' || reference.type === 'sourceShopifyOrderId' ? 'Order reference' : 'Refund reference'}</span>
+                <strong>{reference.id}</strong>
+                <small>{reference.type === 'localOrderId' || reference.type === 'refundRecordId' ? 'Local ID' : 'Shopify ID'}</small>
+              </div>
+              <button type="button" className="button button-secondary button-compact" onClick={clearReferenceScope}>
+                Clear reference
+              </button>
+            </div>
+          ) : null}
+
           <OperationalTable
             columns={isVendorUser
               ? ['Tarih', 'İşlem Tipi', 'Sipariş', 'Durum', 'Tutar', 'Ödeme Etkisi', 'İşlem']
               : ['Date', 'Type', 'Order', 'Status', 'Source amount', 'Settlement impact', 'Action']}
             className="finance-op-table finance-op-table-v2"
           >
-            {isError && !finance ? (
+            {referenceScope?.kind === 'invalid' ? (
+              <OperationalTableRow>
+                <EmptyStatePanel title="Unsupported Finance reference"
+                  description="Use one exact Order or Refund reference in the Finance link." />
+              </OperationalTableRow>
+            ) : isError && !finance ? (
               <OperationalTableRow>
                 <SectionErrorRetry
                   title="Finance unavailable"
@@ -2257,10 +2307,14 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
             ) : filteredRecords.length === 0 ? (
               <OperationalTableRow>
                 <EmptyStatePanel
-                  title={activeWorkflowFilter?.emptyTitle ?? 'No finance preview activity in this view'}
-                  description={activeWorkflowFilter?.emptyDescription ?? (isVendorUser
-                    ? 'Adjust the status, type, or search filters to review payment activity.'
-                    : 'Adjust the status, type, or search filters to review settlement estimates.')}
+                  title={reference ? 'No related Finance transactions' : activeWorkflowFilter?.emptyTitle ?? 'No finance preview activity in this view'}
+                  description={reference
+                    ? searchTerm || statusFilter !== 'all' || categoryFilter !== 'all' || activeWorkflowFilter
+                      ? 'No transactions match this reference and the current filters.'
+                      : 'No active transactions with a verified relationship were found for this reference.'
+                    : activeWorkflowFilter?.emptyDescription ?? (isVendorUser
+                      ? 'Adjust the status, type, or search filters to review payment activity.'
+                      : 'Adjust the status, type, or search filters to review settlement estimates.')}
                 />
               </OperationalTableRow>
             ) : filteredRecords.map((record) => {
@@ -2331,7 +2385,7 @@ function FinancePageContent({ appReadiness, vendorGeneration, vendorGenerationRe
             })}
           </OperationalTable>
 
-          {runtimeConfig.apiMode === 'real' && transactionsPage ? (
+          {runtimeConfig.apiMode === 'real' && referenceScope?.kind !== 'invalid' && transactionsPage ? (
             <nav className="pagination-controls" aria-label="Finance transaction pages">
               <button type="button" className="button button-secondary button-compact" disabled={currentPageIndex === 0}
                 onClick={() => { setSelectedRecordId(null); setPagination((state) => ({ ...state, index: Math.max(0, state.index - 1) })); }}>

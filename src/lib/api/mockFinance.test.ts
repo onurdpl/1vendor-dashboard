@@ -1,11 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import { getMockFinanceDashboard, listMockFinanceTransactions } from './mockFinance';
+import { runtimeConfig } from '../../config/runtime';
+import { runtimeServices } from '../../services/runtime-services';
 
 function parseMoney(value: string) {
   return Number(value.replace(/[^0-9.-]/g, ''));
 }
 
 describe('mock finance derived from vendor allocations', () => {
+  it('keeps typed reference results Vendor scoped and fails closed for unavailable local identities', async () => {
+    const previousMode = runtimeConfig.apiMode;
+    runtimeConfig.apiMode = 'mock';
+    try {
+      const a = getMockFinanceDashboard('demo-vendor-a').transactions;
+      const orderId = a.find((record) => record.shopifyOrderId)?.shopifyOrderId;
+      const refundId = a.find((record) => record.category === 'Refund' && record.shopifyRefundId)?.shopifyRefundId;
+      expect(orderId).toBeTruthy();
+      expect(refundId).toBeTruthy();
+      const orders = await runtimeServices.finance.transactions('demo-vendor-a', {
+        reference: { type: 'sourceShopifyOrderId', id: orderId! }, audience: 'admin',
+      });
+      expect(orders.records.length).toBeGreaterThan(0);
+      expect(orders.records.every((record) => record.shopifyOrderId === orderId)).toBe(true);
+      const refunds = await runtimeServices.finance.transactions('demo-vendor-a', {
+        reference: { type: 'sourceShopifyRefundId', id: refundId! }, audience: 'admin',
+      });
+      expect(refunds.records.length).toBeGreaterThan(0);
+      expect(refunds.records.every((record) => record.category === 'Refund' && record.shopifyRefundId === refundId)).toBe(true);
+      expect((await runtimeServices.finance.transactions('demo-vendor-b', {
+        reference: { type: 'sourceShopifyRefundId', id: refundId! }, audience: 'vendor',
+      })).records.some((record) => record.id === refunds.records[0].id)).toBe(false);
+      expect((await runtimeServices.finance.transactions('demo-vendor-a', {
+        reference: { type: 'localOrderId', id: 'unavailable-local-order' }, audience: 'admin',
+      })).records).toEqual([]);
+      expect((await runtimeServices.finance.transactions('demo-vendor-a', {
+        reference: { type: 'refundRecordId', id: 'unavailable-local-refund' }, audience: 'admin',
+      })).records).toEqual([]);
+    } finally {
+      runtimeConfig.apiMode = previousMode;
+    }
+  });
   it('derives vendor A finance from vendor A allocations only', () => {
     const finance = getMockFinanceDashboard('demo-vendor-a');
 

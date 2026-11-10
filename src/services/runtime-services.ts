@@ -83,6 +83,7 @@ import type {
   SopyoCredentialState,
   VendorOrdersWorkflow,
   VendorOrdersListFilters,
+  FinanceTransactionReference,
   VendorOrdersWorkflowSummary,
 } from '../lib/api/contracts';
 import type {
@@ -2631,13 +2632,21 @@ export const runtimeServices = {
           }),
     transactions: (vendorId = getCurrentVendorId(), options: {
       search?: string; status?: string; category?: string; workflow?: string;
-      cursor?: string | null; signal?: AbortSignal; audience?: 'admin' | 'vendor';
+      cursor?: string | null; reference?: FinanceTransactionReference;
+      signal?: AbortSignal; audience?: 'admin' | 'vendor';
     } = {}) => {
       if (runtimeConfig.apiMode === 'real') return realFinance.getFinanceTransactions({ vendorId, ...options });
       const audience = options.audience ?? 'vendor';
       const vendorName = getCurrentVendorContext().vendorName;
       const search = (options.search ?? '').trim().toLowerCase();
       const filtered = getMockFinanceDashboard(vendorId).transactions.filter((record) => {
+        if (options.reference) {
+          const { type, id } = options.reference;
+          // The demo fixtures have external Shopify IDs, but no persisted local Order or RefundRecord keys.
+          if (type === 'localOrderId' || type === 'refundRecordId') return false;
+          if (type === 'sourceShopifyOrderId' && record.shopifyOrderId !== id) return false;
+          if (type === 'sourceShopifyRefundId' && (record.category !== 'Refund' || record.shopifyRefundId !== id)) return false;
+        }
         const displayStatus = getPayoutActivityStatusLabel(record, audience);
         return (options.status === undefined || options.status === 'all' || options.status === displayStatus) &&
           (options.category === undefined || options.category === 'all' || options.category === record.category) &&
