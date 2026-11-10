@@ -1470,12 +1470,14 @@ function mapPayoutBatchReference(line?: {
 
 async function findVendorFinanceEntries(
   vendorId: string,
-  options: { limit?: number; offset?: number; keyset?: boolean; cursor?: { createdAt: Date; id: string }; ledgerId?: string } = {},
+  options: { limit?: number; offset?: number; keyset?: boolean; cursor?: { createdAt: Date; id: string }; ledgerId?: string;
+    referenceWhere?: Prisma.FinanceLedgerEntryWhereInput } = {},
 ) {
   return withDashboardTiming('finance.records_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
         ...(options.ledgerId ? { id: options.ledgerId } : {}),
+        ...options.referenceWhere,
         ...activeFinanceLedgerWhere,
         ...(options.cursor ? { OR: [
           { createdAt: { lt: options.cursor.createdAt } },
@@ -1833,12 +1835,49 @@ export async function getVendorFinanceRecordById(vendorId: string, ledgerId: str
 
 export class FinanceTransactionsCursorError extends Error {}
 
+export type FinanceTransactionsReference =
+  | { type: 'localOrderId' | 'sourceShopifyOrderId' | 'refundRecordId' | 'sourceShopifyRefundId'; id: string };
+
+function financeTransactionsReferenceWhere(
+  reference: FinanceTransactionsReference | undefined, vendorId: string,
+): Prisma.FinanceLedgerEntryWhereInput | undefined {
+  if (!reference) return undefined;
+  switch (reference.type) {
+    case 'localOrderId':
+      return { vendorAllocation: { is: { sourceShopifyOrderId: reference.id } } };
+    case 'sourceShopifyOrderId':
+      return { vendorAllocation: { is: { order: { is: { sourceShopifyOrderId: reference.id } } } } };
+    case 'refundRecordId':
+      return { refundEvidenceSnapshot: { is: { refundRecordId: reference.id, historicalEconomicVendorId: vendorId } } };
+    case 'sourceShopifyRefundId':
+      return { refundEvidenceSnapshot: { is: { sourceShopifyRefundId: reference.id, historicalEconomicVendorId: vendorId } } };
+  }
+}
+
+function hasExactRefundTransactionReference(
+  entry: Awaited<ReturnType<typeof findVendorFinanceEntries>>[number],
+  reference: FinanceTransactionsReference, vendorId: string,
+) {
+  if (normalizeType(entry.entryType) !== 'refund') return false;
+  const allocation = entry.vendorAllocation;
+  const ledger = allocation?.financeEntries?.find((item) => item.id === entry.id);
+  const evidence = ledger?.refundEvidenceSnapshot;
+  if (!allocation?.id || !evidence || evidence.refundFinanceLedgerEntryId !== entry.id ||
+      evidence.vendorAllocationId !== allocation.id || evidence.historicalEconomicVendorId !== vendorId) return false;
+  const record = allocation.refundRecords?.find((item) => item.id === evidence.refundRecordId);
+  if (!record || record.sourceShopifyRefundId !== evidence.sourceShopifyRefundId) return false;
+  return reference.type === 'refundRecordId'
+    ? record.id === reference.id
+    : record.sourceShopifyRefundId === reference.id;
+}
+
 export type FinanceTransactionsSearchOptions = {
   search?: string;
   status?: string;
   category?: string;
   workflow?: string;
   cursor?: string;
+  reference?: FinanceTransactionsReference;
   audience: 'admin' | 'vendor';
   vendorName: string;
 };
@@ -1851,6 +1890,8 @@ type FinanceTransactionsCursor = {
   status: string;
   category: string;
   workflow: string;
+  referenceType?: FinanceTransactionsReference['type'];
+  referenceId?: string;
   createdAt: string;
   id: string;
 };
@@ -1865,6 +1906,7 @@ function decodeFinanceTransactionsCursor(encoded: string, expected: Omit<Finance
         cursor.audience !== expected.audience || cursor.search !== expected.search ||
         cursor.status !== expected.status || cursor.category !== expected.category ||
         cursor.workflow !== expected.workflow || typeof cursor.id !== 'string' || !cursor.id ||
+        cursor.referenceType !== expected.referenceType || cursor.referenceId !== expected.referenceId ||
         typeof cursor.createdAt !== 'string' || !cursor.createdAt ||
         !Number.isFinite(Date.parse(cursor.createdAt)) || new Date(cursor.createdAt).toISOString() !== cursor.createdAt) {
       throw new Error('Cursor does not match the current Finance query');
@@ -1880,22 +1922,27 @@ export async function getVendorFinanceTransactionsPage(vendorId: string, options
   const status = options.status ?? 'all';
   const category = options.category ?? 'all';
   const workflow = options.workflow ?? 'all';
-  const binding = { version: 1 as const, vendorId, audience: options.audience, search, status, category, workflow };
+  const binding = { version: 1 as const, vendorId, audience: options.audience, search, status, category, workflow,
+    ...(options.reference ? { referenceType: options.reference.type, referenceId: options.reference.id } : {}) };
   let cursor = options.cursor ? decodeFinanceTransactionsCursor(options.cursor, binding) : undefined;
   const profile = mapProfile(await prisma.vendorFinancialProfile.findFirst({ where: { vendorId, active: true } }), vendorId);
   const matches: Array<{ record: FinanceRecordDto; createdAt: string; id: string }> = [];
   let scanned = 0;
   let exhausted = false;
   const batchSize = 250;
+  const referenceWhere = financeTransactionsReferenceWhere(options.reference, vendorId);
 
   while (matches.length < 101 && !exhausted) {
-    const entries = await findVendorFinanceEntries(vendorId, { limit: batchSize, keyset: true, cursor });
+    const entries = await findVendorFinanceEntries(vendorId, { limit: batchSize, keyset: true, cursor, referenceWhere });
     scanned += entries.length;
     if (entries.length < batchSize) exhausted = true;
     if (!entries.length) break;
-    const canonical = mapFinanceEntries(entries, profile);
+    const scopedEntries = options.reference &&
+      (options.reference.type === 'refundRecordId' || options.reference.type === 'sourceShopifyRefundId')
+      ? entries.filter((entry) => hasExactRefundTransactionReference(entry, options.reference!, vendorId)) : entries;
+    const canonical = mapFinanceEntries(scopedEntries, profile);
     const presented = mapFinanceRecords(canonical);
-    for (let index = 0; index < entries.length; index += 1) {
+    for (let index = 0; index < scopedEntries.length; index += 1) {
       const record = presented[index];
       const displayStatus = getPayoutActivityStatusLabel(record, options.audience);
       if (status !== 'all' && displayStatus !== status) continue;

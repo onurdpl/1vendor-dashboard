@@ -25,6 +25,7 @@ import {
   getVendorFinanceTransactionsPage,
   getVendorFinanceRecordById,
   FinanceTransactionsCursorError,
+  type FinanceTransactionsReference,
   getVendorFinanceSummary,
   getVendorFinancialProfile,
   getVendorReturnFinanceRecords,
@@ -501,13 +502,25 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       const category = readOptionalQueryString(query, 'category') ?? 'all';
       const workflow = readOptionalQueryString(query, 'workflow') ?? 'all';
       const cursor = readOptionalQueryString(query, 'cursor') ?? undefined;
+      const referenceKeys = ['localOrderId', 'sourceShopifyOrderId', 'refundRecordId', 'sourceShopifyRefundId'] as const;
+      const suppliedReferences = referenceKeys.filter((key) => Object.prototype.hasOwnProperty.call(query, key));
+      if (suppliedReferences.length > 1) {
+        return reply.code(400).send({ message: 'Specify one Finance reference type.' });
+      }
+      const referenceKey = suppliedReferences[0];
+      const referenceId = referenceKey ? readOptionalQueryString(query, referenceKey) : null;
+      if (referenceKey && (!referenceId || referenceId.length > 200)) {
+        return reply.code(400).send({ message: 'Invalid Finance reference.' });
+      }
+      const reference: FinanceTransactionsReference | undefined = referenceKey && referenceId
+        ? { type: referenceKey, id: referenceId } : undefined;
       if (search.length > 200 || status.length > 100 || !['all', 'Payout', 'Refund', 'Invoice', 'Adjustment'].includes(category) ||
           !['all', 'settlement-review'].includes(workflow)) {
         return reply.code(400).send({ message: 'Invalid Finance Transactions filters.' });
       }
       try {
         return await getVendorFinanceTransactionsPage(vendorId, {
-          search, status, category, workflow, cursor,
+          search, status, category, workflow, cursor, reference,
           audience: request.authUser?.role === 'admin' ? 'admin' : 'vendor',
           vendorName: request.vendorContext?.vendorName ?? vendorId,
         });
