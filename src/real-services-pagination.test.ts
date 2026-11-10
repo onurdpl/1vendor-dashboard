@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
-import { getFinanceDashboard, getFinanceProfile, getFinanceRecordById, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
+import { getFinanceDashboard, getFinanceProfile, getFinanceRecordById, getFinanceSummary, getFinanceTransactions, getReturnFinanceRecords } from './services/real/finance';
 import { ApiError } from './lib/api/errors';
 import { getAdminShopifyOrderBreakdown, getOrder, getVendorOrdersWorkflowSummary, listOrders } from './services/real/orders';
 import { getAdminOperationsQueueDashboard, listAdminOperationsQueue } from './services/real/operations';
@@ -379,6 +379,20 @@ describe('real service pagination plumbing', () => {
     await expect(getFinanceRecordById({ vendorId: 'vendor-a', ledgerId: 'missing' }))
       .rejects.toMatchObject({ status: 503 });
   });
+
+  it.each(['localOrderId', 'sourceShopifyOrderId', 'refundRecordId', 'sourceShopifyRefundId'] as const)(
+    'sends one exact %s Finance reference with the existing filters and Vendor scope', async (type) => {
+      apiClientGet.mockResolvedValueOnce({ vendorId: 'vendor-a', records: [], hasNextPage: false, nextCursor: null });
+      await getFinanceTransactions({ vendorId: 'vendor-a', reference: { type, id: 'gid://shopify/Example/a b' },
+        search: 'TRY 1,500', status: 'Pending review', category: 'Refund', workflow: 'settlement-review', cursor: 'next' });
+      const [path, requestOptions] = apiClientGet.mock.calls[0] as [string, { vendorId: string }];
+      expect(path.split('?')[0]).toBe('/finance/transactions');
+      expect(Object.fromEntries(new URLSearchParams(path.split('?')[1]))).toEqual({
+        search: 'TRY 1,500', status: 'Pending review', category: 'Refund', workflow: 'settlement-review',
+        cursor: 'next', [type]: 'gid://shopify/Example/a b',
+      });
+      expect(requestOptions).toMatchObject({ vendorId: 'vendor-a' });
+    });
 
   it('preserves finance split summaries on mapped dashboard records', async () => {
     apiClientGet.mockResolvedValueOnce({

@@ -61,6 +61,8 @@ The frontend currently uses mock transport in local/demo mode, but the same rout
 
 The selected authorized Vendor's active ledger rows are filtered before the existing search, status, category, workflow, and 100-row keyset pagination. Order scope follows the ledger's allocation to the local Order; ledger `vendorId` remains the historical economic ownership boundary. Refund scope includes only refund ledgers with an exact, valid persisted `RefundEvidenceSnapshot`; sale rows that merely display a refund reference and legacy refund rows without such evidence are excluded. Reference type and value bind the continuation cursor. Requests without a reference retain the existing contract. Display order numbers and untyped Support snapshot references are not resolved by this contract.
 
+The Finance Transactions page accepts `/finance?localOrderId=...`, `/finance?sourceShopifyOrderId=...`, `/finance?refundRecordId=...`, or `/finance?sourceShopifyRefundId=...` for the corresponding typed collection. It shows the active scope and separate matching rows; clearing the scope restores the ordinary list. The existing `/finance?ledgerId=...` exact-record link remains separate. Legacy `orderId`, `refundId`, display order numbers, and untyped Support references retain their previous loaded-record behavior; they are not converted into typed relationship filters.
+
 The current frontend directly or indirectly expects the following read endpoints:
 
 - `GET /orders`

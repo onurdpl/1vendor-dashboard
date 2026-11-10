@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from './FinancePage';
 import { runtimeConfig } from '../config/runtime';
@@ -488,6 +488,27 @@ function renderFinanceNavigationHarness(target: string) {
   fireEvent.click(screen.getByRole('tab', { name: 'Transactions' }));
 
   return result;
+}
+
+function FinanceReferenceHistoryHarness() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return <>
+    <button type="button" onClick={() => navigate('/finance?refundRecordId=refund-local-2')}>Open refund reference</button>
+    <button type="button" onClick={() => navigate(-1)}>Browser Back</button>
+    <button type="button" onClick={() => navigate(1)}>Browser Forward</button>
+    <output data-testid="finance-location">{location.search}</output>
+    <FinancePage />
+  </>;
+}
+
+function renderFinanceReferenceHistory() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={queryClient}>
+    <MemoryRouter initialEntries={['/finance?localOrderId=order-local-1']}>
+      <FinanceReferenceHistoryHarness />
+    </MemoryRouter>
+  </QueryClientProvider>);
 }
 
 function getSidePanel(container: HTMLElement) {
@@ -2682,6 +2703,198 @@ describe('FinancePage control center', () => {
     expect(await screen.findByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
     expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
+  it.each([
+    ['localOrderId', 'order-local-1'],
+    ['sourceShopifyOrderId', 'gid://shopify/Order/9010'],
+    ['refundRecordId', 'refund-local-1'],
+    ['sourceShopifyRefundId', 'gid://shopify/Refund/9010'],
+  ] as const)('shows typed %s results as separate rows without selecting a first record', async (type, id) => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    const rows = [
+      { ...financeDashboard.transactions[0], id: 'related-ledger-1', shopifyOrderNumber: '9010' },
+      { ...financeDashboard.transactions[0], id: 'related-ledger-2', shopifyOrderNumber: '9011' },
+    ];
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockResolvedValue({ vendorId: 'demo-vendor-a', records: rows,
+      hasNextPage: false, nextCursor: null });
+    const { container } = renderFinancePage([`/finance?${type}=${encodeURIComponent(id)}`]);
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#9010')).toBeInTheDocument();
+    expect(table.getByText('#9011')).toBeInTheDocument();
+    expect(getFinanceTransactionsMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a', reference: { type, id }, cursor: null,
+    }));
+    expect(screen.getByRole('region', { name: 'Finance reference scope' })).toHaveTextContent(id);
+    expect(getSidePanel(container).getByText('Select a transaction')).toBeInTheDocument();
+    await userEvent.click(within(table.getByText('#9011').closest('[role="button"]') as HTMLElement)
+      .getByRole('button', { name: 'View details' }));
+    expect(await getSidePanel(container).findByRole('heading', { name: 'Order #9011' })).toBeInTheDocument();
+  });
+
+  it('clears a typed reference and restores the ordinary list without changing Overview values', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockImplementation(({ reference }: { reference?: unknown }) => Promise.resolve({
+      vendorId: 'demo-vendor-a', records: reference ? [] : financeDashboard.transactions,
+      hasNextPage: false, nextCursor: null,
+    }));
+    const { container } = renderFinancePage(['/finance?localOrderId=missing']);
+    expect(await screen.findByText('No related Finance transactions')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Clear reference' }));
+    expect(await within(container.querySelector('.finance-op-table') as HTMLElement).findByText('#1021')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Finance reference scope' })).not.toBeInTheDocument();
+    expect(getFinanceTransactionsMock).toHaveBeenLastCalledWith(expect.objectContaining({ reference: undefined, cursor: null }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(screen.getAllByText('$2,947.50').length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    '/finance?localOrderId=a&refundRecordId=b',
+    '/finance?sourceShopifyOrderId=',
+    '/finance?referenceType=sourceShopifyOrderId&referenceId=untyped',
+  ])('fails closed on conflicting, blank, or unsupported reference URL %s', async (url) => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    const { container } = renderFinancePage([url]);
+    expect(await within(container.querySelector('.finance-op-table') as HTMLElement)
+      .findByText('Unsupported Finance reference')).toBeInTheDocument();
+    expect(getFinanceTransactionsMock).not.toHaveBeenCalled();
+    expect(within(container.querySelector('.finance-op-table') as HTMLElement).queryByText('#1021')).not.toBeInTheDocument();
+  });
+
+  it('keeps reference, search and filters together before paging and resets the cursor', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    const rows = Array.from({ length: 101 }, (_, index) => ({ ...financeDashboard.transactions[0],
+      id: `reference-row-${index}`, shopifyOrderNumber: String(9000 + index) }));
+    getFinanceTransactionsMock.mockImplementation(({ vendorId, cursor, search, category }: {
+      vendorId: string; cursor?: string | null; search?: string; category?: string;
+    }) => Promise.resolve({ vendorId, records: search || category === 'Refund' ? [] : cursor ? rows.slice(100) : rows.slice(0, 100),
+      hasNextPage: !cursor && !search && category !== 'Refund', nextCursor: !cursor && !search && category !== 'Refund' ? 'page-two' : null }));
+    const { container } = renderFinancePage(['/finance?localOrderId=order-local-1']);
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#9000')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await table.findByText('#9100')).toBeInTheDocument();
+    expect(getFinanceTransactionsMock).toHaveBeenCalledWith(expect.objectContaining({
+      reference: { type: 'localOrderId', id: 'order-local-1' }, cursor: 'page-two',
+    }));
+    fireEvent.change(screen.getByPlaceholderText('Search by order #, type, status, amount...'),
+      { target: { value: 'needle' } });
+    expect(await screen.findByText('No transactions match this reference and the current filters.')).toBeInTheDocument();
+    expect(getFinanceTransactionsMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      reference: { type: 'localOrderId', id: 'order-local-1' }, search: 'needle', cursor: null,
+    }));
+    fireEvent.change(screen.getByPlaceholderText('Search by order #, type, status, amount...'),
+      { target: { value: '' } });
+    fireEvent.change(screen.getAllByRole('combobox')[1], { target: { value: 'Refund' } });
+    await waitFor(() => expect(getFinanceTransactionsMock).toHaveBeenCalledWith(expect.objectContaining({
+      reference: { type: 'localOrderId', id: 'order-local-1' }, category: 'Refund', cursor: null,
+    })));
+  });
+
+  it('follows typed reference URL changes through Back and Forward without auto-selecting records', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockImplementation(({ vendorId, reference }: {
+      vendorId: string; reference?: { type: string; id: string };
+    }) => Promise.resolve({ vendorId, records: reference?.type === 'refundRecordId'
+      ? [{ ...financeDashboard.transactions[1], id: 'refund-related', shopifyOrderNumber: '9200' }]
+      : [{ ...financeDashboard.transactions[0], id: 'order-related', shopifyOrderNumber: '9100' }],
+    hasNextPage: false, nextCursor: null }));
+    const { container } = renderFinanceReferenceHistory();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#9100')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Open refund reference' }));
+    expect(await table.findByText('#9200')).toBeInTheDocument();
+    expect(table.queryByText('#9100')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Browser Back' }));
+    expect(await table.findByText('#9100')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Browser Forward' }));
+    expect(await table.findByText('#9200')).toBeInTheDocument();
+    expect(getSidePanel(container).getByText('Select a transaction')).toBeInTheDocument();
+    expect(screen.getByTestId('finance-location')).toHaveTextContent('refundRecordId=refund-local-2');
+  });
+
+  it('keeps a typed reference on request failure and Retry', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockRejectedValueOnce(new Error('Temporary failure'))
+      .mockResolvedValueOnce({ vendorId: 'demo-vendor-a', records: [], hasNextPage: false, nextCursor: null });
+    renderFinancePage(['/finance?refundRecordId=refund-local-1']);
+    expect(await screen.findByText('Finance transactions unavailable')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('No related Finance transactions')).toBeInTheDocument();
+    expect(getFinanceTransactionsMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      reference: { type: 'refundRecordId', id: 'refund-local-1' }, cursor: null,
+    }));
+  });
+
+  it('combines typed reference with status and workflow without altering the reference', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceTransactionsMock.mockResolvedValue({ vendorId: 'demo-vendor-a', records: [],
+      hasNextPage: false, nextCursor: null });
+    renderFinancePage(['/finance?sourceShopifyRefundId=gid%3A%2F%2Fshopify%2FRefund%2F9010&workflow=settlement-review']);
+    await waitFor(() => expect(getFinanceTransactionsMock).toHaveBeenCalledWith(expect.objectContaining({
+      reference: { type: 'sourceShopifyRefundId', id: 'gid://shopify/Refund/9010' },
+      workflow: 'settlement-review', cursor: null,
+    })));
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'Approved' } });
+    await waitFor(() => expect(getFinanceTransactionsMock).toHaveBeenCalledWith(expect.objectContaining({
+      reference: { type: 'sourceShopifyRefundId', id: 'gid://shopify/Refund/9010' },
+      workflow: 'all', status: 'Approved', cursor: null,
+    })));
+  });
+
+  it('does not show a delayed Vendor A typed result under B and restores A after switching back', async () => {
+    runtimeConfig.apiMode = 'real';
+    setCurrentVendorId('demo-vendor-a');
+    await verifyTestAdminVendor('demo-vendor-a');
+    const pendingA = deferred<{ vendorId: string; records: FinanceTransaction[]; hasNextPage: boolean; nextCursor: null }>();
+    getFinanceDashboardMock.mockImplementation(({ vendorId }) => Promise.resolve(
+      vendorId === 'demo-vendor-b' ? financeDashboardB : financeDashboard));
+    getFinanceTransactionsMock.mockImplementation(({ vendorId }: { vendorId: string }) => vendorId === 'demo-vendor-b'
+      ? Promise.resolve({ vendorId, records: [{ ...financeDashboardB.transactions[0], shopifyOrderNumber: '9202' }],
+          hasNextPage: false, nextCursor: null })
+      : getFinanceTransactionsMock.mock.calls.filter(([input]) => input.vendorId === 'demo-vendor-a').length === 1
+        ? pendingA.promise
+        : Promise.resolve({ vendorId, records: [{ ...financeDashboard.transactions[0], shopifyOrderNumber: '9101' }],
+            hasNextPage: false, nextCursor: null }));
+    const { container } = renderFinancePage(['/finance?localOrderId=order-local-1']);
+    await waitFor(() => expect(getFinanceTransactionsMock).toHaveBeenCalledTimes(1));
+    await act(async () => { setCurrentVendorId('demo-vendor-b'); await verifyTestAdminVendor('demo-vendor-b'); });
+    showFinanceTransactions();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await table.findByText('#9202')).toBeInTheDocument();
+    await act(async () => pendingA.resolve({ vendorId: 'demo-vendor-a',
+      records: [{ ...financeDashboard.transactions[0], shopifyOrderNumber: '9101' }],
+      hasNextPage: false, nextCursor: null }));
+    expect(table.queryByText('#9101')).not.toBeInTheDocument();
+    await act(async () => { setCurrentVendorId('demo-vendor-a'); await verifyTestAdminVendor('demo-vendor-a'); });
+    showFinanceTransactions();
+    const returnedTable = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(await returnedTable.findByText('#9101')).toBeInTheDocument();
+    expect(returnedTable.queryByText('#9202')).not.toBeInTheDocument();
+    expect(getFinanceTransactionsMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a', reference: { type: 'localOrderId', id: 'order-local-1' }, cursor: null,
+    }));
   });
 
   it('resolves an Admin Support ledger link from the selected Vendor B dataset', async () => {

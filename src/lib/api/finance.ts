@@ -10,6 +10,7 @@ import type {
   VendorDebtHistory,
   VendorFinancialProfile,
 } from './contracts';
+import type { FinanceTransactionReference } from './contracts';
 
 export function getFinanceDashboard(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.finance.dashboard(options.vendorId ?? undefined, { signal: options.signal });
@@ -17,7 +18,8 @@ export function getFinanceDashboard(options: { vendorId?: string | null; signal?
 
 export function getFinanceTransactions(options: {
   vendorId?: string | null; search?: string; status?: string; category?: string;
-  workflow?: string; cursor?: string | null; audience: 'admin' | 'vendor'; signal?: AbortSignal;
+  workflow?: string; cursor?: string | null; reference?: FinanceTransactionReference;
+  audience: 'admin' | 'vendor'; signal?: AbortSignal;
 }) {
   return runtimeServices.finance.transactions(options.vendorId ?? undefined, options);
 }
