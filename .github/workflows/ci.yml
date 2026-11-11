@@ -115,6 +115,24 @@ jobs:
             fi
             return "$outcome"
           }
+          cleanupReplayOwnership() {
+            local outcome=$?
+            trap - EXIT
+            if [ "${createdReplayOwnership:-0}" = 1 ]; then
+              local identity
+              identity="$(PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -XAt -v ON_ERROR_STOP=1 -c "SELECT pg_get_userbyid(datdba) || '|' || (pg_control_system()).system_identifier::text || '|' || shobj_description(oid, 'pg_database') FROM pg_database WHERE datname='p5_05a_replay_validation'")" || exit 1
+              if [ "$identity" != "postgres|$cluster|fin-auto-ci:$proof" ]; then
+                echo 'Replay ownership cleanup identity/proof mismatch; refusing deletion.'
+                exit 1
+              fi
+              PGPASSWORD=postgres dropdb -h 127.0.0.1 -U postgres p5_05a_replay_validation || exit 1
+              local remaining
+              remaining="$(PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='p5_05a_replay_validation'")" || exit 1
+              [ "$remaining" = 0 ] || exit 1
+              echo 'Replay ownership cleanup verified: disposable database absent.'
+            fi
+            return "$outcome"
+          }
           while read -r db gate file; do
             if [ "$db" = fin_paid_cancel_005b_validation ]; then
               created005b=0
@@ -128,18 +146,23 @@ jobs:
               createdFinanceRead=0
               trap cleanupFinanceRead EXIT
             fi
+            if [ "$db" = p5_05a_replay_validation ]; then
+              createdReplayOwnership=0
+              trap cleanupReplayOwnership EXIT
+            fi
             PGPASSWORD=postgres createdb --host=127.0.0.1 --username=postgres \
               --template=vendor_dashboard_pg18_bootstrap "$db"
             if [ "$db" = fin_paid_cancel_005b_validation ]; then created005b=1; fi
             if [ "$db" = a2_admin_read_ci_validation ]; then createdAdminRead=1; fi
             if [ "$db" = a2_finance_read_ci_validation ]; then createdFinanceRead=1; fi
+            if [ "$db" = p5_05a_replay_validation ]; then createdReplayOwnership=1; fi
             url="postgresql://postgres:postgres@127.0.0.1:5432/$db?schema=public"
             report="$RUNNER_TEMP/$db-pg18-vitest.json"
             proof=""
             cluster=""
             a2Env=()
             case "$db" in
-              fin_auto_f03f04_ci_validation|fin_auto_f06_ci_validation|admin_password_reset_ci_validation|a2_vendor_directory_ci_validation|fin_paid_cancel_005b_validation|a2_admin_read_ci_validation|a2_finance_read_ci_validation)
+              fin_auto_f03f04_ci_validation|fin_auto_f06_ci_validation|admin_password_reset_ci_validation|a2_vendor_directory_ci_validation|fin_paid_cancel_005b_validation|a2_admin_read_ci_validation|a2_finance_read_ci_validation|p5_05a_replay_validation)
                 proof="$(openssl rand -hex 32)"
                 cluster="$(PGPASSWORD=postgres psql --host=127.0.0.1 --username=postgres --dbname=postgres --no-psqlrc --tuples-only --no-align --command='SELECT system_identifier FROM pg_control_system()')"
                 PGPASSWORD=postgres psql --host=127.0.0.1 --username=postgres --dbname=postgres --no-psqlrc --set=ON_ERROR_STOP=1 \
@@ -218,6 +241,19 @@ jobs:
                     !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
                 console.log("A2 Finance reads verified: 9 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
               }
+              if (file === "src/vendor-integration-replay-ownership.postgres.test.ts") {
+                const expected = [
+                  "denies former Vendor replay of a status event after supported economic transfer",
+                  "denies former Vendor replay of a invoice event after supported economic transfer",
+                  "preserves shipment replay because shipment evidence blocks the supported transfer path",
+                ];
+                const assertions = r.testResults[0].assertionResults;
+                if (r.numTotalTests !== 3 || r.numPassedTests !== 3 ||
+                    r.numFailedTests !== 0 || r.numPendingTests !== 0 ||
+                    !Array.isArray(assertions) || assertions.length !== 3 ||
+                    !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
+                console.log("Replay ownership verified: 3 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
+              }
             ' "$report" "$file"
             if [ "$db" = fin_paid_cancel_005b_validation ]; then
               cleanup005b
@@ -229,6 +265,10 @@ jobs:
             fi
             if [ "$db" = a2_finance_read_ci_validation ]; then
               cleanupFinanceRead
+              trap - EXIT
+            fi
+            if [ "$db" = p5_05a_replay_validation ]; then
+              cleanupReplayOwnership
               trap - EXIT
             fi
           done <<'SUITES'
@@ -248,6 +288,7 @@ jobs:
           fin_paid_cancel_005b_validation FIN_PAID_CANCEL_005B_TEST_DATABASE_ISOLATED src/fin-paid-cancel-005b.postgres.test.ts
           a2_admin_read_ci_validation A2_REAL_PG_TEST_ISOLATED src/admin-global-vendor-read.postgres.test.ts
           a2_finance_read_ci_validation A2_FINANCE_READ_PG_ISOLATED src/admin-finance-read.postgres.test.ts
+          p5_05a_replay_validation P5_05A_TEST_DATABASE_ISOLATED src/vendor-integration-replay-ownership.postgres.test.ts
           SUITES
 
   build-and-test:
