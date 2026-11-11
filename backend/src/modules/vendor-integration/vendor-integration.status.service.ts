@@ -119,6 +119,9 @@ export async function updateVendorIntegrationOrderStatus(
     });
 
     if (existingEvent) {
+      if (existingEvent.vendorAllocation.assignedVendorId !== input.context.vendorIdentifier) {
+        return null;
+      }
       return {
         idempotent: true,
         allocation: serializeAllocationStatus(existingEvent.vendorAllocation),
