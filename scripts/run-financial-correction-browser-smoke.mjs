@@ -111,7 +111,7 @@ const backendDefaults = {
   KARGONOMI_BASE_URL: 'http://localhost:9', KARGONOMI_API_TOKEN: 'browser-smoke-inert',
 };
 const frontendEnv = {
-  ...baseEnv, VITE_API_MODE: 'real', VITE_API_BASE_URL: localBackend,
+  ...baseEnv, VITE_API_MODE: 'real', VITE_API_BASE_URL: ipv4Loopback ? '/api' : localBackend,
 };
 
 function run(command, args, env = baseEnv) {
@@ -284,7 +284,9 @@ async function runScenario(scenario) {
       return health.status === 'ok' && health.dbReachable === true && health.schemaReady === true;
     }, backend);
     if (ipv4Loopback) console.log(`Backend health, database and schema ready at ${localBackend}.`);
-    const frontend = start('npm', ['run', 'preview', '--', '--host', webHost, '--port', '5173', '--strictPort'], frontendEnv, processes);
+    const previewArgs = ['run', 'preview', '--', '--host', webHost, '--port', '5173', '--strictPort'];
+    if (ipv4Loopback) previewArgs.push('--config', 'vite.config.p5-06k.ts');
+    const frontend = start('npm', previewArgs, frontendEnv, processes);
     if (ipv4Loopback) {
       let frontendStatus;
       try {
@@ -293,6 +295,10 @@ async function runScenario(scenario) {
         frontendStatus = await probeFrontend();
       }
       if (frontendStatus !== 200) throw new Error(`Frontend HTTP probe failed at ${localFrontend}.`);
+      await run('node_modules/.bin/tsx', ['scripts/ci/p5-06k-browser-preflight.ts'], {
+        ...baseEnv, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+        BROWSER_SMOKE_EXPECTED_DATABASE: databaseName,
+      });
     } else {
       await waitFor(localFrontend, async () => true, frontend);
     }

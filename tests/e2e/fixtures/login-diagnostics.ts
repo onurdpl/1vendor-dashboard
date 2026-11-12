@@ -10,7 +10,10 @@ const startupMessages = [
 ];
 const startupTitle = 'Runtime configuration needs attention';
 const startupEyebrow = 'Startup configuration';
-const knownRoutes = new Set(['/', '/login', '/auth/me', '/auth/session', '/auth/csrf', '/auth/login', '/health', '/ready']);
+const knownRoutes = new Set([
+  '/', '/login', '/auth/me', '/auth/session', '/auth/csrf', '/auth/login', '/health', '/ready',
+  '/api/auth/me', '/api/auth/session', '/api/auth/csrf', '/api/auth/login', '/api/health',
+]);
 
 export function observeLogin(
   page: Page,
