@@ -1,10 +1,11 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { connect } from 'node:net';
+import { lookup } from 'node:dns/promises';
 import { userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nodeEgressGuard = path.join(root, 'scripts/test-node-egress-guard.mjs');
@@ -72,8 +73,20 @@ if (requested.length > 1 || (requested.length === 1 && !/^--scenario=(review-cre
 const selectedScenarios = requested.length
   ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])
   : scenarios.filter(scenario => !scenario.explicitOnly);
-const localBackend = 'http://localhost:4000';
-const localFrontend = 'http://localhost:5173';
+const loopbackMode = process.env.BROWSER_SMOKE_IPV4_LOOPBACK;
+if (loopbackMode !== undefined && (loopbackMode !== '1' || requested[0] !== '--scenario=review-credit')) {
+  throw new Error('BROWSER_SMOKE_IPV4_LOOPBACK accepts only 1 with --scenario=review-credit.');
+}
+const ipv4Loopback = loopbackMode === '1';
+const loginDiagnostics = process.env.BROWSER_SMOKE_LOGIN_DIAGNOSTICS;
+const proofTemp = process.env.RUNNER_TEMP;
+if (loginDiagnostics !== undefined &&
+    (loginDiagnostics !== '1' || !ipv4Loopback || !proofTemp || !path.isAbsolute(proofTemp))) {
+  throw new Error('Login diagnostics require the IPv4 review-credit proof and an absolute RUNNER_TEMP.');
+}
+const webHost = ipv4Loopback ? '127.0.0.1' : 'localhost';
+const localBackend = `http://${webHost}:4000`;
+const localFrontend = `http://${webHost}:5173`;
 const baseEnv = {
   PATH: process.env.PATH || '',
   HOME: process.env.HOME || '',
@@ -98,7 +111,7 @@ const backendDefaults = {
   KARGONOMI_BASE_URL: 'http://localhost:9', KARGONOMI_API_TOKEN: 'browser-smoke-inert',
 };
 const frontendEnv = {
-  ...baseEnv, VITE_API_MODE: 'real', VITE_API_BASE_URL: localBackend,
+  ...baseEnv, VITE_API_MODE: 'real', VITE_API_BASE_URL: ipv4Loopback ? '/api' : localBackend,
 };
 
 function run(command, args, env = baseEnv) {
@@ -109,8 +122,8 @@ function run(command, args, env = baseEnv) {
   });
 }
 
-function start(command, args, env, processes) {
-  const child = spawn(command, args, { cwd: root, env, stdio: 'inherit', detached: true });
+function start(command, args, env, processes, cwd = root) {
+  const child = spawn(command, args, { cwd, env, stdio: 'inherit', detached: true });
   processes.push(child);
   return child;
 }
@@ -136,6 +149,32 @@ async function waitFor(url, check, child) {
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
   throw new Error(`${url} did not become ready.`);
+}
+
+async function probeFrontend() {
+  const localhostAddresses = await lookup('localhost', { all: true });
+  const results = await Promise.all(['127.0.0.1', '[::1]', 'localhost'].map(async (host) => {
+    try {
+      const response = await fetch(`http://${host}:5173/`, {
+        signal: AbortSignal.timeout(1500), redirect: 'manual',
+      });
+      await response.body?.cancel();
+      return { host, status: response.status };
+    } catch (error) {
+      return { host, error: error.cause?.code ?? error.code ?? error.message };
+    }
+  }));
+  const listeners = {};
+  if (process.platform === 'linux') {
+    for (const family of ['tcp', 'tcp6']) {
+      const entries = (await readFile(`/proc/net/${family}`, 'utf8')).split('\n').slice(1);
+      listeners[family] = entries.map((line) => line.trim().split(/\s+/))
+        .filter((fields) => fields[1]?.endsWith(':1435') && fields[3] === '0A')
+        .map((fields) => fields[1]);
+    }
+  }
+  console.log('Frontend loopback diagnostic:', JSON.stringify({ bind: webHost, listeners, localhostAddresses, results }));
+  return results[0].status;
 }
 
 async function stopServers(processes) {
@@ -192,6 +231,13 @@ async function runScenario(scenario) {
   let databaseCreated = false;
   let browserSucceeded = false;
   console.log(`Running real browser scenario ${scenario.name}.`);
+  if (loginDiagnostics === '1') {
+    console.log('Login proof build and server settings', JSON.stringify({
+      VITE_API_MODE: frontendEnv.VITE_API_MODE,
+      VITE_API_BASE_URL: frontendEnv.VITE_API_BASE_URL,
+      CORS_ORIGIN: backendEnv.CORS_ORIGIN,
+    }));
+  }
   try {
     await run('createdb', [`--maintenance-db=${adminUrl.toString()}`, databaseName]);
     databaseCreated = true;
@@ -214,18 +260,59 @@ async function runScenario(scenario) {
     await run('npm', ['run', 'backend:build'], backendEnv);
     await run('npm', ['run', 'build'], frontendEnv);
 
-    const backend = start('npm', ['run', 'backend:start'], {
-      ...backendEnv, NODE_OPTIONS: `--import=${nodeEgressGuard}`,
-    }, processes);
+    const guardedBackendEnv = { ...backendEnv, NODE_OPTIONS: `--import=${nodeEgressGuard}` };
+    // The regular server entry point binds all interfaces. Use the same app
+    // and shutdown handlers with an explicit loopback listener in the proof.
+    const backend = ipv4Loopback
+      ? start(process.execPath, ['--input-type=module', '-e', `
+          import { createApp } from './dist/app.js';
+          import { loadEnv } from './dist/config/env.js';
+          import { registerGracefulShutdownHandlers } from './dist/runtime/graceful-shutdown.js';
+          const env = loadEnv();
+          const app = createApp();
+          const shutdown = registerGracefulShutdownHandlers({ app });
+          try {
+            await app.listen({ port: env.PORT, host: '127.0.0.1' });
+          } catch (error) {
+            shutdown.dispose();
+            throw error;
+          }
+        `], guardedBackendEnv, processes, path.join(root, 'backend'))
+      : start('npm', ['run', 'backend:start'], guardedBackendEnv, processes);
     await waitFor(`${localBackend}/health`, async (response) => {
       const health = await response.json();
       return health.status === 'ok' && health.dbReachable === true && health.schemaReady === true;
     }, backend);
-    const frontend = start('npm', ['run', 'preview', '--', '--host', 'localhost', '--port', '5173', '--strictPort'], frontendEnv, processes);
-    await waitFor(localFrontend, async () => true, frontend);
+    if (ipv4Loopback) console.log(`Backend health, database and schema ready at ${localBackend}.`);
+    const previewArgs = ['run', 'preview', '--', '--host', webHost, '--port', '5173', '--strictPort'];
+    if (ipv4Loopback) previewArgs.push('--config', 'vite.config.p5-06k.ts');
+    const frontend = start('npm', previewArgs, frontendEnv, processes);
+    if (ipv4Loopback) {
+      let frontendStatus;
+      try {
+        await waitFor(localFrontend, (response) => response.status === 200, frontend);
+      } finally {
+        frontendStatus = await probeFrontend();
+      }
+      if (frontendStatus !== 200) throw new Error(`Frontend HTTP probe failed at ${localFrontend}.`);
+      await run('node_modules/.bin/tsx', ['scripts/ci/p5-06k-browser-preflight.ts'], {
+        ...baseEnv, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+        BROWSER_SMOKE_EXPECTED_DATABASE: databaseName,
+      });
+    } else {
+      await waitFor(localFrontend, async () => true, frontend);
+    }
     await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts'], {
       ...baseEnv, BROWSER_SMOKE_REVIEW_ID: scenario.reviewId, BROWSER_SMOKE_REAL_SPEC: scenario.spec,
       BROWSER_SMOKE_RUN_DATE: replacementRunDate,
+      ...(ipv4Loopback ? {
+        BROWSER_SMOKE_IPV4_LOOPBACK: '1',
+        PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+      } : {}),
+      ...(loginDiagnostics === '1' ? {
+        BROWSER_SMOKE_LOGIN_DIAGNOSTICS: '1',
+        BROWSER_SMOKE_LOGIN_DIAGNOSTICS_DIR: path.join(proofTemp, 'p5-06f', 'login'),
+      } : {}),
       ...(fin03 ? { BROWSER_SMOKE_EVIDENCE_PATH: evidencePath, ...(recovery ? { FIN03_RECOVERY_SMOKE: '1', ...(process.env.FIN03_SCOPED_CLOSURE === '1' ? { FIN03_SCOPED_CLOSURE: '1' } : {}) } : {}), NODE_OPTIONS: `--import=${nodeEgressGuard}` } : {}),
     });
     browserSucceeded = true;

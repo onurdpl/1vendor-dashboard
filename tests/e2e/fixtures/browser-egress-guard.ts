@@ -1,8 +1,10 @@
 import { test as base } from '@playwright/test';
 import type { BrowserContext } from '@playwright/test';
+import { observeLogin } from './login-diagnostics';
 
 const localHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const internalSchemes = new Set(['about:', 'data:', 'blob:']);
+const loginDiagnostics = new WeakMap<BrowserContext, { origins: readonly string[]; blocked: readonly string[] }>();
 
 export async function installBrowserEgressGuard(context: BrowserContext, origins: readonly string[]) {
   const allowed = new Set(origins);
@@ -30,10 +32,29 @@ export const test = base.extend({
       throw new Error(`EXTERNAL EGRESS BLOCKED: ${baseURL}`);
     }
     const origins = [baseOrigin.origin];
-    if (process.env.BROWSER_SMOKE_REAL_SPEC) origins.push('http://localhost:4000');
+    if (process.env.BROWSER_SMOKE_REAL_SPEC && process.env.BROWSER_SMOKE_IPV4_LOOPBACK !== '1') {
+      origins.push('http://localhost:4000');
+    }
     const blocked = await installBrowserEgressGuard(context, origins);
+    const diagnosticsEnabled = process.env.BROWSER_SMOKE_LOGIN_DIAGNOSTICS === '1';
+    if (diagnosticsEnabled) {
+      loginDiagnostics.set(context, { origins, blocked });
+    }
     await use(context);
-    if (blocked.length) throw new Error(`EXTERNAL EGRESS BLOCKED: ${blocked.join(', ')}`);
+    if (blocked.length) {
+      const details = diagnosticsEnabled ? 'see sanitized login diagnostics' : blocked.join(', ');
+      throw new Error(`EXTERNAL EGRESS BLOCKED: ${details}`);
+    }
+  },
+  page: async ({ page, baseURL }, use, testInfo) => {
+    const guard = loginDiagnostics.get(page.context());
+    if (!guard) return use(page);
+    const finish = observeLogin(page, baseURL, guard);
+    try {
+      await use(page);
+    } finally {
+      await finish(testInfo.status ?? 'unknown');
+    }
   },
 });
 

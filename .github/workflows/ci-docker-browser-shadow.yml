@@ -1,0 +1,35 @@
+name: CI Docker Browser Shadow
+
+on:
+  push:
+    branches:
+      - codex/p5-06n-docker-browser-shadow
+
+permissions:
+  contents: read
+
+jobs:
+  docker-browser-shadow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # Chromium is preinstalled. PostgreSQL clients still require Apt at image build time.
+      - name: Build temporary pinned test image
+        run: |
+          set -euo pipefail
+          docker build --pull --file .github/ci/Dockerfile --tag sporgym-p5-06n-shadow:${GITHUB_SHA} .
+          docker image inspect sporgym-p5-06n-shadow:${GITHUB_SHA} --format 'Derived image ID: {{.Id}}'
+
+      - name: Verify image, Chromium, PostgreSQL, loopback and artifacts
+        run: bash scripts/ci/p5-06n-browser-shadow.sh
+
+      - name: Upload sanitized proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p5-06n-browser-shadow
+          path: ${{ runner.temp }}/p5-06f/
+          if-no-files-found: error
+          retention-days: 3
