@@ -30,7 +30,12 @@ export const test = base.extend({
       throw new Error(`EXTERNAL EGRESS BLOCKED: ${baseURL}`);
     }
     const origins = [baseOrigin.origin];
-    if (process.env.BROWSER_SMOKE_REAL_SPEC) origins.push('http://localhost:4000');
+    if (process.env.BROWSER_SMOKE_REAL_SPEC) {
+      const backendOrigin = process.env.BROWSER_SMOKE_IPV4_LOOPBACK === '1'
+        ? 'http://127.0.0.1:4000'
+        : 'http://localhost:4000';
+      origins.push(backendOrigin);
+    }
     const blocked = await installBrowserEgressGuard(context, origins);
     await use(context);
     if (blocked.length) throw new Error(`EXTERNAL EGRESS BLOCKED: ${blocked.join(', ')}`);
