@@ -118,9 +118,86 @@ try {
 }
 NODE
     npm run smoke:browser -- tests/e2e/browser-egress-guard.spec.ts
+    npm run build
+    # Diagnose the same Vite preview binding and Node readiness fetch used by
+    # the existing smoke. Only apply an IPv4 client preference if the mismatch
+    # is observed and the preference itself succeeds against that live server.
+    dns_choice="$(node --input-type=module <<'NODE'
+import { spawn, spawnSync } from 'node:child_process';
+import { lookup } from 'node:dns/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+
+const artifactDir = `${process.env.RUNNER_TEMP}/p5-06f`;
+const env = {
+  PATH: process.env.PATH ?? '',
+  HOME: process.env.HOME ?? '',
+  TMPDIR: process.env.TMPDIR ?? '/tmp',
+  VITE_API_MODE: 'real',
+  VITE_API_BASE_URL: 'http://localhost:4000',
+};
+const preview = spawn('npm', ['run', 'preview', '--', '--host', 'localhost', '--port', '5173', '--strictPort'], {
+  env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+});
+let previewOutput = '';
+for (const stream of [preview.stdout, preview.stderr]) {
+  stream.on('data', (chunk) => { previewOutput += chunk.toString().slice(0, 2048); });
+}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function http(url) {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(1200) });
+    return { status: response.status, ok: response.ok };
+  } catch (error) {
+    return { error: error?.cause?.code ?? error?.code ?? error?.message ?? 'unknown' };
+  }
+}
+try {
+  let ipv4;
+  let ipv6;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (preview.exitCode !== null) throw new Error(`Vite preview exited: ${previewOutput}`);
+    [ipv4, ipv6] = await Promise.all([
+      http('http://127.0.0.1:5173/'), http('http://[::1]:5173/'),
+    ]);
+    if (ipv4.ok || ipv6.ok) break;
+    await sleep(250);
+  }
+  const localhost = await http('http://localhost:5173/');
+  const addresses = await lookup('localhost', { all: true });
+  const listening = {};
+  for (const family of ['tcp', 'tcp6']) {
+    const lines = (await readFile(`/proc/net/${family}`, 'utf8')).split('\n').slice(1);
+    listening[family] = lines.map((line) => line.trim().split(/\s+/))
+      .filter((fields) => fields[1]?.endsWith(':1435') && fields[3] === '0A')
+      .map((fields) => fields[1]);
+  }
+  const preferred = spawnSync(process.execPath, [
+    '--dns-result-order=ipv4first', '--input-type=module', '-e',
+    'const r = await fetch("http://localhost:5173/", { signal: AbortSignal.timeout(2000) }); if (!r.ok) process.exit(1);',
+  ], { encoding: 'utf8', timeout: 4000 });
+  const diagnostic = {
+    node: process.version, addresses, listening, ipv4, ipv6, localhost,
+    ipv4PreferredStatus: preferred.status, previewRunning: preview.exitCode === null,
+  };
+  await writeFile(`${artifactDir}/frontend-diagnostic.json`, `${JSON.stringify(diagnostic, null, 2)}\n`);
+  console.error(`Frontend loopback diagnostic: ${JSON.stringify(diagnostic)}`);
+  if (!ipv4.ok || ipv6.ok || localhost.ok || preferred.status !== 0) {
+    throw new Error('IPv4/IPv6 frontend readiness mismatch was not proven; no DNS correction applied.');
+  }
+  console.log('ipv4first');
+} finally {
+  if (preview.pid) {
+    try { process.kill(-preview.pid, 'SIGTERM'); } catch { /* already stopped */ }
+    await sleep(1200);
+    try { process.kill(-preview.pid, 'SIGKILL'); } catch { /* already stopped */ }
+  }
+}
+NODE
+)"
+    [[ "$dns_choice" == 'ipv4first' ]] || { echo 'Unsupported frontend DNS correction; stopping.'; exit 1; }
     BROWSER_SMOKE_ALLOW_LOCAL_DB=1 \
       BROWSER_SMOKE_ADMIN_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres \
-      npm run smoke:browser:real -- --scenario=review-credit
+      node --dns-result-order=ipv4first scripts/run-financial-correction-browser-smoke.mjs --scenario=review-credit
     for file in "$artifact_directory/chromium.png" "$artifact_directory/chromium-trace.zip"; do
       [[ -s "$file" ]] || { echo "Proof artifact missing after browser smokes: $file"; exit 1; }
     done
