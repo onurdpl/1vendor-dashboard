@@ -36,7 +36,7 @@ test('Admin applies a PAID payout vendor deduction without changing paid history
   await reason.fill('Browser smoke: verified PAID vendor deduction and additive debt.');
   await expect(apply).toBeEnabled();
 
-  const postPath = `/admin/finance/refund-reviews/${reviewId}/financial-correction-paid-debt`;
+  const postPath = `${process.env.BROWSER_SMOKE_IPV4_LOOPBACK === '1' ? '/api' : ''}/admin/finance/refund-reviews/${reviewId}/financial-correction-paid-debt`;
   let postCount = 0;
   page.on('request', (request) => {
     if (request.method() === 'POST' && new URL(request.url()).pathname === postPath) postCount += 1;

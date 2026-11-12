@@ -135,11 +135,11 @@ NODE
       BROWSER_SMOKE_LOGIN_DIAGNOSTICS=1 \
       BROWSER_SMOKE_ALLOW_LOCAL_DB=1 \
       BROWSER_SMOKE_ADMIN_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres \
-      npm run smoke:browser:real -- --scenario=review-credit
+      npm run smoke:browser:real
     remaining_smoke_databases="$(psql -XAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres \
       -c "SELECT count(*) FROM pg_database WHERE datname ~ '^vendor_dashboard_browser_smoke_[0-9]+_[0-9]+$'")"
     [[ "$remaining_smoke_databases" == 0 ]] || { echo 'Real smoke database cleanup not verified.'; exit 1; }
-    echo 'Real review-credit database cleanup verified.'
+    echo 'All real smoke databases removed.'
     for file in "$artifact_directory/chromium.png" "$artifact_directory/chromium-trace.zip"; do
       [[ -s "$file" ]] || { echo "Proof artifact missing after browser smokes: $file"; exit 1; }
     done

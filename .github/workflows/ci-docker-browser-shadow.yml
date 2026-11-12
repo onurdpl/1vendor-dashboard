@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/p5-06n-docker-browser-shadow
+      - codex/p5-06o-browser-parity
 
 permissions:
   contents: read

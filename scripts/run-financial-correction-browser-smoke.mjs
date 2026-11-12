@@ -74,15 +74,15 @@ const selectedScenarios = requested.length
   ? scenarios.filter((scenario) => `--scenario=${scenario.name}` === requested[0])
   : scenarios.filter(scenario => !scenario.explicitOnly);
 const loopbackMode = process.env.BROWSER_SMOKE_IPV4_LOOPBACK;
-if (loopbackMode !== undefined && (loopbackMode !== '1' || requested[0] !== '--scenario=review-credit')) {
-  throw new Error('BROWSER_SMOKE_IPV4_LOOPBACK accepts only 1 with --scenario=review-credit.');
+if (loopbackMode !== undefined && (loopbackMode !== '1' || selectedScenarios.some((scenario) => scenario.explicitOnly))) {
+  throw new Error('BROWSER_SMOKE_IPV4_LOOPBACK accepts only 1 for default financial browser scenarios.');
 }
 const ipv4Loopback = loopbackMode === '1';
 const loginDiagnostics = process.env.BROWSER_SMOKE_LOGIN_DIAGNOSTICS;
 const proofTemp = process.env.RUNNER_TEMP;
 if (loginDiagnostics !== undefined &&
     (loginDiagnostics !== '1' || !ipv4Loopback || !proofTemp || !path.isAbsolute(proofTemp))) {
-  throw new Error('Login diagnostics require the IPv4 review-credit proof and an absolute RUNNER_TEMP.');
+  throw new Error('Login diagnostics require the IPv4 browser proof and an absolute RUNNER_TEMP.');
 }
 const webHost = ipv4Loopback ? '127.0.0.1' : 'localhost';
 const localBackend = `http://${webHost}:4000`;
@@ -199,14 +199,30 @@ async function runScenario(scenario) {
   targetUrl.pathname = `/${databaseName}`;
   targetUrl.searchParams.set('schema', 'public');
   const fin03 = scenario.name === 'fin03-history' || scenario.name === 'cancellation-eligibility';
-  const proof = fin03 ? randomBytes(32).toString('hex') : '';
+  const proof = fin03 || ipv4Loopback ? randomBytes(32).toString('hex') : '';
+  const reportPath = path.join(process.env.TMPDIR || '/tmp', `${databaseName}.playwright.json`);
   const evidencePath = path.join(process.env.TMPDIR || '/tmp', `${databaseName}.fin03.json`);
   function inspect(database = 'postgres') {
     const url = new URL(adminUrl); url.pathname = `/${database}`;
     return JSON.parse(execFileSync('psql', ['-XAt', `--dbname=${url}`, '-v', 'ON_ERROR_STOP=1', '-c',
-      "SELECT json_build_object('major',current_setting('server_version_num')::int/10000,'owner',current_user,'databaseOwner',pg_get_userbyid(d.datdba),'systemId',(pg_control_system()).system_identifier::text,'directory',current_setting('data_directory'),'port',inet_server_port(),'comment',shobj_description(d.oid,'pg_database')) FROM pg_database d WHERE datname=current_database()"], { env: baseEnv, encoding: 'utf8' }));
+      "SELECT json_build_object('name',current_database(),'address',host(inet_server_addr()),'major',current_setting('server_version_num')::int/10000,'owner',current_user,'databaseOwner',pg_get_userbyid(d.datdba),'systemId',(pg_control_system()).system_identifier::text,'directory',current_setting('data_directory'),'port',inet_server_port(),'comment',shobj_description(d.oid,'pg_database')) FROM pg_database d WHERE datname=current_database()"], { env: baseEnv, encoding: 'utf8' }));
   }
-  const cluster = fin03 ? inspect() : null;
+  const cluster = fin03 || ipv4Loopback ? inspect() : null;
+  function isDockerDatabase(target, name) {
+    return target.name === name && target.major === 16 && target.port === 5432 &&
+      ['127.0.0.1', '::1'].includes(target.address) &&
+      target.owner === 'postgres' && target.databaseOwner === 'postgres' &&
+      /^\d{15,25}$/.test(target.systemId) && target.systemId === cluster.systemId;
+  }
+  if (ipv4Loopback && !isDockerDatabase(cluster, 'postgres')) {
+    throw new Error('Docker browser smoke requires the disposable PG16 loopback cluster.');
+  }
+  function assertDockerDatabase() {
+    const target = inspect(databaseName);
+    if (!isDockerDatabase(target, databaseName) || target.comment !== `p5-06o:${proof}`) {
+      throw new Error('Docker smoke database ownership or provenance mismatch.');
+    }
+  }
   const recovery = fin03 && process.env.FIN03_RECOVERY_SMOKE === '1';
   if (recovery) {
     if (cluster.major !== 18 || cluster.systemId !== process.env.FIN03_RECOVERY_CLUSTER_ID ||
@@ -242,6 +258,12 @@ async function runScenario(scenario) {
     await run('createdb', [`--maintenance-db=${adminUrl.toString()}`, databaseName]);
     databaseCreated = true;
     console.log(`Created disposable database ${databaseName}.`);
+    if (ipv4Loopback) {
+      execFileSync('psql', [`--dbname=${adminUrl}`, '-v', 'ON_ERROR_STOP=1', '-c',
+        `COMMENT ON DATABASE "${databaseName}" IS 'p5-06o:${proof}'`], { env: baseEnv });
+      assertDockerDatabase();
+      console.log(`Docker PG16 database identity verified for ${scenario.name}.`);
+    }
     if (fin03) {
       execFileSync('psql', [`--dbname=${adminUrl}`, '-v', 'ON_ERROR_STOP=1', '-c',
         `COMMENT ON DATABASE "${databaseName}" IS 'fin03-history:${proof}'`], { env: baseEnv });
@@ -302,19 +324,28 @@ async function runScenario(scenario) {
     } else {
       await waitFor(localFrontend, async () => true, frontend);
     }
-    await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts'], {
+    await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts',
+      ...(ipv4Loopback ? ['--reporter=list,json'] : []),
+    ], {
       ...baseEnv, BROWSER_SMOKE_REVIEW_ID: scenario.reviewId, BROWSER_SMOKE_REAL_SPEC: scenario.spec,
       BROWSER_SMOKE_RUN_DATE: replacementRunDate,
       ...(ipv4Loopback ? {
         BROWSER_SMOKE_IPV4_LOOPBACK: '1',
+        PLAYWRIGHT_JSON_OUTPUT_NAME: reportPath,
         PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
       } : {}),
       ...(loginDiagnostics === '1' ? {
         BROWSER_SMOKE_LOGIN_DIAGNOSTICS: '1',
-        BROWSER_SMOKE_LOGIN_DIAGNOSTICS_DIR: path.join(proofTemp, 'p5-06f', 'login'),
+        BROWSER_SMOKE_LOGIN_DIAGNOSTICS_DIR: path.join(proofTemp, 'p5-06f', 'login', scenario.name),
       } : {}),
       ...(fin03 ? { BROWSER_SMOKE_EVIDENCE_PATH: evidencePath, ...(recovery ? { FIN03_RECOVERY_SMOKE: '1', ...(process.env.FIN03_SCOPED_CLOSURE === '1' ? { FIN03_SCOPED_CLOSURE: '1' } : {}) } : {}), NODE_OPTIONS: `--import=${nodeEgressGuard}` } : {}),
     });
+    if (ipv4Loopback) {
+      const { stats } = JSON.parse(await readFile(reportPath, 'utf8'));
+      if (stats?.expected !== 1 || stats.unexpected !== 0 || stats.flaky !== 0 || stats.skipped !== 0) {
+        throw new Error(`${scenario.name} must report exactly one browser pass without skips or retries.`);
+      }
+    }
     browserSucceeded = true;
     if (!fin03) {
       await run('node_modules/.bin/tsx', [scenario.verify], databaseEnv);
@@ -326,17 +357,18 @@ async function runScenario(scenario) {
       if (fin03 && databaseCreated) await run('node_modules/.bin/tsx', [scenario.verify], { ...databaseEnv, FIN03_BROWSER_PASSED: browserSucceeded ? '1' : '0' });
     } finally {
     if (databaseCreated) {
+      if (ipv4Loopback) assertDockerDatabase();
       if (fin03) {
         const target = inspect(databaseName);
         if (target.systemId !== cluster.systemId || target.databaseOwner !== cluster.owner || target.comment !== `fin03-history:${proof}`)
           throw new Error('FIN03 cleanup ownership/proof mismatch; refusing destructive cleanup.');
       }
       await run('dropdb', ['--force', `--maintenance-db=${adminUrl.toString()}`, databaseName]);
-      if (scenario.name === 'cancellation-eligibility') {
+      if (scenario.name === 'cancellation-eligibility' || ipv4Loopback) {
         const remaining = execFileSync('psql', [`--dbname=${adminUrl}`, '-XAt', '-v', 'ON_ERROR_STOP=1',
           '-c', `SELECT count(*) FROM pg_database WHERE datname='${databaseName}'`], { env: baseEnv, encoding: 'utf8' }).trim();
-        if (remaining !== '0') throw new Error('005C disposable database cleanup not verified.');
-        console.log('005C cleanup verified: database absent.');
+        if (remaining !== '0') throw new Error('Disposable database cleanup not verified.');
+        console.log(`${scenario.name} cleanup verified: database absent.`);
       }
       console.log(`Disposed database ${databaseName}.`);
     }
@@ -344,4 +376,7 @@ async function runScenario(scenario) {
   }
 }
 
+const fullDockerParity = ipv4Loopback && requested.length === 0;
+if (fullDockerParity && selectedScenarios.length !== 6) throw new Error('Expected exactly six default Docker browser scenarios.');
 for (const scenario of selectedScenarios) await runScenario(scenario);
+if (fullDockerParity) console.log('Docker real browser parity verified: six browser passes and six database post-checks.');
