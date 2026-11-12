@@ -41,8 +41,9 @@ test('Admin applies the persisted REVIEW vendor credit with explicit EFT-not-sen
 
   const responsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url());
+    const apiPrefix = process.env.BROWSER_SMOKE_IPV4_LOOPBACK === '1' ? '/api' : '';
     return response.request().method() === 'POST' &&
-      url.pathname === `/admin/finance/refund-reviews/${reviewId}/financial-correction-review-payout`;
+      url.pathname === `${apiPrefix}/admin/finance/refund-reviews/${reviewId}/financial-correction-review-payout`;
   });
   await apply.click();
   const response = await responsePromise;
