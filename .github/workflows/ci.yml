@@ -298,9 +298,6 @@ jobs:
           /usr/lib/postgresql/16/bin/psql --version | grep -E '^psql \(PostgreSQL\) 16\.'
           /usr/lib/postgresql/16/bin/pg_dump --version | grep -E '^pg_dump \(PostgreSQL\) 16\.'
 
-      - name: Install Playwright Chromium
-        run: ./node_modules/.bin/playwright install --with-deps chromium
-
       - name: Validate fresh database bootstrap
         run: |
           PGPASSWORD=postgres createdb --host=127.0.0.1 --username=postgres vendor_dashboard_fresh_bootstrap
@@ -390,9 +387,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Mock browser smoke
-        run: npm run smoke:browser
-
       - name: Test
         run: npm run test
 
@@ -409,18 +403,29 @@ jobs:
           KARGONOMI_BASE_URL: http://127.0.0.1:9
           KARGONOMI_API_TOKEN: test-token
 
-      - name: Real Financial Correction browser smokes
-        id: real_financial_correction_browser_smokes
-        run: npm run smoke:browser:real
-        env:
-          BROWSER_SMOKE_ALLOW_LOCAL_DB: '1'
-          BROWSER_SMOKE_ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      - name: Build pinned browser test image
+        run: docker build --pull --file .github/ci/Dockerfile --tag "sporgym-p5-06n-shadow:${GITHUB_SHA}" .
 
-      - name: Upload real browser smoke failure artifacts
-        if: failure() && steps.real_financial_correction_browser_smokes.outcome == 'failure'
+      - name: Run Docker mock and real finance browser smokes
+        id: docker_browser_smokes
+        run: |
+          set -euo pipefail
+          browser_source="$(mktemp -d "$RUNNER_TEMP/sporgym-browser-source.XXXXXX")"
+          trap 'rm -rf -- "$browser_source"' EXIT
+          git archive HEAD | tar -x -C "$browser_source"
+          cd "$browser_source"
+          bash scripts/ci/p5-06n-browser-shadow.sh
+
+      - name: Upload sanitized Docker browser evidence
+        if: always() && (steps.docker_browser_smokes.outcome == 'success' || steps.docker_browser_smokes.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: financial-correction-browser-smokes
-          path: test-results/
-          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/p5-06f/chromium.png
+            ${{ runner.temp }}/p5-06f/chromium-trace.zip
+            ${{ runner.temp }}/p5-06f/docker-outcome.json
+            ${{ runner.temp }}/p5-06f/login/*/login-diagnostics.json
+            ${{ runner.temp }}/p5-06f/login/*/error-context.md
+          if-no-files-found: error
           retention-days: 3

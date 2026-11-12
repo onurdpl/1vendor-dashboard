@@ -34,7 +34,7 @@ test('Admin applies a DRAFT payout vendor deduction without EFT attestation', as
   await reason.fill('Browser smoke: verified DRAFT vendor deduction and payout cancellation.');
   await expect(apply).toBeEnabled();
 
-  const postPath = `/admin/finance/refund-reviews/${reviewId}/financial-correction-draft-payout`;
+  const postPath = `${process.env.BROWSER_SMOKE_IPV4_LOOPBACK === '1' ? '/api' : ''}/admin/finance/refund-reviews/${reviewId}/financial-correction-draft-payout`;
   let postCount = 0;
   page.on('request', (request) => {
     if (request.method() === 'POST' && new URL(request.url()).pathname === postPath) postCount += 1;
