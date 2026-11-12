@@ -78,6 +78,12 @@ if (loopbackMode !== undefined && (loopbackMode !== '1' || requested[0] !== '--s
   throw new Error('BROWSER_SMOKE_IPV4_LOOPBACK accepts only 1 with --scenario=review-credit.');
 }
 const ipv4Loopback = loopbackMode === '1';
+const loginDiagnostics = process.env.BROWSER_SMOKE_LOGIN_DIAGNOSTICS;
+const proofTemp = process.env.RUNNER_TEMP;
+if (loginDiagnostics !== undefined &&
+    (loginDiagnostics !== '1' || !ipv4Loopback || !proofTemp || !path.isAbsolute(proofTemp))) {
+  throw new Error('Login diagnostics require the IPv4 review-credit proof and an absolute RUNNER_TEMP.');
+}
 const webHost = ipv4Loopback ? '127.0.0.1' : 'localhost';
 const localBackend = `http://${webHost}:4000`;
 const localFrontend = `http://${webHost}:5173`;
@@ -225,6 +231,13 @@ async function runScenario(scenario) {
   let databaseCreated = false;
   let browserSucceeded = false;
   console.log(`Running real browser scenario ${scenario.name}.`);
+  if (loginDiagnostics === '1') {
+    console.log('Login proof build and server settings', JSON.stringify({
+      VITE_API_MODE: frontendEnv.VITE_API_MODE,
+      VITE_API_BASE_URL: frontendEnv.VITE_API_BASE_URL,
+      CORS_ORIGIN: backendEnv.CORS_ORIGIN,
+    }));
+  }
   try {
     await run('createdb', [`--maintenance-db=${adminUrl.toString()}`, databaseName]);
     databaseCreated = true;
@@ -289,6 +302,10 @@ async function runScenario(scenario) {
       ...(ipv4Loopback ? {
         BROWSER_SMOKE_IPV4_LOOPBACK: '1',
         PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+      } : {}),
+      ...(loginDiagnostics === '1' ? {
+        BROWSER_SMOKE_LOGIN_DIAGNOSTICS: '1',
+        BROWSER_SMOKE_LOGIN_DIAGNOSTICS_DIR: path.join(proofTemp, 'p5-06f', 'login'),
       } : {}),
       ...(fin03 ? { BROWSER_SMOKE_EVIDENCE_PATH: evidencePath, ...(recovery ? { FIN03_RECOVERY_SMOKE: '1', ...(process.env.FIN03_SCOPED_CLOSURE === '1' ? { FIN03_SCOPED_CLOSURE: '1' } : {}) } : {}), NODE_OPTIONS: `--import=${nodeEgressGuard}` } : {}),
     });

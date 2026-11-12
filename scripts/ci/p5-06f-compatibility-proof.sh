@@ -119,6 +119,7 @@ try {
 NODE
     npm run smoke:browser -- tests/e2e/browser-egress-guard.spec.ts
     BROWSER_SMOKE_IPV4_LOOPBACK=1 \
+      BROWSER_SMOKE_LOGIN_DIAGNOSTICS=1 \
       BROWSER_SMOKE_ALLOW_LOCAL_DB=1 \
       BROWSER_SMOKE_ADMIN_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres \
       npm run smoke:browser:real -- --scenario=review-credit
