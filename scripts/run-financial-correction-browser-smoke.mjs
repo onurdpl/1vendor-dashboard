@@ -5,7 +5,7 @@ import { userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nodeEgressGuard = path.join(root, 'scripts/test-node-egress-guard.mjs');
@@ -78,6 +78,15 @@ if (loopbackMode !== undefined && (loopbackMode !== '1' || selectedScenarios.som
   throw new Error('BROWSER_SMOKE_IPV4_LOOPBACK accepts only 1 for default financial browser scenarios.');
 }
 const ipv4Loopback = loopbackMode === '1';
+const negativeProof = process.env.P5_06P_NEGATIVE_PROOF;
+const negativeRef = 'refs/heads/codex/p5-06p-failure-artifact-proof';
+const negativeMarker = 'P5_06P_EXPECTED_BROWSER_FAILURE';
+if (negativeProof !== undefined &&
+    (negativeProof !== '1' || process.env.GITHUB_ACTIONS !== 'true' ||
+      process.env.GITHUB_REF !== negativeRef || !ipv4Loopback ||
+      requested[0] !== '--scenario=review-credit' || process.env.RUNNER_TEMP !== '/proof-temp')) {
+  throw new Error('Invalid P5-06P negative proof context.');
+}
 const loginDiagnostics = process.env.BROWSER_SMOKE_LOGIN_DIAGNOSTICS;
 const proofTemp = process.env.RUNNER_TEMP;
 if (loginDiagnostics !== undefined &&
@@ -118,7 +127,7 @@ function run(command, args, env = baseEnv) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd: root, env, stdio: 'inherit' });
     child.once('error', reject);
-    child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`${command} exited with ${code}.`)));
+    child.once('exit', (code) => code === 0 ? resolve() : reject(Object.assign(new Error(`${command} exited with ${code}.`), { exitCode: code })));
   });
 }
 
@@ -246,6 +255,7 @@ async function runScenario(scenario) {
   const processes = [];
   let databaseCreated = false;
   let browserSucceeded = false;
+  let expectedBrowserExit;
   console.log(`Running real browser scenario ${scenario.name}.`);
   if (loginDiagnostics === '1') {
     console.log('Login proof build and server settings', JSON.stringify({
@@ -324,22 +334,46 @@ async function runScenario(scenario) {
     } else {
       await waitFor(localFrontend, async () => true, frontend);
     }
-    await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts',
-      ...(ipv4Loopback ? ['--reporter=list,json'] : []),
-    ], {
-      ...baseEnv, BROWSER_SMOKE_REVIEW_ID: scenario.reviewId, BROWSER_SMOKE_REAL_SPEC: scenario.spec,
-      BROWSER_SMOKE_RUN_DATE: replacementRunDate,
-      ...(ipv4Loopback ? {
-        BROWSER_SMOKE_IPV4_LOOPBACK: '1',
-        PLAYWRIGHT_JSON_OUTPUT_NAME: reportPath,
-        PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
-      } : {}),
-      ...(loginDiagnostics === '1' ? {
-        BROWSER_SMOKE_LOGIN_DIAGNOSTICS: '1',
-        BROWSER_SMOKE_LOGIN_DIAGNOSTICS_DIR: path.join(proofTemp, 'p5-06f', 'login', scenario.name),
-      } : {}),
-      ...(fin03 ? { BROWSER_SMOKE_EVIDENCE_PATH: evidencePath, ...(recovery ? { FIN03_RECOVERY_SMOKE: '1', ...(process.env.FIN03_SCOPED_CLOSURE === '1' ? { FIN03_SCOPED_CLOSURE: '1' } : {}) } : {}), NODE_OPTIONS: `--import=${nodeEgressGuard}` } : {}),
-    });
+    try {
+      await run('node_modules/.bin/playwright', ['test', '--config', 'playwright.real.config.ts',
+        ...(ipv4Loopback ? ['--reporter=list,json'] : []),
+      ], {
+        ...baseEnv, BROWSER_SMOKE_REVIEW_ID: scenario.reviewId, BROWSER_SMOKE_REAL_SPEC: scenario.spec,
+        BROWSER_SMOKE_RUN_DATE: replacementRunDate,
+        ...(ipv4Loopback ? {
+          BROWSER_SMOKE_IPV4_LOOPBACK: '1',
+          PLAYWRIGHT_JSON_OUTPUT_NAME: reportPath,
+          PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+        } : {}),
+        ...(negativeProof ? {
+          P5_06P_NEGATIVE_PROOF: '1', P5_06P_DATABASE_VERIFIED: '1',
+          GITHUB_ACTIONS: 'true', GITHUB_REF: negativeRef,
+        } : {}),
+        ...(loginDiagnostics === '1' ? {
+          BROWSER_SMOKE_LOGIN_DIAGNOSTICS: '1',
+          BROWSER_SMOKE_LOGIN_DIAGNOSTICS_DIR: path.join(proofTemp, 'p5-06f', 'login', scenario.name),
+        } : {}),
+        ...(fin03 ? { BROWSER_SMOKE_EVIDENCE_PATH: evidencePath, ...(recovery ? { FIN03_RECOVERY_SMOKE: '1', ...(process.env.FIN03_SCOPED_CLOSURE === '1' ? { FIN03_SCOPED_CLOSURE: '1' } : {}) } : {}), NODE_OPTIONS: `--import=${nodeEgressGuard}` } : {}),
+      });
+    } catch (error) {
+      if (negativeProof && error.exitCode === 1) {
+        const report = JSON.parse(await readFile(reportPath, 'utf8'));
+        const collectResults = (suite) => [
+          ...(suite.specs ?? []).flatMap((spec) => spec.tests.flatMap((test) => test.results)),
+          ...(suite.suites ?? []).flatMap(collectResults),
+        ];
+        const results = report.suites.flatMap(collectResults);
+        if (report.stats?.unexpected === 1 && report.stats.expected === 0 &&
+            report.stats.skipped === 0 && report.stats.flaky === 0 && report.errors.length === 0 &&
+            results.length === 1 && results[0].status === 'failed' && results[0].errors.length === 1 &&
+            results[0].errors[0].message?.split('\n', 1)[0] === `Error: ${negativeMarker}`) {
+          expectedBrowserExit = error.exitCode;
+          console.log(`${negativeMarker}: Playwright exited ${expectedBrowserExit}.`);
+        }
+      }
+      throw error;
+    }
+    if (negativeProof) throw new Error('Negative proof unexpectedly passed.');
     if (ipv4Loopback) {
       const { stats } = JSON.parse(await readFile(reportPath, 'utf8'));
       if (stats?.expected !== 1 || stats.unexpected !== 0 || stats.flaky !== 0 || stats.skipped !== 0) {
@@ -369,6 +403,13 @@ async function runScenario(scenario) {
           '-c', `SELECT count(*) FROM pg_database WHERE datname='${databaseName}'`], { env: baseEnv, encoding: 'utf8' }).trim();
         if (remaining !== '0') throw new Error('Disposable database cleanup not verified.');
         console.log(`${scenario.name} cleanup verified: database absent.`);
+        if (expectedBrowserExit === 1) {
+          await writeFile(path.join(proofTemp, 'p5-06p-browser.json'), JSON.stringify({
+            proof: 'P5-06P', scenario: 'review-credit', stage: 'authenticated-admin-before-financial-mutation',
+            marker: negativeMarker, testOutcome: 'failed', browserExit: expectedBrowserExit,
+            databaseCleanup: 'verified-absent',
+          }) + '\n', { flag: 'wx' });
+        }
       }
       console.log(`Disposed database ${databaseName}.`);
     }

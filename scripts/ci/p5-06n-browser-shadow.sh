@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+negative_proof="${P5_06P_NEGATIVE_PROOF-}"
+if [[ "${P5_06P_NEGATIVE_PROOF+x}" == x ]]; then
+  [[ "$negative_proof" == 1 && "${GITHUB_ACTIONS:-}" == true &&
+     "${GITHUB_REF:-}" == refs/heads/codex/p5-06p-failure-artifact-proof ]] || {
+    echo 'Invalid P5-06P shell context.'; exit 1;
+  }
+fi
+
 if [[ "${1:-}" == --inside ]]; then
   major="${2:?PostgreSQL major required}"
   service="${PG_SERVICE:?PostgreSQL service required}"
   [[ "$major" == 16 || "$major" == 18 ]] || exit 1
+  [[ -z "$negative_proof" || ( "$major" == 16 && "${RUNNER_TEMP:-}" == /proof-temp ) ]] || exit 1
   [[ "$service" == "p506f-pg${major}" ]] || exit 1
   [[ "$(id -u)" != 0 ]] || { echo 'Proof refuses root execution.'; exit 1; }
   [[ "$(node -p 'process.versions.node.split(".")[0]')" == 20 ]] || {
@@ -42,6 +51,10 @@ if [[ "${1:-}" == --inside ]]; then
         -c "SELECT count(*) FROM pg_database WHERE datname='${database}'")" || exit 1
       [[ "$remaining" == 0 ]] || exit 1
       echo "PostgreSQL ${major} disposable database cleanup verified."
+    fi
+    if [[ "$negative_proof" == 1 && -s "$RUNNER_TEMP/p5-06p-browser.json" && "$result" == 1 ]]; then
+      printf '%s\n' "$result" > "$RUNNER_TEMP/p5-06p-runner-exit"
+      echo 'Negative proof smoke runner exited 1 after verified database cleanup.'
     fi
     return "$result"
   }
@@ -118,6 +131,14 @@ try {
   await browser.close();
 }
 NODE
+    if [[ "$negative_proof" == 1 ]]; then
+      BROWSER_SMOKE_IPV4_LOOPBACK=1 \
+        BROWSER_SMOKE_ALLOW_LOCAL_DB=1 \
+        BROWSER_SMOKE_ADMIN_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres \
+        node scripts/run-financial-correction-browser-smoke.mjs --scenario=review-credit
+      echo 'Negative proof unexpectedly returned success.'
+      exit 1
+    fi
     # Keep the machine-readable report inside the container. Only the
     # standalone Chromium artifacts and sanitized diagnostics are uploaded.
     mock_report="$(mktemp /tmp/p5-06n-mock.XXXXXX)"
@@ -157,9 +178,27 @@ network="p506f-${proof_run_id}"
 network_id=''
 pg16_id=''
 pg18_id=''
+docker_status=0
+browser_name="p506p-browser-${proof_run_id}"
+browser_options=()
+majors=(16 18)
+if [[ "$negative_proof" == 1 ]]; then
+  browser_options=(--name "$browser_name" --label "sporgym.p5-06f=${proof_run_id}"
+    -e P5_06P_NEGATIVE_PROOF=1 -e "GITHUB_REF=${GITHUB_REF}")
+  majors=(16)
+fi
 cleanup_host() {
   local result=$?
+  local browser_remaining owner
   trap - EXIT
+  if [[ "$negative_proof" == 1 ]]; then
+    browser_remaining="$(docker ps -aq --filter "name=^/${browser_name}$")" || exit 1
+    if [[ -n "$browser_remaining" ]]; then
+      owner="$(docker inspect --format '{{index .Config.Labels "sporgym.p5-06f"}}' "$browser_remaining")" || exit 1
+      [[ "$owner" == "$proof_run_id" ]] || { echo 'Browser container provenance mismatch.'; exit 1; }
+      docker rm -f "$browser_remaining" >/dev/null || exit 1
+    fi
+  fi
   for id in "$pg16_id" "$pg18_id"; do
     [[ -n "$id" ]] || continue
     owner="$(docker inspect --format '{{index .Config.Labels "sporgym.p5-06f"}}' "$id")" || exit 1
@@ -173,6 +212,30 @@ cleanup_host() {
     docker network rm "$network_id" >/dev/null || exit 1
     if docker network inspect "$network_id" >/dev/null 2>&1; then exit 1; fi
   fi
+  if [[ "$negative_proof" == 1 ]]; then
+    local remaining_containers remaining_networks
+    remaining_containers="$(docker ps -aq --filter "label=sporgym.p5-06f=${proof_run_id}")" || exit 1
+    remaining_networks="$(docker network ls -q --filter "label=sporgym.p5-06f=${proof_run_id}")" || exit 1
+    [[ -z "$remaining_containers" && -z "$remaining_networks" ]] || {
+      echo 'Proof-owned Docker resources remain after cleanup.'; exit 1;
+    }
+    if [[ "$docker_status" == 1 && "$result" == 1 && -s "$RUNNER_TEMP/p5-06p-browser.json" &&
+          -s "$RUNNER_TEMP/p5-06p-runner-exit" ]]; then
+      local smoke_runner_exit
+      read -r smoke_runner_exit < "$RUNNER_TEMP/p5-06p-runner-exit"
+      [[ "$smoke_runner_exit" == 1 ]] || exit 1
+      mkdir -p "$RUNNER_TEMP/p5-06p"
+      jq -e --argjson dockerExit "$docker_status" --argjson smokeRunnerExit "$smoke_runner_exit" '
+        select(.proof == "P5-06P" and .scenario == "review-credit"
+          and .stage == "authenticated-admin-before-financial-mutation"
+          and .marker == "P5_06P_EXPECTED_BROWSER_FAILURE" and .testOutcome == "failed"
+          and .browserExit == 1 and .databaseCleanup == "verified-absent")
+        | {proof, scenario, stage, marker, testOutcome, browserExit, databaseCleanup}
+          + {dockerExit: $dockerExit, smokeRunnerExit: $smokeRunnerExit, dockerCleanup: "verified-absent"}
+      ' "$RUNNER_TEMP/p5-06p-browser.json" > "$RUNNER_TEMP/p5-06p-proof.tmp" || exit 1
+      mv "$RUNNER_TEMP/p5-06p-proof.tmp" "$RUNNER_TEMP/p5-06p/failure-proof.json"
+    fi
+  fi
   echo 'Experimental containers and network cleanup verified.'
   return "$result"
 }
@@ -182,10 +245,13 @@ network_id="$(docker network create --label "sporgym.p5-06f=${proof_run_id}" "$n
 pg16_id="$(docker run -d --network "$network" --name p506f-pg16 \
   --label "sporgym.p5-06f=${proof_run_id}" \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=postgres postgres:16-alpine)"
-pg18_id="$(docker run -d --network "$network" --name p506f-pg18 \
+if [[ "$negative_proof" != 1 ]]; then
+  pg18_id="$(docker run -d --network "$network" --name p506f-pg18 \
   --label "sporgym.p5-06f=${proof_run_id}" \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=postgres postgres:18-alpine)"
+fi
 for id in "$pg16_id" "$pg18_id"; do
+  [[ -n "$id" ]] || continue
   ready=0
   for _ in {1..30}; do
     if docker exec "$id" pg_isready -U postgres -d postgres >/dev/null 2>&1; then ready=1; break; fi
@@ -209,9 +275,9 @@ bridge_address="$(docker run --rm --network "$network" --user "$(id -u):$(id -g)
 echo "Previous bridge route server address: ${bridge_address}."
 echo 'PostgreSQL service has no published host port; the bootstrap Docker fallback cannot authorize that bridge address.'
 
-for major in 16 18; do
+for major in "${majors[@]}"; do
   if [[ "$major" == 16 ]]; then postgres_id="$pg16_id"; else postgres_id="$pg18_id"; fi
-  docker run --rm --init --shm-size=1g \
+  docker run --rm --init --shm-size=1g "${browser_options[@]}" \
     --network "container:${postgres_id}" \
     --security-opt "seccomp=$PWD/.github/ci/p5-06f-seccomp.json" \
     --user "$(id -u):$(id -g)" \
@@ -219,5 +285,9 @@ for major in 16 18; do
     -e "PG_SERVICE=p506f-pg${major}" -e "PROOF_RUN_ID=${GITHUB_RUN_ID}" \
     -e PGPASSWORD=postgres -e RUNNER_TEMP=/proof-temp \
     -v "$PWD:/work" -v "$RUNNER_TEMP:/proof-temp" -w /work \
-    "$image" bash scripts/ci/p5-06n-browser-shadow.sh --inside "$major"
+    "$image" bash scripts/ci/p5-06n-browser-shadow.sh --inside "$major" || {
+    docker_status=$?
+    if [[ "$negative_proof" == 1 ]]; then printf 'Negative proof Docker exit: %s.\n' "$docker_status"; fi
+    exit "$docker_status"
+  }
 done

@@ -1,0 +1,36 @@
+name: CI Docker Browser Negative Proof
+
+on:
+  push:
+    branches:
+      - codex/p5-06p-failure-artifact-proof
+
+permissions:
+  contents: read
+
+jobs:
+  docker-browser-negative-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build temporary pinned test image
+        run: |
+          set -euo pipefail
+          docker build --pull --file .github/ci/Dockerfile --tag "sporgym-p5-06n-shadow:${GITHUB_SHA}" .
+          docker image inspect "sporgym-p5-06n-shadow:${GITHUB_SHA}" --format 'Derived image ID: {{.Id}}'
+
+      - name: Run authenticated review-credit failure proof
+        env:
+          P5_06P_NEGATIVE_PROOF: '1'
+        run: bash scripts/ci/p5-06n-browser-shadow.sh
+
+      - name: Upload sanitized failure proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p5-06p-failure-proof
+          path: ${{ runner.temp }}/p5-06p/failure-proof.json
+          if-no-files-found: error
+          retention-days: 3

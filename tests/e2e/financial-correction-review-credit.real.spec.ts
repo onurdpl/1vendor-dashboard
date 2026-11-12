@@ -1,6 +1,15 @@
 import { expect, test } from './fixtures/browser-egress-guard';
 
 const reviewId = process.env.BROWSER_SMOKE_REVIEW_ID;
+const negativeProof = process.env.P5_06P_NEGATIVE_PROOF;
+if (negativeProof !== undefined &&
+    (negativeProof !== '1' || process.env.GITHUB_ACTIONS !== 'true' ||
+      process.env.GITHUB_REF !== 'refs/heads/codex/p5-06p-failure-artifact-proof' ||
+      process.env.BROWSER_SMOKE_IPV4_LOOPBACK !== '1' ||
+      process.env.BROWSER_SMOKE_REAL_SPEC !== 'financial-correction-review-credit.real.spec.ts' ||
+      process.env.P5_06P_DATABASE_VERIFIED !== '1')) {
+  throw new Error('Invalid P5-06P browser test context.');
+}
 const refundId = 'gid://shopify/Refund/browser-smoke-review-credit';
 
 test('Admin applies the persisted REVIEW vendor credit with explicit EFT-not-sent attestation', async ({ page }) => {
@@ -20,6 +29,7 @@ test('Admin applies the persisted REVIEW vendor credit with explicit EFT-not-sen
   await conflicts.getByText(`Refund ${refundId}`).click();
   const detail = conflicts.getByLabel('Refund evidence review detail panel');
   await expect(detail.getByRole('heading', { name: refundId })).toBeVisible();
+  if (negativeProof === '1') throw new Error('P5_06P_EXPECTED_BROWSER_FAILURE');
 
   const application = detail.getByLabel('Review payout correction application');
   await expect(application).toBeVisible();
