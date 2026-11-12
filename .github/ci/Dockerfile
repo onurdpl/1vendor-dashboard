@@ -9,7 +9,7 @@ ENV PATH="/opt/node20/bin:${PATH}"
 # Install tools in the disposable image build, never during the proof test run.
 # PGDG and Ubuntu packages are signature-checked by Apt; no TLS checks are disabled.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl socat \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
     && install -d /usr/share/postgresql-common/pgdg \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \

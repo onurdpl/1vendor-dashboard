@@ -29,6 +29,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: p5-06f-browser-proof
-          path: test-results/p5-06f/
-          if-no-files-found: warn
+          path: ${{ runner.temp }}/p5-06f/
+          if-no-files-found: error
           retention-days: 3
