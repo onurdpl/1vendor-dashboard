@@ -1,0 +1,34 @@
+name: P5-06F Docker compatibility proof
+
+on:
+  push:
+    branches:
+      - codex/p5-06f-docker-proof
+
+permissions:
+  contents: read
+
+jobs:
+  docker-compatibility-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build temporary pinned test image
+        run: |
+          set -euo pipefail
+          docker build --pull --file .github/ci/Dockerfile --tag sporgym-p5-06f-proof:${GITHUB_SHA} .
+          docker image inspect sporgym-p5-06f-proof:${GITHUB_SHA} --format 'Derived image ID: {{.Id}}'
+
+      - name: Verify image, Chromium, PostgreSQL, loopback and artifacts
+        run: bash scripts/ci/p5-06f-compatibility-proof.sh
+
+      - name: Upload sanitized proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p5-06f-browser-proof
+          path: test-results/p5-06f/
+          if-no-files-found: warn
+          retention-days: 3
