@@ -1,3 +1,4 @@
+import { Prisma } from '../backend/node_modules/@prisma/client/index.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
@@ -443,6 +444,68 @@ describe('payout batch preparation', () => {
       settlementDelayDays: 21,
       active: true,
     });
+  });
+
+  function prismaFailure(code: string, sqlState?: string) {
+    return new Prisma.PrismaClientKnownRequestError('Transaction error', {
+      code, clientVersion: Prisma.prismaVersion.client, meta: sqlState ? { code: sqlState } : undefined,
+    });
+  }
+
+  it('returns the committed first attempt without retrying', async () => {
+    const payout = { id: 'committed-draft' };
+    prismaMock.$transaction.mockResolvedValueOnce(payout);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).resolves.toBe(payout);
+    expect(prismaMock.$transaction).toHaveBeenCalledExactlyOnceWith(expect.any(Function), { isolationLevel: 'Serializable' });
+  });
+
+  it.each([prismaFailure('P2034'), prismaFailure('P2010', '40001')])(
+    'retries a confirmed Prisma rollback with a fresh Serializable transaction',
+    async (error) => {
+      const payout = { id: 'committed-draft' };
+      prismaMock.$transaction.mockRejectedValueOnce(error).mockResolvedValueOnce(payout);
+
+      await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).resolves.toBe(payout);
+      expect(prismaMock.$transaction.mock.calls).toEqual([
+        [expect.any(Function), { isolationLevel: 'Serializable' }],
+        [expect.any(Function), { isolationLevel: 'Serializable' }],
+      ]);
+    },
+  );
+
+  it('stops after two confirmed rollbacks and reports a safe exhaustion message', async () => {
+    prismaMock.$transaction.mockRejectedValueOnce(prismaFailure('P2034'))
+      .mockRejectedValueOnce(prismaFailure('P2010', '40001'));
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'Payout preparation stopped because financial state changed concurrently. Refresh payment preparation and try again.',
+    );
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['business rule', new Error('INSUFFICIENT_PAYABLE_FOR_FULL_DEDUCTION')],
+    ['unknown outcome', new Error('Connection lost during commit')],
+    ['transaction timeout', prismaFailure('P2028')],
+    ['uniqueness violation', prismaFailure('P2002')],
+    ['unverified raw SQL state', prismaFailure('P2010', '40P01')],
+    ['missing raw SQL state', prismaFailure('P2010')],
+    ['plain object imitating Prisma', { code: 'P2034' }],
+    ['message imitating rollback', new Error('40001: write conflict')],
+  ])('does not retry %s', async (_label, error) => {
+    prismaMock.$transaction.mockRejectedValueOnce(error);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toBe(error);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates a business rejection on the second attempt unchanged', async () => {
+    const error = new Error('No eligible payable ledger rows are available for payout batch preparation.');
+    prismaMock.$transaction.mockRejectedValueOnce(prismaFailure('P2034')).mockRejectedValueOnce(error);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toBe(error);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
   });
 
   it('blocks first payout while an approved-settlement correction credit lacks approved settlement', async () => {
