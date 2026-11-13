@@ -334,8 +334,13 @@ jobs:
 
       - name: Ensure PostgreSQL 16 client for baseline verification
         run: |
+          # Older pg_dump emits WAL-dependent pg_attver values from patched servers.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-16
+          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' postgresql-client-16)" ge 16.16
           /usr/lib/postgresql/16/bin/psql --version | grep -E '^psql \(PostgreSQL\) 16\.'
           /usr/lib/postgresql/16/bin/pg_dump --version | grep -E '^pg_dump \(PostgreSQL\) 16\.'
 
