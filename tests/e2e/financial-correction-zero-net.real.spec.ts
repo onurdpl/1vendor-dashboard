@@ -34,7 +34,7 @@ test('Admin acknowledges a zero-net reconciliation without a monetary correction
   })).toHaveCount(0);
   await expect(preview.getByRole('button', { name: /approve|apply|debt|credit|payout/i })).toHaveCount(0);
 
-  const postPath = `/admin/finance/refund-reviews/${reviewId}/financial-correction-zero-net-acknowledgement`;
+  const postPath = `${process.env.BROWSER_SMOKE_IPV4_LOOPBACK === '1' ? '/api' : ''}/admin/finance/refund-reviews/${reviewId}/financial-correction-zero-net-acknowledgement`;
   let postCount = 0;
   page.on('request', (request) => {
     if (request.method() === 'POST' && new URL(request.url()).pathname === postPath) postCount += 1;
