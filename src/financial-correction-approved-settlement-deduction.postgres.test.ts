@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma, PrismaClient } from '../backend/node_modules/@prisma/client/index.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -670,6 +670,102 @@ describeWithPostgres('approved-settlement financial correction deduction with is
     expect(await db.financialCorrectionApprovedDeductionCoverage.count({ where: { vendorId: ids.vendor } })).toBe(1);
     await expect(applyDeduction({ ...input, actorUserId: 'other-admin' }, db as never))
       .rejects.toMatchObject({ code: 'DEDUCTION_EFFECT_ALREADY_EXISTS' });
+  });
+
+  it.each([false, true])('rolls back payout writes with retry exhaustion=%s', async (exhausted) => {
+    await createServiceApprovedOrigin();
+    const input = await inputFor();
+    await db.vendorBalanceEvent.create({ data: {
+      vendorId: ids.vendor, type: 'VENDOR_DEBT_CREATED', amountMinor: -6000, currency: 'TRY',
+      sourceType: 'phase2e3b_test_existing_debt', sourceId: runId, idempotencyKey: `${runId}-debt`,
+    } });
+    const originBefore = await db.settlementApproval.findUniqueOrThrow({
+      where: { id: ids.origin }, include: { lines: true },
+    });
+    const { prisma } = await import('../backend/src/db/prisma.js');
+    const transaction = prisma.$transaction.bind(prisma);
+    const attemptedPayoutIds: string[] = [];
+    const rolledBackCodes: string[] = [];
+    const spy = vi.spyOn(prisma, '$transaction').mockImplementation(async (callback, options) => {
+      if (typeof callback !== 'function') throw new Error('Expected interactive payout transaction');
+      try {
+        return await transaction(async (tx) => {
+          const payout = await callback(tx);
+          attemptedPayoutIds.push(payout.id);
+          expect(payout.debtOffsetAmount).toBe('60.00');
+          if (attemptedPayoutIds.length === 1 || exhausted) {
+            // PostgreSQL aborts after the real payout callback has staged its writes.
+            await tx.$executeRaw`DO $$ BEGIN RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'test serialization abort'; END $$`;
+          }
+          return payout;
+        }, options);
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+            error.code !== 'P2010' || error.meta?.code !== '40001') throw error;
+        rolledBackCodes.push(error.meta.code);
+        if (rolledBackCodes.length === 1) {
+          // Commit Apply before the service starts its second transaction.
+          await applyDeduction(input, db as never);
+        }
+        throw error;
+      }
+    });
+
+    try {
+      const preparation = preparePayoutBatch({ vendorId: ids.vendor }, ids.admin);
+      if (exhausted) {
+        await expect(preparation).rejects.toThrow(
+          'Payout preparation stopped because financial state changed concurrently. Refresh payment preparation and try again.',
+        );
+      } else {
+        const payout = await preparation;
+        payoutIds.push(payout.id);
+        expect(payout.vendorId).toBe(ids.vendor);
+        expect(payout.correctionDeductionAmount).toBe('100.00');
+        expect(payout.payableBeforeDebtOffset).toBe('900.00');
+        expect(payout.netAmount).toBe('840.00');
+      }
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(rolledBackCodes).toEqual(exhausted ? ['40001', '40001'] : ['40001']);
+    expect(attemptedPayoutIds).toHaveLength(2);
+    expect(new Set(attemptedPayoutIds).size).toBe(2);
+    const abortedIds = exhausted ? attemptedPayoutIds : attemptedPayoutIds.slice(0, 1);
+    const abortedScope = { payoutBatchId: { in: abortedIds } };
+    expect(await db.payoutBatch.count({ where: { id: { in: abortedIds } } })).toBe(0);
+    expect(await db.payoutBatchLine.count({ where: abortedScope })).toBe(0);
+    expect(await db.financialCorrectionApprovedDeductionPayoutLine.count({ where: abortedScope })).toBe(0);
+    expect(await db.vendorBalanceEvent.count({ where: abortedScope })).toBe(0);
+    expect(await db.payoutOffsetClaim.count({ where: abortedScope })).toBe(0);
+
+    const committed = await db.payoutBatch.findMany({
+      where: { vendorId: ids.vendor },
+      include: { lines: true, approvedDeductionLines: true },
+    });
+    expect(committed).toHaveLength(exhausted ? 0 : 1);
+    const offsets = await db.vendorBalanceEvent.findMany({
+      where: { vendorId: ids.vendor, type: 'VENDOR_DEBT_OFFSET' },
+    });
+    expect(offsets).toHaveLength(exhausted ? 0 : 1);
+    if (!exhausted) {
+      const [batch] = committed;
+      expect(batch.id).toBe(attemptedPayoutIds[1]);
+      expect(batch.status).toBe('DRAFT');
+      expect(batch.netAmount.toFixed(2)).toBe('840.00');
+      expect(offsets[0]).toMatchObject({ payoutBatchId: batch.id, amountMinor: 6000 });
+      expect(batch.lines.map((line) => line.financeLedgerEntryId).sort()).toEqual([ids.sale, ids.refundLedger].sort());
+      expect(batch.lines.map((line) => line.settlementApprovalLineId).sort()).toEqual([ids.saleLine, ids.refundLine].sort());
+      expect(batch.approvedDeductionLines).toHaveLength(1);
+      expect(batch.approvedDeductionLines[0]?.amountMinor).toBe(10000);
+    }
+    expect(await db.financialCorrectionDeduction.count({ where: { vendorId: ids.vendor } })).toBe(1);
+    expect(await db.financialCorrectionApprovedDeductionCoverage.count({ where: { vendorId: ids.vendor } })).toBe(1);
+    expect(await db.settlementApproval.findUniqueOrThrow({
+      where: { id: ids.origin }, include: { lines: true },
+    })).toEqual(originBefore);
   });
 
   it.each([1, 2, 3, 4, 5])('serializes Apply with payout preparation race %i', async () => {

@@ -2839,9 +2839,21 @@ export async function preparePayoutBatch(
     throw new Error('vendorId is required.');
   }
 
-  return prisma.$transaction((tx) => preparePayoutBatchInTransaction(tx, input, createdByUserId, false), {
-    isolationLevel: 'Serializable',
-  });
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await prisma.$transaction((tx) => preparePayoutBatchInTransaction(tx, input, createdByUserId, false), {
+        isolationLevel: 'Serializable',
+      });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+          (error.code !== 'P2034' && !(error.code === 'P2010' && error.meta?.code === '40001'))) {
+        throw error;
+      }
+      if (attempt === 2) {
+        throw new Error('Payout preparation stopped because financial state changed concurrently. Refresh payment preparation and try again.');
+      }
+    }
+  }
 }
 
 /** Isolated R1 path; intentionally not registered in any route or worker. */
