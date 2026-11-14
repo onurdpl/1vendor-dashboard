@@ -13,16 +13,36 @@ describe.skipIf(!url)('durable payout failure history on disposable PostgreSQL 1
   let tokens: { admin: string; vendor: string };
   beforeAll(async () => {
     const target = new URL(url!);
+    const proof = process.env.FIN_AUTO_CI_DB_PROOF;
+    const cluster = process.env.FIN_AUTO_CI_CLUSTER_ID;
+    const ciMajor = process.env.FIN_AUTO_CI_PG_MAJOR;
+    const ciTarget = process.env.P5_06C1_CI_MODE === '1' && process.env.GITHUB_ACTIONS === 'true' &&
+      process.env.CI === 'true' && target.port === '5432' && target.password === 'postgres' &&
+      ['16', '18'].includes(ciMajor ?? '') && /^[a-f0-9]{64}$/.test(proof ?? '') && /^\d+$/.test(cluster ?? '');
+    const localTarget = process.env.P5_06C1_CI_MODE === undefined && process.env.GITHUB_ACTIONS !== 'true' &&
+      ['55483', '55484'].includes(target.port);
     if (process.env.P5_06C1_TEST_DATABASE_ISOLATED !== '1' || target.protocol !== 'postgresql:' ||
-        target.hostname !== '127.0.0.1' || !['55483', '55484'].includes(target.port) || target.username !== 'postgres' ||
-        target.pathname !== `/${databaseName}` || target.search !== '?schema=public') throw new Error('Unverified disposable database target.');
+        target.hostname !== '127.0.0.1' || target.username !== 'postgres' ||
+        target.pathname !== `/${databaseName}` || target.search !== '?schema=public' || target.hash ||
+        !(ciTarget || localTarget)) throw new Error('Unverified disposable database target.');
     process.env.NODE_ENV = 'test'; process.env.DATABASE_URL = url;
     const { PrismaClient } = await import('../backend/node_modules/@prisma/client/index.js');
     db = new PrismaClient({ datasources: { db: { url } } });
-    const [identity] = await db.$queryRaw<Array<{ name: string; address: string; port: number; major: number }>>`
+    const [identity] = await db.$queryRaw<Array<{ name: string; address: string; port: number; major: number;
+      owner: string; databaseOwner: string; systemId: bigint; comment: string | null }>>`
       SELECT current_database() AS name, host(inet_server_addr()) AS address, inet_server_port() AS port,
-      (current_setting('server_version_num')::integer / 10000) AS major`;
-    expect(identity).toEqual({ name: databaseName, address: '127.0.0.1', port: Number(target.port), major: target.port === '55483' ? 16 : 18 });
+      (current_setting('server_version_num')::integer / 10000) AS major,
+      current_user AS owner, pg_get_userbyid(d.datdba) AS "databaseOwner",
+      (pg_control_system()).system_identifier AS "systemId", shobj_description(d.oid, 'pg_database') AS comment
+      FROM pg_database d WHERE d.datname = current_database()`;
+    if (ciTarget) {
+      expect(identity).toMatchObject({ name: databaseName, owner: 'postgres', databaseOwner: 'postgres',
+        port: 5432, major: Number(ciMajor), comment: `fin-auto-ci:${proof}` });
+      expect(String(identity.systemId)).toBe(cluster);
+    } else {
+      expect(identity).toMatchObject({ name: databaseName, address: '127.0.0.1', port: Number(target.port),
+        major: target.port === '55483' ? 16 : 18 });
+    }
     expect(await db.vendor.count()).toBe(0); expect(await db.payoutPreparationFailure.count()).toBe(0);
     (globalThis as { prisma?: PrismaClient }).prisma = db;
     await db.vendor.createMany({ data: [{ id: vendorA, name: 'Original A' }, { id: vendorB, name: 'Original B' }] });
