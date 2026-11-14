@@ -2772,3 +2772,17 @@ model AutomationAction {
   @@index([signalId])
   @@index([createdAt])
 }
+
+// Immutable occurrence facts; scalar historical identity deliberately has no live
+// Vendor FK, cascade, or lifecycle effect on Vendor deletion/provisioning.
+model PayoutPreparationFailure {
+  id                   String   @id @default(cuid())
+  invocationId         String   @unique @db.Uuid
+  historicalVendorId   String
+  occurredAt           DateTime @default(now()) @db.Timestamptz(3)
+  classification       String   @db.VarChar(64)
+  correlationReference String?  @db.VarChar(128)
+
+  @@index([occurredAt(sort: Desc), id(sort: Desc)])
+  @@index([historicalVendorId, occurredAt(sort: Desc), id(sort: Desc)])
+}

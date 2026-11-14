@@ -2831,6 +2831,14 @@ export async function getPayoutOffsetObligationSummary(vendorId: string) {
   };
 }
 
+/** Only emitted after both known retryable transaction failures have rolled back. */
+export class PayoutPreparationExhaustedError extends Error {
+  constructor(readonly verifiedVendorId: string | null) {
+    super('Payout preparation stopped because financial state changed concurrently. Refresh payment preparation and try again.');
+    this.name = 'PayoutPreparationExhaustedError';
+  }
+}
+
 export async function preparePayoutBatch(
   input: PreparePayoutBatchDto,
   createdByUserId: string | null,
@@ -2839,9 +2847,10 @@ export async function preparePayoutBatch(
     throw new Error('vendorId is required.');
   }
 
+  let verifiedVendorId: string | null = null;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await prisma.$transaction((tx) => preparePayoutBatchInTransaction(tx, input, createdByUserId, false), {
+      return await prisma.$transaction((tx) => preparePayoutBatchInTransaction(tx, input, createdByUserId, false, (id) => { verifiedVendorId = id; }), {
         isolationLevel: 'Serializable',
       });
     } catch (error) {
@@ -2850,7 +2859,7 @@ export async function preparePayoutBatch(
         throw error;
       }
       if (attempt === 2) {
-        throw new Error('Payout preparation stopped because financial state changed concurrently. Refresh payment preparation and try again.');
+        throw new PayoutPreparationExhaustedError(verifiedVendorId);
       }
     }
   }
@@ -2954,11 +2963,16 @@ async function preparePayoutBatchInTransaction(
   input: PreparePayoutBatchDto,
   createdByUserId: string | null,
   r1Isolated: boolean,
+  onVerifiedVendor?: (vendorId: string) => void,
 ): Promise<PayoutBatchDto> {
     // Serialize first-payout selection with approved-settlement correction Apply.
-    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    const lockedVendors = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT "id" FROM "Vendor" WHERE "id" = ${input.vendorId} FOR UPDATE
     `);
+    // Capture original-operation evidence only; no post-rollback identity lookup.
+    if (lockedVendors?.length === 1 && lockedVendors[0].id === input.vendorId) {
+      onVerifiedVendor?.(lockedVendors[0].id);
+    }
     // R1 remains disconnected from normal preparation. If an isolated R1 debt
     // reservation exists, the legacy aggregate debt route cannot safely assign
     // that same debt to a new payout without source-level reconciliation.

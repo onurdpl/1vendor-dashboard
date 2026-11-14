@@ -1,3 +1,6 @@
+import { recordPayoutPreparationFailure, parsePayoutFailureQuery, listPayoutPreparationFailures,
+  getPayoutPreparationFailure, PayoutFailureQueryError } from './payout-preparation-failure.service.js';
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   LegacyRefundFinanceArtifactType,
@@ -37,6 +40,7 @@ import {
   completeR1CashlessPayout,
   cancelR1ReviewPayoutBeforeEft,
   PayoutBatchTransitionRevalidationError,
+  PayoutPreparationExhaustedError,
   preparePayoutBatch,
   prepareAdminPayoutBatchWithR1,
   upsertShipmentShippingCost,
@@ -958,6 +962,34 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
+  app.get('/admin/payout-preparation-failures', {
+    preHandler: [authMiddleware.authenticateRequest],
+  }, async (request, reply) => {
+    if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+    try { return await listPayoutPreparationFailures(parsePayoutFailureQuery(request.query)); }
+    catch (error) {
+      if (error instanceof PayoutFailureQueryError) return reply.code(400).send({ message: error.message });
+      throw error;
+    }
+  });
+
+  app.get('/admin/payout-preparation-failures/:id', {
+    preHandler: [authMiddleware.authenticateRequest],
+  }, async (request, reply) => {
+    if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+    try {
+      const query = parsePayoutFailureQuery(request.query);
+      if (query.cursor || (request.query as Record<string, unknown>).limit !== undefined) {
+        throw new PayoutFailureQueryError('Invalid detail query.');
+      }
+      const result = await getPayoutPreparationFailure((request.params as { id: string }).id, query.vendorId);
+      return result ?? reply.code(404).send({ message: 'Preparation failure not found.' });
+    } catch (error) {
+      if (error instanceof PayoutFailureQueryError) return reply.code(400).send({ message: error.message });
+      throw error;
+    }
+  });
+
   app.post(
     '/admin/payout-batches/prepare',
     {
@@ -968,6 +1000,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
+      const invocationId = randomUUID();
       try {
         if (env.R1_PAYOUT_ADMIN_ENABLED === true) {
           const requestId = readOptionalBodyString(request.body, 'requestId');
@@ -977,6 +1010,14 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         }
         return await preparePayoutBatch((request.body ?? {}) as PreparePayoutBatchDto, request.authUser.id);
       } catch (error) {
+        if (env.R1_PAYOUT_ADMIN_ENABLED !== true && error instanceof PayoutPreparationExhaustedError && error.verifiedVendorId) {
+          try {
+            await recordPayoutPreparationFailure({ invocationId, verifiedVendorId: error.verifiedVendorId,
+              correlationReference: request.requestId });
+          } catch {
+            request.log.warn({ code: 'PAYOUT_PREPARATION_FAILURE_HISTORY_WRITE_FAILED' }, 'Payout failure history could not be recorded.');
+          }
+        }
         const message = error instanceof Error ? error.message : 'Payout batch could not be prepared.';
         return reply.code(400).send({ message });
       }

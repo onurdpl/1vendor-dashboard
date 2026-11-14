@@ -484,6 +484,21 @@ describe('payout batch preparation', () => {
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
   });
 
+  it('captures only the Vendor actually returned by the original transaction lock', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'demo-vendor-a' }]);
+    prismaMock.payoutOffsetClaim.count.mockRejectedValue(prismaFailure('P2034'));
+    const error = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user').catch((value) => value);
+    expect(error).toMatchObject({ name: 'PayoutPreparationExhaustedError', verifiedVendorId: 'demo-vendor-a' });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([{ rows: [] }, { rows: [{ id: 'foreign-vendor' }] }])('does not attribute unverified lock evidence %#', async ({ rows }) => {
+    prismaMock.$queryRaw.mockResolvedValue(rows);
+    prismaMock.payoutOffsetClaim.count.mockRejectedValue(prismaFailure('P2034'));
+    const error = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user').catch((value) => value);
+    expect(error).toMatchObject({ name: 'PayoutPreparationExhaustedError', verifiedVendorId: null });
+  });
+
   it.each([
     ['business rule', new Error('INSUFFICIENT_PAYABLE_FOR_FULL_DEDUCTION')],
     ['unknown outcome', new Error('Connection lost during commit')],
