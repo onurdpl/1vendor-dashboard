@@ -89,3 +89,26 @@ export function cancelPayoutBatch(batchId: string) {
 export function isPaymentBatchStatus(value: string): value is PayoutBatchStatus {
   return ['draft', 'review', 'approved', 'cancelled', 'execution_pending', 'paid', 'paid_placeholder'].includes(value);
 }
+
+export type PayoutPreparationFailure = {
+  id: string;
+  historicalVendorId: string;
+  occurredAt: string;
+  classification: string;
+  correlationReference: string | null;
+  recoveryGuidance: string;
+};
+export type PayoutPreparationFailurePage = { items: PayoutPreparationFailure[]; nextCursor: string | null };
+
+export function listPayoutPreparationFailures(input: { vendorId?: string; cursor?: string; signal?: AbortSignal }) {
+  const params = new URLSearchParams();
+  if (input.vendorId) params.set('vendorId', input.vendorId);
+  if (input.cursor) params.set('cursor', input.cursor);
+  return apiClient.get<PayoutPreparationFailurePage>(`/admin/payout-preparation-failures?${params}`, { signal: input.signal });
+}
+
+export function getPayoutPreparationFailure(id: string, vendorId?: string, signal?: AbortSignal) {
+  const params = new URLSearchParams();
+  if (vendorId) params.set('vendorId', vendorId);
+  return apiClient.get<PayoutPreparationFailure>(`/admin/payout-preparation-failures/${encodeURIComponent(id)}?${params}`, { signal });
+}

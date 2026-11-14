@@ -24,6 +24,7 @@ vi.mock('../features/finance/paymentPreparationApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/finance/paymentPreparationApi')>();
   return {
     ...actual,
+    listPayoutPreparationFailures: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     cancelPayoutBatch: vi.fn(),
     cancelR1ReviewPayout: vi.fn(),
     completeR1CashlessPayout: vi.fn(),

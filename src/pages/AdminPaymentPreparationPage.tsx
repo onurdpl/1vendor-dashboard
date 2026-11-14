@@ -1,3 +1,4 @@
+import { PayoutPreparationFailureHistory } from '../features/finance/PayoutPreparationFailureHistory';
 import { useMemo, useRef, useState } from 'react';
 import {
   EmptyStatePanel,
@@ -1158,6 +1159,8 @@ export function AdminPaymentPreparationPage() {
           </div>
         ) : null}
       </section>
+      <PayoutPreparationFailureHistory key={JSON.stringify(normalizedVendorFilter || null)} vendorId={normalizedVendorFilter || undefined} />
+
       {pendingAction ? (
         <PaymentActionConfirmationModal
           action={pendingAction.action}

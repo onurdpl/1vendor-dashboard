@@ -2100,6 +2100,21 @@ CREATE TABLE public."PayoutOffsetClaimEvent" (
 
 
 --
+-- Name: PayoutPreparationFailure; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutPreparationFailure" (
+    id text NOT NULL,
+    "invocationId" uuid NOT NULL,
+    "historicalVendorId" text NOT NULL,
+    "occurredAt" timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    classification character varying(64) NOT NULL,
+    "correlationReference" character varying(128),
+    CONSTRAINT "PayoutPreparationFailure_classification_check" CHECK (((classification)::text = 'TRANSACTION_CONFLICT_RETRY_EXHAUSTED'::text))
+);
+
+
+--
 -- Name: PayoutR1CashlessCompletion; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3597,6 +3612,14 @@ ALTER TABLE ONLY public."PayoutOffsetClaim"
 
 
 --
+-- Name: PayoutPreparationFailure PayoutPreparationFailure_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutPreparationFailure"
+    ADD CONSTRAINT "PayoutPreparationFailure_pkey" PRIMARY KEY (id);
+
+
+--
 -- Name: PayoutR1CashlessCompletion PayoutR1CashlessCompletion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4907,6 +4930,27 @@ CREATE INDEX "PayoutOffsetClaim_vendorDebtOriginEventId_status_idx" ON public."P
 --
 
 CREATE INDEX "PayoutOffsetClaim_vendorId_currency_status_idx" ON public."PayoutOffsetClaim" USING btree ("vendorId", currency, status);
+
+
+--
+-- Name: PayoutPreparationFailure_historicalVendorId_occurredAt_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "PayoutPreparationFailure_historicalVendorId_occurredAt_id_idx" ON public."PayoutPreparationFailure" USING btree ("historicalVendorId", "occurredAt" DESC, id DESC);
+
+
+--
+-- Name: PayoutPreparationFailure_invocationId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "PayoutPreparationFailure_invocationId_key" ON public."PayoutPreparationFailure" USING btree ("invocationId");
+
+
+--
+-- Name: PayoutPreparationFailure_occurredAt_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "PayoutPreparationFailure_occurredAt_id_idx" ON public."PayoutPreparationFailure" USING btree ("occurredAt" DESC, id DESC);
 
 
 --
