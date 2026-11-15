@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn((queries: Array<Promise<unknown>>) => Promise.all(queries)),
+  $queryRaw: vi.fn(),
   supportTicket: {
     count: vi.fn(),
     create: vi.fn(),
@@ -116,7 +117,9 @@ describe('support tickets', () => {
     prismaMock.supportTicketNote.create.mockReset();
     prismaMock.supportTicketReply.create.mockReset();
     prismaMock.$transaction.mockReset();
-    prismaMock.$transaction.mockImplementation((queries: Array<Promise<unknown>>) => Promise.all(queries));
+    prismaMock.$queryRaw.mockReset();
+    prismaMock.$transaction.mockImplementation((operation: Array<Promise<unknown>> | ((tx: typeof prismaMock) => Promise<unknown>)) =>
+      typeof operation === 'function' ? operation(prismaMock) : Promise.all(operation));
     prismaMock.vendorAllocation.findFirst.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.shipmentExecution.findFirst.mockReset();
@@ -496,7 +499,7 @@ describe('support tickets', () => {
   });
 
   it('lets a vendor reply to own waiting ticket and moves it to review', async () => {
-    prismaMock.supportTicket.findFirst.mockResolvedValueOnce({ id: 'ticket-1', status: 'WAITING_FOR_VENDOR' });
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ status: 'WAITING_FOR_VENDOR', priority: 'normal' }]);
     prismaMock.supportTicketReply.create.mockResolvedValueOnce({
       id: 'reply-vendor',
       supportTicketId: 'ticket-1',
@@ -506,8 +509,7 @@ describe('support tickets', () => {
       message: 'Here is the requested context.',
       createdAt: new Date('2026-05-16T12:10:00Z'),
     });
-    prismaMock.supportTicket.update.mockResolvedValueOnce(ticketRecord({ status: 'IN_REVIEW' }));
-    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(ticketRecord({
+    prismaMock.supportTicket.update.mockResolvedValueOnce(ticketRecord({
       status: 'IN_REVIEW',
       replies: [
         {
@@ -528,12 +530,12 @@ describe('support tickets', () => {
 
     expect(result.status).toBe('IN_REVIEW');
     expect(result.replies?.[0]?.message).toBe('Here is the requested context.');
-    expect(prismaMock.supportTicket.findFirst).toHaveBeenNthCalledWith(1, {
-      where: { id: 'ticket-1', vendorId: 'vendor-a' },
-      select: { id: true, status: true, priority: true, firstResponseDueAt: true, nextResponseDueAt: true },
-    });
+    expect(prismaMock.$queryRaw).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.stringContaining('FOR UPDATE')]), 'ticket-1', expect.objectContaining({ values: ['vendor-a'] }),
+    );
     expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
-      where: { id: 'ticket-1' },
+      where: { id: 'ticket-1', vendorId: 'vendor-a' },
+      include: { vendor: { select: { name: true } }, replies: { orderBy: { createdAt: 'asc' } } },
       data: expect.objectContaining({
         status: 'IN_REVIEW',
         nextResponseDueAt: expect.any(Date),
@@ -546,7 +548,7 @@ describe('support tickets', () => {
   });
 
   it('blocks vendor replies to another vendor ticket', async () => {
-    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(null);
+    prismaMock.$queryRaw.mockResolvedValueOnce([]);
 
     await expect(addVendorSupportTicketReply('ticket-1', 'vendor-b', authUser, {
       message: 'Trying to reply.',
@@ -556,7 +558,7 @@ describe('support tickets', () => {
   });
 
   it('lets admins reply to any open ticket', async () => {
-    prismaMock.supportTicket.findUnique.mockResolvedValueOnce({ id: 'ticket-1', status: 'OPEN' });
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ status: 'OPEN', priority: 'normal' }]);
     prismaMock.supportTicketReply.create.mockResolvedValueOnce({
       id: 'reply-admin',
       supportTicketId: 'ticket-1',
@@ -566,8 +568,7 @@ describe('support tickets', () => {
       message: 'Can you send a photo?',
       createdAt: new Date('2026-05-16T12:12:00Z'),
     });
-    prismaMock.supportTicket.update.mockResolvedValueOnce(ticketRecord({ status: 'WAITING_FOR_VENDOR' }));
-    prismaMock.supportTicket.findUnique.mockResolvedValueOnce(ticketRecord({
+    prismaMock.supportTicket.update.mockResolvedValueOnce(ticketRecord({
       status: 'WAITING_FOR_VENDOR',
       replies: [
         {
@@ -601,6 +602,7 @@ describe('support tickets', () => {
     });
     expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
       where: { id: 'ticket-1' },
+      include: { vendor: { select: { name: true } }, notes: { orderBy: { createdAt: 'asc' } }, replies: { orderBy: { createdAt: 'asc' } } },
       data: expect.objectContaining({
         firstResponseDueAt: null,
         nextResponseDueAt: null,
@@ -656,7 +658,7 @@ describe('support tickets', () => {
   });
 
   it('blocks replies to closed tickets', async () => {
-    prismaMock.supportTicket.findUnique.mockResolvedValueOnce({ id: 'ticket-1', status: 'CLOSED' });
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ status: 'CLOSED', priority: 'normal' }]);
 
     await expect(addAdminSupportTicketReply('ticket-1', {
       id: 'admin-1',
