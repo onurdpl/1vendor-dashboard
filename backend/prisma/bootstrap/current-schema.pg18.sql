@@ -329,6 +329,16 @@ CREATE TYPE public."PayoutOffsetSourceType" AS ENUM (
 
 
 --
+-- Name: PayoutPreparationFailureStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."PayoutPreparationFailureStatus" AS ENUM (
+    'OPEN',
+    'RESOLVED'
+);
+
+
+--
 -- Name: PayoutStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -835,6 +845,19 @@ BEGIN
     RAISE EXCEPTION 'Financial correction cannot have multiple economic effects';
   END IF;
   RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: payout_failure_resolution_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.payout_failure_resolution_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'Payout preparation failure resolution evidence is immutable';
 END;
 $$;
 
@@ -2110,7 +2133,22 @@ CREATE TABLE public."PayoutPreparationFailure" (
     "occurredAt" timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     classification character varying(64) NOT NULL,
     "correlationReference" character varying(128),
+    status public."PayoutPreparationFailureStatus" DEFAULT 'OPEN'::public."PayoutPreparationFailureStatus" NOT NULL,
     CONSTRAINT "PayoutPreparationFailure_classification_check" CHECK (((classification)::text = 'TRANSACTION_CONFLICT_RETRY_EXHAUSTED'::text))
+);
+
+
+--
+-- Name: PayoutPreparationFailureResolution; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."PayoutPreparationFailureResolution" (
+    "failureId" text NOT NULL,
+    "actorId" text NOT NULL,
+    reason character varying(500) NOT NULL,
+    "resolvedAt" timestamp(3) with time zone NOT NULL,
+    CONSTRAINT "PayoutPreparationFailureResolution_actorId_check" CHECK ((btrim("actorId") <> ''::text)),
+    CONSTRAINT "PayoutPreparationFailureResolution_reason_check" CHECK ((btrim((reason)::text) <> ''::text))
 );
 
 
@@ -3609,6 +3647,14 @@ ALTER TABLE ONLY public."PayoutOffsetClaimEvent"
 
 ALTER TABLE ONLY public."PayoutOffsetClaim"
     ADD CONSTRAINT "PayoutOffsetClaim_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: PayoutPreparationFailureResolution PayoutPreparationFailureResolution_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutPreparationFailureResolution"
+    ADD CONSTRAINT "PayoutPreparationFailureResolution_pkey" PRIMARY KEY ("failureId");
 
 
 --
@@ -6361,6 +6407,13 @@ CREATE TRIGGER "VendorBalanceEvent_correction_direction_guard" BEFORE INSERT OR 
 
 
 --
+-- Name: PayoutPreparationFailureResolution payout_failure_resolution_immutable_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER payout_failure_resolution_immutable_trigger BEFORE DELETE OR UPDATE ON public."PayoutPreparationFailureResolution" FOR EACH ROW EXECUTE FUNCTION public.payout_failure_resolution_immutable();
+
+
+--
 -- Name: SettlementAutoApprovalAttemptEvent settlement_auto_approval_attempt_event_immutable_trigger; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -7218,6 +7271,14 @@ ALTER TABLE ONLY public."PayoutOffsetClaim"
 
 ALTER TABLE ONLY public."PayoutOffsetClaim"
     ADD CONSTRAINT "PayoutOffsetClaim_vendorDebtOriginEvent_fkey" FOREIGN KEY ("vendorDebtOriginEventId", "vendorId", currency, "vendorDebtOriginEventType") REFERENCES public."VendorBalanceEvent"(id, "vendorId", currency, type) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: PayoutPreparationFailureResolution PayoutPreparationFailureResolution_failureId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."PayoutPreparationFailureResolution"
+    ADD CONSTRAINT "PayoutPreparationFailureResolution_failureId_fkey" FOREIGN KEY ("failureId") REFERENCES public."PayoutPreparationFailure"(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --

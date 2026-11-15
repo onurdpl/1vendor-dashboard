@@ -4,6 +4,7 @@ import type { PrismaClient } from '../backend/node_modules/@prisma/client/index.
 import type { AppEnv } from '../backend/src/config/env.js';
 const url = process.env.TEST_DATABASE_URL;
 const databaseName = 'p5_06c1_failure_validation';
+const appEnv = { NODE_ENV: 'test', JWT_SECRET: 'disposable-c1-jwt-key', JWT_EXPIRES_IN: '1h', LOGIN_RATE_LIMIT_MAX_ATTEMPTS: 20, LOGIN_RATE_LIMIT_WINDOW_SECONDS: 60 } as AppEnv;
 const vendorA = 'c1-original-a', vendorB = 'c1-original-b';
 
 describe.skipIf(!url)('durable payout failure history on disposable PostgreSQL 16/18', () => {
@@ -53,14 +54,14 @@ describe.skipIf(!url)('durable payout failure history on disposable PostgreSQL 1
       { id: 'c1-vendor', email: 'c1-vendor@example.test', name: 'C1 Vendor', role: 'VENDOR', passwordHash },
     ] });
     await db.userVendorAccess.create({ data: { userId: 'c1-vendor', vendorId: vendorA } });
-    const env = { NODE_ENV: 'test', JWT_SECRET: 'disposable-c1-jwt-key', JWT_EXPIRES_IN: '1h', LOGIN_RATE_LIMIT_MAX_ATTEMPTS: 20, LOGIN_RATE_LIMIT_WINDOW_SECONDS: 60 } as AppEnv;
-    const { createAuthService } = await import('../backend/src/modules/auth/auth.service.js'); const auth = createAuthService(env);
+
+    const { createAuthService } = await import('../backend/src/modules/auth/auth.service.js'); const auth = createAuthService(appEnv);
     tokens = { admin: (await auth.login({ email: 'c1-admin@example.test', password }))!.token,
       vendor: (await auth.login({ email: 'c1-vendor@example.test', password }))!.token };
     history = await import('../backend/src/modules/finance/payout-preparation-failure.service.js');
     const { default: Fastify } = await import('../backend/node_modules/fastify/fastify.js');
     const { registerFinanceRoutes } = await import('../backend/src/modules/finance/finance.routes.js');
-    app = Fastify(); registerFinanceRoutes(app, env); await app.ready();
+    app = Fastify(); registerFinanceRoutes(app, appEnv); await app.ready();
   }, 120000);
   afterEach(() => vi.restoreAllMocks());
   afterAll(async () => { await app?.close(); await db?.$disconnect(); delete (globalThis as { prisma?: PrismaClient }).prisma; });
@@ -140,7 +141,7 @@ describe.skipIf(!url)('durable payout failure history on disposable PostgreSQL 1
     expect((await get('/admin/payout-preparation-failures/unknown', tokens.admin)).statusCode).toBe(404);
     const rows = (await get('/admin/payout-preparation-failures?vendorId=c1-original-b', tokens.admin)).json().items;
     expect(rows.length).toBeGreaterThan(0); expect(rows.every((row: { historicalVendorId: string }) => row.historicalVendorId === vendorB)).toBe(true);
-    expect(Object.keys(rows[0]).sort()).toEqual(['id', 'historicalVendorId', 'occurredAt', 'classification', 'correlationReference', 'recoveryGuidance'].sort());
+    expect(Object.keys(rows[0]).sort()).toEqual(['id', 'historicalVendorId', 'occurredAt', 'classification', 'correlationReference', 'recoveryGuidance', 'status'].sort());
   });
   it('rejects malformed cursors and filters and returns empty unknown Vendor scope', async () => {
     for (const query of ['cursor=bad!', 'cursor=abc', 'limit=0', 'vendorId=a&vendorId=b', 'limit=51']) {
@@ -164,5 +165,129 @@ describe.skipIf(!url)('durable payout failure history on disposable PostgreSQL 1
     await history.recordPayoutPreparationFailure({ invocationId: id, verifiedVendorId: vendorB, correlationReference: 'unsafe cookie=secret' });
     expect((await db.payoutPreparationFailure.findUniqueOrThrow({ where: { invocationId: id } })).correlationReference).toBeNull();
     expect(await financialCounts()).toEqual(before);
+  });
+
+  const resolve = (id: string, payload: Record<string, unknown>, token?: string) => app.inject({
+    method: 'POST', url: `/admin/payout-preparation-failures/${id}/resolve`,
+    headers: token ? { authorization: `Bearer ${token}` } : {}, payload,
+  });
+
+  async function openFailure(vendor = vendorA) {
+    const invocationId = randomUUID();
+    await write(invocationId, vendor);
+    return db.payoutPreparationFailure.findUniqueOrThrow({ where: { invocationId } });
+  }
+
+  it('resolves an OPEN failure with server actor and timestamp while preserving original and financial facts', async () => {
+    const original = await openFailure();
+    expect(original.status).toBe('OPEN');
+    expect(await db.payoutPreparationFailureResolution.count({ where: { failureId: original.id } })).toBe(0);
+    const before = await financialCounts();
+    const start = Date.now();
+    const response = await resolve(original.id, { reason: '  Reviewed the operation.  ' }, tokens.admin);
+    expect(response.statusCode).toBe(200);
+    const result = response.json();
+    expect(result.status).toBe('RESOLVED');
+    expect(result.events).toEqual([{ fromStatus: 'OPEN', toStatus: 'RESOLVED', actorId: 'c1-admin',
+      reason: 'Reviewed the operation.', resolvedAt: expect.any(String) }]);
+    const event = await db.payoutPreparationFailureResolution.findUniqueOrThrow({ where: { failureId: original.id } });
+    expect(event.resolvedAt.getTime()).toBeGreaterThanOrEqual(start);
+    expect(event.resolvedAt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(event.resolvedAt.toISOString()).toBe(result.events[0].resolvedAt);
+    expect(await db.payoutPreparationFailure.findUnique({ where: { id: original.id } })).toEqual({ ...original, status: 'RESOLVED' });
+    expect(await financialCounts()).toEqual(before);
+    expect((await get(`/admin/payout-preparation-failures/${original.id}?vendorId=${vendorA}`, tokens.admin)).json()).toEqual(result);
+    await expect(db.payoutPreparationFailureResolution.update({ where: { failureId: original.id },
+      data: { reason: 'Overwrite' } })).rejects.toThrow(/immutable/);
+    await expect(db.payoutPreparationFailureResolution.delete({ where: { failureId: original.id } })).rejects.toThrow(/immutable/);
+    expect((await openFailure()).status).toBe('OPEN');
+  });
+
+  it('rejects invalid resolution inputs, missing identities and unauthorized roles', async () => {
+    const failure = await openFailure();
+    expect((await resolve(failure.id, { reason: 'Reviewed' })).statusCode).toBe(401);
+    expect((await resolve(failure.id, { reason: 'Reviewed' }, tokens.vendor)).statusCode).toBe(403);
+    for (const payload of [{}, { reason: '' }, { reason: '  \t' }, { reason: 'a'.repeat(501) },
+      { reason: 'Reviewed', actorId: 'forged' }, { reason: 'Reviewed', status: 'OPEN' }]) {
+      expect((await resolve(failure.id, payload, tokens.admin)).statusCode).toBe(400);
+    }
+    expect((await resolve('%20', { reason: 'Reviewed' }, tokens.admin)).statusCode).toBe(400);
+    expect((await resolve('missing-record', { reason: 'Reviewed' }, tokens.admin)).statusCode).toBe(404);
+    expect(await db.payoutPreparationFailure.findUnique({ where: { id: failure.id } })).toEqual(failure);
+    expect(await db.payoutPreparationFailureResolution.count({ where: { failureId: failure.id } })).toBe(0);
+  });
+
+  it('rolls back status and event together after a failure inside the resolution transaction', async () => {
+    const failure = await openFailure();
+    const transaction = db.$transaction.bind(db);
+    let staged = false;
+    vi.spyOn(db, '$transaction').mockImplementation((async (callback: (tx: unknown) => Promise<unknown>) =>
+      transaction(async (tx) => {
+        await callback(tx);
+        const inside = await tx.payoutPreparationFailure.findUniqueOrThrow({
+          where: { id: failure.id }, include: { resolution: true },
+        });
+        expect(inside.status).toBe('RESOLVED');
+        expect(inside.resolution?.reason).toBe('Rollback evidence');
+        staged = true;
+        throw new Error('synthetic rollback');
+      })) as never);
+    const response = await resolve(failure.id, { reason: 'Rollback evidence' }, tokens.admin);
+    expect(response.statusCode).toBe(500);
+    expect(staged).toBe(true);
+    expect(response.json().message).toContain('could not be confirmed');
+    expect(await db.payoutPreparationFailure.findUnique({ where: { id: failure.id } })).toEqual(failure);
+    expect(await db.payoutPreparationFailureResolution.count({ where: { failureId: failure.id } })).toBe(0);
+  });
+
+  it('commits one authoritative event for competing Admins and refuses later overwrites or reopening', async () => {
+    const failure = await openFailure(vendorB);
+    const { hashPasswordArgon2id } = await import('../backend/src/modules/auth/password-hashing.js');
+    const { createAuthService } = await import('../backend/src/modules/auth/auth.service.js');
+    const password = 'disposable-c2-second-password';
+    await db.user.create({ data: { id: 'c2-other-admin', email: 'c2-other@example.test', name: 'Second Admin',
+      role: 'ADMIN', passwordHash: await hashPasswordArgon2id(password) } });
+    const auth = createAuthService(appEnv);
+    const other = (await auth.login({ email: 'c2-other@example.test', password }))!.token;
+    const transaction = db.$transaction.bind(db);
+    let entered = 0;
+    let release!: () => void;
+    const bothStarted = new Promise<void>((done) => { release = done; });
+    const spy = vi.spyOn(db, '$transaction').mockImplementation((async (
+      callback: (tx: unknown) => Promise<unknown>, options: { isolationLevel: 'ReadCommitted' },
+    ) => transaction(async (tx) => {
+      if (++entered === 2) release();
+      await bothStarted;
+      return callback(tx);
+    }, options)) as never);
+    const responses = await Promise.all([
+      resolve(failure.id, { reason: 'First investigation' }, tokens.admin),
+      resolve(failure.id, { reason: 'Second investigation' }, other),
+    ]);
+    spy.mockRestore();
+    expect(entered).toBe(2);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    const winnerIndex = responses.findIndex((response) => response.statusCode === 200);
+    const winner = { actorId: winnerIndex === 0 ? 'c1-admin' : 'c2-other-admin',
+      reason: winnerIndex === 0 ? 'First investigation' : 'Second investigation' };
+    const committed = await db.payoutPreparationFailureResolution.findMany({ where: { failureId: failure.id } });
+    expect(committed).toEqual([expect.objectContaining(winner)]);
+    expect((await resolve(failure.id, { reason: 'Overwrite attempt' }, other)).statusCode).toBe(409);
+    expect((await resolve(failure.id, { reason: 'Reopen', status: 'OPEN' }, other)).statusCode).toBe(400);
+    expect(await db.payoutPreparationFailureResolution.findMany({ where: { failureId: failure.id } })).toEqual(committed);
+  });
+
+  it('keeps lifecycle state changes out of occurrence ordering and exact Vendor cursor scope', async () => {
+    const failure = await openFailure(vendorB);
+    const before = await history.listPayoutPreparationFailures({ vendorId: vendorB, limit: 10 });
+    const target = before.items.find((row) => row.status === 'OPEN')!;
+    expect(target.status).toBe('OPEN');
+    expect((await resolve(target.id, { reason: 'Verified pagination' }, tokens.admin)).statusCode).toBe(200);
+    const after = await history.listPayoutPreparationFailures({ vendorId: vendorB, limit: 10 });
+    expect(after.nextCursor).toBe(before.nextCursor);
+    expect(after.items).toEqual(before.items.map((row) => row.id === target.id ? { ...row, status: 'RESOLVED' } : row));
+    const global = await history.listPayoutPreparationFailures({ limit: 50 });
+    expect(new Set(global.items.map((row) => row.status))).toEqual(new Set(['OPEN', 'RESOLVED']));
+    expect((await get(`/admin/payout-preparation-failures/${failure.id}?vendorId=${vendorA}`, tokens.admin)).statusCode).toBe(404);
   });
 });
