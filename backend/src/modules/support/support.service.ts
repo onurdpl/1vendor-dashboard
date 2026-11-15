@@ -1231,28 +1231,26 @@ export async function addAdminSupportTicketNote(
   return mapNote(note);
 }
 
-async function loadTicketForReply(ticketId: string, vendorId?: string) {
-  if (vendorId) {
-    return prisma.supportTicket.findFirst({
-      where: { id: ticketId, vendorId },
-      select: { id: true, status: true, priority: true, firstResponseDueAt: true, nextResponseDueAt: true },
-    });
-  }
-
-  return prisma.supportTicket.findUnique({
-    where: { id: ticketId },
-    select: { id: true, status: true, priority: true, firstResponseDueAt: true, nextResponseDueAt: true },
-  });
+async function lockSupportTicketState(tx: Prisma.TransactionClient, ticketId: string, vendorId?: string) {
+  // Every status writer updates this row. Read the current state only after
+  // concurrent updates release the lock, and hold it through reply persistence.
+  const [ticket] = await tx.$queryRaw<Array<{ status: string; priority: string }>>`
+    SELECT "status", "priority" FROM "SupportTicket"
+    WHERE "id" = ${ticketId}
+    ${vendorId === undefined ? Prisma.empty : Prisma.sql`AND "vendorId" = ${vendorId}`}
+    FOR UPDATE
+  `;
+  if (!ticket) throw new SupportTicketError('Support ticket not found.', 404);
+  return ticket;
 }
 
-async function loadTicketDetailForActor(ticketId: string, includeNotes: boolean, vendorId?: string) {
-  if (vendorId) {
-    return getVendorSupportTicket(ticketId, vendorId);
+async function writePublicReply<T>(write: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  try {
+    return await prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  } catch (error) {
+    if (error instanceof SupportTicketError) throw error;
+    throw new SupportTicketError('Unable to post reply.', 500);
   }
-  return getAdminSupportTicket(ticketId).then((ticket) => ticket ? {
-    ...ticket,
-    notes: includeNotes ? ticket.notes : undefined,
-  } : null);
 }
 
 export async function addVendorSupportTicketReply(
@@ -1262,49 +1260,47 @@ export async function addVendorSupportTicketReply(
   input: AddSupportTicketReplyInput,
 ): Promise<SupportTicketDto> {
   const message = readText(input.message, 'Reply', 2000);
-  const ticket = await loadTicketForReply(ticketId, vendorId);
-  if (!ticket) {
-    throw new SupportTicketError('Support ticket not found.', 404);
-  }
+  return writePublicReply(async (tx) => {
+    const ticket = await lockSupportTicketState(tx, ticketId, vendorId);
+    const currentStatus = normalizeStatus(ticket.status);
+    if (currentStatus === 'CLOSED') {
+      throw new SupportTicketError('Closed support tickets cannot receive replies.', 400);
+    }
 
-  const currentStatus = normalizeStatus(ticket.status);
-  if (currentStatus === 'CLOSED') {
-    throw new SupportTicketError('Closed support tickets cannot receive replies.', 400);
-  }
+    const now = new Date();
+    await tx.supportTicketReply.create({
+      data: {
+        supportTicketId: ticketId,
+        authorUserId: authUser.id,
+        authorName: authUser.name,
+        authorRole: 'VENDOR',
+        message,
+        createdAt: now,
+      },
+    });
 
-  await prisma.supportTicketReply.create({
-    data: {
-      supportTicketId: ticketId,
-      authorUserId: authUser.id,
-      authorName: authUser.name,
-      authorRole: 'VENDOR',
-      message,
-    },
+    const priority = readPriority(ticket.priority);
+    const updated = await tx.supportTicket.update({
+      where: { id: ticketId, vendorId },
+      data: {
+        status: currentStatus === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : currentStatus,
+        resolvedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+        closedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+        nextResponseDueAt: calculateSupportResponseDueAt(priority, now),
+        escalatedAt: null,
+        escalationReason: null,
+        adminUnreadCount: { increment: 1 },
+        vendorUnreadCount: 0,
+        lastReplyAt: now,
+        lastReplyByRole: 'VENDOR',
+      },
+      include: {
+        vendor: { select: { name: true } },
+        replies: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    return mapVendorTicket(updated, { includeReplies: true });
   });
-
-  const now = new Date();
-  const priority = readPriority(ticket.priority);
-  await prisma.supportTicket.update({
-    where: { id: ticketId },
-    data: {
-      status: currentStatus === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : currentStatus,
-      resolvedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
-      closedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
-      nextResponseDueAt: calculateSupportResponseDueAt(priority, now),
-      escalatedAt: null,
-      escalationReason: null,
-      adminUnreadCount: { increment: 1 },
-      vendorUnreadCount: 0,
-      lastReplyAt: now,
-      lastReplyByRole: 'VENDOR',
-    },
-  });
-
-  const updated = await loadTicketDetailForActor(ticketId, false, vendorId);
-  if (!updated) {
-    throw new SupportTicketError('Support ticket not found.', 404);
-  }
-  return updated;
 }
 
 export async function escalateVendorSupportTicket(
@@ -1312,44 +1308,33 @@ export async function escalateVendorSupportTicket(
   vendorId: string,
   authUser: AuthUserContext,
 ): Promise<SupportTicketDto> {
-  const existing = await prisma.supportTicket.findFirst({
-    where: {
-      id: ticketId,
-      vendorId,
-    },
-    select: {
-      id: true,
-      status: true,
-    },
-  });
-  if (!existing) {
-    throw new SupportTicketError('Support ticket not found.', 404);
-  }
+  return prisma.$transaction(async (tx) => {
+    const existing = await lockSupportTicketState(tx, ticketId, vendorId);
+    const currentStatus = normalizeStatus(existing.status);
+    if (currentStatus === 'RESOLVED' || currentStatus === 'CLOSED') {
+      throw new SupportTicketError('Resolved or closed support tickets cannot be escalated.', 400);
+    }
 
-  const currentStatus = normalizeStatus(existing.status);
-  if (currentStatus === 'RESOLVED' || currentStatus === 'CLOSED') {
-    throw new SupportTicketError('Resolved or closed support tickets cannot be escalated.', 400);
-  }
-
-  const now = new Date();
-  const ticket = await prisma.supportTicket.update({
-    where: { id: ticketId },
-    data: {
-      priority: 'high',
-      status: currentStatus === 'OPEN' ? 'IN_REVIEW' : currentStatus,
-      escalatedAt: now,
-      escalationReason: `Vendor escalation requested by ${authUser.name}.`,
-      adminUnreadCount: { increment: 1 },
-      updatedAt: now,
-    },
-    include: {
-      vendor: {
-        select: { name: true },
+    const now = new Date();
+    const ticket = await tx.supportTicket.update({
+      where: { id: ticketId, vendorId },
+      data: {
+        priority: 'high',
+        status: currentStatus === 'OPEN' ? 'IN_REVIEW' : currentStatus,
+        escalatedAt: now,
+        escalationReason: `Vendor escalation requested by ${authUser.name}.`,
+        adminUnreadCount: { increment: 1 },
+        updatedAt: now,
       },
-    },
-  });
+      include: {
+        vendor: {
+          select: { name: true },
+        },
+      },
+    });
 
-  return mapVendorTicket(ticket, { includeSla: true });
+    return mapVendorTicket(ticket, { includeSla: true });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 export async function addAdminSupportTicketReply(
@@ -1359,54 +1344,53 @@ export async function addAdminSupportTicketReply(
 ): Promise<SupportTicketDto> {
   const message = readText(input.message, 'Reply', 2000);
   const requestedStatus = readStatus(input.status);
-  const ticket = await loadTicketForReply(ticketId);
-  if (!ticket) {
-    throw new SupportTicketError('Support ticket not found.', 404);
-  }
+  return writePublicReply(async (tx) => {
+    const ticket = await lockSupportTicketState(tx, ticketId);
+    const currentStatus = normalizeStatus(ticket.status);
+    if (currentStatus === 'CLOSED') {
+      throw new SupportTicketError('Closed support tickets cannot receive replies.', 400);
+    }
 
-  const currentStatus = normalizeStatus(ticket.status);
-  if (currentStatus === 'CLOSED') {
-    throw new SupportTicketError('Closed support tickets cannot receive replies.', 400);
-  }
+    const nextStatus = requestedStatus ?? currentStatus;
+    if (nextStatus === 'CLOSED') {
+      throw new SupportTicketError('Use the ticket status action to close support tickets.', 400);
+    }
 
-  const nextStatus = requestedStatus ?? currentStatus;
-  if (nextStatus === 'CLOSED') {
-    throw new SupportTicketError('Use the ticket status action to close support tickets.', 400);
-  }
+    const now = new Date();
+    await tx.supportTicketReply.create({
+      data: {
+        supportTicketId: ticketId,
+        authorUserId: authUser.id,
+        authorName: authUser.name,
+        authorRole: 'ADMIN',
+        message,
+        createdAt: now,
+      },
+    });
 
-  await prisma.supportTicketReply.create({
-    data: {
-      supportTicketId: ticketId,
-      authorUserId: authUser.id,
-      authorName: authUser.name,
-      authorRole: 'ADMIN',
-      message,
-    },
+    const updated = await tx.supportTicket.update({
+      where: { id: ticketId },
+      data: {
+        status: nextStatus,
+        resolvedAt: nextStatus === 'RESOLVED' ? now : nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+        closedAt: nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' || nextStatus === 'RESOLVED' ? null : undefined,
+        firstResponseDueAt: null,
+        nextResponseDueAt: null,
+        escalatedAt: nextStatus === 'RESOLVED' ? null : undefined,
+        escalationReason: nextStatus === 'RESOLVED' ? null : undefined,
+        vendorUnreadCount: { increment: 1 },
+        adminUnreadCount: 0,
+        lastReplyAt: now,
+        lastReplyByRole: 'ADMIN',
+      },
+      include: {
+        vendor: { select: { name: true } },
+        notes: { orderBy: { createdAt: 'asc' } },
+        replies: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    return mapAdminTicket(updated, { includeNotes: true, includeReplies: true, includeSla: true });
   });
-
-  const now = new Date();
-  await prisma.supportTicket.update({
-    where: { id: ticketId },
-    data: {
-      status: nextStatus,
-      resolvedAt: nextStatus === 'RESOLVED' ? now : nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
-      closedAt: nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' || nextStatus === 'RESOLVED' ? null : undefined,
-      firstResponseDueAt: null,
-      nextResponseDueAt: null,
-      escalatedAt: nextStatus === 'RESOLVED' ? null : undefined,
-      escalationReason: nextStatus === 'RESOLVED' ? null : undefined,
-      vendorUnreadCount: { increment: 1 },
-      adminUnreadCount: 0,
-      lastReplyAt: now,
-      lastReplyByRole: 'ADMIN',
-    },
-  });
-
-  const updated = await loadTicketDetailForActor(ticketId, true);
-  if (!updated) {
-    throw new SupportTicketError('Support ticket not found.', 404);
-  }
-  return updated;
 }
 
 export async function assignSupportTicketToSelf(ticketId: string, authUser: AuthUserContext): Promise<SupportTicketDto> {
