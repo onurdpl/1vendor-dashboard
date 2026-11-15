@@ -2783,6 +2783,23 @@ model PayoutPreparationFailure {
   classification       String   @db.VarChar(64)
   correlationReference String?  @db.VarChar(128)
 
+  status                PayoutPreparationFailureStatus @default(OPEN)
+  resolution            PayoutPreparationFailureResolution?
+
   @@index([occurredAt(sort: Desc), id(sort: Desc)])
   @@index([historicalVendorId, occurredAt(sort: Desc), id(sort: Desc)])
+}
+
+enum PayoutPreparationFailureStatus {
+  OPEN
+  RESOLVED
+}
+
+// The authenticated actor ID is an immutable historical value with no live FK.
+model PayoutPreparationFailureResolution {
+  failureId      String   @id
+  actorId        String
+  reason         String   @db.VarChar(500)
+  resolvedAt     DateTime @db.Timestamptz(3)
+  failure        PayoutPreparationFailure @relation(fields: [failureId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }

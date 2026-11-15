@@ -287,13 +287,18 @@ jobs:
                   "rejects malformed cursors and filters and returns empty unknown Vendor scope",
                   "does not record ordinary business rejection, missing Vendor or unverified conflict",
                   "does not persist unsafe correlation data or change financial state",
+                  "resolves an OPEN failure with server actor and timestamp while preserving original and financial facts",
+                  "rejects invalid resolution inputs, missing identities and unauthorized roles",
+                  "rolls back status and event together after a failure inside the resolution transaction",
+                  "commits one authoritative event for competing Admins and refuses later overwrites or reopening",
+                  "keeps lifecycle state changes out of occurrence ordering and exact Vendor cursor scope",
                 ];
                 const assertions = r.testResults[0].assertionResults;
-                if (r.numTotalTests !== 8 || r.numPassedTests !== 8 ||
+                if (r.numTotalTests !== 13 || r.numPassedTests !== 13 ||
                     r.numFailedTests !== 0 || r.numPendingTests !== 0 ||
-                    !Array.isArray(assertions) || assertions.length !== 8 ||
+                    !Array.isArray(assertions) || assertions.length !== 13 ||
                     !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
-                console.log("Payout failure history verified: 8 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
+                console.log("Payout failure history verified: 13 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
               }
             ' "$report" "$file"
             if [ "$db" = p5_06c1_failure_validation ]; then
@@ -481,13 +486,18 @@ jobs:
                   "rejects malformed cursors and filters and returns empty unknown Vendor scope",
                   "does not record ordinary business rejection, missing Vendor or unverified conflict",
                   "does not persist unsafe correlation data or change financial state",
+                  "resolves an OPEN failure with server actor and timestamp while preserving original and financial facts",
+                  "rejects invalid resolution inputs, missing identities and unauthorized roles",
+                  "rolls back status and event together after a failure inside the resolution transaction",
+                  "commits one authoritative event for competing Admins and refuses later overwrites or reopening",
+                  "keeps lifecycle state changes out of occurrence ordering and exact Vendor cursor scope",
                 ];
                 const assertions = r.testResults[0].assertionResults;
-                if (r.numTotalTests !== 8 || r.numPassedTests !== 8 ||
+                if (r.numTotalTests !== 13 || r.numPassedTests !== 13 ||
                     r.numFailedTests !== 0 || r.numPendingTests !== 0 ||
-                    !Array.isArray(assertions) || assertions.length !== 8 ||
+                    !Array.isArray(assertions) || assertions.length !== 13 ||
                     !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
-                console.log("Payout failure history verified: 8 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
+                console.log("Payout failure history verified: 13 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
               }
             ' "$report" "$file"
             if [ "$db" = p5_06c1_failure_validation ]; then

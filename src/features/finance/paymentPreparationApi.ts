@@ -97,6 +97,10 @@ export type PayoutPreparationFailure = {
   classification: string;
   correlationReference: string | null;
   recoveryGuidance: string;
+  status: 'OPEN' | 'RESOLVED';
+};
+export type PayoutPreparationFailureDetail = PayoutPreparationFailure & {
+  events: Array<{ fromStatus: 'OPEN'; toStatus: 'RESOLVED'; actorId: string; reason: string; resolvedAt: string }>;
 };
 export type PayoutPreparationFailurePage = { items: PayoutPreparationFailure[]; nextCursor: string | null };
 
@@ -110,5 +114,12 @@ export function listPayoutPreparationFailures(input: { vendorId?: string; cursor
 export function getPayoutPreparationFailure(id: string, vendorId?: string, signal?: AbortSignal) {
   const params = new URLSearchParams();
   if (vendorId) params.set('vendorId', vendorId);
-  return apiClient.get<PayoutPreparationFailure>(`/admin/payout-preparation-failures/${encodeURIComponent(id)}?${params}`, { signal });
+  return apiClient.get<PayoutPreparationFailureDetail>(`/admin/payout-preparation-failures/${encodeURIComponent(id)}?${params}`, { signal });
+}
+
+
+export function resolvePayoutPreparationFailure(id: string, reason: string, signal?: AbortSignal) {
+  return apiClient.post<PayoutPreparationFailureDetail>(
+    `/admin/payout-preparation-failures/${encodeURIComponent(id)}/resolve`, { reason }, { signal },
+  );
 }

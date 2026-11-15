@@ -1,5 +1,5 @@
 import { recordPayoutPreparationFailure, parsePayoutFailureQuery, listPayoutPreparationFailures,
-  getPayoutPreparationFailure, PayoutFailureQueryError } from './payout-preparation-failure.service.js';
+  getPayoutPreparationFailure, PayoutFailureQueryError, parsePayoutFailureResolution, resolvePayoutPreparationFailure } from './payout-preparation-failure.service.js';
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
@@ -987,6 +987,25 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
     } catch (error) {
       if (error instanceof PayoutFailureQueryError) return reply.code(400).send({ message: error.message });
       throw error;
+    }
+  });
+
+  app.post('/admin/payout-preparation-failures/:id/resolve', {
+    preHandler: [authMiddleware.authenticateRequest],
+  }, async (request, reply) => {
+    if (request.authUser?.role !== 'admin') return reply.code(403).send({ message: 'Admin access required.' });
+    try {
+      const reason = parsePayoutFailureResolution(request.body);
+      const result = await resolvePayoutPreparationFailure(
+        (request.params as { id: string }).id, request.authUser.id, reason,
+      );
+      if (result.outcome === 'missing') return reply.code(404).send({ message: 'Preparation failure not found.' });
+      if (result.outcome === 'conflict') return reply.code(409).send({ message: 'Preparation failure is already resolved.' });
+      return result.detail;
+    } catch (error) {
+      if (error instanceof PayoutFailureQueryError) return reply.code(400).send({ message: error.message });
+      request.log.error({ code: 'PAYOUT_PREPARATION_FAILURE_RESOLUTION_FAILED' }, 'Payout failure resolution could not be confirmed.');
+      return reply.code(500).send({ message: 'Resolution could not be confirmed. Refresh the failure details before trying again.' });
     }
   });
 
