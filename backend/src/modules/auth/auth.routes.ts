@@ -7,8 +7,7 @@ import { createAuthService } from './auth.service.js';
 import { createAuthMiddleware } from './auth.middleware.js';
 import type { AuthLoginRouteTiming, LoginBody } from './auth.types.js';
 import {
-  checkLoginRateLimit,
-  recordFailedLoginRateLimitAttempt,
+  reserveLoginRateLimitAttempt,
   resetLoginRateLimit,
 } from './login-rate-limit.js';
 import {
@@ -116,7 +115,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       maxAttempts: env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
       windowSeconds: env.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
     };
-    const loginRateLimit = checkLoginRateLimit(
+    const loginRateLimit = reserveLoginRateLimitAttempt(
       loginRateLimitIdentity,
       loginRateLimitConfig,
     );
@@ -140,7 +139,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     }
 
     const serviceStartedAt = process.hrtime.bigint();
-    let loginResult: Awaited<ReturnType<typeof authService.loginWithDiagnostics>>;
+    let loginResult: Awaited<ReturnType<typeof authService.loginWithDiagnostics>> | undefined;
     try {
       loginResult = await authService.loginWithDiagnostics({
         email,
@@ -161,11 +160,12 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         validationDurationMs,
       });
       throw error;
+    } finally {
+      loginRateLimit.finish(loginResult === undefined ? 'exception' : loginResult.success ? 'success' : 'failure');
     }
     const routeEntryToServiceStartMs = elapsedMs(routeStartedAt, serviceStartedAt);
 
     if (!loginResult.success) {
-      recordFailedLoginRateLimitAttempt(loginRateLimitIdentity, loginRateLimitConfig);
       logAuthLoginDiagnostics(app, request, {
         email,
         success: false,
@@ -185,7 +185,6 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       return reply.code(401).send({ message: 'Invalid email or password.' });
     }
 
-    resetLoginRateLimit(loginRateLimitIdentity);
     const responsePreparationStartedAt = process.hrtime.bigint();
     const csrfGenerationStartedAt = process.hrtime.bigint();
     const csrfToken = authService.createCsrfToken(loginResult.token);
