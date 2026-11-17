@@ -38,8 +38,9 @@ jobs:
           npm run backend:db:generate
       - name: Install PostgreSQL 18 client
         run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          # Verify the checked-in official PGDG key before giving it to APT.
+          echo '0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  .github/ci/pgdg-ACCC4CF8.asc' | sha256sum --check --strict
+          sudo install -D -m 0644 .github/ci/pgdg-ACCC4CF8.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           . /etc/os-release
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
@@ -421,8 +422,9 @@ jobs:
       - name: Ensure PostgreSQL 16 client for baseline verification
         run: |
           # Older pg_dump emits WAL-dependent pg_attver values from patched servers.
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          # Verify the checked-in official PGDG key before giving it to APT.
+          echo '0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  .github/ci/pgdg-ACCC4CF8.asc' | sha256sum --check --strict
+          sudo install -D -m 0644 .github/ci/pgdg-ACCC4CF8.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-16
