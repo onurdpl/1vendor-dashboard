@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 
 const findUniqueMock = vi.hoisted(() => vi.fn());
@@ -266,6 +266,45 @@ describe('auth login rate limiting', () => {
       findUniqueMock.mockResolvedValue({ ...buildUser(), passwordHash: data.passwordHash });
       return { count: 1 };
     });
+  });
+
+  afterEach(resetLoginRateLimitForTests);
+
+  it('limits overlapping authentication work per bucket and preserves failure accounting', async () => {
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    let complete!: (value: null) => void;
+    const heldLookup = new Promise<null>((resolve) => { complete = resolve; });
+    findUniqueMock.mockImplementationOnce(() => {
+      enter();
+      return heldLookup;
+    });
+    const pending = injectLogin({ password: 'wrong' });
+    await entered;
+    try {
+      // A completed failure and an outstanding lookup together fill the budget.
+      expect((await injectLogin({ password: 'wrong' })).statusCode).toBe(401);
+      const calls = findUniqueMock.mock.calls.length;
+      const response = await injectLogin({ email: ' VENDOR@example.com ', password: 'wrong' });
+      expect(response.statusCode).toBe(429);
+      expect(response.headers['Retry-After']).toBe('600');
+      expect(response.payload).toMatchObject({ retryAfterSeconds: 600, retryAt: expect.any(String) });
+      expect(findUniqueMock).toHaveBeenCalledTimes(calls);
+      expect((await injectLogin({ email: 'independent@example.test', password: 'wrong' })).statusCode).toBe(401);
+    } finally {
+      complete(null);
+      await pending;
+    }
+    expect((await pending).statusCode).toBe(401);
+    expect((await injectLogin({ password: 'wrong' })).statusCode).toBe(429);
+  });
+
+  it('releases a rejected authentication lookup without counting it as a credential failure', async () => {
+    const env = buildEnv({ LOGIN_RATE_LIMIT_MAX_ATTEMPTS: 1 });
+    findUniqueMock.mockRejectedValueOnce(new Error('Synthetic lookup failure'));
+    await expect(injectLogin({ password: 'wrong', env })).rejects.toThrow('Synthetic lookup failure');
+    expect((await injectLogin({ password: 'wrong', env })).statusCode).toBe(401);
+    expect((await injectLogin({ password: 'wrong', env })).statusCode).toBe(429);
   });
 
   it('keeps login behavior unchanged under the configured limit', async () => {
@@ -1409,6 +1448,7 @@ describe('auth login rate limiting', () => {
       const response = await injectLogin({ password: 'wrong', env });
       expect(response.statusCode).toBe(401);
     } finally {
+      resetLoginRateLimitForTests();
       vi.useRealTimers();
     }
   });
