@@ -8,11 +8,12 @@ ENV PATH="/opt/node20/bin:${PATH}"
 
 # Install tools in the disposable image build, never during the proof test run.
 # PGDG and Ubuntu packages are signature-checked by Apt; no TLS checks are disabled.
-RUN apt-get update \
+# Official Ubuntu instructions publish fingerprint B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8.
+# https://www.postgresql.org/download/linux/ubuntu/
+COPY .github/ci/pgdg-ACCC4CF8.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+RUN echo '0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' | sha256sum --check --strict \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && install -d /usr/share/postgresql-common/pgdg \
-    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-      -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
     && echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' \
       > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
