@@ -204,3 +204,112 @@ label-opening decision remains for P02; unrelated D08 decisions remain outside s
 At this record's commit, Draft-PR CI is pending delivery. Exact commit/PR/run/job
 identities and observed results are reported in the delivery response. No merge or
 deployment is authorized; no P03/P04 work starts automatically.
+
+## P03 — Returns Detail information parity
+
+### Verified baseline and scope
+
+- Isolated branch `codex/ui-p03-returns-detail-parity`, based on main
+  `27c9da6a694da9b84f1990c97b2fdcfe5b46d02c`; PR #70 verified merged.
+- Original checkout and unrelated modifications preserved. P03 changes only
+  `src/pages/ReturnDetailPage.tsx`, `src/pages/ReturnDetailPage.test.tsx` and this file.
+- D07/D08 investigation leads were checked against current source. No panel,
+  operational sidebar, route, navigation, backend, DTO, mapper, stylesheet or
+  financial/provider behavior is removed or changed.
+
+### Panel versus Detail matrix
+
+| Area | Before | After | Evidence / limit |
+| --- | --- | --- | --- |
+| Return lifecycle labels | EXACT_PARITY | EXACT_PARITY | Existing operational/terminal helpers retained |
+| Refund pending/terminal interpretation | EXACT_PARITY | EXACT_PARITY | Existing refund projection and review guards retained |
+| Request date | EXACT_PARITY | EXACT_PARITY | Existing date field, no new timestamp |
+| Reason/customer note | EXACT_PARITY | EXACT_PARITY | Existing detail content retained |
+| Vendor carrier/tracking | NO_PARITY | EXACT_PARITY | Read-only summary from authorized detail fields |
+| Item name/SKU/variant/quantity/image | PARTIAL_PARITY | PARTIAL_PARITY | Actual detail lines retained; legacy summary-only SKU fallback unresolved |
+| Item amount | NO_PARITY | PARTIAL_PARITY | Actual formatted detail-line amounts displayed; no summary-total synthesis |
+| Support | PARTIAL_PARITY | EXACT_PARITY | Existing local Return ID/modal/tickets retained; first item SKU added to snapshot |
+| Timeline | PARTIAL_PARITY | PARTIAL_PARITY | Existing request/receipt/review/refund/Support projections retained; Closed timestamp gap below |
+| Review actions/restrictions | EXACT_PARITY | EXACT_PARITY | Existing receipt/approve/reject/Support/restricted/terminal gates retained |
+| Admin shipment diagnostics | EXACT_PARITY | EXACT_PARITY | Existing Admin card unchanged, no duplicate Vendor card |
+| Vendor/route lifecycle and deep links | EXACT_PARITY | EXACT_PARITY | Existing Vendor+Return query/remount/response guards retained and tested |
+
+EXACT_PARITY describes these shared UI contracts, not identical layouts or live
+provider/production verification.
+
+### Shipment and amount semantics
+
+- A Vendor gets a summary only when carrier, tracking number or tracking URL is
+  present. A provider ID alone is insufficient. Missing text uses `Not provided`;
+  URL-only tracking uses `Open tracking`. Existing cancellation/terminal predicates
+  label retained tracking as historical. No provider IDs, diagnostics or controls
+  are added for Vendors; Admin retains the original detailed card.
+- `getReturnedItems` still prefers actual `refundedItems`, then `items`. Formatted
+  nonblank item amounts, including zero, are displayed verbatim as **Item amount**.
+  No multiplication, currency conversion or whole-return-total fallback is added.
+- Missing amount on a Shopify return request without a refund reference uses
+  `Not posted`; other missing amounts use `Not available`. This defensive UI handling
+  does not change the API's string type or the real client's existing formatting.
+- Backend `toAllocationReturnedItem` uses allocation line value, whereas
+  `toRefundReturnedItem` uses refund-line subtotal. Therefore the existing field
+  `refundAmount` is not universally evidence of a completed cash refund. Displaying
+  it does not create a refund event or financial authority.
+
+### Timeline, Support and remaining decisions
+
+- Existing detail `getTimeline` and panel `buildTimeline` were compared. Dedicated
+  receipt/review dates exist; some existing approval/shipment/refund projections
+  use `updatedAt` fallbacks. These projections are unchanged, not newly certified
+  event timestamps. Admin Finance events remain separate.
+- Terminal panel adds `Closed` using `updatedAt`/request-date fallback. Detail has
+  no distinct persisted closed-event timestamp in its current contract. P03 does
+  not fabricate that event/date or alter the existing normalization protected by
+  regression tests. Exact Closed-event parity is **USER_DECISION_REQUIRED** if it
+  must be preserved before P05: establish an authoritative event/date contract or
+  separately approve an explicitly qualified presentation. No API change is made.
+- Panel legacy SKU-only fallback repeats the whole-return amount and invents a
+  quantity of one. This is not copied. If actual detail lines are absent, existing
+  `No returned items` stays. Preserving legacy per-item quantities/amounts requires
+  authoritative line evidence; **USER_DECISION_REQUIRED** for that affected portion.
+- Existing Contact support/modal/local ReturnRecord ID/linked-ticket flow and
+  review-blocking rules remain. First actual item SKU restores panel snapshot
+  context. No Support endpoint, workflow or permissions change.
+- Full parity and P05 panel-removal readiness are **not claimed**. The above
+  timeline/legacy decisions and their verification remain dependencies before
+  any separately authorized panel removal. P03 is partial with those bounded
+  decisions, not blocked for the completed shipment/item-line presentation.
+
+### Validation and delivery
+
+Validation results and Draft-PR CI state are recorded below after execution.
+
+- Final full suite: **4,584 passed, 0 failed, 724 skipped**, 343 files.
+  P03 adds 29 passing component cases. Return Detail: 94; Returns list: 55;
+  Returns real-client mapping: 13; review route/service: 16; Admin reads: 9;
+  operational deep links: 5. These six focused files total **192 passed** in
+  the final run. Order Detail: 250; Orders: 134; P01's 34 and P02's 26 cases
+  remain passing (included in totals).
+- Initial focused run found one new Admin assertion selecting an existing provider
+  ID repeated in several Admin sections; scoped it to the existing shipment card.
+  Broader focused run then found the old Vendor test expecting carrier/tracking to
+  be entirely hidden. Updated that test for the explicitly approved read-only
+  summary while preserving its Admin-diagnostics and lifecycle protections.
+  No old test was deleted or skipped; no assertion hides a production regression.
+- Existing conditional PostgreSQL suites account for all 724 skipped tests; no
+  new skips. No disposable PostgreSQL, real-backend browser or live provider test
+  was run for these frontend-only changes. Mock component evidence is not backend
+  authorization or production evidence. Backend ownership source is unchanged.
+- Frontend TypeScript/Vite build, backend typecheck and backend build passed.
+  Existing Vite chunk-size warning remains. Backend smoke passed with explicit
+  no-DB mode, inert loopback provider URL and egress guard; DB-backed processing
+  was intentionally omitted. Prisma client generation completed locally.
+- Full suite used an inert `DATABASE_URL` on loopback port 9 and unset
+  `TEST_DATABASE_URL`; no production credentials/database/services were used.
+  `real-api:dry-run` was not run because no disposable real backend was started.
+  No lint script exists. `git diff --check` passed.
+- Delivery is a Draft PR only. At this commit its number and CI result are pending;
+  exact PR/head/run/job evidence is supplied in the delivery response rather than
+  represented as a historical PASS here. No merge or deployment is authorized.
+- Classification for overall parity: `P03_PARTIAL_BLOCKED_BY_USER_DECISION` for the
+  explicitly documented Closed-event/legacy-line portions; completed presentation
+  has local PASS. This does not certify P05 panel removal.

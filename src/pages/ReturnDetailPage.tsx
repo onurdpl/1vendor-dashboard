@@ -218,6 +218,16 @@ function getReturnedItems(returnRequest: ReturnDetail) {
   return refundedItems.length ? refundedItems : safeArray(returnRequest.items);
 }
 
+function getReturnedItemAmount(item: ReturnLineItem, returnRequest: ReturnDetail) {
+  // Keep the formatted item value; the whole-return amount is not an item fallback.
+  if (typeof item.refundAmount === 'string' && item.refundAmount.trim()) {
+    return item.refundAmount;
+  }
+  return returnRequest.sourceType === 'shopify_return_request' && !returnRequest.sourceShopifyRefundId
+    ? 'Not posted'
+    : 'Not available';
+}
+
 function getTimelineLabel(label: string | null | undefined) {
   const normalized = label?.toLowerCase() ?? '';
   if (normalized.includes('requested') || normalized.includes('return')) {
@@ -1326,6 +1336,7 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
     refundStatus: getRefundStatus(returnRequest),
     itemCount: returnedItems.length,
     itemTitle: returnedItems[0]?.name ?? null,
+    sku: returnedItems[0]?.sku ?? null,
     returnCarrierPresent: Boolean(returnRequest.returnCarrierName),
     returnTrackingPresent: Boolean(returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl),
   };
@@ -1592,6 +1603,7 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
                     <div className="return-review-item-main">
                       <strong>{item.name || 'Return item'}</strong>
                       {getVariantText(item.variantTitle) !== '—' ? <span>{getVariantText(item.variantTitle)}</span> : null}
+                      <span>Item amount: {getReturnedItemAmount(item, returnRequest)}</span>
                     </div>
                     <div>
                       <span>SKU</span>
@@ -1941,6 +1953,32 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
               </div>
             ) : null}
           </article>
+
+          {currentUser?.role === 'vendor' && (
+            returnRequest.returnCarrierName || returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl
+          ) ? (
+            <article className="return-review-card" aria-label="Return shipment summary">
+              <div className="return-review-card-header">
+                <div><p className="eyebrow">Return shipment</p><h3>Return shipment</h3></div>
+              </div>
+              {kargonomiReturnShipmentCancelled ? (
+                <p className="page-description">Return shipment cancelled. Tracking is retained as historical data.</p>
+              ) : terminalRefundedReturn ? (
+                <p className="page-description">Return completed. Shipment information is historical.</p>
+              ) : null}
+              <div className="return-review-summary-list">
+                <div><span>Carrier</span><strong>{returnRequest.returnCarrierName ?? 'Not provided'}</strong></div>
+                <div>
+                  <span>Tracking</span>
+                  {returnRequest.returnTrackingUrl ? (
+                    <a href={returnRequest.returnTrackingUrl} target="_blank" rel="noreferrer">
+                      {returnRequest.returnTrackingNumber ?? 'Open tracking'}
+                    </a>
+                  ) : <strong>{returnRequest.returnTrackingNumber ?? 'Not provided'}</strong>}
+                </div>
+              </div>
+            </article>
+          ) : null}
 
           {isAdmin && hasReturnShipment ? (
             <article className="return-review-card">

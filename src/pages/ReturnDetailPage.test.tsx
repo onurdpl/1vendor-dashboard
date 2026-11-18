@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnDetailPage } from './ReturnDetailPage';
 import type { KargonomiReturnPreview, ReturnDetail } from '../features/returns/api';
@@ -1550,7 +1550,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Shopify return request lifecycle/i)).not.toBeInTheDocument();
   });
 
-  it('hides vendor provider shipment details while preserving tracking-backed return activity', async () => {
+  it('shows vendor tracking summary without provider diagnostics while preserving tracking-backed return activity', async () => {
     getReturnMock.mockResolvedValue({
       ...returnDetail,
       returnCarrierName: 'Yurtiçi Kargo',
@@ -1562,8 +1562,10 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
     expect(screen.queryByText('Customer shipment')).not.toBeInTheDocument();
-    expect(screen.queryByText('Yurtiçi Kargo')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'returnkargo-123' })).not.toBeInTheDocument();
+    const summary = screen.getByRole('article', { name: 'Return shipment summary' });
+    expect(within(summary).getByText('Yurtiçi Kargo')).toBeInTheDocument();
+    expect(within(summary).getByRole('link', { name: 'returnkargo-123' })).toHaveAttribute('href', 'https://tracking.example/returnkargo-123');
+    expect(screen.queryByText('Provider shipment ID')).not.toBeInTheDocument();
     expect(screen.getByText('Return shipment created')).toBeInTheDocument();
     expect(screen.queryByText(/in transit/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/delivered/i)).not.toBeInTheDocument();
@@ -2632,5 +2634,275 @@ describe('ReturnDetailPage vendor review screen', () => {
     }));
     expect((await screen.findAllByText('Order #2099')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Nike Air Force 1 07')).not.toBeInTheDocument();
+  });
+
+  describe('P03 Returns detail information parity', () => {
+    const tracking = { returnCarrierName: 'P03 Carrier', returnTrackingNumber: 'P03-TRACK-A',
+      returnTrackingUrl: 'https://tracking.example.com/P03-A', returnProvider: 'kargonomi',
+      returnProviderShipmentId: 'P03-admin-provider-id' };
+    function actor(role: 'admin' | 'vendor' | 'support' = 'vendor', restricted = false) {
+      setCurrentUser({ email: `${role}@example.com`, name: role, role,
+        vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A', status: restricted ? 'inactive' : 'active' },
+          { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'demo-vendor-a' });
+    }
+    function line(refundAmount: string | null | undefined, id = 'line-1') {
+      // Missing values exercise defensive legacy presentation, not a new API type.
+      return { ...returnDetail.refundedItems[0], id, refundAmount } as ReturnDetail['refundedItems'][number];
+    }
+    function view(overrides: Partial<ReturnDetail> = {}) {
+      getReturnMock.mockResolvedValue({ ...returnDetail, ...overrides });
+      return renderPage();
+    }
+    function navigable() {
+      return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={[`/returns/${returnDetail.id}`]}>
+          <Link to={`/returns/${returnDetail.id}`}>Open Return A</Link>
+          <Link to="/returns/RET-P03-B">Open Return B</Link>
+          <Routes><Route path="/returns/:returnId" element={<ReturnDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>);
+    }
+    beforeEach(() => { actor(); getReturnMock.mockResolvedValue(returnDetail); });
+
+    it('shows authorized Vendor carrier and tracking without provider actions or identifiers', async () => {
+      view(tracking);
+      const card = within(await screen.findByRole('article', { name: 'Return shipment summary' }));
+      expect(card.getByText('P03 Carrier')).toBeInTheDocument();
+      expect(card.getByRole('link', { name: 'P03-TRACK-A' })).toHaveAttribute('href', tracking.returnTrackingUrl);
+      expect(card.getByRole('link')).toHaveAttribute('target', '_blank');
+      expect(screen.queryByText('P03-admin-provider-id')).not.toBeInTheDocument();
+      expect(card.queryByRole('button')).not.toBeInTheDocument();
+      expect(getKargonomiReturnPreviewMock).not.toHaveBeenCalled();
+      expect(createKargonomiReturnShipmentMock).not.toHaveBeenCalled();
+      expect(refreshKargonomiReturnProviderDataMock).not.toHaveBeenCalled();
+      expect(syncKargonomiReturnToShopifyMock).not.toHaveBeenCalled();
+      expect(getReturnMock).toHaveBeenCalledWith(returnDetail.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    });
+
+    it('keeps carrier-only shipment tracking unavailable', async () => {
+      view({ returnCarrierName: 'P03 Carrier' });
+      const card = within(await screen.findByRole('article', { name: 'Return shipment summary' }));
+      expect(card.getByText('Not provided')).toBeInTheDocument();
+      expect(card.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('keeps number-only tracking without inventing a URL or carrier', async () => {
+      view({ returnTrackingNumber: 'P03-NUMBER' });
+      const card = within(await screen.findByRole('article', { name: 'Return shipment summary' }));
+      expect(card.getByText('P03-NUMBER')).toBeInTheDocument();
+      expect(card.getByText('Not provided')).toBeInTheDocument();
+      expect(card.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('uses Open tracking when a URL exists without a number', async () => {
+      view({ returnTrackingUrl: tracking.returnTrackingUrl });
+      const card = within(await screen.findByRole('article', { name: 'Return shipment summary' }));
+      expect(card.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', tracking.returnTrackingUrl);
+    });
+
+    it('does not create a shipment summary from only an internal provider identifier', async () => {
+      view({ returnProviderShipmentId: tracking.returnProviderShipmentId });
+      await screen.findByText('Nike Air Force 1 07');
+      expect(screen.queryByRole('article', { name: 'Return shipment summary' })).not.toBeInTheDocument();
+    });
+
+    it('keeps the existing Admin detailed shipment card without adding a duplicate Vendor card', async () => {
+      actor('admin');
+      view(tracking);
+      expect(await screen.findByRole('heading', { name: 'Customer shipment' })).toBeInTheDocument();
+      expect(screen.getAllByRole('heading', { name: 'Customer shipment' })).toHaveLength(1);
+      expect(within(screen.getByRole('heading', { name: 'Customer shipment' }).closest('article')!).getByText('P03-admin-provider-id')).toBeInTheDocument();
+      expect(screen.queryByRole('article', { name: 'Return shipment summary' })).not.toBeInTheDocument();
+    });
+
+    it('preserves historical tracking for a cancelled Kargonomi return shipment', async () => {
+      view({ ...tracking, returnProviderSnapshot: { kargonomiReturnCancelled: true, returnStatus: 'cancelled' } });
+      const card = within(await screen.findByRole('article', { name: 'Return shipment summary' }));
+      expect(card.getByText('Return shipment cancelled. Tracking is retained as historical data.')).toBeInTheDocument();
+      expect(card.getByRole('link', { name: 'P03-TRACK-A' })).toHaveAttribute('href', tracking.returnTrackingUrl);
+      expect(card.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('keeps terminal refund tracking historical and review actions unavailable', async () => {
+      view({ ...closedRefundedReturnDetail, assignedVendorId: 'demo-vendor-a', vendorId: 'demo-vendor-a', ...tracking });
+      const card = within(await screen.findByRole('article', { name: 'Return shipment summary' }));
+      expect(card.getByText('Return completed. Shipment information is historical.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
+    });
+
+    it('preserves item amount, name, SKU, variant, image and quantity without using the return total', async () => {
+      const { container } = view({ amount: 'TRY 9999.99', refundedItems: [{ ...line('TRY 12.34'), quantity: 2 }] });
+      await screen.findByText('Item amount: TRY 12.34');
+      const item = within(container.querySelector('.return-review-item') as HTMLElement);
+      expect(item.getByText('Nike Air Force 1 07')).toBeInTheDocument();
+      expect(item.getByText('DJ1196-002-40,5')).toBeInTheDocument();
+      expect(item.getByText('White / 42')).toBeInTheDocument();
+      expect(item.getByText('2')).toBeInTheDocument();
+      expect(item.getByRole('img', { name: /Nike Air Force/ })).toHaveAttribute('src', returnDetail.refundedItems[0].imageUrl);
+      expect(item.queryByText(/9999|24.68/)).not.toBeInTheDocument();
+    });
+
+    it('keeps multiple item amounts separate and prefers refundedItems over the items alias', async () => {
+      view({ refundedItems: [line('TRY 12.34'), { ...line('TRY 56.78', 'line-2'), sku: 'SKU-2', name: 'Second product', quantity: 3 }],
+        items: [line('TRY 9999.99', 'alias-only')] });
+      expect(await screen.findByText('Item amount: TRY 12.34')).toBeInTheDocument();
+      expect(screen.getByText('Item amount: TRY 56.78')).toBeInTheDocument();
+      expect(screen.queryByText('Item amount: TRY 9999.99')).not.toBeInTheDocument();
+    });
+
+    it('uses the existing items alias when refundedItems is empty', async () => {
+      view({ refundedItems: [], items: [line('EUR 12.34')] });
+      expect(await screen.findByText('Item amount: EUR 12.34')).toBeInTheDocument();
+      expect(screen.queryByText('Item amount: TRY 12.34')).not.toBeInTheDocument();
+    });
+
+    it('preserves an actual zero amount even for a pending Return request', async () => {
+      view({ refundedItems: [line('TRY 0.00')] });
+      expect(await screen.findByText('Item amount: TRY 0.00')).toBeInTheDocument();
+      expect(screen.queryByText('Item amount: Not posted')).not.toBeInTheDocument();
+      expect(screen.queryByText('Refund processed')).not.toBeInTheDocument();
+    });
+
+    it.each(['', '   ', null, undefined])('keeps a missing refund-sourced amount unavailable (%s)', async (amount) => {
+      view({ sourceType: 'shopify_refund', sourceShopifyRefundId: 'gid://shopify/Refund/P03', status: 'Processed',
+        amount: 'TRY 9999.99', refundedItems: [line(amount)] });
+      expect(await screen.findByText('Item amount: Not available')).toBeInTheDocument();
+      expect(screen.queryByText('Item amount: TRY 0.00')).not.toBeInTheDocument();
+      expect(screen.queryByText('Item amount: TRY 9999.99')).not.toBeInTheDocument();
+    });
+
+    it('uses Not posted only for a missing amount on a request without a refund reference', async () => {
+      view({ refundedItems: [line('')] });
+      expect(await screen.findByText('Item amount: Not posted')).toBeInTheDocument();
+      expect(screen.queryByText('Refund processed')).not.toBeInTheDocument();
+    });
+
+    it('does not use Not posted for a request that already has a refund reference', async () => {
+      view({ sourceShopifyRefundId: 'gid://shopify/Refund/P03', refundedItems: [line('')] });
+      expect(await screen.findByText('Item amount: Not available')).toBeInTheDocument();
+    });
+
+    it('does not manufacture per-SKU amounts from the whole-return summary when item lines are missing', async () => {
+      view({ refundedItems: [], items: [], refundedSkus: ['SKU-A', 'SKU-B'], amount: 'TRY 9999.99' });
+      expect(await screen.findByText('No returned items')).toBeInTheDocument();
+      expect(screen.queryByText(/^Item amount:/)).not.toBeInTheDocument();
+    });
+
+    it('does not turn a pending request item value or Vendor approval into a refund-completion event', async () => {
+      view({ refundedItems: [line('TRY 123.45')], vendorReceivedAt: '2026-05-14T01:00:00Z',
+        vendorDecision: 'approved', vendorReviewedAt: '2026-05-14T02:00:00Z' });
+      expect(await screen.findByText('Item amount: TRY 123.45')).toBeInTheDocument();
+      expect(screen.getByText('Received by vendor')).toBeInTheDocument();
+      expect(screen.getByText('Approved by vendor')).toBeInTheDocument();
+      expect(screen.queryByText('Refund processed')).not.toBeInTheDocument();
+      expect(screen.queryByText('Refund completed')).not.toBeInTheDocument();
+    });
+
+    it('keeps Support creation scoped to the local Return ID and preserves the panel SKU context', async () => {
+      createSupportTicketMock.mockResolvedValue({ id: 'P03-ticket', subject: 'Help with return #1023', status: 'OPEN' });
+      view(tracking);
+      await userEvent.click(await screen.findByRole('button', { name: 'Contact support' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
+      await waitFor(() => expect(createSupportTicketMock).toHaveBeenCalledTimes(1));
+      expect(createSupportTicketMock).toHaveBeenCalledWith(expect.objectContaining({ contextType: 'return', contextId: returnDetail.id,
+        contextSnapshot: expect.objectContaining({ sku: returnDetail.refundedItems[0].sku, returnTrackingPresent: true }) }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Contact support' })).not.toBeInTheDocument());
+    });
+
+    it('does not grant Support review or provider operations', async () => {
+      actor('support');
+      view(tracking);
+      await screen.findByText('Nike Air Force 1 07');
+      expect(screen.queryByRole('article', { name: 'Return shipment summary' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
+      expect(createKargonomiReturnShipmentMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps restricted Vendor read information without enabling review', async () => {
+      actor('vendor', true);
+      view(tracking);
+      expect(await screen.findByRole('article', { name: 'Return shipment summary' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Mark received' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Approve return' })).toBeDisabled();
+    });
+
+    it('does not expose amounts or tracking when authentication is missing', async () => {
+      clearToken();
+      view(tracking);
+      await screen.findByRole('heading', { name: 'Session required' });
+      expect(screen.queryByRole('article', { name: 'Return shipment summary' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Item amount:/)).not.toBeInTheDocument();
+      expect(getReturnMock).not.toHaveBeenCalled();
+    });
+
+    it('does not expose a foreign Vendor return even if it is returned by a mocked request', async () => {
+      view({ ...tracking, assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b' });
+      await waitFor(() => expect(getReturnMock).toHaveBeenCalled());
+      expect(screen.queryByRole('article', { name: 'Return shipment summary' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Item amount:/)).not.toBeInTheDocument();
+    });
+
+    it('does not render a different local Return ID returned for the current route', async () => {
+      view({ ...tracking, id: 'RET-WRONG-P03' });
+      await waitFor(() => expect(getReturnMock).toHaveBeenCalled());
+      expect(screen.queryByRole('article', { name: 'Return shipment summary' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Item amount:/)).not.toBeInTheDocument();
+    });
+
+    it('keeps Admin A to B to A views scoped to the selected Vendor and exact Return route', async () => {
+      actor('admin');
+      getReturnMock.mockImplementation(async (id, options) => {
+        if (options?.vendorId === 'demo-vendor-a' && id === returnDetail.id) return { ...returnDetail, ...tracking, refundedItems: [line('TRY 111.11')] };
+        if (options?.vendorId === 'demo-vendor-b' && id === 'RET-P03-B') return { ...returnDetail, id, assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b',
+          ...tracking, returnTrackingNumber: 'P03-TRACK-B', refundedItems: [line('TRY 222.22')] };
+        throw new ApiError('Not found', 'server', { status: 404 });
+      });
+      navigable();
+      await screen.findByText('Item amount: TRY 111.11');
+      act(() => setCurrentVendorId('demo-vendor-b'));
+      expect(screen.queryByText('Item amount: TRY 111.11')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('link', { name: 'Open Return B' }));
+      await screen.findByText('Item amount: TRY 222.22');
+      expect(screen.queryByText('P03-TRACK-A')).not.toBeInTheDocument();
+      act(() => setCurrentVendorId('demo-vendor-a'));
+      expect(screen.queryByText('Item amount: TRY 222.22')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('link', { name: 'Open Return A' }));
+      await screen.findByText('Item amount: TRY 111.11');
+      expect(screen.queryByText('P03-TRACK-B')).not.toBeInTheDocument();
+    });
+
+    it('ignores a late Vendor A response after Vendor B loads its own return', async () => {
+      actor('admin');
+      const a = deferred<ReturnDetail>();
+      getReturnMock.mockImplementation(async (id, options) => options?.vendorId === 'demo-vendor-a' ? a.promise
+        : { ...returnDetail, id, assignedVendorId: 'demo-vendor-b', vendorId: 'demo-vendor-b', refundedItems: [line('TRY 222.22')] });
+      navigable();
+      await waitFor(() => expect(getReturnMock).toHaveBeenCalled());
+      act(() => setCurrentVendorId('demo-vendor-b'));
+      await userEvent.click(screen.getByRole('link', { name: 'Open Return B' }));
+      await screen.findByText('Item amount: TRY 222.22');
+      await act(async () => a.resolve({ ...returnDetail, ...tracking, refundedItems: [line('TRY 111.11')] }));
+      expect(screen.queryByText('Item amount: TRY 111.11')).not.toBeInTheDocument();
+      expect(screen.queryByText('P03-TRACK-A')).not.toBeInTheDocument();
+    });
+
+    it('ignores a late return response after same-Vendor navigation to another Return', async () => {
+      const a = deferred<ReturnDetail>();
+      getReturnMock.mockImplementation(async (id) => id === returnDetail.id ? a.promise
+        : { ...returnDetail, ...tracking, id, returnTrackingNumber: 'P03-TRACK-B', refundedItems: [line('TRY 222.22')] });
+      navigable();
+      await waitFor(() => expect(getReturnMock).toHaveBeenCalled());
+      await userEvent.click(screen.getByRole('link', { name: 'Open Return B' }));
+      await screen.findByText('Item amount: TRY 222.22');
+      await act(async () => a.resolve({ ...returnDetail, ...tracking, refundedItems: [line('TRY 111.11')] }));
+      expect(screen.queryByText('Item amount: TRY 111.11')).not.toBeInTheDocument();
+      expect(screen.getByRole('article', { name: 'Return shipment summary' })).toHaveTextContent('P03-TRACK-B');
+    });
   });
 });
