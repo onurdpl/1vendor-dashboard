@@ -137,6 +137,48 @@ function getSnapshotCurrency(order: OrderDetail) {
   return order.orderSnapshot?.currency || 'TRY';
 }
 
+function getAllocationFinanceSummaryRows(summary: NonNullable<OrderDetail['allocationFinanceSummary']>) {
+  // Preserve the Orders panel's presentation; this DTO has no currency field.
+  const amount = (value: string | null | undefined) =>
+    value === null || value === undefined || value === '' ? 'Not available' : formatCurrency(value, 'TRY');
+  const rows = [
+    { label: 'Product value', value: amount(summary.productValue) },
+    { label: 'Commission', value: amount(summary.commission) },
+    { label: 'Commission VAT', value: amount(summary.commissionVat) },
+    { label: 'Shipping deduction', value: amount(summary.shippingDeduction) },
+    { label: 'Shipping deduction status', value: safeStatusLabel(summary.shippingDeductionStatus, 'Not available') },
+  ];
+  const primary = summary.primaryPayable;
+  const hideNegativeRefundEstimate = primary?.type === 'estimated'
+    && summary.settlementStatus === 'partially_refunded' && Number(primary.amount) < 0;
+  if (primary && !hideNegativeRefundEstimate) {
+    const labels = {
+      estimated: 'Estimated payable',
+      approved: 'Approved payable',
+      paid_payout_contribution: 'Paid payout contribution',
+      cashless_offset_contribution: 'Completed by offsets (no EFT)',
+    };
+    rows.push({ label: labels[primary.type], value: amount(primary.amount) });
+  }
+  const payoutLabels: Partial<Record<NonNullable<typeof summary.payoutStatus>, string>> = {
+    pending: 'Not prepared', draft: 'Estimated', review: 'Pending review',
+    execution_pending: 'Scheduled', paid_placeholder: 'Payment evidence pending',
+    cashless_completed: 'Completed by offsets (no EFT)',
+  };
+  rows.push(
+    { label: 'Settlement', value: summary.settlementStatus === 'partially_refunded'
+      ? 'Refund recorded' : safeStatusLabel(summary.settlementStatus, 'Not available') },
+    { label: 'Payout', value: summary.payoutStatus
+      ? payoutLabels[summary.payoutStatus] ?? safeStatusLabel(summary.payoutStatus) : 'Not available' },
+  );
+  if (summary.paidAt) {
+    rows.push({ label: 'Paid at', value: formatDateTime(summary.paidAt, {
+      month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    }, 'Not synced') });
+  }
+  return rows;
+}
+
 function formatSnapshotAmount(value: string | null | undefined, currency: string) {
   return value === null || value === undefined || value === '' ? '—' : formatCurrency(value, currency);
 }
@@ -7772,6 +7814,26 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                   </div>
                 </div>
               ) : null}
+            </article>
+          ) : null}
+
+          {isAdmin && order.allocationFinanceSummary ? (
+            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Allocation finance summary">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Allocation finance summary</h2>
+                  <p>Allocation amounts, settlement and payout contribution.</p>
+                </div>
+              </div>
+              {order.allocationFinanceSummary.available ? (
+                <div className="order-financial-impact-grid order-finance-preview-grid">
+                  {getAllocationFinanceSummaryRows(order.allocationFinanceSummary).map((row) => (
+                    <div key={row.label}><span>{row.label}</span><strong>{row.value}</strong></div>
+                  ))}
+                </div>
+              ) : (
+                <p className="page-description">Finance data unavailable. Requires review.</p>
+              )}
             </article>
           ) : null}
 

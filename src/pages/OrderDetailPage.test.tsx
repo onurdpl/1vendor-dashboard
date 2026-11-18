@@ -6,7 +6,7 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useEffect } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
-import { getCurrentUser, markAuthConfirmed, setCurrentUser as setCachedCurrentUser, setCurrentVendorId, setToken, type CurrentUser } from '../lib/auth';
+import { clearToken, getCurrentUser, markAuthConfirmed, setCurrentUser as setCachedCurrentUser, setCurrentVendorId, setToken, type CurrentUser } from '../lib/auth';
 import { getAdminVendorSelection, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
 import { useAppReadiness } from '../lib/appReadiness';
 import { ApiError } from '../lib/api/errors';
@@ -10121,5 +10121,184 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByLabelText('Warehouse ID')).toHaveValue('223344');
     expect(screen.queryByText('Sporjinal warehouse')).not.toBeInTheDocument();
     expect(getAdminVendorShippingConfigMock).toHaveBeenCalledWith('yalispor', expect.any(Object));
+  });
+
+  describe('P01 Admin allocation finance summary preservation', () => {
+    const summary: NonNullable<OrderDetail['allocationFinanceSummary']> = {
+      available: true, resolutionStatus: 'resolved', productValue: '1234.56',
+      commission: '123.45', commissionVat: '24.69', shippingDeduction: '45.67',
+      shippingDeductionStatus: 'available', primaryPayable: { type: 'estimated', amount: '1040.75' },
+      settlementStatus: 'accruing', payoutStatus: 'pending', paidAt: null,
+    };
+    function admin() {
+      setCurrentUser({
+        email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+        vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }, { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+        canSwitchVendors: true, defaultVendorId: 'sporjinal',
+      });
+    }
+    function withSummary(overrides: Partial<typeof summary> = {}): OrderDetail {
+      return { ...orderWithShipmentSummary, allocationFinanceSummary: { ...summary, ...overrides } };
+    }
+    async function section(overrides: Partial<typeof summary> = {}) {
+      getOrderMock.mockResolvedValue(withSummary(overrides));
+      renderOrderDetail();
+      return within(await screen.findByRole('article', { name: 'Allocation finance summary' }));
+    }
+    beforeEach(admin);
+
+    it('renders authoritative allocation amounts separately from existing order finance content and Shopify currency', async () => {
+      getOrderMock.mockResolvedValue({ ...withSummary(), orderSnapshot: { ...orderWithShipmentSummary.orderSnapshot, currency: 'USD' } });
+      renderOrderDetail();
+      const card = within(await screen.findByRole('article', { name: 'Allocation finance summary' }));
+      expect(card.getByText('Product value').nextElementSibling).toHaveTextContent('TRY 1,234.56');
+      expect(card.getByText('Commission').nextElementSibling).toHaveTextContent('TRY 123.45');
+      expect(card.getByText('Commission VAT').nextElementSibling).toHaveTextContent('TRY 24.69');
+      expect(card.getByText('Shipping deduction').nextElementSibling).toHaveTextContent('TRY 45.67');
+      expect(card.getByText('Shipping deduction status').nextElementSibling).toHaveTextContent('Available');
+      expect(card.getByText('Estimated payable').nextElementSibling).toHaveTextContent('TRY 1,040.75');
+      expect(card.queryByText('TRY 4,999.00')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Order finance preview')).toBeInTheDocument();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['estimated', 'Estimated payable'], ['approved', 'Approved payable'],
+      ['paid_payout_contribution', 'Paid payout contribution'], ['cashless_offset_contribution', 'Completed by offsets (no EFT)'],
+    ] as const)('preserves %s contribution authority without inferring paid evidence', async (type, label) => {
+      const card = await section({ primaryPayable: { type, amount: '765.43' } });
+      expect(card.getByText(label).nextElementSibling).toHaveTextContent('TRY 765.43');
+      expect(card.queryByText('Paid at')).not.toBeInTheDocument();
+      if (type !== 'paid_payout_contribution') expect(card.queryByText('Paid payout contribution')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['pending', 'Not prepared'], ['draft', 'Estimated'], ['review', 'Pending review'],
+      ['execution_pending', 'Scheduled'], ['paid_placeholder', 'Payment evidence pending'],
+      ['cashless_completed', 'Completed by offsets (no EFT)'], ['approved', 'Approved'], ['paid', 'Paid'], ['hold', 'Hold'],
+    ] as const)('preserves the %s payout status independently from settlement', async (payoutStatus, label) => {
+      const card = await section({ payoutStatus });
+      expect(card.getByText('Payout').nextElementSibling).toHaveTextContent(label);
+      expect(card.getByText('Settlement').nextElementSibling).toHaveTextContent('Accruing');
+    });
+
+    it('renders the supplied paid timestamp and paid contribution', async () => {
+      const card = await section({ primaryPayable: { type: 'paid_payout_contribution', amount: '432.10' },
+        payoutStatus: 'paid', settlementStatus: 'settled', paidAt: '2026-05-15T12:08:00.000Z' });
+      expect(card.getByText('Paid payout contribution').nextElementSibling).toHaveTextContent('TRY 432.10');
+      expect(card.getByText('Paid at').nextElementSibling).toHaveTextContent('May 15, 2026');
+    });
+
+    it.each(['pending', 'unavailable'] as const)('keeps %s shipping and null amounts unavailable rather than zero', async (shippingDeductionStatus) => {
+      const card = await section({ productValue: null, commission: null, commissionVat: null,
+        shippingDeduction: null, shippingDeductionStatus, primaryPayable: null, payoutStatus: null, settlementStatus: null });
+      for (const label of ['Product value', 'Commission', 'Commission VAT', 'Shipping deduction', 'Payout']) {
+        expect(card.getByText(label).nextElementSibling).toHaveTextContent('Not available');
+      }
+      expect(card.getByText('Settlement').nextElementSibling).toHaveTextContent('Not Available');
+      expect(card.getByText('Shipping deduction status').nextElementSibling).toHaveTextContent(shippingDeductionStatus === 'pending' ? 'Pending' : 'Unavailable');
+      expect(card.queryByText(/TRY 0/)).not.toBeInTheDocument();
+      expect(card.queryByText('Estimated payable')).not.toBeInTheDocument();
+    });
+
+    it.each(['finance_record_unavailable', 'ambiguous_settlement_authority', 'ambiguous_payout_authority'])('fails closed for %s even if monetary fields are present', async (resolutionStatus) => {
+      const card = await section({ available: false, resolutionStatus });
+      expect(card.getByText('Finance data unavailable. Requires review.')).toBeInTheDocument();
+      expect(card.queryByText(/TRY/)).not.toBeInTheDocument();
+    });
+
+    it('suppresses the existing negative partially-refunded estimate without suppressing other fields', async () => {
+      const card = await section({ primaryPayable: { type: 'estimated', amount: '-77.77' }, settlementStatus: 'partially_refunded' });
+      expect(card.queryByText('Estimated payable')).not.toBeInTheDocument();
+      expect(card.queryByText(/77.77/)).not.toBeInTheDocument();
+      expect(card.getByText('Settlement').nextElementSibling).toHaveTextContent('Refund recorded');
+      expect(card.getByText('Product value').nextElementSibling).toHaveTextContent('TRY 1,234.56');
+    });
+
+    it('does not suppress a negative approved contribution using the estimate-only rule', async () => {
+      const card = await section({ primaryPayable: { type: 'approved', amount: '-77.77' }, settlementStatus: 'partially_refunded' });
+      expect(card.getByText('Approved payable').nextElementSibling).toHaveTextContent('-TRY 77.77');
+    });
+
+    it('does not invent a summary when the DTO omits it', async () => {
+      renderOrderDetail();
+      expect(await screen.findByText('Order #1028')).toBeInTheDocument();
+      expect(screen.queryByRole('article', { name: 'Allocation finance summary' })).not.toBeInTheDocument();
+    });
+
+    it('preserves an explicit zero amount', async () => {
+      const card = await section({ shippingDeduction: '0.00' });
+      expect(card.getByText('Shipping deduction').nextElementSibling).toHaveTextContent('TRY 0.00');
+    });
+
+    it.each(['held', 'disputed'] as const)('keeps %s settlement without a primary payable', async (settlementStatus) => {
+      const card = await section({ settlementStatus, primaryPayable: null });
+      expect(card.queryByText('Estimated payable')).not.toBeInTheDocument();
+      expect(card.getByText('Settlement').nextElementSibling).toHaveTextContent(settlementStatus === 'held' ? 'Held' : 'Disputed');
+    });
+
+    it.each(['vendor', 'support', 'finance'] as const)('does not render Admin summary data for %s even when a response contains it', async (role) => {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }], canSwitchVendors: false, defaultVendorId: 'sporjinal' });
+      getOrderMock.mockResolvedValue(withSummary());
+      renderOrderDetail();
+      expect(await screen.findByText('Order #1028')).toBeInTheDocument();
+      expect(screen.queryByRole('article', { name: 'Allocation finance summary' })).not.toBeInTheDocument();
+    });
+
+    it('does not expose the summary when authentication is missing', async () => {
+      clearToken();
+      getOrderMock.mockResolvedValue(withSummary());
+      renderOrderDetail();
+      await waitFor(() => expect(screen.queryByText('Order #1028')).not.toBeInTheDocument());
+      expect(screen.queryByRole('article', { name: 'Allocation finance summary' })).not.toBeInTheDocument();
+      expect(getOrderMock).not.toHaveBeenCalled();
+    });
+
+    it('does not render the summary for a foreign allocation returned in the wrong Vendor context', async () => {
+      getOrderMock.mockResolvedValue({ ...withSummary(), assignedVendorId: 'yalispor', vendorId: 'yalispor' });
+      renderOrderDetail();
+      await waitFor(() => expect(getOrderMock).toHaveBeenCalled());
+      expect(screen.queryByRole('article', { name: 'Allocation finance summary' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
+    });
+
+    it('fails closed when the backend denies allocation access', async () => {
+      getOrderMock.mockRejectedValue(new ApiError('Forbidden', 'server', { status: 403 }));
+      renderOrderDetail();
+      await waitFor(() => expect(getOrderMock).toHaveBeenCalled());
+      expect(screen.queryByRole('article', { name: 'Allocation finance summary' })).not.toBeInTheDocument();
+    });
+
+    it('keeps Admin A to B to A summaries isolated while each Vendor loads', async () => {
+      const b = deferred<OrderDetail>();
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor' ? b.promise : withSummary());
+      renderOrderDetail();
+      expect(await screen.findByRole('article', { name: 'Allocation finance summary' })).toHaveTextContent('TRY 1,234.56');
+      act(() => setCurrentVendorId('yalispor'));
+      expect(screen.queryByRole('article', { name: 'Allocation finance summary' })).not.toBeInTheDocument();
+      await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(orderWithShipmentSummary.id, expect.objectContaining({ vendorId: 'yalispor' })));
+      await act(async () => b.resolve({ ...withSummary({ productValue: '8888.88' }), assignedVendorId: 'yalispor', vendorId: 'yalispor' }));
+      expect(await screen.findByRole('article', { name: 'Allocation finance summary' })).toHaveTextContent('TRY 8,888.88');
+      act(() => setCurrentVendorId('sporjinal'));
+      const card = await screen.findByRole('article', { name: 'Allocation finance summary' });
+      expect(card).toHaveTextContent('TRY 1,234.56');
+      expect(card).not.toHaveTextContent('TRY 8,888.88');
+    });
+
+    it('ignores a late Vendor A summary after Vendor B has rendered', async () => {
+      const a = deferred<OrderDetail>();
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? { ...withSummary({ productValue: '8888.88' }), assignedVendorId: 'yalispor', vendorId: 'yalispor' } : a.promise);
+      renderOrderDetail();
+      await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(orderWithShipmentSummary.id, expect.objectContaining({ vendorId: 'sporjinal' })));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(await screen.findByRole('article', { name: 'Allocation finance summary' })).toHaveTextContent('TRY 8,888.88');
+      await act(async () => a.resolve(withSummary()));
+      const card = screen.getByRole('article', { name: 'Allocation finance summary' });
+      expect(card).toHaveTextContent('TRY 8,888.88');
+      expect(card).not.toHaveTextContent('TRY 1,234.56');
+    });
   });
 });
