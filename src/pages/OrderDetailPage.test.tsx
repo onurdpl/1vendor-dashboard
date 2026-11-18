@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useEffect } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
 import { clearToken, getCurrentUser, markAuthConfirmed, setCurrentUser as setCachedCurrentUser, setCurrentVendorId, setToken, type CurrentUser } from '../lib/auth';
 import { getAdminVendorSelection, verifyAdminVendorSelection } from '../lib/auth/vendorContext';
@@ -10299,6 +10299,292 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       const card = screen.getByRole('article', { name: 'Allocation finance summary' });
       expect(card).toHaveTextContent('TRY 8,888.88');
       expect(card).not.toHaveTextContent('TRY 1,234.56');
+    });
+  });
+
+  describe('P02 shipment action and operational parity', () => {
+    const openWindow = vi.fn();
+    function actor(role: 'admin' | 'vendor' | 'support' = 'vendor', restricted = false) {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role,
+        vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal', status: restricted ? 'inactive' : 'active' },
+          { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function shipment(overrides: Partial<NonNullable<OrderDetail['shipmentExecution']>> = {}) {
+      return { ...orderWithShipmentSummary.shipmentExecution!, provider: 'kargonomi' as const,
+        shipmentStatus: 'created' as const, providerShipmentId: null, barcode: null,
+        providerResponseSummary: { ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          providerError: null, dryRun: false, disabledGates: [], ok: true }, ...overrides };
+    }
+    beforeEach(() => {
+      actor();
+      openWindow.mockReset();
+      vi.stubGlobal('open', openWindow);
+      getOrderMock.mockResolvedValue(orderWithoutShipment);
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('opens an existing label without creation or retry mutations', async () => {
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentExecution: shipment({ labelUrl: 'https://example.com/existing.pdf' }) });
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Open shipping label' }));
+      expect(openWindow).toHaveBeenCalledWith('https://example.com/existing.pdf', '_blank', 'noopener,noreferrer');
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it('uses the existing creation payload and opens the returned label once in the current context', async () => {
+      createShipmentExecutionMock.mockResolvedValue(shipment({ providerShipmentId: 'P02-created', labelUrl: 'https://example.com/new.pdf' }));
+      renderOrderDetail();
+      const button = await screen.findByRole('button', { name: 'Create shipment label' });
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      await userEvent.click(button);
+      expect(createShipmentExecutionMock).toHaveBeenCalledExactlyOnceWith(orderWithoutShipment.id, { vendorId: 'sporjinal', customerOverrides: undefined });
+      expect(await screen.findByRole('button', { name: 'Open shipping label' })).toBeEnabled();
+      expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/new.pdf', '_blank', 'noopener,noreferrer');
+    });
+
+    it('uses ordinary failed-shipment retry rather than Admin diagnostic retry', async () => {
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentExecution: shipment({ shipmentStatus: 'failed' }) });
+      retryFailedShipmentExecutionMock.mockResolvedValue(shipment({ providerShipmentId: 'P02-retried', labelUrl: 'https://example.com/retried.pdf' }));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Retry shipment label' }));
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledExactlyOnceWith(orderWithShipmentSummary.shipmentExecution!.id,
+        { vendorId: 'sporjinal', customerOverrides: undefined });
+      expect(retryShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(await screen.findByRole('button', { name: 'Open shipping label' })).toBeEnabled();
+      expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/retried.pdf', '_blank', 'noopener,noreferrer');
+    });
+
+    it.each(['pending', 'created'] as const)('does not retry a non-failed %s shipment without a label', async (shipmentStatus) => {
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentExecution: shipment({ shipmentStatus }) });
+      renderOrderDetail();
+      const button = await screen.findByRole('button', { name: 'Create shipment label' });
+      expect(button).toBeDisabled();
+      await userEvent.click(button);
+      expect(screen.getByText('Shipment exists. Label availability is controlled by the provider.')).toBeInTheDocument();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it('blocks both Smart label and existing creation while the same request is pending', async () => {
+      const pending = deferred<ReturnType<typeof shipment>>();
+      createShipmentExecutionMock.mockReturnValue(pending.promise);
+      renderOrderDetail();
+      const smart = await screen.findByRole('button', { name: 'Create shipment label' });
+      const existing = screen.getByRole('button', { name: 'Create shipment', exact: true });
+      await act(async () => { fireEvent.click(smart); fireEvent.click(existing); fireEvent.click(smart); });
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Preparing shipping label...' })).toBeDisabled();
+      await act(async () => pending.resolve(shipment({ providerShipmentId: 'P02-created', labelUrl: 'https://example.com/new.pdf' })));
+      expect(await screen.findByRole('button', { name: 'Open shipping label' })).toBeEnabled();
+    });
+
+    it('releases the synchronous reservation after an error and presents the existing error feedback', async () => {
+      createShipmentExecutionMock.mockRejectedValueOnce(new Error('P02 provider request rejected'));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      await waitFor(() => expect(screen.getAllByText('P02 provider request rejected').length).toBeGreaterThan(0));
+      expect(screen.getByRole('button', { name: 'Create shipment label' })).toBeEnabled();
+      await userEvent.click(screen.getByRole('button', { name: 'Create shipment label' }));
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not create again when creation succeeds without a label', async () => {
+      createShipmentExecutionMock.mockResolvedValue(shipment({ providerShipmentId: 'P02-created' }));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Create shipment label' })).toBeDisabled());
+      expect(screen.getByText('Shipment exists. Label availability is controlled by the provider.')).toBeInTheDocument();
+      expect(openWindow).not.toHaveBeenCalled();
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('blocks rapid failed-retry clicks and releases the reservation after rejection', async () => {
+      const pending = deferred<ReturnType<typeof shipment>>();
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentExecution: shipment({ shipmentStatus: 'failed' }) });
+      retryFailedShipmentExecutionMock.mockReturnValueOnce(pending.promise);
+      renderOrderDetail();
+      const button = await screen.findByRole('button', { name: 'Retry shipment label' });
+      await act(async () => { fireEvent.click(button); fireEvent.click(button); });
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Preparing shipping label...' })).toBeDisabled();
+      await act(async () => pending.reject(new Error('P02 retry failed')));
+      expect(screen.getByRole('button', { name: 'Retry shipment label' })).toBeEnabled();
+      await userEvent.click(screen.getByRole('button', { name: 'Retry shipment label' }));
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('retains the existing missing-field recovery form without a Smart label bypass', async () => {
+      createShipmentExecutionMock.mockRejectedValueOnce(new Error('Missing required shipment customer fields: customer.phone'));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      await waitFor(() => expect(screen.getAllByText('Complete shipment-only fields').length).toBeGreaterThan(0));
+      expect(screen.getByRole('button', { name: 'Create shipment label' })).toBeDisabled();
+      expect(screen.getByText('Complete shipment-only fields below.')).toBeInTheDocument();
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps Admin missing-field recovery reachable from the Smart label action', async () => {
+      actor('admin');
+      createShipmentExecutionMock.mockRejectedValueOnce(new Error('Missing required shipment customer fields: customer.phone'));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      expect(await screen.findByText('Complete shipment-only fields')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create shipment with completed fields' })).toBeInTheDocument();
+      expect(screen.queryByText('Shipping actions are currently unavailable.')).not.toBeInTheDocument();
+    });
+
+    it('keeps Allocation metadata hidden from Vendor users', async () => {
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByText('Allocation', { exact: true })).not.toBeInTheDocument();
+    });
+
+    it('ignores creation completion after navigating to another allocation in the same Vendor', async () => {
+      const pending = deferred<ReturnType<typeof shipment>>();
+      createShipmentExecutionMock.mockReturnValue(pending.promise);
+      getOrderMock.mockImplementation(async (id) => ({ ...orderWithoutShipment, id,
+        sourceShopifyOrderNumber: id === orderWithoutShipment.id ? '#1028' : '#2099' }));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      await screen.findByText('Order #2099');
+      await act(async () => pending.resolve(shipment({ providerShipmentId: 'P02-old-order', labelUrl: 'https://example.com/old-order.pdf' })));
+      expect(screen.queryByRole('button', { name: 'Open shipping label' })).not.toBeInTheDocument();
+      expect(openWindow).not.toHaveBeenCalled();
+    });
+
+    it('preserves restricted Vendor action blocking', async () => {
+      actor('vendor', true);
+      renderOrderDetail();
+      const button = await screen.findByRole('button', { name: 'Create shipment label' });
+      expect(button).toBeDisabled();
+      await userEvent.click(button);
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['cancelled', 'blocked', 'refunded'] as const)('does not expose Smart label for an operationally %s allocation', async (state) => {
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+        ...(state === 'cancelled' ? { isCancelled: true, cancelledAt: '2026-05-16T12:00:00Z' }
+          : state === 'blocked' ? { allocationStatus: 'vendor_blocked', reassignmentRequired: true }
+            : { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' }, refundRecordCount: 1 }) });
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it('presents label-opening errors without repeating successful shipment creation', async () => {
+      createShipmentExecutionMock.mockResolvedValue(shipment({ providerShipmentId: 'P02-created', labelUrl: 'not-a-supported-label' }));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      expect(await screen.findByText('Shipment label data is not a supported PDF link.')).toBeInTheDocument();
+      expect(screen.getByText('Shipment P02-created recorded.')).toBeInTheDocument();
+      expect(openWindow).not.toHaveBeenCalled();
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps shipment success separate when browser label opening throws', async () => {
+      openWindow.mockImplementationOnce(() => { throw new Error('Browser refused opening'); });
+      createShipmentExecutionMock.mockResolvedValue(shipment({ providerShipmentId: 'P02-created', labelUrl: 'https://example.com/new.pdf' }));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      expect(await screen.findByText('Shipment label could not be opened.')).toBeInTheDocument();
+      expect(screen.getByText('Shipment P02-created recorded.')).toBeInTheDocument();
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it('ignores a late failed-retry label after changing allocation', async () => {
+      const pending = deferred<ReturnType<typeof shipment>>();
+      retryFailedShipmentExecutionMock.mockReturnValue(pending.promise);
+      getOrderMock.mockImplementation(async (id) => id === orderWithoutShipment.id
+        ? { ...orderWithoutShipment, shipmentExecution: shipment({ shipmentStatus: 'failed' }) }
+        : { ...orderWithoutShipment, id, sourceShopifyOrderNumber: '#2099' });
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Retry shipment label' }));
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      await screen.findByText('Order #2099');
+      await act(async () => pending.resolve(shipment({ providerShipmentId: 'P02-old-retry', labelUrl: 'https://example.com/old-retry.pdf' })));
+      expect(openWindow).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: 'Open shipping label' })).not.toBeInTheDocument();
+    });
+
+    it('does not open a late label after leaving the detail page', async () => {
+      const pending = deferred<ReturnType<typeof shipment>>();
+      createShipmentExecutionMock.mockReturnValue(pending.promise);
+      const view = renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      view.unmount();
+      await act(async () => pending.resolve(shipment({ providerShipmentId: 'P02-left', labelUrl: 'https://example.com/left.pdf' })));
+      expect(openWindow).not.toHaveBeenCalled();
+    });
+
+    it('keeps Support read-only and Allocation metadata Admin-only', async () => {
+      actor('support');
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Allocation', { exact: true })).not.toBeInTheDocument();
+    });
+
+    it('preserves Admin metadata and panel timestamp precedence without a new event', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentUpdatedAt: '2026-06-02T09:10:00Z' });
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.getByText('Allocation', { exact: true }).nextElementSibling).toHaveTextContent(orderWithoutShipment.id);
+      expect(screen.getByLabelText('Last update')).toHaveTextContent('Jun 2, 2026');
+      expect(screen.getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Vendor Invoice' })).toBeInTheDocument();
+    });
+
+    it('does not expose a foreign allocation or its Smart label action', async () => {
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, assignedVendorId: 'yalispor' });
+      renderOrderDetail();
+      await waitFor(() => expect(getOrderMock).toHaveBeenCalled());
+      expect(screen.queryByText('Order #1028')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+    });
+
+    it('ignores late creation success after Admin A to B to A navigation', async () => {
+      actor('admin');
+      const pending = deferred<ReturnType<typeof shipment>>();
+      createShipmentExecutionMock.mockReturnValue(pending.promise);
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? { ...orderWithoutShipment, assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099' }
+        : orderWithoutShipment);
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(await screen.findByText('Order #2099')).toBeInTheDocument();
+      await act(async () => pending.resolve(shipment({ providerShipmentId: 'P02-old-A', labelUrl: 'https://example.com/old-A.pdf' })));
+      expect(screen.queryByRole('button', { name: 'Open shipping label' })).not.toBeInTheDocument();
+      expect(openWindow).not.toHaveBeenCalled();
+      act(() => setCurrentVendorId('sporjinal'));
+      expect(await screen.findByText('Order #1028')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open shipping label' })).not.toBeInTheDocument();
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a late failed retry error after switching Vendor', async () => {
+      actor('admin');
+      const pending = deferred<ReturnType<typeof shipment>>();
+      retryFailedShipmentExecutionMock.mockReturnValue(pending.promise);
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? { ...orderWithoutShipment, assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099' }
+        : { ...orderWithoutShipment, shipmentExecution: shipment({ shipmentStatus: 'failed' }) });
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Retry shipment label' }));
+      act(() => setCurrentVendorId('yalispor'));
+      await screen.findByText('Order #2099');
+      await act(async () => pending.reject(new Error('P02-old-A-error')));
+      expect(screen.queryByText('P02-old-A-error')).not.toBeInTheDocument();
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledTimes(1);
     });
   });
 });
