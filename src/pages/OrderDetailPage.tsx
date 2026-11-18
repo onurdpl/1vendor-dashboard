@@ -42,7 +42,7 @@ import { formatCurrency, formatDateTime, getSafeTimestamp, parseSafeDate, safeAr
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 import { SupportTicketModal } from '../components/SupportTicketModal';
 import { useAppReadiness, type AppReadinessState } from '../lib/appReadiness';
-import { isVendorContextRestricted, RESTRICTED_ACTION_MESSAGE } from '../lib/auth';
+import { getCurrentVendorContext, isVendorContextRestricted, RESTRICTED_ACTION_MESSAGE } from '../lib/auth';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import { listReturns } from '../features/returns/api';
 import { getFinanceDashboard } from '../features/finance/api';
@@ -1496,6 +1496,13 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const [trackingNumber, setTrackingNumber] = useState('');
   const [trackingUrl, setTrackingUrl] = useState('');
   const [notifyCustomer, setNotifyCustomer] = useState(false);
+  const [automaticLabelError, setAutomaticLabelError] = useState<string | null>(null);
+  const shipmentMutationInFlightRef = useRef(false);
+  const shipmentActionMountedRef = useRef(false);
+  useEffect(() => {
+    shipmentActionMountedRef.current = true;
+    return () => { shipmentActionMountedRef.current = false; };
+  }, []);
   const [supportOpen, setSupportOpen] = useState(false);
   const [splitRejectOpen, setSplitRejectOpen] = useState(false);
   const [fullRejectOpen, setFullRejectOpen] = useState(false);
@@ -1528,11 +1535,21 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const refreshShipmentStatusMutationRef = useRef<((shipmentExecutionId: string) => Promise<ShipmentExecution>) | null>(null);
   const refetchOrderRef = useRef<(() => unknown) | null>(null);
   function handleOpenShipmentLabel(labelValue: string) {
+    setAutomaticLabelError(null);
     const result = openShipmentLabel(labelValue);
     if (result.opened) {
       showFeedback('Shipment label opened.', 'success');
     } else {
       showFeedback(result.error, 'error');
+    }
+  }
+
+  function openCompletedShipmentLabel(labelValue: string) {
+    try {
+      const result = openShipmentLabel(labelValue);
+      setAutomaticLabelError(result.opened ? null : result.error);
+    } catch {
+      setAutomaticLabelError('Shipment label could not be opened.');
     }
   }
 
@@ -2098,11 +2115,16 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   }
 
   function handleCreateShipment(fields: ShipmentCustomerField[] = [], completedOverrides?: ShipmentCustomerOverrides) {
-    if (!order) {
+    if (!order || shipmentMutationInFlightRef.current) {
       return;
     }
 
+    shipmentMutationInFlightRef.current = true;
+    const actionVendorId = currentVendor.vendorId;
+    const isCurrentAction = () => shipmentActionMountedRef.current
+      && getCurrentVendorContext().vendorId === actionVendorId;
     const customerOverrides = completedOverrides ?? buildShipmentCustomerOverrides(fields);
+    setAutomaticLabelError(null);
     setShipmentActionState({
       tone: 'info',
       message: 'Creating shipment with the configured provider...',
@@ -2111,6 +2133,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
 
     void createShipmentMutation({ allocationId: order.id, customerOverrides })
       .then((shipment) => {
+        if (!isCurrentAction()) return;
         const resultState = getShipmentActionResultState(shipment, 'create');
         setShipmentActionState({
           ...resultState,
@@ -2119,9 +2142,11 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         });
         setShipmentCustomerOverrides({});
         showFeedback(resultState.message, resultState.tone);
+        if (shipment.labelUrl) openCompletedShipmentLabel(shipment.labelUrl);
         void refetch();
       })
       .catch((mutationError) => {
+        if (!isCurrentAction()) return;
         const diagnostics = getApiErrorDiagnostics(mutationError);
         const errorMessage = getCreateShipmentErrorMessage(mutationError);
         setShipmentActionState({
@@ -2131,15 +2156,21 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
           endpoint: diagnostics?.endpoint ?? 'POST /shipments/create',
         });
         showFeedback(errorMessage, 'error');
-      });
+      })
+      .finally(() => { shipmentMutationInFlightRef.current = false; });
   }
 
   function handleRetryFailedShipment(fields: ShipmentCustomerField[] = [], completedOverrides?: ShipmentCustomerOverrides) {
-    if (!visibleShipmentExecution) {
+    if (!visibleShipmentExecution || shipmentMutationInFlightRef.current) {
       return;
     }
 
+    shipmentMutationInFlightRef.current = true;
+    const actionVendorId = currentVendor.vendorId;
+    const isCurrentAction = () => shipmentActionMountedRef.current
+      && getCurrentVendorContext().vendorId === actionVendorId;
     const customerOverrides = completedOverrides ?? buildShipmentCustomerOverrides(fields);
+    setAutomaticLabelError(null);
     setShipmentActionState({
       tone: 'info',
       message: 'Retrying shipment provider request...',
@@ -2155,6 +2186,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       ...(useFullSenderDetailsForThisRetry ? { useFullSenderDetailsForThisRetry: true } : {}),
     })
       .then((shipment) => {
+        if (!isCurrentAction()) return;
         const resultState = getShipmentActionResultState(shipment, 'retry');
         setShipmentActionState({
           ...resultState,
@@ -2164,9 +2196,11 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         setShipmentCustomerOverrides({});
         setUseFullNavlungoSenderForRetry(false);
         showFeedback(resultState.message, resultState.tone);
+        if (shipment.labelUrl) openCompletedShipmentLabel(shipment.labelUrl);
         void refetch();
       })
       .catch((mutationError) => {
+        if (!isCurrentAction()) return;
         const diagnostics = getApiErrorDiagnostics(mutationError);
         const errorMessage = getCreateShipmentErrorMessage(mutationError);
         setShipmentActionState({
@@ -2176,7 +2210,8 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/retry`,
         });
         showFeedback(errorMessage, 'error');
-      });
+      })
+      .finally(() => { shipmentMutationInFlightRef.current = false; });
   }
 
   function handleRefreshShipmentStatus() {
@@ -4363,6 +4398,13 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled';
   const shouldShowCreateShipmentAction =
     operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution;
+  const showSmartLabelAction = isRealMode && (isAdmin || canUseFulfillmentActionsBeforeRestriction)
+    && operationalStory.actionVisibility.canCreateShipment;
+  const smartLabelPending = isCreatingShipment || isRetryingFailedShipment;
+  const smartLabelBlocked = vendorRestricted || smartLabelPending
+    || (!visibleShipmentExecution?.labelUrl && missingShipmentCustomerFields.length > 0)
+    || Boolean(visibleShipmentExecution && !visibleShipmentExecution.labelUrl && !canRecoverFailedShipment)
+    || (!visibleShipmentExecution && !shouldShowCreateShipmentAction);
   const financePreview = isAdmin ? order.financeLedgerPreview : null;
   const financeSummaryUnknowns = financePreview?.unknowns ?? [];
   const payoutFinanceRecord = relatedFinanceRecords.find((record) => record.category !== 'Refund');
@@ -5241,6 +5283,12 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                   <strong>{order.assignedVendorId || 'Unknown'}</strong>
                 </div>
               ) : null}
+              {isAdmin ? (
+                <div>
+                  <span>Allocation</span>
+                  <strong>{order.id}</strong>
+                </div>
+              ) : null}
               <div>
                 <span>Customer</span>
                 <strong>{customerLabel}</strong>
@@ -5555,6 +5603,47 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                 ) : null}
               </div>
             </div>
+            <div className="summary-row" aria-label="Last update">
+              <span>Last update</span>
+              <strong>{formatDateTime(
+                order.shipmentUpdatedAt ?? visibleShipmentExecution?.lastProviderResponseAt ?? order.fulfilledAt ?? order.date,
+                undefined, 'Not synced',
+              )}</strong>
+            </div>
+            {showSmartLabelAction ? (
+              <section className="order-shipment-primary-action" aria-label="Smart label action">
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={smartLabelBlocked}
+                  title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
+                  onClick={() => {
+                    if (shipmentMutationInFlightRef.current || smartLabelBlocked) return;
+                    if (visibleShipmentExecution?.labelUrl) {
+                      handleOpenShipmentLabel(visibleShipmentExecution.labelUrl);
+                    } else if (visibleShipmentExecution && canRecoverFailedShipment) {
+                      handleRetryFailedShipment();
+                    } else if (!visibleShipmentExecution && shouldShowCreateShipmentAction) {
+                      handleCreateShipment();
+                    }
+                  }}
+                >
+                  {smartLabelPending ? 'Preparing shipping label...'
+                    : visibleShipmentExecution?.labelUrl ? 'Open shipping label'
+                      : canRecoverFailedShipment ? 'Retry shipment label' : 'Create shipment label'}
+                </button>
+                {automaticLabelError ? (
+                  <p className="action-feedback action-error" role="status">{automaticLabelError}</p>
+                ) : null}
+                <p aria-live="polite">
+                  {vendorRestricted ? RESTRICTED_ACTION_MESSAGE
+                      : visibleShipmentExecution?.labelUrl ? 'Open existing label without creating a duplicate.'
+                        : missingShipmentCustomerFields.length > 0 ? 'Complete shipment-only fields below.'
+                          : visibleShipmentExecution && !canRecoverFailedShipment ? 'Shipment exists. Label availability is controlled by the provider.'
+                            : 'Use the existing shipment workflow. Open the label when available.'}
+                </p>
+              </section>
+            ) : null}
             {canUseFulfillmentActions || (vendorRestricted && canUseFulfillmentActionsBeforeRestriction) ? (
               <div className={`action-row vendor-action-panel${isFulfillmentAuthoritativelyClosed ? ' order-fulfillment-complete-panel' : ''}`}>
                 {isFulfillmentAuthoritativelyClosed ? (
@@ -6848,7 +6937,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                     <strong>No operational action required</strong>
                   </div>
                 ) : null}
-                {(isAdmin || canUseFulfillmentActions) && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt) ? (
+                {(isAdmin || canUseFulfillmentActions) && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt || shipmentActionState) ? (
                   <div className="tracking-summary-card order-tracking-summary-card">
                     {visibleShipmentExecution ? (
                       <>
@@ -7766,7 +7855,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                   </div>
                 ) : null}
                 {!hasCanonicalOperationalStory ? shippingConfigEditorPanel : null}
-                {!hasCanonicalOperationalStory ? (
+                {!hasCanonicalOperationalStory && !showSmartLabelAction ? (
                   <p className="page-description">
                     Shipping actions are currently unavailable.
                     {order.cancellationReason ? ` Reason: ${order.cancellationReason.replace(/_/g, ' ')}.` : ''}
