@@ -587,16 +587,87 @@ describe('AdminDiagnosticsPage control center', () => {
       id === 'webhook-replayable' ? pendingB.promise : Promise.resolve(blockedDetail));
     renderDiagnosticsPage();
     await screen.findByText('Webhook state');
-    const panel = document.querySelector('.op-side-panel') as HTMLElement;
+    expect(within(screen.getByRole('complementary')).getAllByText('Payload missing').length).toBeGreaterThan(0);
     await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    await waitFor(() => expect(diagnosticsMocks.webhookDetail).toHaveBeenCalledWith('webhook-replayable', expect.anything()));
     await act(async () => pendingB.reject(new Error('Webhook B unavailable')));
 
-    expect(within(panel).getByText('Select a webhook event')).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Webhook detail unavailable' });
+    const panel = screen.getByRole('complementary');
+    expect(panel).toBeInTheDocument();
+    expect(within(panel).getByText('Webhook B unavailable')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Retry' })).toBeEnabled();
+    expect(screen.getByRole('heading', { name: 'Diagnostics workspace' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'View' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'View' })[1]!.closest('.op-table-row')).toHaveClass('op-row-selected');
+    expect(screen.queryByText('Diagnostics unavailable')).not.toBeInTheDocument();
     expect(within(panel).queryByText('Payload missing')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('Webhook state')).not.toBeInTheDocument();
     expect(within(panel).queryByRole('button', { name: 'Recover Failed Webhook' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Replay Stored Webhook' })).not.toBeInTheDocument();
     expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
     expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
   });
+
+  it('retries only the selected failed webhook detail and restores B without losing filters', async () => {
+    diagnosticsMocks.webhookDetail.mockImplementation(async (id: string) => {
+      if (id === 'webhook-replayable') throw new Error('Webhook B unavailable');
+      return blockedDetail;
+    });
+    renderDiagnosticsPage();
+    await screen.findByText('Webhook state');
+    const search = screen.getByPlaceholderText('Search topic, payload hash, entity, error...');
+    await userEvent.type(search, 'create');
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    await screen.findByRole('heading', { name: 'Webhook detail unavailable' });
+    expect(search).toHaveValue('create');
+    const listCalls = diagnosticsMocks.webhooks.mock.calls.length;
+    diagnosticsMocks.webhookDetail.mockResolvedValue(replayableDetail);
+    await userEvent.click(within(screen.getByRole('complementary')).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(within(screen.getByRole('complementary')).getByRole('button', { name: 'Replay Stored Webhook' })).toBeEnabled());
+    const panel = screen.getByRole('complementary');
+    expect(within(panel).getByRole('button', { name: 'Recover Failed Webhook' })).toBeEnabled();
+    expect(within(panel).queryByText('Payload missing')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('Webhook B unavailable')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search topic, payload hash, entity, error...')).toHaveValue('create');
+    expect(diagnosticsMocks.webhookDetail).toHaveBeenLastCalledWith('webhook-replayable', expect.anything());
+    expect(diagnosticsMocks.webhooks).toHaveBeenCalledTimes(listCalls);
+    expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
+    expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
+  });
+
+  it('allows another webhook selection after B fails without retaining B error', async () => {
+    diagnosticsMocks.webhookDetail.mockImplementation(async (id: string) => {
+      if (id === 'webhook-replayable') throw new Error('Webhook B unavailable');
+      return blockedDetail;
+    });
+    renderDiagnosticsPage();
+    await screen.findByText('Webhook state');
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[1]!);
+    await screen.findByRole('heading', { name: 'Webhook detail unavailable' });
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[0]!);
+    await waitFor(() => expect(within(screen.getByRole('complementary')).getByText('Webhook state')).toBeInTheDocument());
+    const panel = screen.getByRole('complementary');
+    expect(within(panel).getAllByText('Payload missing').length).toBeGreaterThan(0);
+    expect(within(panel).queryByText('Webhook B unavailable')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Replay Stored Webhook' })).toBeDisabled();
+    expect(within(panel).getByRole('button', { name: 'Recover Failed Webhook' })).toBeDisabled();
+    expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
+    expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
+  });
+
+  it.each(['webhooks', 'reconciliation', 'syncEvents', 'canonicalReconciliationSummary'] as const)(
+    'keeps genuine %s workspace failure in the whole-page error state', async (resource) => {
+      diagnosticsMocks[resource].mockRejectedValue(new Error('Primary workspace unavailable'));
+      renderDiagnosticsPage();
+      expect(await screen.findByRole('heading', { name: 'Diagnostics unavailable' })).toBeInTheDocument();
+      expect(screen.getByText('Primary workspace unavailable')).toBeInTheDocument();
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'View' })).not.toBeInTheDocument();
+      expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
+      expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects mismatched webhook detail IDs and late old responses', async () => {
     const pendingA = createDeferred<typeof blockedDetail>();

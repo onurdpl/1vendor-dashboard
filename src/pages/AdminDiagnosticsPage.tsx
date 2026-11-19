@@ -457,7 +457,7 @@ export function AdminDiagnosticsPage() {
     ].some((identity) => identity && processingReviewOrderIdentities.has(identity))) ?? [];
 
   const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading || canonicalReconciliationQuery.isLoading;
-  const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? canonicalReconciliationQuery.error ?? webhookDetailQuery.error;
+  const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? canonicalReconciliationQuery.error;
   const pageDiagnostics = webhooksQuery.diagnostics
     ?? reconciliationQuery.diagnostics
     ?? syncEventsQuery.diagnostics
@@ -959,7 +959,7 @@ export function AdminDiagnosticsPage() {
 
         <SideDetailPanel
           eyebrow="Webhook detail"
-          title={selectedWebhook ? formatWebhookTopic(selectedWebhook.topic) : 'No event selected'}
+          title={selectedWebhook ? formatWebhookTopic(selectedWebhook.topic) : latestWebhookEventId ? 'Selected webhook' : 'No event selected'}
           action={
             selectedWebhook?.relatedShopifyOrderId ? (
               <Link className="button button-secondary button-compact" to={`/admin/orders/${selectedWebhook.relatedShopifyOrderId}`}>
@@ -968,7 +968,13 @@ export function AdminDiagnosticsPage() {
             ) : null
           }
         >
-          {selectedWebhook ? (
+          {webhookDetailQuery.error ? (
+            <SectionErrorRetry
+              title="Webhook detail unavailable"
+              description={webhookDetailQuery.error}
+              onRetry={() => void webhookDetailQuery.refetch()}
+            />
+          ) : selectedWebhook ? (
             <>
               <MetadataGroup title="Webhook state">
                 <MetadataRow
