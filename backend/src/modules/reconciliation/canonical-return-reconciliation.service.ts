@@ -1,3 +1,4 @@
+import { observeCanonicalReturnClosures, persistReturnClosure } from '../returns/return-closure-evidence.js';
 import {
   OperationalSignalSeverity,
   OperationalSignalSourceArea,
@@ -301,6 +302,7 @@ async function reconcileReturnRecordForLineItem(input: {
   tx: Prisma.TransactionClient;
   shopifyOrder: {
     id: string;
+    sourceShopifyOrderId: string;
     sourceShopifyOrderNumber: string;
     lineItems: Array<{
       id: string;
@@ -415,6 +417,8 @@ async function reconcileReturnRecordForLineItem(input: {
     },
   });
 
+  await persistReturnClosure(tx, canonicalReturn, shopifyOrder.sourceShopifyOrderId);
+
   return {
     id: recordId,
     vendorAllocationId: ownership.allocation.id,
@@ -428,6 +432,7 @@ export async function applyCanonicalReturnsInTransaction(input: {
   tx: Prisma.TransactionClient;
   shopifyOrder: {
     id: string;
+    sourceShopifyOrderId: string;
     sourceShopifyOrderNumber: string;
     lineItems: Array<{
       id: string;
@@ -466,7 +471,7 @@ export function createCanonicalReturnReconciliationService(env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
 
   async function reconcileShopifyOrderReturns(sourceShopifyOrderId: string): Promise<CanonicalReturnReconciliationReport | null> {
-    const canonicalReturns = await shopifyAdminService.fetchCanonicalReturnsForOrder(sourceShopifyOrderId);
+    const canonicalReturns = await observeCanonicalReturnClosures(() => shopifyAdminService.fetchCanonicalReturnsForOrder(sourceShopifyOrderId), env.SHOPIFY_API_VERSION, sourceShopifyOrderId);
     if (!canonicalReturns) {
       return null;
     }

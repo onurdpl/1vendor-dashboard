@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../backend/src/modules/returns/return-closure-evidence.js', () => ({
+  observeCanonicalReturnClosures: (load: () => Promise<unknown>) => load(),
+  observeReturnDetailClosure: (load: () => Promise<unknown>) => load(),
+  persistReturnClosure: vi.fn(),
+}));
+
 const prismaMock = vi.hoisted(() => ({
   webhookEvent: {
     update: vi.fn(),

@@ -1502,6 +1502,8 @@ export type ReturnOwnershipSummary = {
 };
 
 export type ReturnSummary = {
+  shopifyClosedAt?: string | null;
+  shopifyClosureStatus?: string | null;
   originalVendorId: VendorId;
   assignedVendorId: VendorId;
   id: string;

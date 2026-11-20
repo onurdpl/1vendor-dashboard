@@ -325,7 +325,8 @@ export type CanonicalShopifyReturnSnapshot = {
   status: string;
   createdAt: string | null;
   requestApprovedAt: string | null;
-  closedAt: string | null;
+  closedAt?: string | null;
+  closureObservation?: import('../returns/return-closure-evidence.js').ReturnClosureObservation;
   returnLineItems: CanonicalShopifyReturnLineItemSnapshot[];
 };
 
@@ -381,6 +382,9 @@ export type FetchShopifyReturnReverseDeliveryInputsResult = {
 };
 
 export type FetchShopifyReturnDetailsResult = {
+  status?: string;
+  closedAt?: string | null;
+  closureObservation?: import('../returns/return-closure-evidence.js').ReturnClosureObservation;
   returnGid: string;
   orderGid: string;
   lineItems: ShopifyReturnLineItem[];

@@ -1,3 +1,4 @@
+import { observeReturnDetailClosure, persistReturnClosure } from '../returns/return-closure-evidence.js';
 import { prisma } from '../../db/prisma.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
 import type { AppEnv } from '../../config/env.js';
@@ -153,6 +154,13 @@ export async function ingestReturnRequestWebhook(
   const shopifyAdminService = createShopifyAdminService(env);
 
   try {
+    const returnDetails = await observeReturnDetailClosure(() => shopifyAdminService.fetchReturnDetails(identity.sourceShopifyReturnGid), env.SHOPIFY_API_VERSION, identity.sourceShopifyReturnGid);
+    const returnTrackingUpdate = toReturnTrackingUpdate(returnDetails);
+    const sourceShopifyOrderId = extractShopifyGidTail(returnDetails.orderGid);
+    if (!sourceShopifyOrderId) {
+      throw new Error('Shopify return detail did not include a usable order id.');
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       await tx.webhookEvent.update({
         where: { id: input.event.id },
@@ -161,13 +169,6 @@ export async function ingestReturnRequestWebhook(
           errorMessage: null,
         },
       });
-
-      const returnDetails = await shopifyAdminService.fetchReturnDetails(identity.sourceShopifyReturnGid);
-      const returnTrackingUpdate = toReturnTrackingUpdate(returnDetails);
-      const sourceShopifyOrderId = extractShopifyGidTail(returnDetails.orderGid);
-      if (!sourceShopifyOrderId) {
-        throw new Error('Shopify return detail did not include a usable order id.');
-      }
 
       const shopifyOrder = await tx.shopifyOrder.findUnique({
         where: {
@@ -273,6 +274,8 @@ export async function ingestReturnRequestWebhook(
           },
         });
 
+        await persistReturnClosure(tx, returnDetails, returnDetails.orderGid);
+
         affectedRecordCount += 1;
         affectedReturnRecordIds.push(id);
       }
@@ -326,8 +329,7 @@ export async function applyReturnLifecycleStatusWebhook(
   try {
     const lifecycleStatus = mapLifecycleStatus(topic);
     const shopifyAdminService = createShopifyAdminService(env);
-    const returnTrackingUpdate = await shopifyAdminService
-      .fetchReturnDetails(identity.sourceShopifyReturnGid)
+    const returnTrackingUpdate = await observeReturnDetailClosure(() => shopifyAdminService.fetchReturnDetails(identity.sourceShopifyReturnGid), env.SHOPIFY_API_VERSION, identity.sourceShopifyReturnGid)
       .then(toReturnTrackingUpdate)
       .catch(() => ({}));
     const updateResult = await prisma.$transaction(async (tx) => {

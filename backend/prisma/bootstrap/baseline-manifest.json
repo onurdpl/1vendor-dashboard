@@ -8,17 +8,17 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "b368568052ef846e62bd2bf2b44f0880bc661d25ef9e65906e002908120996c1"
+    "sha256": "739d0d19e2a6809026cda0c99ca3fbd8ad9881164dc93a980615bb60c98dd4c8"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "40eba894214c597dc9baab4d759508561b5a29ffce23aa5f23c4de9f85e9d691"
+    "sha256": "af147dd9f717ec16a768683ac074e42f9c10e5192696d01f6ff123749cb16730"
   },
   "catalog": {
-    "sha256": "22fa374f5d459f2755a982e875a3ad13dfec420a999ebdef22c859574388606f"
+    "sha256": "51db4e8998928525d22cb84ddd8ad41a6c4ed3676c08d22003338bd43e8dd644"
   },
-  "migrationCutoff": "20261115120000_add_payout_preparation_failure_resolution",
-  "baselineMigrationFilesSha256": "f53c0cd37eaae2911cf74bd777722c3e108c42badd877be133ba51ed32ea3382",
+  "migrationCutoff": "20261120120000_add_return_closure_evidence",
+  "baselineMigrationFilesSha256": "80cdbc43653311c486ebdec687e0a46ab21edf28fdb39bcda2ddf24adb7bdac5",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -153,6 +153,7 @@
     "20261021120000_add_vendor_identity_cutover",
     "20261021150000_add_vendor_password_reset",
     "20261114120000_add_payout_preparation_failure_history",
-    "20261115120000_add_payout_preparation_failure_resolution"
+    "20261115120000_add_payout_preparation_failure_resolution",
+    "20261120120000_add_return_closure_evidence"
   ]
 }

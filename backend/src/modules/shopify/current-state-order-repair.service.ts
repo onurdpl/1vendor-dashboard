@@ -1,3 +1,4 @@
+import { observeCanonicalReturnClosures } from '../returns/return-closure-evidence.js';
 import {
   OperationalJobStatus,
   OperationalJobType,
@@ -185,11 +186,12 @@ function canonicalFetchError(
 async function fetchCanonicalRepairBundle(
   shopifyAdmin: CanonicalRepairSource,
   orderId: string,
+  shopifyApiVersion: string,
 ): Promise<CanonicalRepairBundle | null> {
   const [orderResult, refundResult, returnResult] = await Promise.allSettled([
     shopifyAdmin.fetchCanonicalOrderSnapshot(orderId),
     shopifyAdmin.fetchCanonicalRefundsForOrder(orderId),
-    shopifyAdmin.fetchCanonicalReturnsForOrder(orderId),
+    observeCanonicalReturnClosures(() => shopifyAdmin.fetchCanonicalReturnsForOrder(orderId), shopifyApiVersion, orderId),
   ]);
 
   if (orderResult.status === 'rejected') {
@@ -816,7 +818,7 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
       if (!orderId) {
         return null;
       }
-      return fetchCanonicalRepairBundle(shopifyAdmin, orderId);
+      return fetchCanonicalRepairBundle(shopifyAdmin, orderId, env.SHOPIFY_API_VERSION);
     },
 
     async inspectLocalState(bundle) {

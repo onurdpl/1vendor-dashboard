@@ -1367,6 +1367,10 @@ model ReturnRecord {
   returnLifecycleStatus    String?
   returnRequestSource      String?
   requestCreatedAt         DateTime?
+  shopifyClosedAt          DateTime?
+  shopifyClosureStatus     String?
+  shopifyClosureVersion    BigInt?
+  shopifyClosureApiVersion String?
   requestUpdatedAt         DateTime?
   status                   String
   reason                   String?

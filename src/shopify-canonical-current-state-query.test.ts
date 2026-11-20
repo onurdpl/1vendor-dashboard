@@ -339,6 +339,17 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
     });
   });
 
+  it.each([{}, { closedAt: null }, { closedAt: '2026-11-19T10:00:00Z' }])('preserves closure field presence from the canonical API (%j)', async (closure) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({ data: { order: {
+      id: 'gid://shopify/Order/7856043819345', legacyResourceId: '7856043819345',
+      returns: returnsConnection([{ id: 'gid://shopify/Return/9001', status: 'CLOSED', ...closure,
+        returnLineItems: { pageInfo: { hasNextPage: false }, edges: [] } }]),
+    } } }));
+    const result = await createShopifyAdminService(env).fetchCanonicalReturnsForOrder('7856043819345');
+    expect(Object.prototype.hasOwnProperty.call(result!.returns[0], 'closedAt')).toBe(Object.prototype.hasOwnProperty.call(closure, 'closedAt'));
+    if ('closedAt' in closure) expect(result!.returns[0].closedAt).toBe(closure.closedAt);
+  });
+
   it('returns an empty canonical return collection safely', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
       data: {

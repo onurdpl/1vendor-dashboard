@@ -10,6 +10,8 @@ import type {
 import { formatCurrency, toTitleCaseLabel } from './formatting';
 
 type ReturnSummaryDto = {
+  shopifyClosedAt?: string | null;
+  shopifyClosureStatus?: string | null;
   id: string;
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string;
@@ -297,6 +299,8 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     sourceShopifyRefundId: dto.sourceShopifyRefundId,
     sourceShopifyReturnId: dto.sourceShopifyReturnId,
     sourceShopifyReturnGid: dto.sourceShopifyReturnGid,
+    shopifyClosedAt: dto.shopifyClosedAt ?? null,
+    shopifyClosureStatus: dto.shopifyClosureStatus ?? null,
     sourceType,
     status: mapStatus(dto.status, sourceType),
     relatedOrderId: dto.sourceShopifyOrderId,

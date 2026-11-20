@@ -2905,4 +2905,26 @@ describe('ReturnDetailPage vendor review screen', () => {
       expect(screen.getByRole('article', { name: 'Return shipment summary' })).toHaveTextContent('P03-TRACK-B');
     });
   });
+  describe('authoritative current closure date', () => {
+    it.each([null, '2001-01-02T03:04:00Z'])('renders the canonical closure or the explicit unknown message (%s)', async (date) => {
+      getReturnMock.mockResolvedValue({ ...returnDetail, status: 'Closed', returnLifecycleStatus: 'closed',
+        shopifyClosureStatus: 'CLOSED', shopifyClosedAt: date, updatedAt: '2040-06-01T00:00:00Z' });
+      renderPage();
+      await screen.findByText('Nike Air Force 1 07');
+      const card = screen.getByRole('heading', { name: 'Return activity' }).closest('article')!;
+      const event = within(card).getByText('Closed').closest('li')!;
+      expect(event).not.toHaveTextContent('2040');
+      if (date) expect(event).toHaveTextContent('2001');
+      else expect(event).toHaveTextContent('Kapanış tarihi bilinmiyor');
+    });
+    it('does not show an old closure when canonical status is OPEN but operational status stays Closed', async () => {
+      getReturnMock.mockResolvedValue({ ...returnDetail, status: 'Closed', returnLifecycleStatus: 'closed',
+        shopifyClosureStatus: 'OPEN', shopifyClosedAt: '2001-01-02T03:04:00Z' });
+      renderPage(); await screen.findByText('Nike Air Force 1 07');
+      const card = screen.getByRole('heading', { name: 'Return activity' }).closest('article')!;
+      expect(within(card).queryByText('Closed')).not.toBeInTheDocument();
+      expect(card).not.toHaveTextContent('2001');
+    });
+  });
+
 });
