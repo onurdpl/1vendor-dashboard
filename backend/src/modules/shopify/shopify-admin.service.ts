@@ -554,6 +554,8 @@ type FulfillmentOrderCancellationClassificationQueryResponse = {
 type ShopifyReturnQueryResponse = {
   return: {
     id: string;
+    status?: string;
+    closedAt?: string | null;
     order: {
       id: string;
     } | null;
@@ -2699,7 +2701,7 @@ export function createShopifyAdminService(env: AppEnv) {
           status: normalizeShopifyString(returnNode.status)?.toLowerCase() ?? 'unknown',
           createdAt: returnNode.createdAt ?? null,
           requestApprovedAt: returnNode.requestApprovedAt ?? null,
-          closedAt: returnNode.closedAt ?? null,
+          ...(Object.prototype.hasOwnProperty.call(returnNode, 'closedAt') ? { closedAt: returnNode.closedAt } : {}),
           returnLineItems: (returnNode.returnLineItems.edges ?? []).map((lineItemEdge) => {
             const lineItem = lineItemEdge.node;
             return {
@@ -2932,6 +2934,8 @@ export function createShopifyAdminService(env: AppEnv) {
             query GetReturn($id: ID!) {
               return(id: $id) {
                 id
+                status
+                closedAt
                 order { id }
                 returnLineItems(first: 20) {
                   edges {
@@ -3037,6 +3041,8 @@ export function createShopifyAdminService(env: AppEnv) {
     );
 
     return {
+      status: returnNode.status,
+      ...(Object.prototype.hasOwnProperty.call(returnNode, 'closedAt') ? { closedAt: returnNode.closedAt } : {}),
       returnGid: returnNode.id,
       orderGid: returnNode.order.id,
       lineItems: inlineLineItems.length > 0 ? inlineLineItems : fallbackLineItems,

@@ -1511,4 +1511,27 @@ describe('ReturnsPage control center', () => {
     expect(await screen.findByText('No returns match this view')).toBeInTheDocument();
     expect(table.queryByText('#1001')).not.toBeInTheDocument();
   });
+  describe('authoritative closure in the existing panel', () => {
+    it.each([null, '2001-01-02T03:04:00Z'])('shows only the accepted date or unknown (%s)', async (date) => {
+      const detail = { ...closedRefundedReturnRequest, shopifyClosureStatus: 'CLOSED', shopifyClosedAt: date, updatedAt: '2040-06-01T00:00:00Z' };
+      listReturnsMock.mockResolvedValue([toSummary(detail)]); getReturnMock.mockResolvedValue(detail);
+      const { container } = renderReturnsPage();
+      await waitFor(() => expect(getReturnMock).toHaveBeenCalled());
+      await waitFor(() => expect(container.querySelector('.returns-timeline')).not.toBeNull());
+      const timeline = container.querySelector('.returns-timeline') as HTMLElement;
+      const event = within(timeline).getByText('Closed').closest('li')!;
+      expect(event).not.toHaveTextContent('2040');
+      if (date) expect(event).toHaveTextContent('2001');
+      else expect(event).toHaveTextContent('Kapanış tarihi bilinmiyor');
+    });
+    it('suppresses a historical closure when accepted canonical status is OPEN', async () => {
+      const detail = { ...closedRefundedReturnRequest, shopifyClosureStatus: 'OPEN', shopifyClosedAt: '2001-01-02T03:04:00Z' };
+      listReturnsMock.mockResolvedValue([toSummary(detail)]); getReturnMock.mockResolvedValue(detail);
+      const { container } = renderReturnsPage();
+      await waitFor(() => expect(getReturnMock).toHaveBeenCalled());
+      await waitFor(() => expect(container.querySelector('.returns-timeline')).not.toBeNull());
+      expect(within(container.querySelector('.returns-timeline') as HTMLElement).queryByText('Closed')).not.toBeInTheDocument();
+    });
+  });
+
 });

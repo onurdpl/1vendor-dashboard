@@ -1,4 +1,6 @@
 export type ReturnSummaryDto = {
+  shopifyClosedAt?: string | null;
+  shopifyClosureStatus?: string | null;
   id: string;
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string;

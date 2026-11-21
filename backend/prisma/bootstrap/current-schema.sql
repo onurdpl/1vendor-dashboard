@@ -2360,6 +2360,18 @@ CREATE TABLE public."RefundTerminalEvidenceReviewEvent" (
 
 
 --
+-- Name: ReturnClosureObservationVersion; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public."ReturnClosureObservationVersion"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
 -- Name: ReturnRecord; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2394,7 +2406,11 @@ CREATE TABLE public."ReturnRecord" (
     "vendorDecision" text,
     "vendorDecisionReason" text,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    "updatedAt" timestamp(3) without time zone NOT NULL
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "shopifyClosedAt" timestamp(3) without time zone,
+    "shopifyClosureStatus" text,
+    "shopifyClosureVersion" bigint,
+    "shopifyClosureApiVersion" text
 );
 
 

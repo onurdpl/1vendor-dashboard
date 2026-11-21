@@ -842,6 +842,26 @@ Optional `search` (up to 100 characters), `limit` (default 100, maximum 250), an
 
 The Returns page displays 100 rows and requests 101 for Next-page lookahead. Offset pagination is live rather than snapshot-stable; no global filtered count is returned.
 
+Both list summaries and `GET /returns/:returnId` expose additive nullable
+`shopifyClosedAt` (ISO date) and `shopifyClosureStatus` (canonical Shopify status).
+These are current canonical closure evidence, separate from the operational
+return lifecycle. Only a complete, valid Shopify Admin observation updates them;
+omission, invalid values and failed reads preserve existing evidence. Explicit
+`closedAt: null` is accepted as unknown; an accepted non-CLOSED canonical status
+clears the current closure date without reopening the operational return.
+Observations reserve a database sequence version before fetching Shopify; an
+older-started read cannot overwrite a newer accepted observation. Identity is
+matched by Return GID and its allocation's canonical Order identity. Evidence
+for existing records is persisted independently of operational status guards;
+new rows also receive it within their existing creation transaction.
+
+The existing panel and Return Detail show the accepted canonical CLOSED/date
+evidence independently of operational status. CLOSED records without a date show
+`Kapanış tarihi bilinmiyor`; a known canonical non-CLOSED status suppresses the
+current closure event. Generic timestamps are never closure-date fallbacks.
+Historical null records remain valid; no closure history or backfill is provided.
+
+
 ### GET /returns/status-options
 
 Read-only sorted `string[]` of displayed status labels present in the current authorized Vendor's complete return history. Empty history returns `[]`. It uses the same authentication and Admin selected-Vendor/Vendor membership resolution as `GET /returns`. Free-form persisted statuses are not replaced by a hard-coded enum, and no global cross-Vendor status vocabulary is exposed.

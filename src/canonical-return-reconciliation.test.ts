@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../backend/src/modules/returns/return-closure-evidence.js', () => ({
+  observeCanonicalReturnClosures: (load: () => Promise<unknown>) => load(),
+  observeReturnDetailClosure: (load: () => Promise<unknown>) => load(),
+  persistReturnClosure: vi.fn(),
+}));
 import type { AppEnv } from '../backend/src/config/env.js';
 import type { CanonicalShopifyReturnSnapshot } from '../backend/src/modules/shopify/shopify-admin.types.js';
 

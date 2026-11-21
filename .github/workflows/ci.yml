@@ -168,7 +168,30 @@ jobs:
             fi
             return "$outcome"
           }
+          cleanupReturnClosure() {
+            local outcome=$?
+            trap - EXIT INT TERM
+            if [ "${createdReturnClosure:-0}" = 1 ]; then
+              local identity remaining
+              identity="$(PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -XAt -v ON_ERROR_STOP=1 -c "SELECT pg_get_userbyid(datdba) || '|' || (pg_control_system()).system_identifier::text || '|' || shobj_description(oid, 'pg_database') FROM pg_database WHERE datname='fix01_closure_validation'")" || exit 1
+              if [ "$identity" != "postgres|$cluster|fin-auto-ci:$proof" ]; then
+                echo 'Return closure cleanup identity/proof mismatch; refusing deletion.'
+                exit 1
+              fi
+              PGPASSWORD=postgres dropdb -h 127.0.0.1 -U postgres fix01_closure_validation || exit 1
+              remaining="$(PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='fix01_closure_validation'")" || exit 1
+              [ "$remaining" = 0 ] || exit 1
+              echo 'Return closure cleanup verified: disposable database absent.'
+            fi
+            return "$outcome"
+          }
           while read -r db gate file; do
+            if [ "$db" = fix01_closure_validation ]; then
+              createdReturnClosure=0
+              trap cleanupReturnClosure EXIT
+              trap 'exit 130' INT
+              trap 'exit 143' TERM
+            fi
             if [ "$db" = p5_07a_support_reply_validation ]; then
               createdSupportReply=0
               trap cleanupSupportReply EXIT
@@ -201,13 +224,14 @@ jobs:
             if [ "$db" = p5_05a_replay_validation ]; then createdReplayOwnership=1; fi
             if [ "$db" = p5_06c1_failure_validation ]; then createdPayoutFailureHistory=1; fi
             if [ "$db" = p5_07a_support_reply_validation ]; then createdSupportReply=1; fi
+            if [ "$db" = fix01_closure_validation ]; then createdReturnClosure=1; fi
             url="postgresql://postgres:postgres@127.0.0.1:5432/$db?schema=public"
             report="$RUNNER_TEMP/$db-pg18-vitest.json"
             proof=""
             cluster=""
             a2Env=()
             case "$db" in
-              fin_auto_f03f04_ci_validation|fin_auto_f06_ci_validation|admin_password_reset_ci_validation|a2_vendor_directory_ci_validation|fin_paid_cancel_005b_validation|a2_admin_read_ci_validation|a2_finance_read_ci_validation|p5_05a_replay_validation|p5_06c1_failure_validation|p5_07a_support_reply_validation)
+              fin_auto_f03f04_ci_validation|fin_auto_f06_ci_validation|admin_password_reset_ci_validation|a2_vendor_directory_ci_validation|fin_paid_cancel_005b_validation|a2_admin_read_ci_validation|a2_finance_read_ci_validation|p5_05a_replay_validation|p5_06c1_failure_validation|p5_07a_support_reply_validation|fix01_closure_validation)
                 proof="$(openssl rand -hex 32)"
                 cluster="$(PGPASSWORD=postgres psql --host=127.0.0.1 --username=postgres --dbname=postgres --no-psqlrc --tuples-only --no-align --command='SELECT system_identifier FROM pg_control_system()')"
                 PGPASSWORD=postgres psql --host=127.0.0.1 --username=postgres --dbname=postgres --no-psqlrc --set=ON_ERROR_STOP=1 \
@@ -219,6 +243,7 @@ jobs:
             if [ "$db" = a2_finance_read_ci_validation ]; then a2Env=("A2_FINANCE_READ_CI_MODE=1"); fi
             if [ "$db" = p5_06c1_failure_validation ]; then a2Env=("P5_06C1_CI_MODE=1"); fi
             if [ "$db" = p5_07a_support_reply_validation ]; then a2Env=("P5_07A_CI_MODE=1"); fi
+            if [ "$db" = fix01_closure_validation ]; then a2Env=("FIX01_CI_MODE=1" "FIX01_TEST_DATABASE_URL=$url"); fi
             env "TEST_DATABASE_URL=$url" "DATABASE_URL=$url" "$gate=1" "${a2Env[@]}" "FIN_AUTO_CI_DB_PROOF=$proof" \
               "FIN_AUTO_CI_CLUSTER_ID=$cluster" "FIN_AUTO_CI_PG_MAJOR=18" npm run test -- "$file" \
               --reporter=default --reporter=json --outputFile.json="$report"
@@ -301,6 +326,23 @@ jobs:
                     !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
                 console.log("Replay ownership verified: 3 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
               }
+              if (file === "src/return-closure-evidence.postgres.test.ts") {
+                const expected = [
+                  "keeps historical records null and persists a canonical date without changing operational timestamps or ownership",
+                  "fences an older overlapping response after a newer observation commits",
+                  "preserves accepted OPEN evidence despite an independent operational transaction rollback",
+                  "distinguishes explicit null from omitted, invalid and failed observations",
+                  "makes duplicate application of an observation idempotent",
+                  "rejects mismatched canonical identity before persisting evidence",
+                  "does not persist synthetic mock-source evidence as Shopify authority",
+                ];
+                const assertions = r.testResults[0].assertionResults;
+                if (r.numTotalTests !== 7 || r.numPassedTests !== 7 || r.numFailedTests !== 0 ||
+                    r.numPendingTests !== 0 || (r.numTodoTests ?? 0) !== 0 ||
+                    !Array.isArray(assertions) || assertions.length !== 7 ||
+                    !expected.every((title) => assertions.some((test) => test.title === title && test.status === "passed"))) process.exit(1);
+                console.log("Return closure evidence verified: 7 PASS / 0 FAIL / 0 SKIPPED / 0 PENDING");
+              }
               if (file === "src/support-reply-atomicity.postgres.test.ts") {
                 const assertions = r.testResults[0].assertionResults;
                 if (r.numTotalTests !== 9 || r.numPassedTests !== 9 || r.numFailedTests !== 0 ||
@@ -356,6 +398,9 @@ jobs:
               cleanupReplayOwnership
               trap - EXIT
             fi
+            if [ "$db" = fix01_closure_validation ]; then
+              cleanupReturnClosure
+            fi
           done <<'SUITES'
           p5_07a_support_reply_validation P5_07A_TEST_DATABASE_ISOLATED src/support-reply-atomicity.postgres.test.ts
           p5_06c1_failure_validation P5_06C1_TEST_DATABASE_ISOLATED src/payout-preparation-failure.postgres.test.ts
@@ -376,6 +421,7 @@ jobs:
           a2_admin_read_ci_validation A2_REAL_PG_TEST_ISOLATED src/admin-global-vendor-read.postgres.test.ts
           a2_finance_read_ci_validation A2_FINANCE_READ_PG_ISOLATED src/admin-finance-read.postgres.test.ts
           p5_05a_replay_validation P5_05A_TEST_DATABASE_ISOLATED src/vendor-integration-replay-ownership.postgres.test.ts
+          fix01_closure_validation FIX01_TEST_DATABASE_ISOLATED src/return-closure-evidence.postgres.test.ts
           SUITES
 
   build-and-test:

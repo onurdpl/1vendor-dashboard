@@ -517,4 +517,13 @@ describe('real returns service item title mapping', () => {
     expect(detail.returnTrackingNumber).toBe('returnkargo-123');
     expect(detail.returnTrackingUrl).toBe('https://tracking.example/returnkargo-123');
   });
+  it('preserves canonical closure fields without substituting generic update time', async () => {
+    apiClientGet.mockResolvedValue({ id: 'closure', returnRequestSource: 'shopify_return_request', status: 'closed',
+      assignedVendorId: 'vendor-a', originalVendorId: 'vendor-a', refundedSkus: [], refundedItems: [],
+      refundAmount: '0.00', createdAt: '2020-01-01T00:00:00Z', updatedAt: '2040-01-01T00:00:00Z',
+      shopifyClosedAt: '2001-01-02T03:04:00Z', shopifyClosureStatus: 'CLOSED' });
+    const detail = await getReturn('closure');
+    expect(detail.shopifyClosedAt).toBe('2001-01-02T03:04:00Z'); expect(detail.shopifyClosureStatus).toBe('CLOSED');
+  });
+
 });

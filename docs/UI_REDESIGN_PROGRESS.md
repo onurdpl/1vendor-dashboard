@@ -313,3 +313,44 @@ Validation results and Draft-PR CI state are recorded below after execution.
 - Classification for overall parity: `P03_PARTIAL_BLOCKED_BY_USER_DECISION` for the
   explicitly documented Closed-event/legacy-line portions; completed presentation
   has local PASS. This does not certify P05 panel removal.
+
+
+## P03-FIX-01 — authoritative current closure evidence (2026-11-20)
+
+- Isolated implementation based on main `2a0e7796d599795c0de62e77bf815a45a5a2ab66`.
+- Adds four nullable ReturnRecord closure fields and a PostgreSQL sequence in one
+  additive migration. No historical records are backfilled. PG16/PG18 bootstrap
+  SQL and manifests are regenerated with the existing official refresh script;
+  the schema checksum guard requires both updates.
+- Reserve observation order before each existing canonical Return read. Atomic
+  SQL fences older responses, matches exact Return/Order identities, and leaves
+  operational timestamps/status/ownership unchanged. Existing-row evidence is
+  committed independently before operational status guards; rejected operational
+  transitions cannot undo an accepted closure observation. Existing row creation
+  also applies the same fenced evidence within its existing transaction. The
+  request-ingestion canonical read now occurs before opening that transaction;
+  no database transaction is held across the Shopify request.
+- Missing/invalid/failed canonical evidence preserves prior values; explicit null
+  remains distinct. Mock-source reads do not establish Shopify authority.
+- Existing Returns panel and detail use the same closure presentation helper:
+  actual canonical date, `Kapanış tarihi bilinmiyor` when unknown, or no current
+  closure event for known non-CLOSED canonical state. Panel remains present.
+- Local final focused regressions: 269 PASS / 0 FAIL / 0 SKIP across 12 files,
+  including seven actual disposable PostgreSQL 18 cases. Four additional directly
+  affected route/runner suites: 38 PASS / 0 FAIL / 0 SKIP. Component/API mocks do
+  not prove production behavior. PostgreSQL tests cover overlapping old/new reads,
+  identity denial, rollback independence, UTC storage, null/omission/failure,
+  duplicate application and mock-source rejection. The rollback case uses a real
+  rejected transaction; unchanged operational-guard assertions remain unit tests.
+- Frontend build, backend typecheck and backend build pass. No-DB backend smoke
+  passes with outbound requests guarded and an inert loopback provider URL. PG16 and PG18 baseline
+  refresh/restore checks pass; fresh PG18 bootstrap accepts 135 migrations. The
+  bootstrap correctly refused a populated target during validation; a new empty
+  disposable database was then used successfully.
+- New PostgreSQL suite requires explicit isolated loopback database flags and was
+  executed locally. It is not added to mandatory CI PostgreSQL suite lists in this
+  change. No production database, live Shopify request or browser smoke was used.
+- Draft delivery only; CI status is pending at this commit. FIX-01 is not marked
+  complete until review, migration verification and GitHub CI are resolved.
+  No financial/quantity/currency rules or operational status guards are changed;
+  no history, backfill, P04/P05 work, merge or deployment is authorized.

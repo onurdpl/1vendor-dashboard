@@ -1,3 +1,4 @@
+import { getCurrentReturnClosure } from '../lib/returnClosure';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
@@ -414,6 +415,8 @@ function getVendorTimelineLabel(label: string) {
 }
 
 function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
+  const closure = getCurrentReturnClosure(detail ?? summary);
+  const closureItem = closure ? [{ label: closure.label, at: closure.at ? formatDate(closure.at) : 'Kapanış tarihi bilinmiyor' }] : [];
   const terminalRefundedReturn = isTerminalRefundedReturn({
     status: detail?.status ?? summary.status,
     returnLifecycleStatus: detail?.returnLifecycleStatus ?? summary.returnLifecycleStatus,
@@ -452,17 +455,11 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
         rawAt: detail?.updatedAt ?? summary.updatedAt ?? summary.date,
         enabled: Boolean(detail?.sourceShopifyRefundId ?? summary.sourceShopifyRefundId),
       },
-      {
-        label: 'Closed',
-        at: formatDate(detail?.updatedAt ?? summary.updatedAt ?? summary.date),
-        rawAt: detail?.updatedAt ?? summary.updatedAt ?? summary.date,
-        enabled: true,
-      },
     ];
 
     return terminalItems
       .filter((item) => item.enabled)
-      .map(({ label, at }) => ({ label, at }));
+      .map(({ label, at }) => ({ label, at })).concat(closureItem);
   }
 
   const detailTimeline = detail?.timeline ?? [];
@@ -474,7 +471,7 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
         at: formatDate(item.at),
       }))
       .filter((item) => {
-        if (!item.label || seenLabels.has(item.label)) {
+        if (!item.label || item.label === 'Closed' || seenLabels.has(item.label)) {
           return false;
         }
         seenLabels.add(item.label);
@@ -482,7 +479,7 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
       });
 
     if (items.length > 0) {
-      return items;
+      return items.concat(closureItem);
     }
   }
 
@@ -495,7 +492,7 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
       label: summary.sourceType === 'shopify_return_request' ? 'Vendor reviewed' : 'Refund approved',
       at: formatDate(summary.updatedAt ?? summary.date),
     },
-  ];
+  ].concat(closureItem);
 }
 
 function getReturnShipment(summary: ReturnSummary, detail: ReturnDetail | null) {

@@ -1,3 +1,4 @@
+import { getCurrentReturnClosure } from '../lib/returnClosure';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useParams } from 'react-router-dom';
@@ -477,6 +478,8 @@ function readNavlungoReturnLogs(snapshot: Record<string, unknown>) {
 }
 
 function getTimeline(returnRequest: ReturnDetail) {
+  const closure = getCurrentReturnClosure(returnRequest);
+  const closureItem = closure ? [{ label: closure.label, at: closure.at ? formatDate(closure.at) : 'Kapanış tarihi bilinmiyor', rawAt: closure.at }] : [];
   const normalizedStatus = returnRequest.status?.toLowerCase() ?? '';
   const hasReturnTracking = Boolean(
     returnRequest.returnCarrierName || returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl,
@@ -525,7 +528,7 @@ function getTimeline(returnRequest: ReturnDetail) {
   ].filter((entry) => entry.enabled);
 
   if (dataBackedTimeline.length > 1 || hasReturnTracking) {
-    return dataBackedTimeline;
+    return [...dataBackedTimeline, ...closureItem];
   }
 
   const seenLabels = new Set<string>();
@@ -544,7 +547,7 @@ function getTimeline(returnRequest: ReturnDetail) {
     });
 
   if (timeline.length > 0) {
-    return timeline;
+    return [...timeline, ...closureItem];
   }
 
   return [
@@ -554,6 +557,7 @@ function getTimeline(returnRequest: ReturnDetail) {
       at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
       rawAt: returnRequest.updatedAt ?? returnRequest.date,
     },
+    ...closureItem,
   ];
 }
 
@@ -1403,7 +1407,8 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
     ...timeline.map((entry, index) => ({
       id: `return-${index}-${entry.label}-${entry.at}`,
       title: entry.label,
-      at: entry.rawAt ?? returnRequest.timeline[index]?.at ?? returnRequest.date,
+      at: entry.label === 'Closed' ? entry.rawAt : entry.rawAt ?? returnRequest.timeline[index]?.at ?? returnRequest.date,
+      description: entry.label === 'Closed' && !entry.rawAt ? 'Kapanış tarihi bilinmiyor' : undefined,
       tone: 'neutral' as const,
     })),
     ...(returnRequest.navlungoReturnCreatedAt

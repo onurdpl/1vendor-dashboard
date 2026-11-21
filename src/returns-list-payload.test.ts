@@ -88,6 +88,16 @@ describe('returns list payload optimization', () => {
     prismaMock.$queryRaw.mockReset();
   });
 
+  it('exposes identical authoritative closure fields in list and detail without generic timestamp fallback', async () => {
+    const record = { ...buildReturnRecord(), shopifyClosedAt: new Date('2026-05-02T08:00:00.000Z'), shopifyClosureStatus: 'CLOSED' };
+    prismaMock.returnRecord.findMany.mockResolvedValueOnce([record]);
+    prismaMock.returnRecord.findFirst.mockResolvedValueOnce(record);
+    const list = await listVendorReturns('sporjinal');
+    const detail = await getVendorReturnById('sporjinal', 'return-1');
+    expect(list[0]).toMatchObject({ shopifyClosedAt: '2026-05-02T08:00:00.000Z', shopifyClosureStatus: 'CLOSED' });
+    expect(detail).toMatchObject({ shopifyClosedAt: list[0].shopifyClosedAt, shopifyClosureStatus: list[0].shopifyClosureStatus });
+  });
+
   it('omits heavy return provider snapshots from list summaries', async () => {
     prismaMock.returnRecord.findMany.mockResolvedValueOnce([buildReturnRecord()]);
 
