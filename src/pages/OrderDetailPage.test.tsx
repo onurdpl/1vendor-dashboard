@@ -10846,4 +10846,222 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       expect(await paymentValue()).toHaveTextContent(/^partially_refunded$/);
     });
   });
+
+  describe('P04-02C G1 read-only shipment evidence', () => {
+    const openWindow = vi.fn();
+    function actor(role: 'admin' | 'vendor' | 'support' | 'finance' = 'vendor', restricted = false, canSwitchVendors = role === 'admin') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role,
+        vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal', status: restricted ? 'inactive' : 'active' },
+          { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+        canSwitchVendors, defaultVendorId: 'sporjinal' });
+    }
+    function evidence(overrides: Partial<NonNullable<OrderDetail['shipmentExecution']>> = {}) {
+      return { ...orderWithShipmentSummary.shipmentExecution!, provider: 'kargonomi' as const,
+        shipmentStatus: 'created' as const, trackingNumber: 'G1-SHIPMENT-TRACK',
+        trackingUrl: 'https://tracking.example/g1', labelUrl: 'https://example.com/g1.pdf',
+        providerResponseSummary: { ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          providerError: null, dryRun: false, disabledGates: [], ok: true }, ...overrides };
+    }
+    function readOrder(overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, allocationStatus: 'fulfilled', fulfillmentActionAvailable: false,
+        fulfillmentStatus: 'Fulfilled', shippingStatus: 'In Transit',
+        trackingNumber: undefined, trackingUrl: undefined, carrier: undefined,
+        shipmentExecution: evidence(), ...overrides };
+    }
+    function expectNoShipmentMutations() {
+      for (const mutation of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, updateNavlungoShipmentExecutionMock, createReturnShipmentLabelMock,
+        probeShopifyReturnLabelUploadMock, probeTryOtoReturnDetailsMock, probeTryOtoReturnLinkMock,
+        probeTryOtoReturnAwbPrintMock, updateVendorShippingConfigMock, syncKargonomiWarehouseDetailsMock]) {
+        expect(mutation).not.toHaveBeenCalled();
+      }
+    }
+    beforeEach(() => {
+      actor();
+      openWindow.mockReset();
+      vi.stubGlobal('open', openWindow);
+      getOrderMock.mockResolvedValue(readOrder());
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it.each((['admin', 'vendor', 'support', 'finance'] as const).flatMap((role) =>
+      (['active', 'fulfilled'] as const).map((allocationStatus) => ({ role, allocationStatus }))))(
+      'preserves existing evidence for $role on $allocationStatus without any mutation', async ({ role, allocationStatus }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(readOrder({ allocationStatus, fulfillmentActionAvailable: allocationStatus === 'active' }));
+        renderOrderDetail();
+        await screen.findByText('Order #1028');
+        expect(screen.getAllByText('G1-SHIPMENT-TRACK').length).toBeGreaterThan(0);
+        const link = screen.getByRole('link', { name: 'Open tracking', exact: true });
+        expect(link).toHaveAttribute('href', 'https://tracking.example/g1');
+        expect(link).toHaveAttribute('target', '_blank');
+        expect(link.getAttribute('rel')).toContain('noreferrer');
+        const shouldUseReadOnlySection = role === 'support' || role === 'finance' || (role === 'vendor' && allocationStatus === 'fulfilled');
+        expect(Boolean(screen.queryByRole('region', { name: 'Shipment information' }))).toBe(shouldUseReadOnlySection);
+        expect(screen.getAllByRole('link', { name: 'Open tracking', exact: true })).toHaveLength(1);
+        await userEvent.click(screen.getByRole('button', { name: 'Open label PDF' }));
+        expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/g1.pdf', '_blank', 'noopener,noreferrer');
+        expect(getOrderMock).toHaveBeenCalledTimes(1);
+        expectNoShipmentMutations();
+        if (role === 'support' || role === 'finance' || allocationStatus === 'fulfilled' && role === 'vendor') {
+          expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+          expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
+        }
+      });
+
+    it('preserves reads for an active Vendor with fulfillmentActionAvailable false', async () => {
+      getOrderMock.mockResolvedValue(readOrder({ allocationStatus: 'active', fulfillmentActionAvailable: false }));
+      renderOrderDetail();
+      const section = await screen.findByRole('region', { name: 'Shipment information' });
+      expect(within(section).getByText('G1-SHIPMENT-TRACK')).toBeInTheDocument();
+      await userEvent.click(within(section).getByRole('button', { name: 'Open label PDF' }));
+      expect(openWindow).toHaveBeenCalledTimes(1);
+      expectNoShipmentMutations();
+    });
+
+    it.each(['active', 'fulfilled'] as const)('preserves restricted Vendor reads without enabling %s mutations', async (allocationStatus) => {
+      actor('vendor', true);
+      getOrderMock.mockResolvedValue(readOrder({ allocationStatus, fulfillmentActionAvailable: allocationStatus === 'active' }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      if (allocationStatus === 'active') {
+        const action = screen.getByRole('button', { name: 'Open shipping label' });
+        expect(action).toBeDisabled();
+        await userEvent.click(action);
+        expect(openWindow).not.toHaveBeenCalled();
+      }
+      await userEvent.click(screen.getByRole('button', { name: 'Open label PDF' }));
+      expect(openWindow).toHaveBeenCalledTimes(1);
+      expectNoShipmentMutations();
+    });
+
+    it.each(['label', 'url', 'both', 'all'] as const)('keeps the missing %s evidence unavailable without creating replacements', async (missing) => {
+      getOrderMock.mockResolvedValue(readOrder({ shipmentExecution: evidence({
+        labelUrl: missing === 'url' ? 'https://example.com/g1.pdf' : null,
+        trackingUrl: missing === 'label' ? 'https://tracking.example/g1' : null,
+        ...(missing === 'all' ? { trackingNumber: null } : {}),
+      }) }));
+      renderOrderDetail();
+      const section = await screen.findByRole('region', { name: 'Shipment information' });
+      expect(within(section).getAllByText('Not available').length).toBeGreaterThan(0);
+      if (missing !== 'url') expect(within(section).queryByRole('button', { name: 'Open label PDF' })).not.toBeInTheDocument();
+      if (missing !== 'label') expect(within(section).queryByRole('link', { name: 'Open tracking' })).not.toBeInTheDocument();
+      expectNoShipmentMutations();
+    });
+
+    it('retains allocation tracking precedence over shipment tracking', async () => {
+      getOrderMock.mockResolvedValue(readOrder({ trackingNumber: 'G1-ALLOCATION-TRACK', trackingUrl: 'https://tracking.example/allocation' }));
+      renderOrderDetail();
+      const section = await screen.findByRole('region', { name: 'Shipment information' });
+      expect(within(section).getByText('G1-ALLOCATION-TRACK')).toBeInTheDocument();
+      expect(within(section).queryByText('G1-SHIPMENT-TRACK')).not.toBeInTheDocument();
+      expect(within(section).getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.example/allocation');
+      expectNoShipmentMutations();
+    });
+
+    it('shows an unsupported-label error without retry, creation or payload disclosure', async () => {
+      getOrderMock.mockResolvedValue(readOrder({ shipmentExecution: evidence({ labelUrl: 'not-a-supported-label' }) }));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Open label PDF' }));
+      expect(await screen.findByText('Shipment label data is not a supported PDF link.')).toBeInTheDocument();
+      expect(screen.queryByText('not-a-supported-label')).not.toBeInTheDocument();
+      expect(openWindow).not.toHaveBeenCalled();
+      expectNoShipmentMutations();
+    });
+
+    it('keeps a failed PDF opening separate from shipment operations', async () => {
+      const BrowserURL = URL;
+      vi.stubGlobal('URL', class extends BrowserURL {
+        static createObjectURL() { throw new Error('synthetic PDF opening failure'); }
+      });
+      getOrderMock.mockResolvedValue(readOrder({ shipmentExecution: evidence({ labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=' }) }));
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Open label PDF' }));
+      expect(await screen.findByText('Shipment label PDF could not be opened.')).toBeInTheDocument();
+      expect(openWindow).not.toHaveBeenCalled();
+      expectNoShipmentMutations();
+    });
+
+    const terminalStates: Array<[string, Partial<OrderDetail>]> = [
+      ['cancelled', { isCancelled: true, shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending' }],
+      ['conflict', { isCancelled: true, isCancellationConflict: true }],
+      ['refunded', { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' } }],
+      ['blocked', { allocationStatus: 'vendor_blocked' }],
+    ];
+    it.each((['admin', 'vendor', 'support', 'finance'] as const).flatMap((role) =>
+      terminalStates.map(([state, overrides]) => ({ role, state, overrides }))))(
+      'does not introduce read-only controls for $role in canonical $state state', async ({ role, overrides }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(readOrder(overrides));
+        renderOrderDetail();
+        await screen.findByText('Order #1028');
+        expect(screen.queryByRole('region', { name: 'Shipment information' })).not.toBeInTheDocument();
+        if (role !== 'admin') {
+          expect(screen.queryByRole('link', { name: 'Open tracking', exact: true })).not.toBeInTheDocument();
+          expect(screen.queryByRole('button', { name: 'Open label PDF' })).not.toBeInTheDocument();
+        }
+        expect(openWindow).not.toHaveBeenCalled();
+        expectNoShipmentMutations();
+      });
+
+    it('rejects foreign Vendor shipment evidence before rendering or opening it', async () => {
+      getOrderMock.mockResolvedValue(readOrder({ assignedVendorId: 'yalispor', vendorId: 'yalispor' }));
+      renderOrderDetail();
+      await screen.findByText('Order unavailable');
+      expect(screen.queryByRole('region', { name: 'Shipment information' })).not.toBeInTheDocument();
+      expect(screen.queryByText('G1-SHIPMENT-TRACK')).not.toBeInTheDocument();
+      expect(openWindow).not.toHaveBeenCalled();
+      expectNoShipmentMutations();
+    });
+
+    it('keeps a late Vendor A response and its label out of Vendor B', async () => {
+      actor('vendor', false, true);
+      const late = deferred<OrderDetail>();
+      let reads = 0;
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? readOrder({ assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099',
+          shipmentExecution: evidence({ vendorId: 'yalispor', trackingNumber: 'G1-B-TRACK', trackingUrl: 'https://tracking.example/b', labelUrl: 'https://example.com/b.pdf' }) })
+        : ++reads === 1 ? readOrder() : late.promise);
+      const { queryClient } = renderOrderDetail();
+      const oldButton = await screen.findByRole('button', { name: 'Open label PDF' });
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(oldButton).not.toBeInTheDocument();
+      expect(screen.queryByText('G1-SHIPMENT-TRACK')).not.toBeInTheDocument();
+      await screen.findByText('G1-B-TRACK');
+      await act(async () => late.resolve(readOrder({ shipmentExecution: evidence({ labelUrl: 'https://example.com/stale.pdf' }) })));
+      expect(openWindow).not.toHaveBeenCalled();
+      expect(screen.queryByText('G1-SHIPMENT-TRACK')).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.example/b');
+      await userEvent.click(screen.getByRole('button', { name: 'Open label PDF' }));
+      expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/b.pdf', '_blank', 'noopener,noreferrer');
+      expectNoShipmentMutations();
+    });
+
+    it('does not retain the prior allocation label during navigation or a late refetch', async () => {
+      const late = deferred<OrderDetail>();
+      const next = deferred<OrderDetail>();
+      let reads = 0;
+      getOrderMock.mockImplementation((id) => id === 'alloc-yalispor-2099' ? next.promise
+        : ++reads === 1 ? Promise.resolve(readOrder()) : late.promise);
+      const { queryClient } = renderOrderDetail();
+      const oldButton = await screen.findByRole('button', { name: 'Open label PDF' });
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      expect(oldButton).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open label PDF' })).not.toBeInTheDocument();
+      await act(async () => late.resolve(readOrder()));
+      expect(openWindow).not.toHaveBeenCalled();
+      expect(screen.queryByText('G1-SHIPMENT-TRACK')).not.toBeInTheDocument();
+      await act(async () => next.resolve(readOrder({ id: 'alloc-yalispor-2099', sourceShopifyOrderNumber: '#2099',
+        shipmentExecution: evidence({ allocationId: 'alloc-yalispor-2099', trackingNumber: 'G1-NEXT-TRACK', labelUrl: 'https://example.com/next.pdf' }) })));
+      await userEvent.click(await screen.findByRole('button', { name: 'Open label PDF' }));
+      expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/next.pdf', '_blank', 'noopener,noreferrer');
+      expectNoShipmentMutations();
+    });
+  });
 });

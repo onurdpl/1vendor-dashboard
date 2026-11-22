@@ -4420,6 +4420,8 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution;
   const showSmartLabelAction = isRealMode && (isAdmin || canUseFulfillmentActionsBeforeRestriction)
     && operationalStory.actionVisibility.canCreateShipment;
+  const showReadOnlyShipmentEvidence = !isAdmin && !canUseFulfillmentActionsBeforeRestriction
+    && !hasCanonicalOperationalStory;
   const smartLabelPending = isCreatingShipment || isRetryingFailedShipment;
   const smartLabelBlocked = vendorRestricted || smartLabelPending
     || (!visibleShipmentExecution?.labelUrl && missingShipmentCustomerFields.length > 0)
@@ -5642,6 +5644,32 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                 undefined, 'Not synced',
               )}</strong>
             </div>
+            {showReadOnlyShipmentEvidence ? (
+              <section className="tracking-summary-card order-tracking-summary-card" aria-label="Shipment information">
+                <div className="summary-row">
+                  <span>Tracking number</span>
+                  <strong>{getShipmentTrackingNumber(order, visibleShipmentExecution) ?? 'Not available'}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Tracking link</span>
+                  {getShipmentTrackingUrl(order, visibleShipmentExecution) ? (
+                    <a className="inline-link" href={getShipmentTrackingUrl(order, visibleShipmentExecution) || undefined}
+                      target="_blank" rel="noopener noreferrer">
+                      Open tracking
+                    </a>
+                  ) : <strong className="muted">Not available</strong>}
+                </div>
+                <div className="summary-row">
+                  <span>Shipping label</span>
+                  {visibleShipmentExecution?.labelUrl ? (
+                    <button type="button" className="inline-link inline-button-link"
+                      onClick={() => handleOpenShipmentLabel(visibleShipmentExecution.labelUrl!)}>
+                      Open label PDF
+                    </button>
+                  ) : <strong className="muted">Not available</strong>}
+                </div>
+              </section>
+            ) : null}
             {showSmartLabelAction ? (
               <section className="order-shipment-primary-action" aria-label="Smart label action">
                 <button
