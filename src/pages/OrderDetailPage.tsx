@@ -4383,6 +4383,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
   const operationalStory = getOperationalStory(order);
   const hasCanonicalOperationalStory = operationalStory.state !== 'active_or_unknown';
+  const paymentStatusLabel = hasCanonicalOperationalStory
+    ? operationalStory.financeLabel
+    : formatSnapshotValue(order.orderSnapshot?.financialStatus);
   const shopifyDeliverySyncStatus = order.shippingStatus === 'Delivered' && !hasCanonicalOperationalStory
     ? order.shopifyDeliverySync?.status
     : null;
@@ -5481,7 +5484,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
             </div>
           </article>
 
-          {!isAdmin && vendorFinancialSummaryRows.length ? (
+          {!isAdmin ? (
             <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order financial summary">
               <div className="order-card-heading">
                 <div>
@@ -5489,6 +5492,10 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                 </div>
               </div>
               <div className="order-financial-impact-grid order-finance-preview-grid">
+                <div>
+                  <span>Payment Status</span>
+                  <strong>{paymentStatusLabel}</strong>
+                </div>
                 {vendorFinancialSummaryRows.map((row) => (
                   <div key={row.label}>
                     <span>{row.label}</span>

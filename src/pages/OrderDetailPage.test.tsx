@@ -10718,4 +10718,132 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       expect(screen.getByText('Shopify delivery sync pending')).toBeInTheDocument();
     });
   });
+
+  describe('P04-02A payment status parity', () => {
+    function actor(role: 'admin' | 'vendor' | 'support' | 'finance' = 'vendor', canSwitchVendors = role === 'admin') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role,
+        vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+          { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+        canSwitchVendors, defaultVendorId: 'sporjinal' });
+    }
+    function paymentOrder(financialStatus: string | null = 'paid', overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment,
+        orderSnapshot: { ...orderWithShipmentSummary.orderSnapshot!, financialStatus }, ...overrides };
+    }
+    async function paymentValue() {
+      const summary = await screen.findByLabelText('Order financial summary');
+      return within(summary).getByText('Payment Status').nextElementSibling;
+    }
+    beforeEach(() => actor());
+
+    it.each([
+      ['vendor', 'paid'], ['vendor', 'partially_refunded'],
+      ['support', 'paid'], ['support', 'partially_refunded'],
+      ['finance', 'paid'], ['finance', 'partially_refunded'],
+    ] as const)('preserves active %s payment information (%s) without Admin snapshot disclosure', async (role, status) => {
+      actor(role);
+      getOrderMock.mockResolvedValue(paymentOrder(status));
+      renderOrderDetail();
+      expect(await paymentValue()).toHaveTextContent(status);
+      expect(within(screen.getByLabelText('Current order state')).queryByText('Payment Status')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Shopify details section')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Allocation finance summary')).not.toBeInTheDocument();
+      expect(screen.queryByText('PayTR Marketplace')).not.toBeInTheDocument();
+      expect(getOrderMock).toHaveBeenCalledTimes(1);
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
+      expect(rejectOrderMock).not.toHaveBeenCalled();
+      expect(retryShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['missing snapshot', undefined], ['null snapshot', null],
+      ['null status', { ...orderWithShipmentSummary.orderSnapshot!, financialStatus: null }],
+      ['empty status', { ...orderWithShipmentSummary.orderSnapshot!, financialStatus: '' }],
+      ['blank status', { ...orderWithShipmentSummary.orderSnapshot!, financialStatus: '   ' }],
+    ] satisfies Array<[string, OrderDetail['orderSnapshot']]>)(
+      'preserves the dash for %s', async (_name, orderSnapshot) => {
+        getOrderMock.mockResolvedValue(paymentOrder('paid', { orderSnapshot }));
+        renderOrderDetail();
+        expect(await paymentValue()).toHaveTextContent(/^—$/);
+      });
+
+    it('trims the existing snapshot value without changing its meaning', async () => {
+      getOrderMock.mockResolvedValue(paymentOrder('  partially_refunded  '));
+      renderOrderDetail();
+      expect(await paymentValue()).toHaveTextContent(/^partially_refunded$/);
+    });
+
+    const terminalCases: Array<[string, Partial<OrderDetail>, string]> = [
+      ['cancellation', { isCancelled: true }, 'Sale voided'],
+      ['cancellation conflict', { isCancelled: true, isCancellationConflict: true }, 'Review required'],
+      ['refund completed', { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' } }, 'Refund completed'],
+      ['Vendor blocked', { allocationStatus: 'vendor_blocked' }, 'Held'],
+    ];
+    it.each((['vendor', 'support', 'finance'] as const).flatMap((role) =>
+      terminalCases.map(([name, overrides, expected]) => ({ role, name, overrides, expected }))))(
+      'uses canonical $name finance label for $role instead of raw Shopify paid', async ({ role, overrides, expected }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(paymentOrder('paid', overrides));
+        renderOrderDetail();
+        expect(await paymentValue()).toHaveTextContent(expected);
+        expect(await paymentValue()).not.toHaveTextContent(/^paid$/);
+      });
+
+    it('keeps payment information available when no monetary summary rows exist', async () => {
+      getOrderMock.mockResolvedValue(paymentOrder('paid', { amount: 'Unknown' }));
+      renderOrderDetail();
+      expect(await paymentValue()).toHaveTextContent(/^paid$/);
+      const summary = screen.getByLabelText('Order financial summary');
+      expect(within(summary).queryByText('Gross Allocation Amount')).not.toBeInTheDocument();
+      expect(within(summary).queryByText('Commission')).not.toBeInTheDocument();
+      expect(within(summary).queryByText('Shipping Deduction')).not.toBeInTheDocument();
+      expect(within(summary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
+      expect(summary.querySelectorAll('.order-financial-impact-grid > div')).toHaveLength(1);
+    });
+
+    it('retains the Admin-only snapshot and creates no non-Admin payment row for Admin', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue(paymentOrder());
+      renderOrderDetail();
+      const snapshot = await screen.findByLabelText('Shopify order snapshot');
+      expect(within(snapshot).getByText('Shopify financial status').nextElementSibling).toHaveTextContent('Paid');
+      expect(within(snapshot).getByText('Payment gateway').nextElementSibling).toHaveTextContent('PayTR Marketplace');
+      expect(screen.queryByText('Payment Status')).not.toBeInTheDocument();
+    });
+
+    it('clears the old payment status while navigating to another allocation', async () => {
+      const next = deferred<OrderDetail>();
+      getOrderMock.mockImplementation((id) => id === 'alloc-yalispor-2099' ? next.promise : Promise.resolve(paymentOrder()));
+      renderOrderDetail();
+      expect(await paymentValue()).toHaveTextContent(/^paid$/);
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      expect(screen.queryByText('Payment Status')).not.toBeInTheDocument();
+      await act(async () => next.resolve(paymentOrder('partially_refunded', {
+        id: 'alloc-yalispor-2099', sourceShopifyOrderNumber: '#2099' })));
+      expect(await paymentValue()).toHaveTextContent(/^partially_refunded$/);
+    });
+
+    it('does not retain Vendor A payment evidence or accept its late refetch under Vendor B', async () => {
+      // Synthetic multi-membership Vendor with the existing explicit switching capability.
+      actor('vendor', true);
+      const lateA = deferred<OrderDetail>();
+      let aReads = 0;
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? paymentOrder('partially_refunded', { originalVendorId: 'yalispor', assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099' })
+        : ++aReads === 1 ? paymentOrder() : lateA.promise);
+      const { queryClient } = renderOrderDetail();
+      expect(await paymentValue()).toHaveTextContent(/^paid$/);
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(aReads).toBe(2));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(screen.queryByText('Payment Status')).not.toBeInTheDocument();
+      await screen.findByText('Order #2099');
+      expect(await paymentValue()).toHaveTextContent(/^partially_refunded$/);
+      await act(async () => lateA.resolve(paymentOrder('OLD_A_PAYMENT')));
+      expect(screen.queryByText('OLD_A_PAYMENT')).not.toBeInTheDocument();
+      expect(await paymentValue()).toHaveTextContent(/^partially_refunded$/);
+    });
+  });
 });
