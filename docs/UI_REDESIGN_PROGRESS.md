@@ -394,3 +394,45 @@ redesign and Orders panel removal are not implemented or declared complete.
   outcomes are reported separately; no merge or deployment is claimed here.
   Remaining complete panel-removal parity and full-width acceptance are unverified
   by this bounded change. Existing P01/P02 functionality is retained, not rebuilt.
+
+## P04-02A — Non-Admin Payment Status preservation (2026-11-22)
+
+Baseline: `ad69f9cecc1a697ef3850250188dddcb43a3cd66` (`origin/main`).
+Branch: `codex/p04-02a-payment-status-parity`.
+
+The P04-02 pre-removal review found that the Orders panel displays Payment Status
+for non-Admin users, while Order Detail's Shopify financial-status field was
+Admin-only. This bounded fix preserves that existing information without removing
+the panel or implementing the full-width layout.
+
+- `src/pages/OrderDetailPage.tsx`: adds Payment Status to the existing non-Admin
+  Order financial summary, outside the unchanged current-state header. The section
+  remains visible when monetary rows are absent; existing unknown amounts stay
+  absent. Active/unknown operational state uses the existing trimmed
+  `order.orderSnapshot?.financialStatus`, with `—` for absent/null/blank evidence.
+  Canonical states instead use `getOperationalStory(order).financeLabel`: Sale
+  voided, Review required, Refund completed or Held as applicable. These are
+  existing display labels, not new payment/settlement/payout authority.
+- Vendor, Support and Finance retain existing `orders:read` access and the same
+  non-Admin visibility as the panel. Admin snapshot and P01 allocation summary
+  are unchanged. No gateway, Admin diagnostics or additional full-order financial
+  details are exposed. No route, query, effect, mutation, API or backend changes.
+- `src/pages/OrderDetailPage.test.tsx`: 28 new mocked cases cover roles, active
+  values, trimming/missing values, canonical precedence for all three non-Admin
+  roles, absent monetary rows, Admin preservation, allocation navigation and a
+  late previous-Vendor response using an explicitly switch-enabled membership fixture.
+- Validation: the two-file Order Detail/Orders run initially recorded **431 PASS,
+  1 FAIL, 0 SKIP**. The new no-monetary-rows fixture used `Not available`, whereas
+  the existing source contract uses `Unknown`. Only that fixture was corrected;
+  no application logic or assertions were weakened. Its focused rerun recorded
+  **1 PASS, 0 FAIL**, with 297 other cases excluded by the test-name filter.
+  Across these execution records, all 432 distinct cases have passing evidence:
+  Order Detail 298 (including 28 new), Orders 134. Unchanged passing cases were
+  not rerun. `npm run build` passed (TypeScript + Vite; existing chunk-size warning).
+  `git diff --check` passed. No database, Docker, live provider or browser tests ran.
+- Third changed file: this appended progress entry. Local mocked evidence is not
+  production verification. Draft PR/CI status is reported separately; no merge or
+  deployment is claimed. P04 is not complete: full panel-removal acceptance for
+  timeline/timestamps, remaining metadata/product variants, deep links/Back and
+  responsive/full-width behavior remains unverified. Do not remove the panel or
+  begin P05 automatically.
