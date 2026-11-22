@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { AllocationSplitRejectModal } from '../components/AllocationSplitRejectModal';
-import { EmptyStatePanel, SectionErrorRetry, SkeletonText, WorkflowActionGuidance } from '../components/OperationalPrimitives';
+import { EmptyStatePanel, SectionErrorRetry, SkeletonText, StatusBadge, WorkflowActionGuidance } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { VendorShippingConfigEditor } from '../components/VendorShippingConfigEditor';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -4383,6 +4383,23 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
   const operationalStory = getOperationalStory(order);
   const hasCanonicalOperationalStory = operationalStory.state !== 'active_or_unknown';
+  const shopifyDeliverySyncStatus = order.shippingStatus === 'Delivered' && !hasCanonicalOperationalStory
+    ? order.shopifyDeliverySync?.status
+    : null;
+  const shopifyDeliverySyncLabel = shopifyDeliverySyncStatus === 'confirmed'
+    ? 'Shopify delivery synced'
+    : shopifyDeliverySyncStatus === 'pending'
+      ? 'Shopify delivery sync pending'
+      : isAdmin && shopifyDeliverySyncStatus === 'rejected'
+        ? 'Shopify delivery sync failed'
+        : isAdmin && shopifyDeliverySyncStatus === 'outcome_unknown'
+          ? 'Shopify delivery sync needs verification'
+          : null;
+  const shopifyDeliverySyncWarningTone = isAdmin && shopifyDeliverySyncStatus === 'rejected'
+    ? 'danger'
+    : isAdmin && shopifyDeliverySyncStatus === 'outcome_unknown'
+      ? 'warning'
+      : null;
   const operationalStatusLabel = hasCanonicalOperationalStory
     ? operationalStory.primaryLabel
     : toTitleCaseLabel(order.allocationStatus);
@@ -5603,6 +5620,14 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                 ) : null}
               </div>
             </div>
+            {shopifyDeliverySyncLabel ? (
+              <div className="summary-row" aria-label="Shopify Delivered event sync">
+                <span>Shopify delivery sync</span>
+                {shopifyDeliverySyncWarningTone ? (
+                  <StatusBadge tone={shopifyDeliverySyncWarningTone}>{shopifyDeliverySyncLabel}</StatusBadge>
+                ) : <span>{shopifyDeliverySyncLabel}</span>}
+              </div>
+            ) : null}
             <div className="summary-row" aria-label="Last update">
               <span>Last update</span>
               <strong>{formatDateTime(

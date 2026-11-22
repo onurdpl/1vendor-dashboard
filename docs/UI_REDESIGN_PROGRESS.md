@@ -354,3 +354,43 @@ Validation results and Draft-PR CI state are recorded below after execution.
   complete until review, migration verification and GitHub CI are resolved.
   No financial/quantity/currency rules or operational status guards are changed;
   no history, backfill, P04/P05 work, merge or deployment is authorized.
+
+## P04-01 — Order Detail Shopify delivery-sync presentation (2026-11-22)
+
+Baseline: `ebcd6bc8546a53af1f520967560f517fb7765b54` (`origin/main`).
+Branch: `codex/p04-01-delivery-sync-parity`.
+Scope: closes the verified delivery-sync presentation gap only. P04 full-width
+redesign and Orders panel removal are not implemented or declared complete.
+
+- `src/pages/OrderDetailPage.tsx`: displays existing `order.shopifyDeliverySync`
+  evidence inside the existing Fulfillment article. Exact panel copy is retained:
+  confirmed → `Shopify delivery synced`; pending → `Shopify delivery sync pending`;
+  rejected → `Shopify delivery sync failed`; outcome_unknown →
+  `Shopify delivery sync needs verification`.
+- Only exact `shippingStatus === 'Delivered'` and the existing operational story's
+  `active_or_unknown` state permit the message. Canonical cancellation/conflict,
+  refund-terminal and Vendor-blocked states suppress it. Admin sees all four
+  applicable statuses; Vendor sees confirmed/pending only. Admin rejection uses
+  the existing danger StatusBadge; unknown outcome uses warning. Null/absent
+  evidence creates no message. Local Delivered and fulfillment success are not
+  substituted for canonical Delivered-sync evidence.
+- `shopifyDeliveryStatusSyncSkippedReason` remains a separate unchanged shipment
+  diagnostic. Existing queries, Vendor/allocation identity checks, actions,
+  operational rules, Finance, backend/API mapping, Shopify and Orders panel are
+  unchanged. The presentation derives directly from current query data, with no
+  new effect, request or state cache.
+- `src/pages/OrderDetailPage.test.tsx`: 20 new mocked component cases cover the
+  four Admin statuses/tones, Vendor visibility, null/absent evidence, non-Delivered
+  gating, canonical terminal/blocked suppression, independent fulfillment sync,
+  same-Vendor order navigation and a delayed A response after switching to B.
+- Executed once: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-01-tests.json`:
+  **404 passed, 0 failed, 0 skipped/pending** (Order Detail 270; Orders 134).
+  `npm run build` passed (TypeScript and Vite; existing large-chunk warning).
+  `git diff --check` passed. No database, Docker, live Shopify or browser tests
+  were executed; mocked component evidence does not prove production behavior.
+- Third changed file: this existing progress record. Draft delivery and GitHub CI
+  outcomes are reported separately; no merge or deployment is claimed here.
+  Remaining complete panel-removal parity and full-width acceptance are unverified
+  by this bounded change. Existing P01/P02 functionality is retained, not rebuilt.
