@@ -436,3 +436,46 @@ the panel or implementing the full-width layout.
   timeline/timestamps, remaining metadata/product variants, deep links/Back and
   responsive/full-width behavior remains unverified. Do not remove the panel or
   begin P05 automatically.
+
+## P04-02C — G1 read-only shipment information parity (2026-11-22)
+
+Baseline: `57c7535723e210d1c0125b84468a7f27a56a4f06` (`origin/main`).
+Branch: `codex/p04-02c-read-only-shipment`.
+Scope: G1-14 existing-label opening, G1-26 shipment tracking-number fallback and
+G1-27 existing tracking URL only. Orders panel remains unchanged.
+
+- `src/pages/OrderDetailPage.tsx`: adds a small Shipment information presentation
+  inside the existing Fulfillment article only for non-Admin, noncanonical-terminal
+  states where the existing mutation-eligibility branch does not already show it.
+  Admin and eligible/restricted eligible Vendor shipment cards remain unchanged,
+  avoiding duplicate tracking cards. Support/Finance and read-only Vendor cases
+  use the existing authorized Order Detail object, not a new query or permission.
+- Uses the existing nullish tracking-number/URL helpers: allocation evidence first,
+  then existing shipment-execution evidence. No number or URL is manufactured.
+  Missing values remain Not available. Tracking links retain external-link safety
+  attributes. Existing labels open only through handleOpenShipmentLabel and the
+  unchanged safe openShipmentLabel utility; unsupported/failed PDF opening uses
+  existing feedback and never falls back to create, retry or refresh.
+- Canonical cancellation, conflict, refund-terminal and Vendor-blocked stories
+  suppress the new presentation. Existing Admin historical displays are unchanged.
+  Existing panel secondary label opening is read-only even for restricted Vendors;
+  this does not enable their disabled Smart Label/mutation actions. Existing
+  canUseFulfillmentActions, ownership, restriction, create/retry/refresh/update/
+  cancel/Shopify predicates and P02 automatic-opening policy are unchanged.
+- `src/pages/OrderDetailPage.test.tsx`: 37 new mocked cases cover all four roles
+  across active/fulfilled allocations, false mutation availability, restricted
+  Vendor reads, allocation/execution precedence, missing evidence, unsupported
+  and failed PDF opening, all four canonical terminal stories, foreign ownership,
+  allocation navigation and delayed previous-Vendor/allocation refetches. Assertions
+  verify no shipment creation/retry/tracking/provider-refresh/Shopify probe or other
+  shipment mutation is invoked by these reads and label opening.
+- Executed once: OrderDetailPage + OrdersPage component suites:
+  **469 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Order Detail 335, Orders 134;
+  new G1 subset 37). Frontend TypeScript/Vite build and git diff --check pass.
+  Existing large-bundle warning remains. No local PostgreSQL, Docker, live Shopify,
+  provider operations, production access or browser smoke was used. Component
+  mocks do not establish real-backend/browser/production behavior.
+- Third changed file: this appended progress record. GitHub Draft PR and CI results
+  are reported separately; no merge/deployment is claimed. G2 carrier precedence,
+  G3 fulfillment timestamp and U1-U10 remain outside this implementation. P04
+  full-width/removal acceptance is not complete; do not remove the panel or begin P05.
