@@ -10587,4 +10587,135 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       expect(retryFailedShipmentExecutionMock).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('P04-01 delivery sync parity', () => {
+    function actor(role: 'admin' | 'vendor' = 'admin') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role,
+        vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+          { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function delivered(overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, shippingStatus: 'Delivered',
+        shopifyDeliverySync: { status: 'confirmed' }, ...overrides };
+    }
+    const syncMessage = /Shopify delivery sync(?:ed| pending| failed| needs verification)/;
+    beforeEach(() => actor());
+
+    it.each([
+      ['confirmed', 'Shopify delivery synced', null],
+      ['pending', 'Shopify delivery sync pending', null],
+      ['rejected', 'Shopify delivery sync failed', 'op-tone-danger'],
+      ['outcome_unknown', 'Shopify delivery sync needs verification', 'op-tone-warning'],
+    ] as const)('shows Admin %s evidence with the panel warning convention', async (status, label, tone) => {
+      getOrderMock.mockResolvedValue(delivered({ shopifyDeliverySync: { status } }));
+      renderOrderDetail();
+      const sync = await screen.findByLabelText('Shopify Delivered event sync');
+      expect(screen.getByRole('heading', { name: 'Fulfillment', exact: true }).closest('article')).toContainElement(sync);
+      const message = within(sync).getByText(label);
+      if (tone) expect(message).toHaveClass('op-badge', tone);
+      else expect(message).not.toHaveClass('op-tone-danger', 'op-tone-warning');
+      expect(screen.getAllByText(syncMessage)).toHaveLength(1);
+      expect(getOrderMock).toHaveBeenCalledTimes(1);
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+      expect(retryShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['confirmed', 'pending', 'rejected', 'outcome_unknown'] as const)(
+      'preserves Vendor visibility for %s', async (status) => {
+        actor('vendor');
+        getOrderMock.mockResolvedValue(delivered({ shopifyDeliverySync: { status } }));
+        renderOrderDetail();
+        await screen.findByText('Order #1028');
+        if (status === 'confirmed' || status === 'pending') {
+          expect(screen.getByLabelText('Shopify Delivered event sync')).toHaveTextContent(
+            status === 'confirmed' ? 'Shopify delivery synced' : 'Shopify delivery sync pending');
+        } else {
+          expect(screen.queryByLabelText('Shopify Delivered event sync')).not.toBeInTheDocument();
+          expect(screen.queryByText(syncMessage)).not.toBeInTheDocument();
+        }
+      });
+
+    it.each([null, undefined])('does not infer delivery sync from local Delivered or fulfillment success (%s)', async (evidence) => {
+      getOrderMock.mockResolvedValue(delivered({ shopifyDeliverySync: evidence,
+        shopifyFulfillmentSync: { status: 'synced', fulfillmentOrderIdPresent: true, fulfillmentIdPresent: true,
+          syncStatus: 'synced', skippedReason: null, errorMessage: null, lastAttemptedAt: null } }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByText(syncMessage)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Shopify Delivered event sync')).not.toBeInTheDocument();
+    });
+
+    it.each(['Awaiting Shipment', 'In Transit'])('hides delivery sync outside exact Delivered (%s)', async (shippingStatus) => {
+      getOrderMock.mockResolvedValue(delivered({ shippingStatus }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByText(syncMessage)).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['cancellation', { isCancelled: true, shippingStatus: 'Awaiting Shipment' }],
+      ['cancellation conflict', { isCancelled: true, isCancellationConflict: true }],
+      ['refund terminal', { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' } }],
+      ['Vendor blocked', { allocationStatus: 'vendor_blocked' }],
+    ] satisfies Array<[string, Partial<OrderDetail>]>)(
+      'suppresses delivery evidence in canonical %s state', async (_name, overrides) => {
+        getOrderMock.mockResolvedValue(delivered(overrides));
+        renderOrderDetail();
+        await screen.findByText('Order #1028');
+        expect(screen.queryByText(syncMessage)).not.toBeInTheDocument();
+      });
+
+    it('preserves Vendor-blocked suppression for the Vendor role', async () => {
+      actor('vendor');
+      getOrderMock.mockResolvedValue(delivered({ allocationStatus: 'vendor_blocked' }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByText(syncMessage)).not.toBeInTheDocument();
+    });
+
+    it('keeps delivery evidence independent of a pending fulfillment sync', async () => {
+      getOrderMock.mockResolvedValue(delivered({ shopifyFulfillmentSync: {
+        status: 'pending', fulfillmentOrderIdPresent: true, fulfillmentIdPresent: false,
+        syncStatus: 'pending', skippedReason: null, errorMessage: null, lastAttemptedAt: null } }));
+      renderOrderDetail();
+      expect(await screen.findByText('Shopify delivery synced')).toBeInTheDocument();
+    });
+
+    it('removes the previous order message during same-Vendor navigation', async () => {
+      const next = deferred<OrderDetail>();
+      getOrderMock.mockImplementation((id) => id === 'alloc-yalispor-2099' ? next.promise : Promise.resolve(delivered()));
+      renderOrderDetail();
+      await screen.findByText('Shopify delivery synced');
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      expect(screen.queryByText(syncMessage)).not.toBeInTheDocument();
+      await act(async () => next.resolve(delivered({ id: 'alloc-yalispor-2099',
+        sourceShopifyOrderNumber: '#2099', shopifyDeliverySync: { status: 'pending' } })));
+      expect(await screen.findByText('Shopify delivery sync pending')).toBeInTheDocument();
+      expect(screen.queryByText('Shopify delivery synced')).not.toBeInTheDocument();
+    });
+
+    it('clears Vendor A evidence and ignores its delayed refetch after switching to B', async () => {
+      const lateA = deferred<OrderDetail>();
+      let aReads = 0;
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? delivered({ originalVendorId: 'yalispor', assignedVendorId: 'yalispor', vendorId: 'yalispor',
+          sourceShopifyOrderNumber: '#2099', shopifyDeliverySync: { status: 'pending' } })
+        : ++aReads === 1 ? delivered() : lateA.promise);
+      const { queryClient } = renderOrderDetail();
+      await screen.findByText('Shopify delivery synced');
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(aReads).toBe(2));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(screen.queryByText('Shopify delivery synced')).not.toBeInTheDocument();
+      await screen.findByText('Order #2099');
+      expect(screen.getByText('Shopify delivery sync pending')).toBeInTheDocument();
+      await act(async () => lateA.resolve(delivered({ shopifyDeliverySync: { status: 'rejected' } })));
+      expect(screen.queryByText('Shopify delivery sync failed')).not.toBeInTheDocument();
+      expect(screen.getByText('Shopify delivery sync pending')).toBeInTheDocument();
+    });
+  });
 });
