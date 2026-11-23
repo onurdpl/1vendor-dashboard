@@ -4762,6 +4762,10 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     : [];
   const audience = isAdmin ? 'admin' : 'vendor';
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
+  const showFulfillmentCompletion = !hasCanonicalOperationalStory && Boolean(
+    order.fulfilledAt || order.shopifyFulfillmentSync?.fulfillmentIdPresent || order.shopifyFulfillmentSync?.status === 'synced',
+  );
+  const fulfillmentCompletionTime = parseSafeDate(order.fulfilledAt)?.getTime();
   const orderTimelineEvents: OperationalEventInput[] = [];
   orderTimelineEvents.push({
     id: 'order-created',
@@ -4827,6 +4831,14 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         status: getCanonicalTimelineStatus(event.label),
         tone: event.tone === 'warning' ? 'attention' : event.tone ?? 'info',
       });
+    });
+  }
+  if (showFulfillmentCompletion) {
+    orderTimelineEvents.push({
+      id: 'fulfillment-synced',
+      title: 'Fulfillment synced',
+      at: order.fulfilledAt,
+      tone: 'success',
     });
   }
   if (!hasCanonicalOperationalStory && order.shipmentCreatedAt) {
@@ -8304,6 +8316,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
               events={groupOrderDetailTimelineEvents([
                 ...safeArray(order.timeline)
                   .filter((entry) => !isRawProviderTimelineLabel(entry.label))
+                  .filter((entry) => !(showFulfillmentCompletion && fulfillmentCompletionTime !== undefined
+                    && normalizeTimelineTitle(entry.label) === 'fulfillment synced'
+                    && parseSafeDate(entry.at)?.getTime() === fulfillmentCompletionTime))
                   .map((entry) => ({
                     id: `order-native-${entry.label}-${entry.at}`,
                     title: getVendorTimelineLabel(entry.label),
