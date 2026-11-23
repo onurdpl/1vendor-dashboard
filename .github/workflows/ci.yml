@@ -466,14 +466,20 @@ jobs:
         run: npm run backend:db:generate
 
       - name: Ensure PostgreSQL 16 client for baseline verification
+        timeout-minutes: 10
         run: |
           # Older pg_dump emits WAL-dependent pg_attver values from patched servers.
           # Verify the checked-in official PGDG key before giving it to APT.
+          echo 'PostgreSQL 16 preparation: verifying PGDG signing key'
           echo '0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  .github/ci/pgdg-ACCC4CF8.asc' | sha256sum --check --strict
+          echo 'PostgreSQL 16 preparation: configuring signed PGDG repository'
           sudo install -D -m 0644 .github/ci/pgdg-ACCC4CF8.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          echo 'PostgreSQL 16 preparation: updating APT package indexes'
           sudo apt-get update
+          echo 'PostgreSQL 16 preparation: installing PostgreSQL 16 client'
           sudo apt-get install -y postgresql-client-16
+          echo 'PostgreSQL 16 preparation: verifying installed client versions'
           dpkg --compare-versions "$(dpkg-query -W -f='${Version}' postgresql-client-16)" ge 16.16
           /usr/lib/postgresql/16/bin/psql --version | grep -E '^psql \(PostgreSQL\) 16\.'
           /usr/lib/postgresql/16/bin/pg_dump --version | grep -E '^pg_dump \(PostgreSQL\) 16\.'
