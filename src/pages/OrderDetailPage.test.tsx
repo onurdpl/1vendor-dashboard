@@ -11229,4 +11229,207 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       noMutations();
     });
   });
+
+  describe('P04-02E G3 fulfillment completion evidence', () => {
+    const completedAt = '2026-06-02T09:00:00.000Z';
+    const trackingAt = '2026-06-02T10:00:00.000Z';
+    const providerAt = '2026-06-02T11:00:00.000Z';
+    function actor(role: 'admin' | 'vendor' | 'support' | 'finance' = 'vendor', canSwitchVendors = role === 'admin') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }, { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+        canSwitchVendors, defaultVendorId: 'sporjinal' });
+    }
+    function order(overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, allocationStatus: 'fulfilled', fulfillmentActionAvailable: false,
+        fulfillmentStatus: 'Fulfilled', shippingStatus: 'Delivered', fulfilledAt: completedAt,
+        shipmentCreatedAt: '2026-06-02T08:00:00.000Z', shipmentUpdatedAt: trackingAt,
+        trackingNumber: 'G3-TRACK', trackingUrl: 'https://tracking.example/g3', carrier: 'LEGACY-CARRIER',
+        shopifyDeliverySync: null, assignmentHistory: [], timeline: [],
+        shipmentExecution: { ...orderWithShipmentSummary.shipmentExecution!, provider: 'kargonomi', providerCarrierName: 'aras_kargo',
+          shipmentStatus: 'delivered', trackingNumber: 'G3-TRACK', trackingUrl: 'https://tracking.example/g3',
+          labelUrl: 'https://example.com/g3.pdf', lastProviderResponseAt: providerAt,
+          providerResponseSummary: { ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+            ok: true, providerError: null, dryRun: false, disabledGates: [] } }, ...overrides };
+    }
+    const synced: NonNullable<OrderDetail['shopifyFulfillmentSync']> = {
+      status: 'synced', fulfillmentOrderIdPresent: true, fulfillmentIdPresent: true,
+      syncStatus: 'synced', skippedReason: null, errorMessage: null, lastAttemptedAt: trackingAt,
+    };
+    function noMutations() {
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, updateNavlungoShipmentExecutionMock, createReturnShipmentLabelMock,
+        probeShopifyReturnLabelUploadMock, probeTryOtoReturnDetailsMock, probeTryOtoReturnLinkMock, probeTryOtoReturnAwbPrintMock,
+        rejectOrderMock, planAllocationSplitMock, splitAllocationMock]) expect(fn).not.toHaveBeenCalled();
+    }
+    beforeEach(() => {
+      actor();
+      getOrderMock.mockResolvedValue(order());
+    });
+
+    it.each(['admin', 'vendor', 'support', 'finance'] as const)(
+      'preserves independent completion, tracking and delivery dates for %s with no native history', async (role) => {
+        actor(role);
+        renderOrderDetail();
+        await screen.findByText('Fulfillment synced', { exact: true });
+        const completion = getOrderActivityRow('Fulfillment synced');
+        expect(within(completion).getByText(formatTimelineDateForTest(completedAt))).toBeInTheDocument();
+        expect(completion).not.toHaveTextContent(formatTimelineDateForTest(trackingAt));
+        expect(completion).not.toHaveTextContent(formatTimelineDateForTest(providerAt));
+        expect(getOrderActivityRow('Tracking synced')).toHaveTextContent(formatTimelineDateForTest(trackingAt));
+        expect(getOrderActivityRow('Delivered')).toHaveTextContent(formatTimelineDateForTest(providerAt));
+        expect(getOrderActivityRow('Shipment created')).toHaveTextContent(formatTimelineDateForTest('2026-06-02T08:00:00.000Z'));
+        expect(screen.getAllByText('Fulfillment synced', { exact: true })).toHaveLength(1);
+        expect(screen.queryByText('Shopify delivery synced', { exact: true })).not.toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'Open tracking', exact: true })).toHaveAttribute('href', 'https://tracking.example/g3');
+        const fulfillment = screen.getByRole('heading', { name: 'Fulfillment', exact: true }).closest('article')!;
+        expect(within(fulfillment).getByText('Aras Kargo')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Open label PDF' })).toBeInTheDocument();
+        expect(getOrderMock).toHaveBeenCalledTimes(1);
+        noMutations();
+      });
+
+    it.each([undefined, null])('does not infer completion from raw Fulfilled without timestamp/sync (%s)', async (fulfilledAt) => {
+      getOrderMock.mockResolvedValue(order({ fulfilledAt: fulfilledAt as OrderDetail['fulfilledAt'], shopifyFulfillmentSync: null }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByText('Fulfillment synced', { exact: true })).not.toBeInTheDocument();
+      noMutations();
+    });
+
+    it.each([
+      ['synced', undefined], ['synced', null], ['fulfillment ID', undefined], ['fulfillment ID', null],
+    ] as const)('shows %s evidence with missing time %s using the existing dash', async (evidence, fulfilledAt) => {
+      getOrderMock.mockResolvedValue(order({ fulfilledAt: fulfilledAt as OrderDetail['fulfilledAt'],
+        shopifyFulfillmentSync: evidence === 'synced' ? { ...synced, fulfillmentIdPresent: false } : { ...synced, status: 'pending' } }));
+      renderOrderDetail();
+      await screen.findByText('Fulfillment synced', { exact: true });
+      const row = getOrderActivityRow('Fulfillment synced');
+      expect(row.querySelector('small')).toHaveTextContent(/^—$/);
+      for (const otherTime of [trackingAt, providerAt, orderWithShipmentSummary.date]) {
+        expect(row).not.toHaveTextContent(formatTimelineDateForTest(otherTime));
+      }
+      noMutations();
+    });
+
+    it('does not replace an invalid supplied completion time with another event time', async () => {
+      getOrderMock.mockResolvedValue(order({ fulfilledAt: 'invalid-completion-date' }));
+      renderOrderDetail();
+      await screen.findByText('Fulfillment synced', { exact: true });
+      expect(getOrderActivityRow('Fulfillment synced').querySelector('small')).toHaveTextContent(/^—$/);
+      noMutations();
+    });
+
+    it.each(['admin', 'vendor', 'support', 'finance'] as const)(
+      'shows equivalent native completion evidence once for %s without losing its current date', async (role) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order({ timeline: [
+          { label: 'fulfillment synced', at: '2026-06-02T12:00:00+03:00' },
+        ] }));
+        renderOrderDetail();
+        await screen.findByText('Fulfillment synced', { exact: true });
+        const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+        expect(within(activity).getAllByText(/fulfillment synced/i)).toHaveLength(1);
+        expect(getOrderActivityRow('Fulfillment synced')).toHaveTextContent(formatTimelineDateForTest(completedAt));
+        noMutations();
+      });
+
+    it('does not discard a native completion with a different timestamp', async () => {
+      actor('admin');
+      const historicalAt = '2026-06-01T09:00:00.000Z';
+      getOrderMock.mockResolvedValue(order({ timeline: [{ label: 'fulfillment synced', at: historicalAt }] }));
+      renderOrderDetail();
+      await screen.findByText('Fulfillment synced', { exact: true });
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      const rows = within(activity).getAllByText(/fulfillment synced/i).map((title) => title.closest('li')!);
+      expect(rows).toHaveLength(2);
+      expect(rows.some((row) => row.textContent?.includes(formatTimelineDateForTest(completedAt)))).toBe(true);
+      expect(rows.some((row) => row.textContent?.includes(formatTimelineDateForTest(historicalAt)))).toBe(true);
+      noMutations();
+    });
+
+    it('preserves supplied fulfilledAt without shipment or tracking evidence', async () => {
+      getOrderMock.mockResolvedValue(order({ shipmentExecution: null, trackingNumber: undefined, trackingUrl: undefined,
+        carrier: undefined, shipmentCreatedAt: undefined, shipmentUpdatedAt: undefined, shippingStatus: 'Awaiting Shipment',
+        shopifyFulfillmentSync: null }));
+      renderOrderDetail();
+      await screen.findByText('Fulfillment synced', { exact: true });
+      expect(getOrderActivityRow('Fulfillment synced')).toHaveTextContent(formatTimelineDateForTest(completedAt));
+      expect(screen.queryByText('Shopify delivery synced', { exact: true })).not.toBeInTheDocument();
+      noMutations();
+    });
+
+    it('preserves the panel pending-reassignment event condition without enabling actions', async () => {
+      getOrderMock.mockResolvedValue(order({ allocationStatus: 'pending_reassignment', reassignmentRequired: true }));
+      renderOrderDetail();
+      await screen.findByText('Fulfillment synced', { exact: true });
+      expect(getOrderActivityRow('Fulfillment synced')).toHaveTextContent(formatTimelineDateForTest(completedAt));
+      expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+      noMutations();
+    });
+
+    const terminalCases: Array<[string, Partial<OrderDetail>]> = [
+      ['cancelled', { isCancelled: true, carrier: undefined, trackingNumber: undefined, trackingUrl: undefined,
+        shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending' }],
+      ['conflict', { isCancelled: true, isCancellationConflict: true }],
+      ['refunded', { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' } }],
+      ['blocked', { allocationStatus: 'vendor_blocked' }],
+    ];
+    it.each((['admin', 'vendor', 'support', 'finance'] as const).flatMap((role) =>
+      terminalCases.map(([state, overrides]) => ({ role, state, overrides }))))(
+      'suppresses the new completion event for $role in canonical $state state', async ({ role, overrides }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order({ shopifyFulfillmentSync: synced, ...overrides }));
+        renderOrderDetail();
+        await screen.findByText('Order #1028');
+        expect(screen.queryByText('Fulfillment synced', { exact: true })).not.toBeInTheDocument();
+        noMutations();
+      });
+
+    it('does not retain a previous allocation completion or accept its delayed refetch', async () => {
+      const late = deferred<OrderDetail>();
+      const next = deferred<OrderDetail>();
+      const nextAt = '2026-06-03T09:00:00.000Z';
+      let reads = 0;
+      getOrderMock.mockImplementation((id) => id === 'alloc-yalispor-2099' ? next.promise
+        : ++reads === 1 ? Promise.resolve(order()) : late.promise);
+      const { queryClient } = renderOrderDetail();
+      await screen.findByText('Fulfillment synced', { exact: true });
+      const oldRow = getOrderActivityRow('Fulfillment synced');
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      expect(oldRow).not.toBeInTheDocument();
+      await act(async () => late.resolve(order()));
+      expect(screen.queryByText('Fulfillment synced', { exact: true })).not.toBeInTheDocument();
+      await act(async () => next.resolve(order({ id: 'alloc-yalispor-2099', sourceShopifyOrderNumber: '#2099', fulfilledAt: nextAt })));
+      await screen.findByText('Fulfillment synced', { exact: true });
+      expect(getOrderActivityRow('Fulfillment synced')).toHaveTextContent(formatTimelineDateForTest(nextAt));
+      expect(getOrderActivityRow('Fulfillment synced')).not.toHaveTextContent(formatTimelineDateForTest(completedAt));
+      noMutations();
+    });
+
+    it('keeps delayed Vendor A completion evidence out of Vendor B', async () => {
+      actor('vendor', true);
+      const late = deferred<OrderDetail>();
+      const nextAt = '2026-06-03T09:00:00.000Z';
+      let reads = 0;
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? order({ assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099', fulfilledAt: nextAt })
+        : ++reads === 1 ? order() : late.promise);
+      const { queryClient } = renderOrderDetail();
+      await screen.findByText('Fulfillment synced', { exact: true });
+      const oldRow = getOrderActivityRow('Fulfillment synced');
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(oldRow).not.toBeInTheDocument();
+      await screen.findByText('Order #2099');
+      expect(getOrderActivityRow('Fulfillment synced')).toHaveTextContent(formatTimelineDateForTest(nextAt));
+      await act(async () => late.resolve(order()));
+      expect(getOrderActivityRow('Fulfillment synced')).toHaveTextContent(formatTimelineDateForTest(nextAt));
+      expect(getOrderActivityRow('Fulfillment synced')).not.toHaveTextContent(formatTimelineDateForTest(completedAt));
+      noMutations();
+    });
+  });
 });

@@ -539,3 +539,53 @@ Branch: `codex/p04-02d-carrier-parity`. Scope: G2 only; G1 remains present.
 - No Orders/backend/API/auth/Finance/tracking/label integration or mutation handler
   changed. G3 and U1-U10 remain outside scope. No full-width implementation, panel
   removal, merge, deployment or P04 completion is claimed.
+
+## P04-02E — G3 independent fulfillment completion evidence (2026-11-23)
+
+Baseline: `06eda77c2de330a1899bd61d9295346473a3de37` (`origin/main`, PR #77 merged).
+Branch: `codex/p04-02e-fulfillment-timestamp`. Scope: G3 only.
+
+- Original loss: the panel has a separate Fulfillment synced entry whose date is
+  fulfilledAt. Detail only used fulfilledAt as a fallback for tracking, Delivered
+  and Last update; newer shipment/provider timestamps could obscure that evidence.
+- Existing source: Orders service exposes allocation.fulfillment.fulfilledAt via
+  toIsoString; the existing real mapper passes dto.fulfilledAt through (null becomes
+  undefined). Native timeline mapping comes from assignment history and does not
+  guarantee a fulfillment completion event. No backend/DTO/mapper change is needed.
+- `src/pages/OrderDetailPage.tsx`: adds one read-only Fulfillment synced Activity
+  event using order.fulfilledAt directly. Its condition matches the existing panel:
+  no canonical operational story, and either fulfilledAt, fulfillmentIdPresent or
+  shopifyFulfillmentSync.status === synced. Raw Fulfilled status alone does not
+  create the event. Pending reassignment retains the existing panel condition.
+- When sync evidence exists without a completion date, the unchanged shared
+  OperationalTimeline date formatter displays its existing `—`. Invalid supplied
+  dates also use that formatter fallback; no shipment/order/provider/delivery time
+  is substituted. Display formatting does not change timestamp authority.
+- Exact native fulfillment-synced labels (case-normalized) with the same valid
+  instant as supplied fulfilledAt are replaced by this single current evidence
+  entry before existing grouping. Date parsing is used only to compare identity,
+  not to generate the displayed timestamp. Native entries with a different date
+  remain intact; no fuzzy event-name or history inference is introduced.
+- Admin, Vendor, Support and Finance retain authorized read access. Cancellation,
+  conflict, refund-terminal and Vendor-blocked stories suppress the new event.
+  Existing native timeline, operational rules, G1/G2, Delivered-sync, tracking,
+  delivery and Finance authorities otherwise remain unchanged. No query/effect,
+  shipment action, financial operation or permission is added.
+- `src/pages/OrderDetailPage.test.tsx`: 36 new mocked G3 cases cover independent
+  dates, all four roles, empty/equivalent/different native evidence, UTC-equivalent
+  duplicate handling, missing/null/invalid dates, timestamp-only evidence, missing
+  tracking/shipment data, pending reassignment, all four terminal stories, G1/G2
+  preservation and delayed previous-allocation/Vendor responses. Mutations are
+  explicitly asserted unused during rendering.
+- One complete two-file execution: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-02e-tests.json`:
+  **545 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Detail 411, Orders 134; new G3 36).
+  No test correction or repeat run was needed. Frontend TypeScript/Vite build and
+  git diff --check pass; existing bundle-size warning remains.
+- Third changed file: this appended record. No shared timeline, API, backend,
+  Shopify, financial, authorization or operational timestamp semantics changed.
+  No local PostgreSQL, Docker, live provider/Shopify, production or browser smoke
+  was used. Mocked component results are not real-backend/production evidence.
+  Draft PR/CI state is reported separately. U1-U10 and full-width/panel-removal
+  acceptance remain outside scope; no P04 completion, merge or deployment claimed.
