@@ -589,3 +589,37 @@ Branch: `codex/p04-02e-fulfillment-timestamp`. Scope: G3 only.
   was used. Mocked component results are not real-backend/production evidence.
   Draft PR/CI state is reported separately. U1-U10 and full-width/panel-removal
   acceptance remain outside scope; no P04 completion, merge or deployment claimed.
+
+## P04-U2 — Admin historical Vendor integration acceptance (2026-11-23)
+
+Baseline: `8178f81502a8e56b382fb680d53550721705e812` (`origin/main`).
+Branch: `codex/p04-u2-historical-integration`. Scope: U2 only.
+
+- Original acceptance difference: the Orders panel masks Vendor integration status
+  for canonical terminal stories, while Admin Order Detail retains the supplied
+  value inside the existing Shopify order snapshot disclosure.
+- Owner-approved contract: Admin may inspect existing historical integration
+  evidence for cancelled/conflict/refund-terminal/Vendor-blocked orders. This is
+  read-only snapshot evidence, not current shipment/fulfillment authority or a new
+  permission. The existing Detail already satisfies this contract; no production
+  component, Orders panel, API, mapper, backend, role or integration code changed.
+- `src/pages/OrderDetailPage.test.tsx`: 27 added cases cover active and all four
+  canonical terminal stories; supplied status/note/provider/external tracking and
+  shipped-at evidence; absent/null/empty/whitespace status and absent snapshot;
+  Admin-only visibility across Vendor/Support/Finance; no shipment/tracking/Shopify
+  mutations; allocation navigation and delayed previous-allocation/Vendor responses.
+  External tracking retains its existing target/rel safety attributes. Canonical
+  terminal presentation and Smart Label restrictions remain in force; snapshot
+  status is not substituted into current operational or Fulfillment presentation.
+- One two-file execution: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-u2-tests.json`:
+  **572 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Detail 438, Orders 134;
+  new U2 cases 27). No failed cases, assertion weakening or repeat run.
+- `npm run build` (TypeScript + Vite) and `git diff --check` passed; the existing
+  chunk-size warning remains. Tests use frontend mocks; no local PostgreSQL,
+  Docker, live Shopify/provider operation, production access or browser smoke ran.
+- Changed files: this appended record and the existing Order Detail test file.
+  U2 has local acceptance evidence and awaits GitHub CI/review; it is not marked
+  merged or fully complete. No panel removal, role-model change, U3-U10 work,
+  full-width implementation, merge, deployment or P04 completion is claimed.
