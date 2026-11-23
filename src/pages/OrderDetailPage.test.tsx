@@ -5874,7 +5874,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('kargonomi')).toBeInTheDocument();
+    const carrierRow = (await screen.findByText('Carrier', { exact: true })).closest('.summary-row');
+    expect(carrierRow).not.toBeNull();
+    expect(within(carrierRow as HTMLElement).getByText('Kargonomi', { exact: true })).toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO return shipment')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('Try OTO status refresh')).not.toBeInTheDocument();
@@ -11062,6 +11064,169 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Open label PDF' }));
       expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/next.pdf', '_blank', 'noopener,noreferrer');
       expectNoShipmentMutations();
+    });
+  });
+
+  describe('P04-02D G2 carrier presentation', () => {
+    const openWindow = vi.fn();
+    function actor(role: 'admin' | 'vendor' | 'support' | 'finance' = 'vendor', restricted = false, canSwitchVendors = role === 'admin') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role,
+        vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal', status: restricted ? 'inactive' : 'active' },
+          { vendorId: 'yalispor', vendorName: 'Yalıspor' }], canSwitchVendors, defaultVendorId: 'sporjinal' });
+    }
+    function shipment(overrides: Partial<NonNullable<OrderDetail['shipmentExecution']>> = {}) {
+      return { ...orderWithShipmentSummary.shipmentExecution!, provider: 'kargonomi' as const,
+        providerCarrierName: 'aras_kargo', shipmentStatus: 'created' as const,
+        trackingNumber: 'G2-TRACK', trackingUrl: 'https://tracking.example/g2', labelUrl: 'https://example.com/g2.pdf',
+        providerResponseSummary: { ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          providerError: null, dryRun: false, disabledGates: [], ok: true }, ...overrides };
+    }
+    function order(overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, carrier: 'LEGACY-CARRIER', trackingNumber: undefined, trackingUrl: undefined,
+        fulfilledAt: undefined, shippingStatus: 'In Transit', shipmentExecution: shipment(), ...overrides };
+    }
+    async function carrierValues() {
+      await screen.findByText(/Order #(?:1028|2099)/);
+      const article = screen.getByRole('heading', { name: 'Fulfillment', exact: true }).closest('article')!;
+      return within(article).queryAllByText('Carrier', { exact: true }).map((label) => label.nextElementSibling?.textContent?.trim());
+    }
+    function noMutations() {
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, updateNavlungoShipmentExecutionMock, createReturnShipmentLabelMock,
+        probeShopifyReturnLabelUploadMock, probeTryOtoReturnDetailsMock, probeTryOtoReturnLinkMock, probeTryOtoReturnAwbPrintMock]) {
+        expect(fn).not.toHaveBeenCalled();
+      }
+    }
+    beforeEach(() => {
+      actor();
+      vi.stubGlobal('open', openWindow);
+      openWindow.mockReset();
+      getOrderMock.mockResolvedValue(order());
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it.each((['admin', 'vendor', 'support', 'finance'] as const).flatMap((role) =>
+      (['active', 'fulfilled'] as const).map((allocationStatus) => ({ role, allocationStatus }))))(
+      'preserves the panel carrier evidence for $role on $allocationStatus without duplicating fields or changing G1', async ({ role, allocationStatus }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order({ allocationStatus, fulfillmentActionAvailable: allocationStatus === 'active' }));
+        renderOrderDetail();
+        expect(await carrierValues()).toEqual(['Aras Kargo']);
+        expect(screen.getByRole('link', { name: 'Open tracking', exact: true })).toHaveAttribute('href', 'https://tracking.example/g2');
+        expect(screen.getAllByText('G2-TRACK').length).toBeGreaterThan(0);
+        await userEvent.click(screen.getByRole('button', { name: 'Open label PDF' }));
+        expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/g2.pdf', '_blank', 'noopener,noreferrer');
+        expect(getOrderMock).toHaveBeenCalledTimes(1);
+        if (role === 'admin') expect(screen.getByLabelText('Provider response summary')).toBeInTheDocument();
+        else expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
+        noMutations();
+      });
+
+    it.each([
+      ['carrier evidence without allocation carrier', { carrier: undefined }, 'Aras Kargo'],
+      ['formatted carrier alias', { shipmentExecution: shipment({ providerCarrierName: 'kargo_entegrator' }) }, 'Kargo Entegratör'],
+      ['provider fallback', { carrier: undefined, shipmentExecution: shipment({ providerCarrierName: null }) }, 'Kargonomi'],
+      ['allocation fallback', { shipmentExecution: shipment({ providerCarrierName: null }) }, 'LEGACY-CARRIER'],
+      ['blank carrier evidence', { shipmentExecution: shipment({ providerCarrierName: '   ' }) }, 'LEGACY-CARRIER'],
+      ['allocation without shipment', { shipmentExecution: null, carrier: 'DHL' }, 'DHL'],
+      ['all source evidence absent', { shipmentExecution: null, carrier: undefined }, 'Not available'],
+      ['Try OTO Sürat', { shipmentExecution: shipment({ provider: 'try_oto', providerCarrierName: 'surat kargo' }) }, 'Sürat Kargo'],
+      ['Try OTO allocation fallback', { shipmentExecution: shipment({ provider: 'try_oto', providerCarrierName: null }), carrier: 'DHL' }, 'DHL'],
+      ['Try OTO provider fallback', { shipmentExecution: shipment({ provider: 'try_oto', providerCarrierName: null }), carrier: undefined }, 'Try OTO'],
+      ['Try OTO self-reference fallback', { shipmentExecution: shipment({ provider: 'try_oto', providerCarrierName: null }), carrier: 'try_oto' }, 'Try OTO'],
+    ] satisfies Array<[string, Partial<OrderDetail>, string]>)(
+      'preserves %s without inventing carrier evidence', async (_name, overrides, expected) => {
+        actor('support');
+        getOrderMock.mockResolvedValue(order(overrides));
+        renderOrderDetail();
+        expect(await carrierValues()).toEqual([expected]);
+        noMutations();
+      });
+
+    it.each(['active', 'fulfilled'] as const)('preserves restricted Vendor carrier/G1 reads while %s mutation controls stay restricted', async (allocationStatus) => {
+      actor('vendor', true);
+      getOrderMock.mockResolvedValue(order({ allocationStatus, fulfillmentActionAvailable: allocationStatus === 'active' }));
+      renderOrderDetail();
+      expect(await carrierValues()).toEqual(['Aras Kargo']);
+      if (allocationStatus === 'active') expect(screen.getByRole('button', { name: 'Open shipping label' })).toBeDisabled();
+      await userEvent.click(screen.getByRole('button', { name: 'Open label PDF' }));
+      expect(openWindow).toHaveBeenCalledTimes(1);
+      noMutations();
+    });
+
+    const terminalCases: Array<[string, Partial<OrderDetail>]> = [
+      ['blocked', { allocationStatus: 'vendor_blocked' }],
+      ['cancelled', { isCancelled: true, carrier: undefined, shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending' }],
+      ['conflict', { isCancelled: true, isCancellationConflict: true }],
+      ['refunded', { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' } }],
+    ];
+    it.each((['admin', 'vendor', 'support', 'finance'] as const).flatMap((role) =>
+      terminalCases.map(([state, overrides]) => ({ role, state, overrides }))))(
+      'preserves existing $role terminal $state presentation without introducing current carrier evidence', async ({ role, state, overrides }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order({ fulfillmentActionAvailable: false, ...overrides }));
+        renderOrderDetail();
+        expect(await carrierValues()).toEqual(role === 'admin' ? [state === 'cancelled' ? 'Not available' : 'LEGACY-CARRIER'] : []);
+        expect(screen.queryByRole('region', { name: 'Shipment information' })).not.toBeInTheDocument();
+        noMutations();
+      });
+
+    it('leaves the Shopify tracking payload carrier unchanged when the displayed evidence differs', async () => {
+      actor('admin');
+      renderOrderDetail();
+      expect(await carrierValues()).toEqual(['Aras Kargo']);
+      noMutations();
+      await userEvent.click(screen.getByRole('button', { name: 'Sync tracking to Shopify' }));
+      await waitFor(() => expect(submitFulfillmentTrackingMock).toHaveBeenCalledExactlyOnceWith(orderWithoutShipment.id, {
+        trackingNumber: 'G2-TRACK', carrier: 'LEGACY-CARRIER', trackingUrl: 'https://tracking.example/g2', notifyCustomer: false,
+      }));
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it('does not retain another allocation carrier or its late refetch', async () => {
+      actor('support');
+      const late = deferred<OrderDetail>();
+      const next = deferred<OrderDetail>();
+      let reads = 0;
+      getOrderMock.mockImplementation((id) => id === 'alloc-yalispor-2099' ? next.promise
+        : ++reads === 1 ? Promise.resolve(order()) : late.promise);
+      const { queryClient } = renderOrderDetail();
+      expect(await carrierValues()).toEqual(['Aras Kargo']);
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      expect(screen.queryByText('Aras Kargo')).not.toBeInTheDocument();
+      await act(async () => late.resolve(order({ shipmentExecution: shipment({ providerCarrierName: 'OLD_CARRIER' }) })));
+      expect(screen.queryByText('Old Carrier')).not.toBeInTheDocument();
+      await act(async () => next.resolve(order({ id: 'alloc-yalispor-2099', sourceShopifyOrderNumber: '#2099',
+        shipmentExecution: shipment({ allocationId: 'alloc-yalispor-2099', providerCarrierName: 'DHL' }) })));
+      expect(await carrierValues()).toEqual(['DHL']);
+      noMutations();
+    });
+
+    it('keeps a delayed Vendor A carrier out of Vendor B', async () => {
+      actor('vendor', false, true);
+      const late = deferred<OrderDetail>();
+      let reads = 0;
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? order({ assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099', fulfillmentActionAvailable: false,
+          shipmentExecution: shipment({ vendorId: 'yalispor', providerCarrierName: 'DHL' }) })
+        : ++reads === 1 ? order() : late.promise);
+      const { queryClient } = renderOrderDetail();
+      expect(await carrierValues()).toEqual(['Aras Kargo']);
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(screen.queryByText('Aras Kargo')).not.toBeInTheDocument();
+      await screen.findByText('Order #2099');
+      expect(await carrierValues()).toEqual(['DHL']);
+      await act(async () => late.resolve(order({ shipmentExecution: shipment({ providerCarrierName: 'OLD_CARRIER' }) })));
+      expect(await carrierValues()).toEqual(['DHL']);
+      expect(screen.queryByText('Old Carrier')).not.toBeInTheDocument();
+      noMutations();
     });
   });
 });

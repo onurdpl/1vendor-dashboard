@@ -479,3 +479,63 @@ G1-27 existing tracking URL only. Orders panel remains unchanged.
   are reported separately; no merge/deployment is claimed. G2 carrier precedence,
   G3 fulfillment timestamp and U1-U10 remain outside this implementation. P04
   full-width/removal acceptance is not complete; do not remove the panel or begin P05.
+
+## P04-02D — G2 carrier presentation preservation (2026-11-22)
+
+Baseline: `2ae7528799e514918171ba7e29ff6c9d54fa783d` (`origin/main`, PR #76 merged).
+Branch: `codex/p04-02d-carrier-parity`. Scope: G2 only; G1 remains present.
+
+### Consumer analysis and bounded presentation change
+
+- `formatShopifyCarrierForShipment` supplies `shipmentShopifyCarrier`, which is
+  used by Shopify-sync eligibility, the tracking mutation payload and diagnostic
+  copy as well as the original Carrier UI. Changing that helper would change more
+  than presentation. Its implementation, calculation, action predicates, payload
+  and diagnostic consumers remain unchanged.
+- `getRailProviderLabel` is used only by the Orders panel. Its active source order
+  is formatted providerCarrierName, provider, allocation carrier, Provider pending;
+  canonical stories use Blocked. Orders production code remains unchanged.
+- `formatShippingProviderName` is shared by Orders, Detail and Vendor Profile UI,
+  tracking-label formatting, diagnostics and the original operational helper.
+  This shared formatter remains unchanged. Other providerCarrierName consumers
+  are existing Support context/diagnostic data, API types, backend DTO mapping
+  and a mock runtime fixture; none is modified.
+- `src/pages/OrderDetailPage.tsx`: adds a local display-only helper. Non-TryOto
+  meaningful providerCarrierName uses the same formatting as the panel. If absent
+  or blank, the existing Detail fallback remains allocation carrier, then provider.
+  This intentionally does not reorder the established fallback when no carrier
+  evidence exists: the panel's provider-before-allocation order is not substituted
+  into the Shopify payload or existing fallback contract.
+- Try OTO delegates to the unchanged helper, preserving Sürat Kargo normalization,
+  its existing supplied-name handling and allocation/Try OTO fallbacks. No provider
+  is newly mapped to a physical carrier. Missing evidence stays Not available.
+- The display value replaces only the existing active Carrier rows and adds one
+  Carrier row inside the existing G1 read-only section for its already-authorized
+  roles. No duplicate Carrier field or second shipment card is introduced.
+  Canonical terminal states retain their existing Detail historical presentation;
+  G1 remains suppressed there. Admin-only provider diagnostics remain Admin-only.
+
+### Validation and delivery boundaries
+
+- `src/pages/OrderDetailPage.test.tsx`: 40 new mocked cases cover four roles,
+  active/fulfilled/restricted states, source/blank/missing fallbacks, Try OTO/Sürat,
+  all four canonical terminal stories, G1 tracking/label access, delayed Vendor and
+  allocation responses, and an explicit mock tracking submission proving the
+  displayed carrier does not change the existing payload carrier.
+- Initial two-file run: **506 PASS / 3 FAIL / 0 SKIP**. One existing assertion
+  expected raw lowercase `kargonomi`; it now checks the exact Carrier row for the
+  supplied/formatted `Kargonomi` value, retaining all provider-control assertions.
+  Two new Admin cases incorrectly expected diagnostics to be hidden; they now
+  assert existing Admin visibility while non-Admin suppression remains asserted.
+  No application change or unrelated fix was made after that validation.
+- Focused corrected-case rerun: **3 PASS / 0 FAIL**, with 372 cases excluded by
+  the name filter. Across the records, all 509 distinct cases have passing evidence:
+  Order Detail 375 (40 new G2), Orders 134. Unchanged passing cases were not repeated.
+  Frontend TypeScript/Vite build and git diff --check pass; existing chunk warning
+  remains. G1 and previous parity regressions remain passing in the initial run.
+- Third changed file: this appended progress entry. Tests use frontend mocks only;
+  no PostgreSQL, Docker, live Shopify/provider, production operation or browser
+  smoke was executed. Draft PR/CI status is reported separately, not assumed PASS.
+- No Orders/backend/API/auth/Finance/tracking/label integration or mutation handler
+  changed. G3 and U1-U10 remain outside scope. No full-width implementation, panel
+  removal, merge, deployment or P04 completion is claimed.

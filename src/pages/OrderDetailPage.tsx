@@ -1158,6 +1158,15 @@ function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fa
   return fallbackCarrier?.trim() || (shipment ? formatShippingProviderName(shipment.provider) : '');
 }
 
+// Display only: the Shopify tracking payload keeps its existing carrier resolution.
+function formatShipmentCarrierForDisplay(shipment?: ShipmentExecution | null, fallbackCarrier?: string | null) {
+  if (shipment?.provider === 'try_oto') {
+    return formatShopifyCarrierForShipment(shipment, fallbackCarrier);
+  }
+  return formatShippingProviderName(shipment?.providerCarrierName)
+    || formatShopifyCarrierForShipment(shipment, fallbackCarrier);
+}
+
 const TRY_OTO_AUTO_REFRESH_DELAYS_MS = [30_000, 90_000, 180_000] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -4383,6 +4392,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
   const operationalStory = getOperationalStory(order);
   const hasCanonicalOperationalStory = operationalStory.state !== 'active_or_unknown';
+  const shipmentCarrierDisplay = hasCanonicalOperationalStory
+    ? shipmentShopifyCarrier
+    : formatShipmentCarrierForDisplay(visibleShipmentExecution, order.carrier);
   const paymentStatusLabel = hasCanonicalOperationalStory
     ? operationalStory.financeLabel
     : formatSnapshotValue(order.orderSnapshot?.financialStatus);
@@ -5647,6 +5659,10 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
             {showReadOnlyShipmentEvidence ? (
               <section className="tracking-summary-card order-tracking-summary-card" aria-label="Shipment information">
                 <div className="summary-row">
+                  <span>Carrier</span>
+                  <strong>{shipmentCarrierDisplay || 'Not available'}</strong>
+                </div>
+                <div className="summary-row">
                   <span>Tracking number</span>
                   <strong>{getShipmentTrackingNumber(order, visibleShipmentExecution) ?? 'Not available'}</strong>
                 </div>
@@ -5722,7 +5738,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                         <div className="tracking-summary-card order-tracking-summary-card order-shipment-compact-grid">
                           <div className="summary-row">
                             <span>Carrier</span>
-                            <strong className={shipmentShopifyCarrier ? '' : 'muted'}>{shipmentShopifyCarrier || 'Not available'}</strong>
+                            <strong className={shipmentCarrierDisplay ? '' : 'muted'}>{shipmentCarrierDisplay || 'Not available'}</strong>
                           </div>
                           <div className="summary-row">
                             <span>Status</span>
@@ -7031,7 +7047,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                     </div>
                     <div className="summary-row">
                       <span>Carrier</span>
-                      <strong className={order.carrier ? '' : 'muted'}>{formatShippingProviderName(order.carrier) || 'Not available'}</strong>
+                      <strong className={(hasCanonicalOperationalStory ? order.carrier : shipmentCarrierDisplay) ? '' : 'muted'}>
+                        {(hasCanonicalOperationalStory ? formatShippingProviderName(order.carrier) : shipmentCarrierDisplay) || 'Not available'}
+                      </strong>
                     </div>
                     <div className="summary-row">
                       <span>Tracking link</span>
