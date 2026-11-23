@@ -11432,4 +11432,153 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       noMutations();
     });
   });
+
+  describe('P04-U2 Admin historical integration evidence', () => {
+    const status = orderWithShipmentSummary.orderSnapshot!.vendorIntegrationStatus!;
+    const states: Array<{ state: string; overrides: Partial<OrderDetail>; terminal: boolean }> = [
+      { state: 'active', overrides: {}, terminal: false },
+      { state: 'cancelled', overrides: { isCancelled: true, carrier: undefined, trackingNumber: undefined,
+        trackingUrl: undefined, shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending' }, terminal: true },
+      { state: 'conflict', overrides: { isCancelled: true, isCancellationConflict: true }, terminal: true },
+      { state: 'refunded', overrides: { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' } }, terminal: true },
+      { state: 'blocked', overrides: { allocationStatus: 'vendor_blocked' }, terminal: true },
+    ];
+    function actor(role: CurrentUser['role'] = 'admin') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role,
+        vendorAccess: ['sporjinal', 'yalispor'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }, { vendorId: 'yalispor', vendorName: 'Yalıspor' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function order(overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, ...overrides };
+    }
+    function noMutations() {
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, updateNavlungoShipmentExecutionMock, createReturnShipmentLabelMock,
+        probeShopifyReturnLabelUploadMock, probeTryOtoReturnDetailsMock, probeTryOtoReturnLinkMock, probeTryOtoReturnAwbPrintMock,
+        rejectOrderMock, planAllocationSplitMock, splitAllocationMock, updateVendorShippingConfigMock,
+        syncKargonomiWarehouseDetailsMock]) expect(fn).not.toHaveBeenCalled();
+    }
+    async function snapshot() {
+      await screen.findByText('Order #1028');
+      const section = screen.getByRole('heading', { name: 'Shopify order snapshot' }).closest('article')!;
+      await userEvent.click(within(section).getByText('Show details', { exact: true }));
+      return section;
+    }
+    beforeEach(() => { actor(); getOrderMock.mockResolvedValue(order()); });
+
+    it.each(states)('preserves supplied Admin snapshot evidence in $state without making it current operational state', async ({ overrides, terminal }) => {
+      getOrderMock.mockResolvedValue(order(overrides));
+      renderOrderDetail();
+      const section = await snapshot();
+      const value = within(section).getByText('Vendor integration', { exact: true }).nextElementSibling;
+      expect(value).toHaveTextContent(new RegExp(`^${status}$`));
+      expect(value).toBeVisible();
+      expect(within(section).getByText('Order imported into Entegra')).toBeVisible();
+      expect(within(section).getByText('Provider A')).toBeVisible();
+      const tracking = within(section).getByRole('link', { name: 'Open external tracking' });
+      expect(tracking).toHaveAttribute('href', orderWithShipmentSummary.orderSnapshot!.vendorIntegrationTrackingUrl);
+      expect(tracking).toHaveAttribute('target', '_blank');
+      expect(tracking.getAttribute('rel')).toContain('noreferrer');
+      expect(within(section).getByText('External shipped at').nextElementSibling).not.toHaveTextContent(/^—$/);
+      expect(within(section).queryByRole('button')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Current order state')).not.toHaveTextContent(status);
+      const fulfillment = screen.getByRole('heading', { name: 'Fulfillment', exact: true }).closest('article')!;
+      expect(fulfillment).not.toHaveTextContent(status);
+      if (terminal) {
+        expect(screen.getByLabelText('Current order state')).toHaveClass('is-canonical');
+        expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Create shipment', exact: true })).not.toBeInTheDocument();
+      }
+      expect(getOrderMock).toHaveBeenCalledExactlyOnceWith(orderWithoutShipment.id,
+        expect.objectContaining({ vendorId: 'sporjinal' }));
+      noMutations();
+    });
+
+    it.each([undefined, null, '', '   '])('uses the existing dash for terminal missing status %j', async (value) => {
+      getOrderMock.mockResolvedValue(order({ ...states[1].overrides,
+        orderSnapshot: { ...orderWithoutShipment.orderSnapshot!, vendorIntegrationStatus: value } }));
+      renderOrderDetail();
+      const section = await snapshot();
+      expect(within(section).getByText('Vendor integration', { exact: true }).nextElementSibling).toHaveTextContent(/^—$/);
+      noMutations();
+    });
+
+    it('keeps a terminal record with no snapshot compatible', async () => {
+      getOrderMock.mockResolvedValue(order({ ...states[1].overrides, orderSnapshot: null }));
+      renderOrderDetail();
+      const section = await snapshot();
+      expect(within(section).getByText('Vendor integration', { exact: true }).nextElementSibling).toHaveTextContent(/^—$/);
+      expect(within(section).queryByText('Integration note')).not.toBeInTheDocument();
+      expect(within(section).queryByRole('link', { name: 'Open external tracking' })).not.toBeInTheDocument();
+      noMutations();
+    });
+
+    it.each((['vendor', 'support', 'finance'] as const).flatMap((role) => states.map((state) => ({ role, ...state }))))(
+      'does not disclose the Admin snapshot to authorized $role on $state', async ({ role, overrides }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order(overrides));
+        renderOrderDetail();
+        await screen.findByText('Order #1028');
+        expect(screen.queryByRole('heading', { name: 'Shopify order snapshot' })).not.toBeInTheDocument();
+        expect(screen.queryByText('Vendor integration', { exact: true })).not.toBeInTheDocument();
+        expect(screen.queryByText('Order imported into Entegra')).not.toBeInTheDocument();
+        expect(screen.queryByText('Provider A')).not.toBeInTheDocument();
+        expect(screen.queryByRole('link', { name: 'Open external tracking' })).not.toBeInTheDocument();
+        noMutations();
+      });
+
+    it('discards a prior allocation snapshot and ignores its delayed response', async () => {
+      const late = deferred<OrderDetail>();
+      const next = deferred<OrderDetail>();
+      let reads = 0;
+      getOrderMock.mockImplementation((id) => id === 'alloc-yalispor-2099' ? next.promise
+        : ++reads === 1 ? Promise.resolve(order(states[1].overrides)) : late.promise);
+      const { queryClient } = renderOrderDetail();
+      await snapshot();
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+      expect(screen.queryByText('Order imported into Entegra')).not.toBeInTheDocument();
+      await act(async () => late.resolve(order(states[1].overrides)));
+      expect(screen.queryByText('Order imported into Entegra')).not.toBeInTheDocument();
+      await act(async () => next.resolve(order({ id: 'alloc-yalispor-2099', sourceShopifyOrderNumber: '#2099',
+        ...states[1].overrides, orderSnapshot: { ...orderWithoutShipment.orderSnapshot!,
+          vendorIntegrationStatus: null, vendorIntegrationStatusMessage: null, vendorIntegrationProvider: null,
+          vendorIntegrationTrackingUrl: null, vendorIntegrationShippedAt: null } })));
+      await screen.findByText('Order #2099');
+      const section = screen.getByRole('heading', { name: 'Shopify order snapshot' }).closest('article')!;
+      await userEvent.click(within(section).getByText('Show details', { exact: true }));
+      expect(within(section).getByText('Vendor integration', { exact: true }).nextElementSibling).toHaveTextContent(/^—$/);
+      expect(section).not.toHaveTextContent('Order imported into Entegra');
+      noMutations();
+    });
+
+    it('does not restore Vendor A historical integration after an Admin switches to Vendor B', async () => {
+      const late = deferred<OrderDetail>();
+      let reads = 0;
+      getOrderMock.mockImplementation(async (_id, options) => options?.vendorId === 'yalispor'
+        ? order({ ...states[1].overrides, assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099',
+          orderSnapshot: { ...orderWithoutShipment.orderSnapshot!, vendorIntegrationStatus: null,
+            vendorIntegrationStatusMessage: null, vendorIntegrationProvider: null, vendorIntegrationTrackingUrl: null,
+            vendorIntegrationShippedAt: null } })
+        : ++reads === 1 ? order(states[1].overrides) : late.promise);
+      const { queryClient } = renderOrderDetail();
+      await snapshot();
+      act(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderWithoutShipment.id, 'sporjinal') }); });
+      await waitFor(() => expect(reads).toBe(2));
+      act(() => setCurrentVendorId('yalispor'));
+      expect(screen.queryByText('Order imported into Entegra')).not.toBeInTheDocument();
+      await screen.findByText('Order #2099');
+      await act(async () => late.resolve(order(states[1].overrides)));
+      const section = screen.getByRole('heading', { name: 'Shopify order snapshot' }).closest('article')!;
+      await userEvent.click(within(section).getByText('Show details', { exact: true }));
+      expect(within(section).getByText('Vendor integration', { exact: true }).nextElementSibling).toHaveTextContent(/^—$/);
+      expect(section).not.toHaveTextContent('Order imported into Entegra');
+      expect(section).not.toHaveTextContent('Provider A');
+      expect(within(section).queryByRole('link', { name: 'Open external tracking' })).not.toBeInTheDocument();
+      noMutations();
+    });
+  });
 });
