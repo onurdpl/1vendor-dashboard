@@ -11657,4 +11657,56 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
   });
 
+  describe('P04-U4-A1 canonical refund audience visibility', () => {
+    const nativeAt = '2025-10-02T09:30:00.000Z';
+    const noteAt = '2025-10-01T08:00:00.000Z';
+    const collisions = [
+      { name: 'no collision', labels: [] },
+      { name: 'refund collision', labels: ['refund completed'] },
+      { name: 'fulfillment collision', labels: ['fulfillment not required'] },
+      { name: 'both collisions', labels: ['refund completed', 'fulfillment not required'] },
+    ];
+    it.each((['vendor', 'admin'] as const).flatMap((role) => collisions.map((item) => ({ role, ...item }))))(
+      'preserves $role handling with $name without exposing hidden native data', async ({ role, labels }) => {
+        setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+          vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+          canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+        getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+          allocationStatus: 'active', fulfillmentActionAvailable: false,
+          operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+          fulfillmentStatus: 'Pending', shippingStatus: 'Awaiting Shipment',
+          trackingNumber: undefined, trackingUrl: undefined,
+          timeline: [...labels.map((label) => ({ label, at: nativeAt })),
+            { label: 'Internal review note', at: noteAt }] });
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+        for (const title of ['Refund completed', 'Fulfillment not required']) {
+          const rows = within(activity).getAllByText(new RegExp(`^${title}$`, 'i'));
+          expect(rows).toHaveLength(1);
+          const row = rows[0].closest('li')!;
+          const nativeWins = role === 'admin' && labels.includes(title.toLowerCase());
+          expect(row.querySelector('small')).toHaveTextContent(
+            nativeWins ? formatTimelineDateForTest(nativeAt) : /^—$/);
+          if (!nativeWins) expect(row).not.toHaveTextContent(formatTimelineDateForTest(nativeAt));
+        }
+        if (role === 'vendor') {
+          expect(activity).not.toHaveTextContent(formatTimelineDateForTest(nativeAt));
+          expect(within(activity).queryByText(/internal review note/i)).not.toBeInTheDocument();
+        } else {
+          const nativeNote = within(activity).getByText(/internal review note/i).closest('li')!;
+          expect(nativeNote).toHaveTextContent(formatTimelineDateForTest(noteAt));
+        }
+        expect(screen.getByLabelText('Current order state')).toHaveTextContent('Refunded');
+        expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Create shipment', exact: true })).not.toBeInTheDocument();
+        expect(getOrderMock).toHaveBeenCalledWith(orderWithoutShipment.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+        for (const mutation of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+          submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+          cancelShipmentExecutionMock, rejectOrderMock, planAllocationSplitMock, splitAllocationMock]) {
+          expect(mutation).not.toHaveBeenCalled();
+        }
+      });
+  });
+
 });

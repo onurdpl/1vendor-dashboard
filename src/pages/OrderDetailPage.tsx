@@ -4778,7 +4778,12 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       ? getLatestVendorBlockedAt(order.allocationStatus, safeArray(order.assignmentHistory))
       : order.assignmentBlockedAt;
     const existingTimelineTitles = new Set(
-      safeArray(order.timeline).map((entry) => normalizeTimelineTitle(getVendorTimelineLabel(entry.label))),
+      safeArray(order.timeline)
+        // Hidden native history cannot replace visible canonical refund evidence.
+        .filter((entry) => operationalStory.state !== 'refunded_completed' || isAdmin || (
+          !isRawProviderTimelineLabel(entry.label) && getNativeTimelineVisibility(entry.label) !== 'admin'
+        ))
+        .map((entry) => normalizeTimelineTitle(getVendorTimelineLabel(entry.label))),
     );
     const pushVendorBlockedEvent = (event: OperationalEventInput) => {
       if (!existingTimelineTitles.has(normalizeTimelineTitle(event.title))) {
