@@ -797,3 +797,59 @@ Branch: `codex/p04-u4-d1-cancellation-activity`. Scope: U4-D1 only.
   panel change. No live operations, database tests or browser smoke ran. General
   grouping/identity work, native-only cancellation and U4-C1 remain outside scope.
   No U4 closure, panel-removal readiness, merge or deployment is claimed.
+
+
+## P04-U4-C1 — Native assignment Activity source identity (2026-11-24)
+
+Baseline: `41ace90cd9773e3721be2fd9d37f5927ab6017c4` (`origin/main`, PR #84 merged).
+Branch: `codex/p04-u4-c1-native-activity-identity`. Scope: U4-C1 only.
+
+- Backend already returns persisted allocation-assignment history IDs. Frontend
+  mapAssignmentHistory previously dropped them, and native timeline mapping retained
+  only label/time. Different source records could therefore collapse by title/status/day.
+  Fixtures demonstrate this limitation; production occurrence remains UNKNOWN.
+- `src/lib/api/contracts.ts`: optional AssignmentHistoryEntry.id and optional
+  OrderDetail.timeline.assignmentHistoryId retain compatibility with legacy/mock data.
+- `src/services/real/orders.ts`: retain the exact nonblank string DTO history.id,
+  then pass it into timeline.assignmentHistoryId. Missing, null, blank or nonstring
+  input does not create a source identity. Whitespace is checked, not stripped from
+  a retained ID. Backend/DB/query contracts are unchanged.
+- `src/pages/OrderDetailPage.tsx`: native Activity carries this source ID separately
+  from its namespaced React presentation ID. Only native Tracking synced and Shipment
+  created rows use identity-aware grouping. Distinct source IDs in the same existing
+  bucket survive; repeated identical source-ID/bucket presentations remain one row.
+  The original bucket is still marked seen, preserving suppression of later derived
+  and legacy rows. Other labels, missing/invalid-ID grouping, canonical suppression,
+  sorting, Return identity, G3 equivalence and D1 cancellation boundaries are unchanged.
+- IDs are not shown as UI text. Existing raw-provider/audience filters remain active.
+  The two eligible normalized native headings already have Vendor-visible rules;
+  no fabricated same-heading hidden/visible role distinction is introduced. A
+  hidden-first fixture verifies Admin-only shipment history and raw-provider entries
+  do not gain Vendor visibility while distinct eligible tracking records survive.
+- Tests: 48 new mocked Order Detail cases and 7 real-frontend-mapper cases. Cover
+  tracking/shipment, Admin/Vendor, identical/same-day/different-day/invalid timestamps,
+  repeated/missing/blank/nonstring IDs, input reversal, derived-row equivalence,
+  scope/hidden-first/raw restrictions, creation/refund boundaries and no mutations.
+  Existing `orders.finance-summary.test.ts` is extended because it already supplies
+  a real getOrder DTO fixture; no financial semantics or calculations change.
+- Finalized tests on original source: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/services/real/orders.finance-summary.test.ts -t 'P04-U4-C1' --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-u4-c1-red-final.json`:
+  **31 PASS / 24 FAIL**, 515 existing tests outside the selected filter. Failures:
+  2 lost-ID mapper cases and 22 native-row preservation cases. An earlier authoring
+  run also had 2 creation-count expectations that omitted the separate-day order
+  snapshot row; corrected before this baseline proof.
+- Corrected source validation: OrderDetailPage, OrdersPage, orderOperationalStory,
+  real orders finance-summary/auth/economic-transfer/shipments test files:
+  **725 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (561 + 134 + 12 + 9 + 2 + 6 + 1).
+  Includes all 55 new C1 cases and existing U3/U4-A1/U4-B1/U4-D1/G3 regressions.
+  JSON report: `/private/tmp/sporgym-p04-u4-c1-tests.json`.
+- `npm run build` (TypeScript/Vite) and `git diff --check` passed; existing bundle
+  size warning remains. Changed files: contracts, real orders mapper, Order Detail,
+  its tests, existing real orders finance-summary tests and this entry.
+- No database, provider/Shopify operation, browser smoke or production verification.
+  No backend writers, operational rules, provider fingerprints or inactive Navlungo/
+  TryOto behavior changed. C1 cannot restore history absent from current data sources.
+  General grouping, provider-event identity, native-only cancellation and U4-C2
+  remain outside scope. Draft PR/CI is reported separately; no U4 closure, panel
+  removal, merge or deployment is claimed.

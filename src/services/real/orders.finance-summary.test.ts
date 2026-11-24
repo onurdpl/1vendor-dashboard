@@ -109,4 +109,28 @@ describe('real orders allocation finance summary mapping', () => {
 
     expect(order).not.toHaveProperty('allocationFinanceSummary');
   });
+  describe('P04-U4-C1 persisted assignment identity mapping', () => {
+    it.each(['history-original-A', '  history-exact-B  '])('preserves the exact source ID %s through history and timeline', async (id) => {
+      const entry = { id, action: 'tracking_added', fromVendorId: 'vendor-1', toVendorId: 'vendor-1',
+        reason: null, actorUserId: null, createdAt: '2026-06-02T09:00:00.000Z' };
+      fetchMock.mockResolvedValue(new Response(JSON.stringify({ ...orderDetailResponse(), assignmentHistory: [entry] }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
+      const order = await getOrder('allocation-1', { vendorId: 'vendor-1' });
+      expect(order.assignmentHistory[0]).toMatchObject({ id, action: 'tracking_added', createdAt: entry.createdAt });
+      expect(order.timeline[0]).toEqual({ assignmentHistoryId: id, label: 'tracking added', at: entry.createdAt });
+      expect((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).method ?? 'GET').toBe('GET');
+    });
+    it.each([undefined, null, '', '   ', 42])('does not manufacture a source identity for invalid input %s', async (id) => {
+      fetchMock.mockResolvedValue(new Response(JSON.stringify({ ...orderDetailResponse(), assignmentHistory: [
+        { id, action: 'shipment_created', fromVendorId: 'vendor-1', toVendorId: 'vendor-1', reason: null,
+          actorUserId: null, createdAt: '2026-06-02T09:00:00.000Z' },
+      ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      const order = await getOrder('allocation-1', { vendorId: 'vendor-1' });
+      expect(order.assignmentHistory[0]).not.toHaveProperty('id', expect.anything());
+      expect(order.timeline[0]).not.toHaveProperty('assignmentHistoryId', expect.anything());
+      expect(order.timeline[0]).toMatchObject({ label: 'shipment created', at: '2026-06-02T09:00:00.000Z' });
+    });
+  });
+
 });

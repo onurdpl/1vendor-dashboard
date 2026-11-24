@@ -701,6 +701,7 @@ export type AssignmentHistoryAction =
   | 'economic_transfer_retry_completed';
 
 export type AssignmentHistoryEntry = {
+  id?: string;
   action: AssignmentHistoryAction;
   fromVendorId: VendorId | null;
   toVendorId: VendorId;
@@ -998,7 +999,7 @@ export type OrderDetail = OrderSummary & {
   lineItems: OrderLineItem[];
   items: OrderLineItem[];
   orderSnapshot?: OrderIntegrationSnapshot | null;
-  timeline: Array<{ label: string; at: string }>;
+  timeline: Array<{ label: string; at: string; assignmentHistoryId?: string }>;
   shipmentExecution?: ShipmentExecution | null;
   shopifyFulfillmentSync?: {
     status: 'synced' | 'pending' | 'failed' | 'not_available';
