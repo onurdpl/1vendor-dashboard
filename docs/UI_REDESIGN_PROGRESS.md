@@ -914,8 +914,8 @@ Branch: `codex/p04-u4-f3-admin-return-history-identity`. Scope: U4-F3 only.
   returned to vendor` contains `return`, so the general title/status/UTC-day
   grouping could collapse distinct records from the same day. Production occurrence
   remains UNKNOWN.
-- Test first on original source: 12 focused mocked cases, **8 PASS / 4 FAIL / 0
-  SKIP / 0 PENDING**. Distinct persisted IDs with identical timestamps, different
+- Test first on original source: 12 focused mocked cases, **8 PASS / 4 FAIL / 587
+  FILTERED (reported as skipped) / 0 PENDING**. Distinct persisted IDs with identical timestamps, different
   times on one UTC day, invalid timestamps and reversed source order each lost a
   row. This proves the component behavior for existing-contract inputs, not a
   production incident.
@@ -931,7 +931,7 @@ Branch: `codex/p04-u4-f3-admin-return-history-identity`. Scope: U4-F3 only.
   U3 dates and G3 completion remain covered by existing regressions.
 - Changed files: `src/pages/OrderDetailPage.tsx`,
   `src/pages/OrderDetailPage.test.tsx`, this progress document. Focused corrected
-  tests: **12 PASS / 0 FAIL / 0 SKIP / 0 PENDING**. Combined Order Detail, Orders,
+  tests: **12 PASS / 0 FAIL / 587 FILTERED (reported as skipped) / 0 PENDING**. Combined Order Detail, Orders,
   operational story and relevant mapper suites: **754 PASS / 0 FAIL / 0 SKIP /
   0 PENDING**. `npm run build` and `git diff --check` passed; existing bundle-size
   warning remains. Frontend mocks only; no database, browser or live provider call.
