@@ -748,3 +748,52 @@ Branch: `codex/p04-u4-b1-distinct-return-activity`. Scope: U4-B1 only.
   General same-day tracking/shipment grouping, broader audience interactions,
   Admin canonical/native precedence, cancellation mapping and ordering remain
   separate U4 work. No U4 closure, panel removal, merge or deployment is claimed.
+
+
+## P04-U4-D1 — Canonical-present cancellation Activity safety (2026-11-24)
+
+Baseline: `9bf1e95f5a51a560fc4ad7789a77ce3e48e9a19d` (`origin/main`, PR #83 merged).
+Branch: `codex/p04-u4-d1-cancellation-activity`. Scope: U4-D1 only.
+
+- Original fixture-reproduced defect: when canonical cancellation existed, literal
+  native `Shopify order cancelled` history could appear to Admin as a second,
+  misleading Order created row at the history timestamp. A label-only correction
+  would instead risk suppressing canonical cancellation and losing cancelledAt.
+  Production existence of this native history action remains UNKNOWN.
+- `src/pages/OrderDetailPage.tsx`: only in `shopify_order_cancelled` or
+  `shopify_order_cancelled_conflict`, exclude the exact normalized literal native
+  cancellation entry from the Activity input used by both title suppression and
+  native event composition. Matching uses existing trim/lowercase normalization,
+  not substring inference. Canonical evidence therefore remains independent of the
+  native entry at both suppression/grouping stages. Persisted history is untouched.
+- Canonical labels, cancelledAt, cancellation-conflict review messaging and existing
+  missing-canonical-date assignment fallback remain unchanged. The fallback is not
+  reclassified as authoritative cancellation time. Admin-only native data is not
+  exposed to Vendor. Similar unknown labels and ordinary Order created/received
+  mapping retain existing behavior; no global label/dedup/ordering change.
+- Native-only cancellation presentation is deliberately unchanged, including its
+  existing misleading Admin creation label. It lacks verified cancellation-time
+  semantics and a separate approved display contract. That limitation requires a
+  future owner decision; this change does not claim to resolve it.
+- `src/pages/OrderDetailPage.test.tsx`: 35 new mocked cases cover normal/conflict,
+  Admin/Vendor, no collision, identical/same-day/different-day native times,
+  missing/invalid native time, legacy canonical fallback, native-only preservation,
+  ordinary creation/received labels, exact-match scope, scoped order access and no
+  mutation calls. Canonical rows retain their reason and timestamp presentation.
+- Original source test-first execution: `npm run test --
+  src/pages/OrderDetailPage.test.tsx -t 'P04-U4-D1 canonical-present cancellation Activity'
+  --reporter=json --outputFile=/private/tmp/sporgym-p04-u4-d1-red.json`:
+  **23 PASS / 12 FAIL**; 478 existing tests were outside the selected filter.
+  All failures were extra misleading Admin Order created rows in collision cases.
+- Corrected source: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx src/lib/orderOperationalStory.test.ts --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-u4-d1-tests.json`:
+  **659 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Detail 513, Orders 134, story 12).
+  All 35 D1 tests and existing U3/U4-A1/U4-B1/G3, terminal and isolation regressions pass.
+- `npm run build` (TypeScript/Vite) and `git diff --check` passed; existing bundle
+  size warning remains. Changed files: the component, its test file and this entry.
+  Draft PR/CI status is reported separately; local PASS is not GitHub CI PASS.
+- No backend, mapper/DTO, provider, Finance, database, Shopify, permission or Orders
+  panel change. No live operations, database tests or browser smoke ran. General
+  grouping/identity work, native-only cancellation and U4-C1 remain outside scope.
+  No U4 closure, panel-removal readiness, merge or deployment is claimed.
