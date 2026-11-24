@@ -487,7 +487,7 @@ function groupOrderDetailTimelineEvents(events: OrderDetailActivityEvent[], audi
       ? returnRecordId : '';
     const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay, linkedReturnIdentity].join('|');
 
-    const nativeHistoryId = ['tracking synced', 'shipment created'].includes(normalizedTitle)
+    const nativeHistoryId = ['tracking synced', 'shipment created', 'admin returned to vendor'].includes(normalizedTitle)
       ? event.nativeAssignmentHistoryId : undefined;
     if (nativeHistoryId) {
       const nativeKey = JSON.stringify([eventKey, nativeHistoryId]);
