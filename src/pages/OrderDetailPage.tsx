@@ -4770,6 +4770,12 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     order.fulfilledAt || order.shopifyFulfillmentSync?.fulfillmentIdPresent || order.shopifyFulfillmentSync?.status === 'synced',
   );
   const fulfillmentCompletionTime = parseSafeDate(order.fulfilledAt)?.getTime();
+  const hasCanonicalCancellationStory = operationalStory.state === 'shopify_order_cancelled'
+    || operationalStory.state === 'shopify_order_cancelled_conflict';
+  // Keep canonical cancellation evidence independent of literal native history in this Activity.
+  const nativeActivityEntries = safeArray(order.timeline).filter((entry) =>
+    !hasCanonicalCancellationStory || normalizeTimelineTitle(entry.label) !== 'shopify order cancelled',
+  );
   const orderTimelineEvents: OperationalEventInput[] = [];
   orderTimelineEvents.push({
     id: 'order-created',
@@ -4782,7 +4788,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       ? getLatestVendorBlockedAt(order.allocationStatus, safeArray(order.assignmentHistory))
       : order.assignmentBlockedAt;
     const existingTimelineTitles = new Set(
-      safeArray(order.timeline)
+      nativeActivityEntries
         // Hidden native history cannot replace visible canonical refund evidence.
         .filter((entry) => operationalStory.state !== 'refunded_completed' || isAdmin || (
           !isRawProviderTimelineLabel(entry.label) && getNativeTimelineVisibility(entry.label) !== 'admin'
@@ -8326,7 +8332,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
               title="Activity"
               eyebrow=""
               events={groupOrderDetailTimelineEvents([
-                ...safeArray(order.timeline)
+                ...nativeActivityEntries
                   .filter((entry) => !isRawProviderTimelineLabel(entry.label))
                   .filter((entry) => !(showFulfillmentCompletion && fulfillmentCompletionTime !== undefined
                     && normalizeTimelineTitle(entry.label) === 'fulfillment synced'

@@ -11785,4 +11785,105 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
   });
 
+  describe('P04-U4-D1 canonical-present cancellation Activity', () => {
+    const orderAt = '2024-01-02T08:00:00.000Z';
+    const cancelledAt = '2026-06-02T11:00:00.000Z';
+    const blockedAt = '2026-06-01T09:00:00.000Z';
+    function actor(role: 'admin' | 'vendor') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function order(overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, date: orderAt, allocationStatus: 'active', isCancelled: true,
+        isCancellationConflict: false, cancelledAt, cancelReason: 'declined', assignmentHistory: [],
+        shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending', carrier: undefined,
+        trackingNumber: undefined, trackingUrl: undefined, fulfilledAt: undefined,
+        shipmentCreatedAt: undefined, shipmentUpdatedAt: undefined, timeline: [], ...overrides };
+    }
+    function noMutations() {
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, createReturnShipmentLabelMock, probeShopifyReturnLabelUploadMock,
+        rejectOrderMock, planAllocationSplitMock, splitAllocationMock]) expect(fn).not.toHaveBeenCalled();
+    }
+    const cases = [
+      { name: 'no native collision', native: false, nativeAt: cancelledAt },
+      { name: 'same instant', native: true, nativeAt: cancelledAt },
+      { name: 'different same-day instant', native: true, nativeAt: '2026-06-02T09:00:00.000Z' },
+      { name: 'different day', native: true, nativeAt: '2026-06-03T09:00:00.000Z' },
+      { name: 'missing native time', native: true, nativeAt: undefined as unknown as string },
+      { name: 'invalid native time', native: true, nativeAt: 'invalid-native-time' },
+      { name: 'legacy canonical fallback', native: true, nativeAt: cancelledAt, missingCanonical: true },
+    ];
+    it.each((['admin', 'vendor'] as const).flatMap((role) => [false, true].flatMap((conflict) =>
+      cases.map((item) => ({ role, conflict, ...item }))))) (
+      'preserves $role canonical cancellation conflict=$conflict with $name', async ({ role, conflict, native, nativeAt, missingCanonical }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order({ isCancellationConflict: conflict,
+          cancelledAt: missingCanonical ? null : cancelledAt,
+          assignmentBlockedAt: missingCanonical ? blockedAt : undefined,
+          timeline: native ? [{ label: 'Shopify order cancelled', at: nativeAt }] : [] }));
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+        const cancellation = within(activity).getAllByText('Shopify order cancelled', { exact: true });
+        expect(cancellation).toHaveLength(1);
+        const row = cancellation[0].closest('li')!;
+        expect(row.querySelector('small')).toHaveTextContent(formatTimelineDateForTest(missingCanonical ? blockedAt : cancelledAt));
+        expect(row).toHaveTextContent('Reason: declined.');
+        const creation = within(activity).getAllByText(/^Order created$/i);
+        expect(creation).toHaveLength(1);
+        expect(creation[0].closest('li')!.querySelector('small')).toHaveTextContent(formatTimelineDateForTest(orderAt));
+        if (conflict) {
+          expect(within(activity).getByText('Existing operational evidence')).toBeInTheDocument();
+          expect(screen.getByLabelText('Current order state')).toHaveTextContent('Review');
+        } else {
+          expect(within(activity).getByText('Fulfillment not required')).toBeInTheDocument();
+        }
+        expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Create shipment', exact: true })).not.toBeInTheDocument();
+        expect(getOrderMock).toHaveBeenCalledWith(orderWithoutShipment.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+        noMutations();
+      });
+
+    it.each(['admin', 'vendor'] as const)('leaves native-only cancellation history unchanged for %s', async (role) => {
+      actor(role);
+      getOrderMock.mockResolvedValue(order({ isCancelled: false, cancelledAt: undefined,
+        timeline: [{ label: 'Shopify order cancelled', at: cancelledAt }] }));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      expect(within(activity).queryByText('Shopify order cancelled')).not.toBeInTheDocument();
+      const rows = within(activity).getAllByText(/^Order created$/i).map((title) => title.closest('li')!);
+      expect(rows).toHaveLength(role === 'admin' ? 2 : 1);
+      expect(rows.some((row) => row.textContent?.includes(formatTimelineDateForTest(orderAt)))).toBe(true);
+      expect(rows.some((row) => row.textContent?.includes(formatTimelineDateForTest(cancelledAt)))).toBe(role === 'admin');
+      noMutations();
+    });
+
+    it.each((['admin', 'vendor'] as const).flatMap((role) =>
+      ['Order created', 'Order received'].map((label) => ({ role, label }))))(
+      'preserves ordinary $label history for $role', async ({ role, label }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order({ timeline: [{ label, at: orderAt }] }));
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        expect(getOrderActivityRow('Order created').querySelector('small')).toHaveTextContent(formatTimelineDateForTest(orderAt));
+        expect(getOrderActivityRow('Shopify order cancelled').querySelector('small')).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
+        noMutations();
+      });
+
+    it('does not exclude similar unknown native action labels by substring', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue(order({ timeline: [{ label: 'Shopify order cancelled note', at: cancelledAt }] }));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      expect(within(activity).getAllByText(/^Order created$/i)).toHaveLength(2);
+      expect(getOrderActivityRow('Shopify order cancelled').querySelector('small')).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
+      noMutations();
+    });
+  });
+
 });
