@@ -11709,4 +11709,80 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       });
   });
 
+  describe('P04-U4-B1 distinct linked Return Activity', () => {
+    const firstAt = '2026-06-02T09:00:00.000Z';
+    const laterAt = '2026-06-02T11:00:00.000Z';
+    function actor(role: 'admin' | 'vendor') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function record(id: string, date: string, displayTitle: string) {
+      return { id, date, displayTitle, status: 'Requested', sourceType: 'shopify_return_request' as const,
+        relatedOrderId: orderWithoutShipment.id, sourceShopifyOrderId: orderWithoutShipment.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: orderWithoutShipment.sourceShopifyOrderNumber };
+    }
+    function noMutations() {
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, createReturnShipmentLabelMock, probeShopifyReturnLabelUploadMock,
+        probeTryOtoReturnDetailsMock, probeTryOtoReturnLinkMock, probeTryOtoReturnAwbPrintMock,
+        rejectOrderMock, planAllocationSplitMock, splitAllocationMock]) expect(fn).not.toHaveBeenCalled();
+    }
+    const cases = [
+      { name: 'distinct IDs at identical instants', records: [record('b1-a', firstAt, 'First returned product'), record('b1-b', firstAt, 'Second returned product')] },
+      { name: 'distinct IDs at different same-day instants', records: [record('b1-a', firstAt, 'First returned product'), record('b1-b', laterAt, 'Second returned product')] },
+      { name: 'distinct IDs on different days', records: [record('b1-a', firstAt, 'First returned product'), record('b1-b', '2026-06-03T09:00:00.000Z', 'Second returned product')] },
+      { name: 'single Return', records: [record('b1-a', firstAt, 'First returned product')] },
+      { name: 'same ID retains existing grouping', records: [record('b1-a', firstAt, 'First returned product'), record('b1-a', laterAt, 'Second returned product')] },
+      { name: 'empty ID retains existing grouping', records: [record('', firstAt, 'First returned product'), record('', laterAt, 'Second returned product')] },
+    ];
+    it.each((['admin', 'vendor'] as const).flatMap((role) => cases.map((item) => ({ role, ...item }))))(
+      'preserves $role Return evidence with $name', async ({ role, records }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue({ ...orderWithoutShipment, timeline: [], trackingNumber: undefined,
+          trackingUrl: undefined, shipmentCreatedAt: undefined, fulfilledAt: undefined });
+        listReturnsMock.mockResolvedValue([...records, { ...record('unrelated-return', firstAt, 'Unrelated order item'),
+          relatedOrderId: 'another-allocation', sourceShopifyOrderId: '999999999', sourceShopifyOrderNumber: '#999999999' }]);
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+        const expected = records.filter((entry, index) => records.findIndex((other) => other.id === entry.id) === index);
+        await waitFor(() => expect(within(activity).getAllByRole('link', { name: 'Return requested', exact: true })).toHaveLength(expected.length));
+        for (const entry of expected) {
+          const link = within(activity).getAllByRole('link', { name: 'Return requested', exact: true })
+            .find((item) => item.getAttribute('href') === `/returns/${entry.id}`);
+          expect(link).toBeDefined();
+          const row = link!.closest('li')!;
+          expect(row).toHaveTextContent(entry.displayTitle);
+          expect(row.querySelector('small')).toHaveTextContent(formatTimelineDateForTest(entry.date));
+          expect(within(row).queryByText('Requested', { exact: true })).not.toBeInTheDocument();
+        }
+        expect(activity).not.toHaveTextContent('Unrelated order item');
+        expect(activity.querySelector('a[href="/returns/unrelated-return"]')).toBeNull();
+        expect(getOrderMock).toHaveBeenCalledWith(orderWithoutShipment.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+        noMutations();
+      });
+
+    it.each(['admin', 'vendor'] as const)('keeps native Return and non-Return same-day grouping unchanged for %s', async (role) => {
+      actor(role);
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, trackingNumber: undefined, trackingUrl: undefined,
+        shipmentCreatedAt: undefined, fulfilledAt: undefined, timeline: [
+          { label: 'return requested', at: firstAt }, { label: 'return requested', at: laterAt },
+          { label: 'tracking added', at: firstAt }, { label: 'tracking synced', at: laterAt },
+        ] });
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      for (const title of ['Return requested', 'Tracking synced']) {
+        const titles = within(activity).getAllByText(new RegExp(`^${title}$`, 'i'));
+        expect(titles).toHaveLength(1);
+        const row = titles[0].closest('li')!;
+        expect(row.querySelector('small')).toHaveTextContent(formatTimelineDateForTest(firstAt));
+        expect(row).not.toHaveTextContent(formatTimelineDateForTest(laterAt));
+      }
+      noMutations();
+    });
+  });
+
 });

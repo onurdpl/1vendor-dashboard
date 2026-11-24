@@ -705,3 +705,46 @@ Branch: `codex/p04-u4-a1-canonical-visibility`. Scope: U4-A1 only.
   or browser smoke ran. Visible-native/Admin precedence, same-day grouping, broad
   audience/grouping interactions, event identity and ordering remain separate U4
   work. U4 is not closed; no panel-removal readiness, merge or deployment claimed.
+
+
+## P04-U4-B1 — Distinct linked Return Activity preservation (2026-11-24)
+
+Baseline: `01f4664f4961c2044a5991064acb40ef624030c6` (`origin/main`, PR #82 merged).
+Branch: `codex/p04-u4-b1-distinct-return-activity`. Scope: U4-B1 only.
+
+- Reproduced: two different linked Return records with the same title/status/UTC
+  day collapsed to the first Activity row, losing the second detail link and its
+  description/time. Production occurrence remains UNKNOWN.
+- `src/pages/OrderDetailPage.tsx`: the existing grouping key additionally uses a
+  Return record identity only when the event's existing `return-${id}` has a
+  nonblank ID and its href exactly matches `/returns/${id}`. Existing relatedReturns
+  mapping supplies both from the same record. No new ID or business authority is
+  inferred from a title, timestamp, provider or Shopify text.
+- Different verified Return IDs retain separate rows, links, own dates/descriptions
+  and existing status presentation. Same-ID same-day grouping and empty-ID behavior
+  remain unchanged. Events without the matching ID/URL pair retain the existing
+  grouping equivalence; native Return/tracking controls verify this boundary.
+- Canonical suppression, Admin precedence, audience/scoping, ordering, Finance,
+  backend, Shopify/provider integrations and Orders panel remain unchanged. U3,
+  U4-A1, G3 and existing terminal restrictions are preserved.
+- `src/pages/OrderDetailPage.test.tsx`: 14 new mocked cases cover Admin/Vendor,
+  distinct IDs at identical/same-day/different-day times, description/link/date
+  association, single/same/empty IDs, unrelated-order exclusion, native Return and
+  tracking grouping, scoped order access and no operational mutation calls.
+- Finalized new tests on original production code:
+  `npm run test -- src/pages/OrderDetailPage.test.tsx -t 'P04-U4-B1 distinct linked Return Activity'
+  --reporter=json --outputFile=/private/tmp/sporgym-p04-u4-b1-red-final.json`:
+  **10 PASS / 4 FAIL**; 464 existing tests were outside the selected filter. All four
+  failures expected two distinct links but received one. An earlier authoring run
+  also had two native-heading case mismatches, corrected before this baseline proof.
+- Corrected source: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx src/lib/orderOperationalStory.test.ts --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-u4-b1-tests.json`:
+  **624 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Detail 478, Orders 134, story 12).
+- `npm run build` (TypeScript/Vite) and `git diff --check` passed. Existing bundle
+  size warning remains. Changed files: the component, its test file and this entry.
+  Draft PR/GitHub CI status is reported separately; local PASS is not CI PASS.
+- No database, live Shopify/provider, production operation or browser smoke ran.
+  General same-day tracking/shipment grouping, broader audience interactions,
+  Admin canonical/native precedence, cancellation mapping and ordering remain
+  separate U4 work. No U4 closure, panel removal, merge or deployment is claimed.
