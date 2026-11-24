@@ -11886,4 +11886,116 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
   });
 
+  describe('P04-U4-C1 native assignment Activity identity', () => {
+    const firstAt = '2026-06-02T09:00:00.000Z';
+    const laterAt = '2026-06-02T11:00:00.000Z';
+    type Entry = { label: string; at: string; assignmentHistoryId?: unknown };
+    function actor(role: 'admin' | 'vendor') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function order(entries: Entry[], overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, assignmentHistory: [],
+        timeline: entries as OrderDetail['timeline'], shipmentCreatedAt: undefined, shipmentUpdatedAt: undefined,
+        trackingNumber: undefined, trackingUrl: undefined, carrier: undefined, fulfilledAt: undefined,
+        ...overrides };
+    }
+    function noMutations() {
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, rejectOrderMock, planAllocationSplitMock, splitAllocationMock]) expect(fn).not.toHaveBeenCalled();
+    }
+    const scenarios = [
+      { name: 'distinct IDs identical time', ids: ['history-A', 'history-B'], times: [firstAt, firstAt], count: 2 },
+      { name: 'distinct IDs same UTC day', ids: ['history-A', 'history-B'], times: [firstAt, laterAt], count: 2 },
+      { name: 'distinct IDs different days', ids: ['history-A', 'history-B'], times: [firstAt, '2026-06-03T09:00:00.000Z'], count: 2 },
+      { name: 'repeated same persisted ID', ids: ['history-A', 'history-A'], times: [firstAt, firstAt], count: 1 },
+      { name: 'missing identities', ids: [undefined, undefined], times: [firstAt, laterAt], count: 1 },
+      { name: 'blank identities', ids: ['', '   '], times: [firstAt, laterAt], count: 1 },
+      { name: 'invalid identities', ids: [42, null], times: [firstAt, laterAt], count: 1 },
+      { name: 'distinct IDs invalid times', ids: ['history-A', 'history-B'], times: ['invalid-time', ''], count: 2 },
+      { name: 'missing IDs invalid times', ids: [undefined, undefined], times: ['invalid-time', ''], count: 1 },
+      { name: 'reversed distinct records', ids: ['history-B', 'history-A'], times: [laterAt, firstAt], count: 2 },
+    ];
+    it.each((['admin', 'vendor'] as const).flatMap((role) => ['tracking added', 'shipment created'].flatMap((label) =>
+      scenarios.map((scenario) => ({ role, label, ...scenario }))))) (
+      'preserves $role $label with $name', async ({ role, label, ids, times, count }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order(ids.map((assignmentHistoryId, index) => ({ label, at: times[index], assignmentHistoryId }))));
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+        const title = label === 'tracking added' ? 'Tracking synced' : 'Shipment created';
+        const rows = within(activity).getAllByText(new RegExp(`^${title}$`, 'i')).map((node) => node.closest('li')!);
+        expect(rows).toHaveLength(count);
+        const expectedTimes = count === 2 ? times : [times[0]];
+        const displayed = rows.map((row) => row.querySelector('small')!.textContent);
+        for (const time of expectedTimes) {
+          const valid = time && !time.startsWith('invalid');
+          expect(displayed).toContain(valid ? formatTimelineDateForTest(time) : '—');
+        }
+        if (count === 2 && times[0] === laterAt && times[1] === firstAt) {
+          expect(displayed).toEqual([formatTimelineDateForTest(firstAt), formatTimelineDateForTest(laterAt)]);
+        }
+        expect(activity).not.toHaveTextContent('history-A');
+        expect(activity).not.toHaveTextContent('history-B');
+        expect(getOrderMock).toHaveBeenCalledWith(orderWithoutShipment.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+        noMutations();
+      });
+
+    it.each((['admin', 'vendor'] as const).flatMap((role) => ['tracking added', 'shipment created'].map((label) => ({ role, label }))))(
+      'keeps derived $label equivalence for $role with two native identities', async ({ role, label }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order([
+          { label, at: firstAt, assignmentHistoryId: 'history-A' },
+          { label, at: laterAt, assignmentHistoryId: 'history-B' },
+        ], label === 'tracking added' ? { trackingNumber: 'CURRENT-TRACK', shipmentUpdatedAt: laterAt }
+          : { shipmentCreatedAt: laterAt }));
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+        const title = label === 'tracking added' ? 'Tracking synced' : 'Shipment created';
+        expect(within(activity).getAllByText(new RegExp(`^${title}$`, 'i'))).toHaveLength(2);
+        noMutations();
+      });
+
+    it.each(['admin', 'vendor'] as const)('keeps hidden-first and raw provider restrictions for %s', async (role) => {
+      actor(role);
+      getOrderMock.mockResolvedValue(order([
+        { label: 'shipment updated', at: firstAt, assignmentHistoryId: 'history-hidden' },
+        { label: 'provider tracking added', at: firstAt, assignmentHistoryId: 'history-raw' },
+        { label: 'tracking added', at: firstAt, assignmentHistoryId: 'history-A' },
+        { label: 'tracking synced', at: laterAt, assignmentHistoryId: 'history-B' },
+      ]));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      expect(within(activity).getAllByText(/^Tracking synced$/i)).toHaveLength(2);
+      expect(within(activity).queryByText(/^Shipment updated$/i) !== null).toBe(role === 'admin');
+      expect(activity).not.toHaveTextContent('Provider tracking added');
+      noMutations();
+    });
+
+    it.each(['admin', 'vendor'] as const)('does not change creation grouping or canonical refund handling for %s', async (role) => {
+      actor(role);
+      getOrderMock.mockResolvedValue(order([
+        { label: 'Order created', at: firstAt, assignmentHistoryId: 'history-create-A' },
+        { label: 'Order received', at: laterAt, assignmentHistoryId: 'history-create-B' },
+        { label: 'Refund completed', at: firstAt, assignmentHistoryId: 'history-refund' },
+      ], { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' }, fulfillmentActionAvailable: false }));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      const creationRows = within(activity).getAllByText(/^Order created$/i).map((title) => title.closest('li')!);
+      expect(creationRows).toHaveLength(2); // Native June history and the existing May order snapshot.
+      expect(creationRows.some((row) => row.textContent?.includes(formatTimelineDateForTest(firstAt)))).toBe(true);
+      expect(creationRows.some((row) => row.textContent?.includes(formatTimelineDateForTest(laterAt)))).toBe(false);
+      const refund = within(activity).getByText(/^Refund completed$/i).closest('li')!;
+      expect(refund.querySelector('small')).toHaveTextContent(role === 'admin' ? formatTimelineDateForTest(firstAt) : /^—$/);
+      expect(screen.queryByRole('button', { name: 'Create shipment', exact: true })).not.toBeInTheDocument();
+      noMutations();
+    });
+  });
+
 });

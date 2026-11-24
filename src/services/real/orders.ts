@@ -464,6 +464,7 @@ function mapAssignmentHistory(entries: OrderDetailDto['assignmentHistory']): Ass
   return entries.map((entry) => {
     const actor = getAssignmentActorPresentation(entry);
     return {
+      id: typeof entry.id === 'string' && entry.id.trim() ? entry.id : undefined,
       action: (entry.action.trim().toLowerCase() as AssignmentHistoryAction) || 'assigned',
       fromVendorId: entry.fromVendorId,
       toVendorId: entry.toVendorId,
@@ -655,6 +656,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
       summary.cancelReason,
     ),
     timeline: history.map((entry) => ({
+      assignmentHistoryId: entry.id,
       label: entry.action.replace(/_/g, ' '),
       at: entry.createdAt,
     })),

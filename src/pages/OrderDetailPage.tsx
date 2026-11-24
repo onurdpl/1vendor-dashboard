@@ -460,9 +460,12 @@ function getNavlungoLifecycleLogEvents(summary?: ShipmentExecution['providerResp
     });
 }
 
-function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
+type OrderDetailActivityEvent = OperationalEventInput & { nativeAssignmentHistoryId?: string };
+
+function groupOrderDetailTimelineEvents(events: OrderDetailActivityEvent[]) {
   const grouped: OperationalEventInput[] = [];
   const seenGroupedEvents = new Set<string>();
+  const seenNativeHistoryEvents = new Set<string>();
 
   events.forEach((event) => {
     const normalizedTitle = event.title?.toLowerCase() ?? '';
@@ -480,6 +483,18 @@ function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
     const linkedReturnIdentity = returnRecordId.trim() && event.href === `/returns/${returnRecordId}`
       ? returnRecordId : '';
     const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay, linkedReturnIdentity].join('|');
+
+    const nativeHistoryId = ['tracking synced', 'shipment created'].includes(normalizedTitle)
+      ? event.nativeAssignmentHistoryId : undefined;
+    if (nativeHistoryId) {
+      const nativeKey = JSON.stringify([eventKey, nativeHistoryId]);
+      if (seenNativeHistoryEvents.has(nativeKey)) return;
+      seenNativeHistoryEvents.add(nativeKey);
+      // Keep the existing suppression of later derived/legacy rows in this bucket.
+      seenGroupedEvents.add(eventKey);
+      grouped.push(event);
+      return;
+    }
 
     if (isNoisyShipmentEvent && seenGroupedEvents.has(eventKey)) {
       return;
@@ -8337,13 +8352,19 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                   .filter((entry) => !(showFulfillmentCompletion && fulfillmentCompletionTime !== undefined
                     && normalizeTimelineTitle(entry.label) === 'fulfillment synced'
                     && parseSafeDate(entry.at)?.getTime() === fulfillmentCompletionTime))
-                  .map((entry) => ({
-                    id: `order-native-${entry.label}-${entry.at}`,
-                    title: getVendorTimelineLabel(entry.label),
-                    at: entry.at,
-                    tone: 'neutral' as const,
-                    visibility: getNativeTimelineVisibility(entry.label),
-                  })),
+                  .map((entry) => {
+                    const nativeAssignmentHistoryId = typeof entry.assignmentHistoryId === 'string'
+                      && entry.assignmentHistoryId.trim() ? entry.assignmentHistoryId : undefined;
+                    return {
+                      id: nativeAssignmentHistoryId ? `order-native-history-${nativeAssignmentHistoryId}`
+                        : `order-native-${entry.label}-${entry.at}`,
+                      nativeAssignmentHistoryId,
+                      title: getVendorTimelineLabel(entry.label),
+                      at: entry.at,
+                      tone: 'neutral' as const,
+                      visibility: getNativeTimelineVisibility(entry.label),
+                    };
+                  }),
                 ...orderTimelineEvents,
               ]).sort(
                 (left, right) =>
