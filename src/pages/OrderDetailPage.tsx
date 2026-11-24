@@ -54,6 +54,7 @@ import {
   filterOperationalLinks,
   sameOperationalOrderNumber,
   supportTicketMatchesOrder,
+  type OperationalAudience,
   type OperationalEventInput,
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
@@ -462,12 +463,14 @@ function getNavlungoLifecycleLogEvents(summary?: ShipmentExecution['providerResp
 
 type OrderDetailActivityEvent = OperationalEventInput & { nativeAssignmentHistoryId?: string };
 
-function groupOrderDetailTimelineEvents(events: OrderDetailActivityEvent[]) {
+function groupOrderDetailTimelineEvents(events: OrderDetailActivityEvent[], audience: OperationalAudience) {
   const grouped: OperationalEventInput[] = [];
   const seenGroupedEvents = new Set<string>();
   const seenNativeHistoryEvents = new Set<string>();
 
   events.forEach((event) => {
+    // Apply the existing audience visibility rule before a grouping representative is chosen.
+    if (audience !== 'admin' && event.visibility === 'admin') return;
     const normalizedTitle = event.title?.toLowerCase() ?? '';
     const isNoisyShipmentEvent =
       normalizedTitle.includes('order') ||
@@ -8366,7 +8369,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                     };
                   }),
                 ...orderTimelineEvents,
-              ]).sort(
+              ], audience).sort(
                 (left, right) =>
                   getSafeTimestamp(left.at ?? order.date, Number.POSITIVE_INFINITY) -
                   getSafeTimestamp(right.at ?? order.date, Number.POSITIVE_INFINITY),
