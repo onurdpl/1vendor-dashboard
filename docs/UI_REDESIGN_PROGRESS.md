@@ -853,3 +853,52 @@ Branch: `codex/p04-u4-c1-native-activity-identity`. Scope: U4-C1 only.
   General grouping, provider-event identity, native-only cancellation and U4-C2
   remain outside scope. Draft PR/CI is reported separately; no U4 closure, panel
   removal, merge or deployment is claimed.
+
+
+## P04-U4-E1 — Audience-first Order Detail Activity grouping (2026-11-24)
+
+Baseline: `1da22c8a165c327d902aa0581bf51b18fc78657e` (`origin/main`, PR #85 merged).
+Branch: `codex/p04-u4-e1-activity-audience-safety`. Scope: U4-E1 only.
+
+- Reproduced through existing Order Detail native mapping: an Admin-only native
+  heading can normalize to Order created and win its bucket before a Vendor-visible
+  Order received/derived creation row; renderer then hides the winner for Vendor.
+  Fixtures use literal historical Shopify order cancelled without canonical
+  cancellation and conditional Order audit note history. The frontend source path
+  accepts these existing-contract inputs; a current writer/production occurrence
+  for these historical actions is not established. No production incident claimed.
+- `src/pages/OrderDetailPage.tsx`: pass the existing OperationalAudience into local
+  grouping; skip visibility=admin for non-Admin audience before any representative
+  or identity bucket is recorded. This is the existing filterOperationalEvents
+  visibility contract applied locally, not a new permission. Admin skips nothing
+  and retains original source-order grouping precedence.
+- Shared filterOperationalEvents also sorts, so it is not moved upstream. Existing
+  grouping among eligible events, later page/renderer sorting, raw-provider filters,
+  timestamps, labels, IDs, descriptions, links and statuses remain unchanged.
+  existingTimelineTitles/canonical suppression is untouched. U3/A1/B1/D1/C1/G3
+  boundaries remain intact; shared timeline utilities/components are unchanged.
+- `src/pages/OrderDetailPage.test.tsx`: 26 new mocked cases cover hidden-first and
+  visible-first, same/different UTC day, missing/invalid dates, Admin precedence
+  with a later-time first row, visible-only/hidden-only duplicate grouping, native
+  tracking/shipment IDs and same-ID repetition, distinct Return links, scope/no
+  mutations and refund/cancel/conflict/Vendor-blocked canonical preservation.
+- Original production-source test-first execution:
+  `npm run test -- src/pages/OrderDetailPage.test.tsx -t 'P04-U4-E1 audience-first Activity grouping'
+  --reporter=json --outputFile=/private/tmp/sporgym-p04-u4-e1-red.json`:
+  **19 PASS / 7 FAIL**; 561 existing cases outside selected filter. All failures
+  involved missing eligible Vendor creation evidence (one unknown-time case lost
+  its undated visible row while the dated order snapshot still remained).
+- Corrected source: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx src/lib/orderOperationalStory.test.ts --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-u4-e1-tests.json`:
+  **733 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Detail 587, Orders 134, story 12).
+  Includes all 26 E1 cases and existing U3/U4-A1/U4-B1/U4-D1/U4-C1/G3 regressions.
+- `npm run build` (TypeScript/Vite) and `git diff --check` passed; existing bundle
+  size warning remains. Only Order Detail component/tests and this entry changed.
+  Mapper contracts are unaffected, so mapper suites were not repeated. Draft PR/CI
+  status is reported separately; local PASS is not GitHub CI PASS.
+- Frontend mocks only; no browser, database, live provider/Shopify or production
+  operation. Navlungo/TryOto remain inactive and excluded. Separate canonical title
+  suppression, native-only cancellation labels, uncertain provider identity and
+  broader grouping issues remain outside scope. No U4 closure, panel-removal
+  readiness, merge or deployment is claimed.

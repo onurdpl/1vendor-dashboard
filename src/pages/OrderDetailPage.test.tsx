@@ -11998,4 +11998,136 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
   });
 
+  describe('P04-U4-E1 audience-first Activity grouping', () => {
+    const orderAt = '2026-06-02T00:00:00.000Z';
+    const visibleAt = '2026-06-02T09:00:00.000Z';
+    const hiddenAt = '2026-06-02T11:00:00.000Z';
+    function actor(role: 'admin' | 'vendor') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function order(timeline: OrderDetail['timeline'], overrides: Partial<OrderDetail> = {}): OrderDetail {
+      return { ...orderWithoutShipment, date: orderAt, timeline, trackingNumber: undefined, trackingUrl: undefined,
+        carrier: undefined, shipmentCreatedAt: undefined, shipmentUpdatedAt: undefined, fulfilledAt: undefined,
+        assignmentHistory: [], isCancelled: false, isCancellationConflict: false, cancelledAt: null, ...overrides };
+    }
+    function activity() { return screen.getByRole('heading', { name: 'Activity' }).closest('article')!; }
+    function creationRows() { return within(activity()).getAllByText(/^Order created$/i).map((title) => title.closest('li')!); }
+    function noMutations() {
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+        submitFulfillmentTrackingMock, refreshShipmentExecutionStatusMock, refreshShipmentProviderDataMock,
+        cancelShipmentExecutionMock, createReturnShipmentLabelMock, probeShopifyReturnLabelUploadMock,
+        rejectOrderMock, planAllocationSplitMock, splitAllocationMock]) expect(fn).not.toHaveBeenCalled();
+      expect(getOrderMock).toHaveBeenCalledWith(orderWithoutShipment.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+    }
+    const times = [
+      { name: 'same UTC day', hidden: hiddenAt, visible: visibleAt },
+      { name: 'invalid and missing timestamps', hidden: 'invalid-history-date', visible: '' },
+      { name: 'different UTC days', hidden: '2026-06-03T11:00:00.000Z', visible: visibleAt },
+    ];
+    it.each((['admin', 'vendor'] as const).flatMap((role) => [true, false].flatMap((hiddenFirst) =>
+      times.map((time) => ({ role, hiddenFirst, ...time }))))) (
+      'keeps $role eligible evidence hiddenFirst=$hiddenFirst with $name', async ({ role, hiddenFirst, name, hidden, visible }) => {
+        actor(role);
+        // Valid native-history contract; production existence of this historical action is unknown.
+        const hiddenEntry = { label: 'Shopify order cancelled', at: hidden };
+        const visibleEntry = { label: 'Order received', at: visible };
+        getOrderMock.mockResolvedValue(order(hiddenFirst ? [hiddenEntry, visibleEntry] : [visibleEntry, hiddenEntry]));
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        const rows = creationRows();
+        const dates = rows.map((row) => row.querySelector('small')!.textContent);
+        if (name === 'invalid and missing timestamps') {
+          expect(rows).toHaveLength(2);
+          expect(dates).toContain('—');
+          expect(dates).toContain(formatTimelineDateForTest(orderAt));
+        } else if (name === 'different UTC days') {
+          expect(rows).toHaveLength(role === 'admin' ? 2 : 1);
+          expect(dates).toContain(formatTimelineDateForTest(visible));
+          expect(dates.includes(formatTimelineDateForTest(hidden))).toBe(role === 'admin');
+        } else {
+          expect(rows).toHaveLength(1);
+          // Admin keeps source-order precedence, even when the hidden row is chronologically later.
+          expect(dates).toEqual([formatTimelineDateForTest(role === 'admin' && hiddenFirst ? hidden : visible)]);
+        }
+        noMutations();
+      });
+
+    it.each((['admin', 'vendor'] as const).flatMap((role) => [true, false].map((hidden) => ({ role, hidden }))))(
+      'keeps existing eligible duplicate grouping for $role, hidden=$hidden', async ({ role, hidden }) => {
+        actor(role);
+        const label = hidden ? 'Shopify order cancelled' : 'Order received';
+        getOrderMock.mockResolvedValue(order([{ label, at: hiddenAt }, { label, at: visibleAt }]));
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        const rows = creationRows();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].querySelector('small')).toHaveTextContent(formatTimelineDateForTest(hidden && role === 'vendor' ? orderAt : hiddenAt));
+        noMutations();
+      });
+
+    it.each(['admin', 'vendor'] as const)('preserves native identities, Return links and legacy grouping for %s', async (role) => {
+      actor(role);
+      getOrderMock.mockResolvedValue(order([
+        { label: 'Order audit note', at: hiddenAt },
+        { label: 'shipment updated', at: hiddenAt },
+        { label: 'tracking added', at: visibleAt, assignmentHistoryId: 'e1-tracking-A' },
+        { label: 'tracking synced', at: hiddenAt, assignmentHistoryId: 'e1-tracking-B' },
+        { label: 'tracking synced', at: hiddenAt, assignmentHistoryId: 'e1-tracking-B' },
+        { label: 'shipment created', at: visibleAt, assignmentHistoryId: 'e1-shipment-A' },
+        { label: 'shipment created', at: hiddenAt, assignmentHistoryId: 'e1-shipment-B' },
+        { label: 'shipment created', at: hiddenAt, assignmentHistoryId: 'e1-shipment-B' },
+      ]));
+      listReturnsMock.mockResolvedValue(['e1-return-A', 'e1-return-B'].map((id) => ({ id, date: visibleAt,
+        status: 'Requested', sourceType: 'shopify_return_request', displayTitle: id,
+        relatedOrderId: orderWithoutShipment.id, sourceShopifyOrderId: orderWithoutShipment.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: orderWithoutShipment.sourceShopifyOrderNumber })));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      await waitFor(() => expect(within(activity()).getAllByRole('link', { name: 'Return requested', exact: true })).toHaveLength(2));
+      for (const id of ['e1-return-A', 'e1-return-B']) {
+        expect(activity().querySelector(`a[href="/returns/${id}"]`)).not.toBeNull();
+      }
+      for (const title of ['Tracking synced', 'Shipment created']) {
+        expect(within(activity()).getAllByText(new RegExp(`^${title}$`, 'i'))).toHaveLength(2);
+      }
+      expect(within(activity()).queryByText(/^Shipment updated$/i) !== null).toBe(role === 'admin');
+      noMutations();
+    });
+
+    const states: Array<[string, Partial<OrderDetail>]> = [
+      ['refund', { operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' }, fulfillmentActionAvailable: false }],
+      ['cancelled', { isCancelled: true, cancelledAt: hiddenAt }],
+      ['conflict', { isCancelled: true, isCancellationConflict: true, cancelledAt: hiddenAt }],
+      ['blocked', { allocationStatus: 'vendor_blocked' }],
+    ];
+    it.each((['admin', 'vendor'] as const).flatMap((role) => states.map(([state, overrides]) => ({ role, state, overrides }))))(
+      'preserves $role canonical $state evidence with conditional hidden-first history', async ({ role, state, overrides }) => {
+        actor(role);
+        getOrderMock.mockResolvedValue(order([
+          { label: 'Order audit note', at: hiddenAt },
+          { label: 'Order received', at: visibleAt },
+          ...(state === 'refund' ? [{ label: 'Refund completed', at: hiddenAt }] : []),
+          ...(state === 'cancelled' || state === 'conflict' ? [{ label: 'Shopify order cancelled', at: visibleAt }] : []),
+        ], overrides));
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        expect(creationRows()).toHaveLength(1);
+        expect(creationRows()[0].querySelector('small')).toHaveTextContent(formatTimelineDateForTest(role === 'admin' ? hiddenAt : visibleAt));
+        if (state === 'refund') {
+          const refund = within(activity()).getByText(/^Refund completed$/i).closest('li')!;
+          expect(refund.querySelector('small')).toHaveTextContent(role === 'admin' ? formatTimelineDateForTest(hiddenAt) : /^—$/);
+          expect(getOrderActivityRow('Fulfillment not required').querySelector('small')).toHaveTextContent(/^—$/);
+        } else if (state === 'blocked') {
+          expect(within(activity()).getByText(role === 'admin' ? 'Vendor blocked' : 'Order blocked from shipment')).toBeInTheDocument();
+        } else {
+          expect(getOrderActivityRow('Shopify order cancelled').querySelector('small')).toHaveTextContent(formatTimelineDateForTest(hiddenAt));
+          if (state === 'conflict') expect(within(activity()).getByText('Existing operational evidence')).toBeInTheDocument();
+        }
+        expect(screen.queryByRole('button', { name: 'Create shipment', exact: true })).not.toBeInTheDocument();
+        noMutations();
+      });
+  });
+
 });
