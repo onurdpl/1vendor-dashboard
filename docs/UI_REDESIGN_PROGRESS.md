@@ -937,3 +937,40 @@ Branch: `codex/p04-u4-f3-admin-return-history-identity`. Scope: U4-F3 only.
   warning remains. Frontend mocks only; no database, browser or live provider call.
 - F1/F2/F4/F5 remain separate. Inactive Navlungo/TryOto integrations are excluded.
   U4 is not formally closed; no panel removal, merge or deployment is claimed.
+
+## P04-U4-F1 — Native-only cancellation history provenance (2026-11-24)
+
+Baseline: `901b66697210d59588d9165276c35200d94cd9f2` (`origin/main`, PR #87 merged).
+Branch: `codex/p04-u4-f1-native-cancellation-provenance`. Scope: U4-F1 only.
+
+- The persisted `AllocationAssignmentHistory` record has its own ID, action and
+  `createdAt`; the Order Detail DTO and frontend mapper carry these into
+  `assignmentHistory` and `timeline`. No current writer for the literal
+  `Shopify order cancelled` action was established. Production occurrence is
+  **UNKNOWN**. The current frontend accepts that historical native label.
+- Reproduction on original source: **0 PASS / 1 FAIL / 599 filtered (reported as
+  skipped) / 0 PENDING**. Without a canonical cancellation story, an exact native
+  label appeared as `Order created`, not a cancellation-related history row.
+- `src/pages/OrderDetailPage.tsx` now maps only the exact normalized native
+  `Shopify order cancelled` label to `Cancellation history entry`. Its description
+  distinguishes the history record time from the unverified actual Shopify
+  cancellation time. A displayed history time requires exactly one matching
+  persisted history ID, exact normalized action, identical `createdAt` and a valid
+  date. Otherwise the Activity date is `—`; no order, Finance or current-time
+  fallback is used. The internal ID is not rendered.
+- This exact heading is included in the local existing native-ID grouping rule:
+  distinct verified IDs remain distinct, repeated same-ID presentations in a
+  bucket are grouped, and missing IDs retain same-day legacy grouping. General
+  grouping keys and other labels remain unchanged. Native history stays Admin-only;
+  existing E1 audience-first filtering and Vendor isolation remain. D1 still removes
+  the exact native literal when canonical cancellation or conflict is present.
+- Frontend-only changed files: `src/pages/OrderDetailPage.tsx`,
+  `src/pages/OrderDetailPage.test.tsx`, this progress document. Combined Order
+  Detail, Orders and operational-story regression run: **755 PASS / 0 FAIL / 0
+  SKIP / 0 PENDING**. `npm run build` passed with the existing bundle-size warning;
+  one additional nonmatching-label test was then added and the focused F1 run
+  recorded **11 PASS / 0 FAIL / 599 filtered / 0 PENDING**. `git diff --check`
+  passed. Mapper contracts were not changed, so mapper suites
+  were not rerun. No browser, database or live provider/Shopify operation.
+- F2/F4/F5 remain separate. Inactive Navlungo/TryOto integrations are excluded.
+  U4 is not formally closed; no panel removal, merge or deployment is claimed.

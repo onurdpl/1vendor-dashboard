@@ -479,7 +479,8 @@ function groupOrderDetailTimelineEvents(events: OrderDetailActivityEvent[], audi
       normalizedTitle.includes('shipment') ||
       normalizedTitle.includes('delivered') ||
       normalizedTitle.includes('return') ||
-      normalizedTitle.includes('status');
+      normalizedTitle.includes('status') ||
+      normalizedTitle === 'cancellation history entry';
     const eventDay = parseSafeDate(event.at)?.toISOString().slice(0, 10) ?? 'unknown';
     const returnRecordId = event.id.startsWith('return-') ? event.id.slice('return-'.length) : '';
     // Only the existing linked Return record ID/URL pair establishes this identity.
@@ -487,7 +488,7 @@ function groupOrderDetailTimelineEvents(events: OrderDetailActivityEvent[], audi
       ? returnRecordId : '';
     const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay, linkedReturnIdentity].join('|');
 
-    const nativeHistoryId = ['tracking synced', 'shipment created', 'admin returned to vendor'].includes(normalizedTitle)
+    const nativeHistoryId = ['tracking synced', 'shipment created', 'admin returned to vendor', 'cancellation history entry'].includes(normalizedTitle)
       ? event.nativeAssignmentHistoryId : undefined;
     if (nativeHistoryId) {
       const nativeKey = JSON.stringify([eventKey, nativeHistoryId]);
@@ -8358,12 +8359,25 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                   .map((entry) => {
                     const nativeAssignmentHistoryId = typeof entry.assignmentHistoryId === 'string'
                       && entry.assignmentHistoryId.trim() ? entry.assignmentHistoryId : undefined;
+                    const isNativeCancellationHistory = normalizeTimelineTitle(entry.label) === 'shopify order cancelled';
+                    const matchingHistory = isNativeCancellationHistory && nativeAssignmentHistoryId
+                      ? safeArray(order.assignmentHistory).filter((history) =>
+                        history.id === nativeAssignmentHistoryId
+                        && normalizeTimelineTitle(history.action.replace(/_/g, ' ')) === 'shopify order cancelled'
+                        && history.createdAt === entry.at,
+                      ) : [];
+                    const verifiedHistoryTime = matchingHistory.length === 1 && Boolean(parseSafeDate(entry.at));
                     return {
                       id: nativeAssignmentHistoryId ? `order-native-history-${nativeAssignmentHistoryId}`
                         : `order-native-${entry.label}-${entry.at}`,
                       nativeAssignmentHistoryId,
-                      title: getVendorTimelineLabel(entry.label),
-                      at: entry.at,
+                      title: isNativeCancellationHistory ? 'Cancellation history entry' : getVendorTimelineLabel(entry.label),
+                      description: isNativeCancellationHistory
+                        ? verifiedHistoryTime
+                          ? 'History record time. Shopify cancellation time not verified.'
+                          : 'Assignment-history label; record time unverified. Shopify cancellation time not verified.'
+                        : undefined,
+                      at: isNativeCancellationHistory && !verifiedHistoryTime ? undefined : entry.at,
                       tone: 'neutral' as const,
                       visibility: getNativeTimelineVisibility(entry.label),
                     };
