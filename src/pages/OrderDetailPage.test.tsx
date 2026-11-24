@@ -11998,6 +11998,68 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
   });
 
+  describe('P04-U4-F3 Admin return history identity', () => {
+    const firstAt = '2026-06-02T09:00:00.000Z';
+    const laterAt = '2026-06-02T11:00:00.000Z';
+    const title = /^Admin returned to vendor$/i;
+    function actor(role: 'admin' | 'vendor') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function order(entries: Array<{ at: string; assignmentHistoryId?: unknown }>): OrderDetail {
+      return { ...orderWithoutShipment, assignmentHistory: [],
+        timeline: entries.map((entry) => ({ label: 'admin returned to vendor', ...entry })) as OrderDetail['timeline'],
+        shipmentCreatedAt: undefined, shipmentUpdatedAt: undefined, trackingNumber: undefined,
+        trackingUrl: undefined, carrier: undefined, fulfilledAt: undefined };
+    }
+    function rows() {
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      return { activity, rows: within(activity).queryAllByText(title).map((node) => node.closest('li')!) };
+    }
+    const cases = [
+      { name: 'distinct IDs identical time', ids: ['history-A', 'history-B'], times: [firstAt, firstAt], count: 2 },
+      { name: 'distinct IDs same UTC day', ids: ['history-A', 'history-B'], times: [firstAt, laterAt], count: 2 },
+      { name: 'distinct IDs different UTC days', ids: ['history-A', 'history-B'], times: [firstAt, '2026-06-03T09:00:00.000Z'], count: 2 },
+      { name: 'same ID repeated', ids: ['history-A', 'history-A'], times: [firstAt, firstAt], count: 1 },
+      { name: 'missing IDs', ids: [undefined, undefined], times: [firstAt, laterAt], count: 1 },
+      { name: 'empty IDs', ids: ['', ''], times: [firstAt, laterAt], count: 1 },
+      { name: 'whitespace IDs', ids: ['   ', '   '], times: [firstAt, laterAt], count: 1 },
+      { name: 'invalid nonstring IDs', ids: [42, null], times: [firstAt, laterAt], count: 1 },
+      { name: 'distinct IDs invalid times', ids: ['history-A', 'history-B'], times: ['invalid-time', ''], count: 2 },
+      { name: 'missing IDs invalid times', ids: [undefined, undefined], times: ['invalid-time', ''], count: 1 },
+      { name: 'reversed source order', ids: ['history-B', 'history-A'], times: [laterAt, firstAt], count: 2 },
+    ];
+    it.each(cases)('$name retains expected Admin rows', async ({ ids, times, count }) => {
+      actor('admin');
+      getOrderMock.mockResolvedValue(order(ids.map((assignmentHistoryId, index) => ({ assignmentHistoryId, at: times[index] }))));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const result = rows();
+      expect(result.rows).toHaveLength(count);
+      const displayed = result.rows.map((row) => row.querySelector('small')!.textContent);
+      const expected = count === 2 ? times : [times[0]];
+      for (const at of expected) expect(displayed).toContain(at && at !== 'invalid-time' ? formatTimelineDateForTest(at) : '—');
+      if (count === 2 && times[0] === laterAt) expect(displayed).toEqual([formatTimelineDateForTest(firstAt), formatTimelineDateForTest(laterAt)]);
+      expect(result.activity).not.toHaveTextContent('history-A');
+      expect(result.activity).not.toHaveTextContent('history-B');
+      expect(getOrderMock).toHaveBeenCalledWith(orderWithoutShipment.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
+    });
+    it('keeps Admin return history hidden from Vendor', async () => {
+      actor('vendor');
+      getOrderMock.mockResolvedValue(order([
+        { assignmentHistoryId: 'history-A', at: firstAt },
+        { assignmentHistoryId: 'history-B', at: laterAt },
+      ]));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(rows().rows).toHaveLength(0);
+    });
+  });
+
   describe('P04-U4-E1 audience-first Activity grouping', () => {
     const orderAt = '2026-06-02T00:00:00.000Z';
     const visibleAt = '2026-06-02T09:00:00.000Z';

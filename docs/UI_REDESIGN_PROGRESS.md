@@ -902,3 +902,38 @@ Branch: `codex/p04-u4-e1-activity-audience-safety`. Scope: U4-E1 only.
   suppression, native-only cancellation labels, uncertain provider identity and
   broader grouping issues remain outside scope. No U4 closure, panel-removal
   readiness, merge or deployment is claimed.
+
+## P04-U4-F3 — Distinct Admin return history Activity (2026-11-24)
+
+Baseline: `53382b6b73741264dc9f6b16f7caff28668e1e82` (`origin/main`, PR #86 merged).
+Branch: `codex/p04-u4-f3-admin-return-history-identity`. Scope: U4-F3 only.
+
+- The active Admin return-to-Vendor transaction writes an `admin_returned_to_vendor`
+  allocation assignment-history record with its own persisted ID. Existing C1
+  mapping carries that ID to Order Detail native Activity. The heading `Admin
+  returned to vendor` contains `return`, so the general title/status/UTC-day
+  grouping could collapse distinct records from the same day. Production occurrence
+  remains UNKNOWN.
+- Test first on original source: 12 focused mocked cases, **8 PASS / 4 FAIL / 0
+  SKIP / 0 PENDING**. Distinct persisted IDs with identical timestamps, different
+  times on one UTC day, invalid timestamps and reversed source order each lost a
+  row. This proves the component behavior for existing-contract inputs, not a
+  production incident.
+- `src/pages/OrderDetailPage.tsx`: extend only the existing C1 native-history ID
+  grouping eligibility to the exact normalized `admin returned to vendor`
+  heading. Different IDs survive; repeated same ID in the same existing bucket
+  is suppressed. Blank/missing/invalid IDs retain legacy grouping; the original
+  bucket remains recorded for later derived/legacy entries. Each surviving row
+  retains its source timestamp and existing sort. No identity appears as UI text.
+- Existing Admin-only visibility and E1 audience-first filtering remain. Vendor
+  access, allocation scope and backend authorization/writer are unchanged. B1
+  linked Returns, C1 Tracking synced/Shipment created, D1 cancellation, A1 refund,
+  U3 dates and G3 completion remain covered by existing regressions.
+- Changed files: `src/pages/OrderDetailPage.tsx`,
+  `src/pages/OrderDetailPage.test.tsx`, this progress document. Focused corrected
+  tests: **12 PASS / 0 FAIL / 0 SKIP / 0 PENDING**. Combined Order Detail, Orders,
+  operational story and relevant mapper suites: **754 PASS / 0 FAIL / 0 SKIP /
+  0 PENDING**. `npm run build` and `git diff --check` passed; existing bundle-size
+  warning remains. Frontend mocks only; no database, browser or live provider call.
+- F1/F2/F4/F5 remain separate. Inactive Navlungo/TryOto integrations are excluded.
+  U4 is not formally closed; no panel removal, merge or deployment is claimed.
