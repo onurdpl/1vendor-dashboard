@@ -664,3 +664,44 @@ Branch: `codex/p04-u3-refund-timestamp`. Scope: U3 only.
   Draft PR/GitHub CI status is reported separately; local PASS does not imply CI PASS.
   U4 title-only suppression and coarse grouping risks remain unresolved. No U10
   readiness, panel-removal acceptance, P04 completion, merge or deployment is claimed.
+
+
+## P04-U4-A1 — Canonical refund Activity audience visibility (2026-11-24)
+
+Baseline: `11028a494705d8d309cc3de53e86f03db7c1de1c` (`origin/main`, PR #81 merged).
+Branch: `codex/p04-u4-a1-canonical-visibility`. Scope: U4-A1 only.
+
+- Reproduced with frontend fixtures: an Admin-only native refund/fulfillment title
+  suppressed a Vendor-visible canonical refund-terminal event before the native
+  entry was hidden. Production occurrence remains UNKNOWN.
+- `src/pages/OrderDetailPage.tsx`: only for the canonical `refunded_completed`
+  story and non-Admin audience, build the suppression-title set from native entries
+  eligible under the existing raw-entry and native-visibility rules. Hidden native
+  history cannot replace visible canonical evidence. The native records themselves
+  and their audience rules are unchanged; no new permission is introduced.
+- Admin suppression/precedence and non-refund canonical stories are unchanged.
+  The backend terminal fact, canonical labels, terminal action restrictions and U3
+  missing-date `—` remain intact. G3 same-instant fulfillment deduplication and
+  different-instant history remain intact. No general grouping, ordering, native
+  cancellation-label, event identity, mapper, backend or integration change.
+- `src/pages/OrderDetailPage.test.tsx`: 8 new cases cover Admin/Vendor with no
+  collision, refund-only, fulfillment-only and both collisions. They assert both
+  canonical rows, absence of hidden native dates/content for Vendor, existing Admin
+  native dates/history, Vendor/allocation scoping and no operational mutations.
+- Test-first execution on original production source:
+  `npm run test -- src/pages/OrderDetailPage.test.tsx -t 'P04-U4-A1 canonical refund
+  audience visibility' --reporter=json --outputFile=/private/tmp/sporgym-p04-u4-a1-red.json`:
+  **5 PASS / 3 FAIL**; 456 existing tests were outside the selected test-name filter.
+  All failures were missing canonical rows in Vendor collision scenarios.
+- Corrected source: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx src/lib/orderOperationalStory.test.ts --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-u4-a1-tests.json`:
+  **610 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Detail 464, Orders 134, story 12).
+  Includes existing cancellation, Vendor-block, G1/G2/G3/U2/U3 and isolation tests.
+- TypeScript/Vite `npm run build` and `git diff --check` passed; the existing bundle
+  size warning remains. Changed files: the component, its test file and this record.
+  Draft PR/GitHub CI status is reported separately; no CI PASS is presumed.
+- Tests use frontend mocks. No database, live Shopify/provider, production operation
+  or browser smoke ran. Visible-native/Admin precedence, same-day grouping, broad
+  audience/grouping interactions, event identity and ordering remain separate U4
+  work. U4 is not closed; no panel-removal readiness, merge or deployment claimed.
