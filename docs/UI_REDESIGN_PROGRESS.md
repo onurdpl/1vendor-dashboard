@@ -623,3 +623,44 @@ Branch: `codex/p04-u2-historical-integration`. Scope: U2 only.
   U2 has local acceptance evidence and awaits GitHub CI/review; it is not marked
   merged or fully complete. No panel removal, role-model change, U3-U10 work,
   full-width implementation, merge, deployment or P04 completion is claimed.
+
+
+## P04-U3 — Canonical refund-terminal Activity date attribution (2026-11-24)
+
+Baseline: `b20fdd52a4fce593975550b7fcca6b2fd82adbab` (`origin/main`, PR #80 merged).
+Branch: `codex/p04-u3-refund-timestamp`. Scope: U3 only.
+
+- The backend-driven `ALLOCATION_REFUND_TERMINAL` story establishes terminal state,
+  but its `Refund completed` and `Fulfillment not required` events have no supplied
+  event-specific completion time. Finance record `date` maps local ledger
+  `createdAt`; assignment/Vendor-block time is also not refund-completion evidence.
+- `src/pages/OrderDetailPage.tsx`: for `refunded_completed` canonical events, use
+  only the story event's own `at`, without the unrelated Finance/assignment fallback.
+  Current undated events retain their labels and display the existing `—`.
+  No new timestamp authority, event, query, mutation or permission is introduced.
+- Existing separate Finance Activity records retain their amounts, ledger dates,
+  authorized visibility and links. Cancellation and legitimate Vendor-block event
+  date handling, G3 fulfillment completion and terminal action restrictions remain
+  unchanged. Orders panel, backend, Finance/refund processing and Shopify are untouched.
+- `src/pages/OrderDetailPage.test.tsx`: 18 new mocked cases cover Admin/Vendor,
+  absent/empty/invalid timestamps, one/multiple ledger records, distinct block times,
+  both canonical events, Finance links/amounts/dates, scope and mutation restrictions,
+  and legitimate block-date preservation. Native-title collision fixtures are
+  intentionally excluded from U3, leaving U4 behavior unchanged.
+- Old production behavior with finalized new assertions: **8 PASS / 10 FAIL**;
+  438 existing tests were not selected by the focused test-name filter. Every failure
+  showed an unrelated date instead of `—`. An earlier test-authoring run exposed an
+  incorrect expected Finance URL parameter; it was corrected to existing `ledgerId`
+  before this baseline proof (no production link change).
+- Corrected source validation: `npm run test -- src/pages/OrderDetailPage.test.tsx
+  src/pages/OrdersPage.test.tsx src/lib/orderOperationalStory.test.ts --reporter=json
+  --outputFile=/private/tmp/sporgym-p04-u3-final-tests.json`:
+  **602 PASS / 0 FAIL / 0 SKIP / 0 PENDING** (Detail 456, Orders 134, story 12;
+  new U3 cases 18). Existing cancellation, G1/G2/G3/U2 and isolation regressions pass.
+- `npm run build` (TypeScript + Vite) and `git diff --check` passed; existing bundle
+  size warning remains. No database, Docker, live Shopify/provider, production
+  operation or browser smoke was run. Component tests are not production evidence.
+- Changed files: the component, its existing test file and this appended record.
+  Draft PR/GitHub CI status is reported separately; local PASS does not imply CI PASS.
+  U4 title-only suppression and coarse grouping risks remain unresolved. No U10
+  readiness, panel-removal acceptance, P04 completion, merge or deployment is claimed.

@@ -11581,4 +11581,80 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       noMutations();
     });
   });
+  describe('P04-U3 canonical refund-terminal timestamp authority', () => {
+    const ledgerAt = '2026-06-03T10:00:00.000Z';
+    const olderLedgerAt = '2026-06-01T08:00:00.000Z';
+    const blockedAt = '2026-06-02T09:00:00.000Z';
+    function actor(role: 'admin' | 'vendor') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    const cases = [
+      { name: 'no timestamp evidence', dates: [] },
+      { name: 'ledger creation only', dates: [ledgerAt] },
+      { name: 'assignment timestamp only', dates: [], block: blockedAt },
+      { name: 'both unrelated sources', dates: [ledgerAt], block: blockedAt },
+      { name: 'multiple refund ledger entries', dates: [ledgerAt, olderLedgerAt], block: blockedAt },
+      { name: 'missing Finance record', dates: [], block: blockedAt },
+      { name: 'invalid timestamps', dates: ['invalid-ledger-date'], block: 'invalid-block-date' },
+      { name: 'empty timestamps', dates: [''], block: '' },
+    ];
+    it.each((['admin', 'vendor'] as const).flatMap((role) => cases.map((fixture) => ({ role, ...fixture }))))(
+      'keeps canonical dates unknown for $role with $name, preserving separate Finance evidence', async ({ role, dates, block }) => {
+        actor(role);
+        const dashboard = buildOrderFinanceDashboard({ includeProductRefund: true });
+        const refund = dashboard.transactions.find((record) => record.category === 'Refund')!;
+        const refunds = dates.map((date, index) => ({ ...refund, id: `u3-refund-${index}`, date }));
+        getFinanceDashboardMock.mockResolvedValue({ ...dashboard, transactions: refunds });
+        getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+          operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+          fulfillmentActionAvailable: false, allocationStatus: 'active', assignmentBlockedAt: block,
+          assignmentHistory: [], timeline: [], trackingNumber: undefined, trackingUrl: undefined,
+          shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending' });
+        renderOrderDetail();
+        await screen.findByLabelText('Current order state');
+        await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalled());
+        const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+        if (role === 'admin' && refunds.length) {
+          await waitFor(() => expect(within(activity).getAllByRole('link', { name: 'Refund processed' })).toHaveLength(refunds.length));
+          for (const record of refunds) {
+            const link = within(activity).getAllByRole('link', { name: 'Refund processed' })
+              .find((item) => item.getAttribute('href') === `/finance?ledgerId=${record.id}`);
+            expect(link).toBeDefined();
+            const row = link!.closest('li')!;
+            expect(row).toHaveTextContent(record.amount);
+            expect(row.querySelector('small')).toHaveTextContent(
+              record.date && record.date !== 'invalid-ledger-date' ? formatTimelineDateForTest(record.date) : '—');
+          }
+        } else {
+          expect(within(activity).queryByRole('link', { name: 'Refund processed' })).not.toBeInTheDocument();
+        }
+        for (const title of ['Refund completed', 'Fulfillment not required']) {
+          const row = getOrderActivityRow(title);
+          expect(row.querySelector('small')).toHaveTextContent(/^—$/);
+          for (const unrelated of [ledgerAt, olderLedgerAt, blockedAt, orderWithoutShipment.date]) {
+            expect(row).not.toHaveTextContent(formatTimelineDateForTest(unrelated));
+          }
+        }
+        expect(screen.getByLabelText('Current order state')).toHaveTextContent('Refunded');
+        expect(screen.queryByRole('button', { name: 'Create shipment', exact: true })).not.toBeInTheDocument();
+        for (const mutation of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, retryShipmentExecutionMock,
+          submitFulfillmentTrackingMock, rejectOrderMock, splitAllocationMock]) expect(mutation).not.toHaveBeenCalled();
+        expect(getOrderMock).toHaveBeenCalledWith(orderWithoutShipment.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+      });
+
+    it.each(['admin', 'vendor'] as const)('retains legitimate Vendor-block event dates for %s', async (role) => {
+      actor(role);
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, allocationStatus: 'vendor_blocked',
+        assignmentBlockedAt: blockedAt, assignmentHistory: [{ id: 'u3-block', action: 'vendor_blocked',
+          createdAt: blockedAt, actorName: 'Vendor', actorRole: 'vendor' }], timeline: [],
+        shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending' });
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const row = getOrderActivityRow(role === 'admin' ? 'Vendor blocked' : 'Order blocked from shipment');
+      expect(row.querySelector('small')).toHaveTextContent(formatTimelineDateForTest(blockedAt));
+    });
+  });
+
 });

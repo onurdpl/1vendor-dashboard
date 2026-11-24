@@ -4827,7 +4827,10 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                 ? 'Order review started'
                 : event.label,
         description: canonicalDescription,
-        at: event.at ?? (event.tone === 'success' ? refundFinanceRecord?.date ?? vendorBlockedAt : vendorBlockedAt),
+        // Refund terminality establishes state, not the time of either canonical event.
+        at: operationalStory.state === 'refunded_completed'
+          ? event.at
+          : event.at ?? (event.tone === 'success' ? refundFinanceRecord?.date ?? vendorBlockedAt : vendorBlockedAt),
         status: getCanonicalTimelineStatus(event.label),
         tone: event.tone === 'warning' ? 'attention' : event.tone ?? 'info',
       });
