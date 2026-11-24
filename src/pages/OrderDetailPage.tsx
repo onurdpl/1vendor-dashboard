@@ -475,7 +475,11 @@ function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
       normalizedTitle.includes('return') ||
       normalizedTitle.includes('status');
     const eventDay = parseSafeDate(event.at)?.toISOString().slice(0, 10) ?? 'unknown';
-    const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay].join('|');
+    const returnRecordId = event.id.startsWith('return-') ? event.id.slice('return-'.length) : '';
+    // Only the existing linked Return record ID/URL pair establishes this identity.
+    const linkedReturnIdentity = returnRecordId.trim() && event.href === `/returns/${returnRecordId}`
+      ? returnRecordId : '';
+    const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay, linkedReturnIdentity].join('|');
 
     if (isNoisyShipmentEvent && seenGroupedEvents.has(eventKey)) {
       return;
