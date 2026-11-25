@@ -1025,3 +1025,13 @@ Branch: `codex/p04-u4-f1-native-cancellation-provenance`. Scope: U4-F1 only.
   were not rerun. No browser, database or live provider/Shopify operation.
 - F2/F4/F5 remain separate. Inactive Navlungo/TryOto integrations are excluded.
   U4 is not formally closed; no panel removal, merge or deployment is claimed.
+
+## P04-U4 — Formal closure preparation (2026-11-25)
+
+Baseline: `3594858e60e206327bd87b9edf9a6bcf6d47d91e` (`origin/main`). PR #90 is merged at this SHA. Its [post-merge CI](https://github.com/onurdpl/1vendor-dashboard/actions/runs/45606505026) passed `build-and-test` and `postgres-18-finance`. U3 and U4-A1/B1/C1/D1/E1/F1/F2/F3/F4 are merged through PRs #81–#90; the historical implementation and test evidence above remains unchanged.
+
+The owner approved documentation-only formal U4 closure without further code changes. The existing `Shipment created` title and date are **accepted as a documented limitation**: `shipmentCreatedAt` can originate from Shopify fulfillment creation, local shipment processing, or Vendor integration `shippedAt`; it does not universally verify physical carrier handover. No title, timestamp, mapping, Activity behavior, Shopify/provider path, or Finance clock was changed.
+
+U4-F5 is **audit-only** with classification `P04_U4_F5_AUDIT_NO_CHANGE_RECOMMENDED`. No active writer was found for the six secondary canonical titles reviewed. Historical assignment-history action collisions are conditionally possible, but production counts are **UNKNOWN**; no database query ran and no production incident is claimed. The optional aggregate check is not required for the approved closure path. First delivery observation availability and production deployment/execution of this main SHA also remain **UNKNOWN**. CI PASS is not production verification.
+
+The canonical [P04-U4 closure record](P04_U4_CLOSURE.md) lists each merged PR and CI run, Admin/Vendor and Activity identity protections, timestamp provenance, accepted limitations, unknowns, and the owner decision. Its `P04_U4_CLOSED_WITH_DOCUMENTED_LIMITATIONS_AND_DEFERRALS` classification is **proposed** until the documentation-only Draft PR is reviewed and merged into `main`. U4 is not yet repository-recorded as closed. This does not authorize full P04 closure, Orders panel removal, deployment, or other implementation.
