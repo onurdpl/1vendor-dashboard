@@ -938,6 +938,16 @@ Branch: `codex/p04-u4-f3-admin-return-history-identity`. Scope: U4-F3 only.
 - F1/F2/F4/F5 remain separate. Inactive Navlungo/TryOto integrations are excluded.
   U4 is not formally closed; no panel removal, merge or deployment is claimed.
 
+## P04-U4-F4 — Delivery observation and tracking Activity time (2026-11-25)
+
+Baseline: `80e451d02a1ce482fa82913449969b113abc970f` (`origin/main`, PR #89 merged). Its post-merge CI run `45582248875` passed `build-and-test` and `postgres-18-finance`. Owner approved the bounded combined A+B timestamp presentation.
+
+- `AllocationDeliveredObservation.firstObservedDeliveredAt` is a database-recorded first verified delivery observation for one allocation, not the physical delivery time. Existing Kargonomi/Sopyo writers and Finance settlement clocks are unchanged. The Order Detail query now selects only this additional timestamp, checks allocation and outbound-source identity, and returns ISO time or `null`. It does not expose provider references or raw responses.
+- The existing Order Detail DTO, real-order mapper and frontend contract carry the optional observation time. The `Delivered` Activity row keeps its current status gate and shows the observation date and time with “First delivery observed by SPORGYM”. Without a valid observation it shows `—` and an unavailable-time explanation. Provider response, fulfillment, shipment-update and order dates are no longer presented as delivery times.
+- The derived `Tracking synced` row retains its tracking description, number and link, but shows `—` and notes that the event time is unverified. Persisted native tracking-history timestamps and IDs remain intact. Grouping is performed using the previous inputs; only the two approved derived rows are adjusted afterward. Unknown-time derived rows sort after timed rows rather than borrowing order creation time. Shared timeline and global grouping rules are unchanged.
+- Test-first reproduction on original source: **0 PASS / 5 FAIL / 624 filtered** across the backend DTO and four role-based G3 expectations. Focused corrected run: **61 PASS / 0 FAIL / 592 filtered**. Combined Order Detail, Orders, operational-story, Order Detail API, route/isolation and real mapper suites: **863 PASS / 0 FAIL / 0 SKIP / 0 PENDING**. Two additional same-day/URL-only assertions were added afterward; the final focused G3 run passed **45 / 0 FAIL / 586 filtered / 0 PENDING**. Frontend build, backend build, backend typecheck and `git diff --check` passed after generating an isolated Prisma client for this worktree. No production database, Shopify or provider call was made.
+- `Shipment created` retains heterogeneous timestamp provenance and was not changed. Production observation-data availability is **UNKNOWN**. U4-F5 remains open; U4 is not closed.
+
 ## P04-U4-F2 — Vendor blocked current state and history separation (2026-11-25)
 
 Baseline: `b0c646c07a407d2006536538d9174a9679d8246f` (`origin/main`, PR #88 merged).

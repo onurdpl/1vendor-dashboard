@@ -4904,6 +4904,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       id: 'tracking-added',
       title: 'Tracking synced',
       description: [formatTrackingCarrierLabel(order.carrier), order.trackingNumber].filter(Boolean).join(' / ') || 'Tracking link available.',
+      // Preserve the former grouping bucket; the unverified time is hidden after grouping.
       at: order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date,
       tone: 'success',
     });
@@ -4948,6 +4949,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     orderTimelineEvents.push({
       id: 'shipment-delivered',
       title: 'Delivered',
+      // Preserve the former grouping bucket; only the verified observation is displayed.
       at: visibleShipmentExecution?.lastProviderResponseAt ?? order.fulfilledAt ?? order.shipmentUpdatedAt ?? order.date,
       tone: 'success',
     });
@@ -8405,11 +8407,32 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                     };
                   }),
                 ...orderTimelineEvents,
-              ], audience).sort(
-                (left, right) =>
-                  getSafeTimestamp(left.at ?? order.date, Number.POSITIVE_INFINITY) -
-                  getSafeTimestamp(right.at ?? order.date, Number.POSITIVE_INFINITY),
-              )}
+              ], audience).map((event) => {
+                if (event.id === 'tracking-added') return {
+                  ...event,
+                  at: undefined,
+                  description: `${event.description ?? ''} Tracking event time not verified.`.trim(),
+                };
+                if (event.id === 'shipment-delivered') {
+                  const observedAt = parseSafeDate(order.firstObservedDeliveredAt);
+                  return {
+                    ...event,
+                    at: observedAt?.toISOString(),
+                    description: observedAt
+                      ? 'First delivery observed by SPORGYM. Physical delivery time not verified.'
+                      : 'Delivery observation time unavailable or unverified.',
+                  };
+                }
+                return event;
+              }).sort((left, right) => {
+                const displayTime = (event: OperationalEventInput) =>
+                  getSafeTimestamp(
+                    event.id === 'tracking-added' || event.id === 'shipment-delivered'
+                      ? event.at : event.at ?? order.date,
+                    Number.POSITIVE_INFINITY,
+                  );
+                return displayTime(left) - displayTime(right);
+              })}
               audience={audience}
               emptyMessage="No records available."
             />

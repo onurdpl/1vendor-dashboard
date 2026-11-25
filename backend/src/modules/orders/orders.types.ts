@@ -619,6 +619,7 @@ export type AllocationSplitExecutionResponseDto = {
 
 export type OrderDetailDto = OrderSummaryDto & {
   customerName: string | null;
+  firstObservedDeliveredAt: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   orderSnapshot: OrderSnapshotDto;

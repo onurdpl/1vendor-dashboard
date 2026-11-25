@@ -243,6 +243,60 @@ describe('order detail snapshot API mapping', () => {
     expect((await getVendorOrderById('sporjinal', base.id))?.shopifyDeliverySync).toBeNull();
   });
 
+  it('exposes only the matching allocation delivery observation time', async () => {
+    const observedAt = new Date('2026-06-03T11:12:13.000Z');
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildAllocation({
+      outboundMethodSnapshot: 'KARGONOMI',
+      outboundIntegrationProviderSnapshot: null,
+      deliveredObservation: {
+        vendorAllocationId: 'alloc-sporjinal-1001', outboundMethod: 'KARGONOMI',
+        outboundIntegrationProvider: null, firstObservedDeliveredAt: observedAt,
+      },
+    }));
+    const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
+    expect(result?.firstObservedDeliveredAt).toBe(observedAt.toISOString());
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'alloc-sporjinal-1001', assignedVendorId: 'sporjinal' },
+      include: expect.objectContaining({ deliveredObservation: { select: expect.objectContaining({ firstObservedDeliveredAt: true }) } }),
+    }));
+  });
+
+  it.each([
+    { name: 'Sopyo', method: 'VENDOR_INTEGRATION', provider: 'SOPYO' },
+    { name: 'Kargonomi', method: 'KARGONOMI', provider: null },
+  ])('returns the first verified $name observation without provider metadata', async ({ method, provider }) => {
+    const firstObservedDeliveredAt = new Date('2026-06-03T11:12:13.000Z');
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
+      outboundMethodSnapshot: method, outboundIntegrationProviderSnapshot: provider,
+      deliveredObservation: { vendorAllocationId: 'alloc-sporjinal-1001', outboundMethod: method,
+        outboundIntegrationProvider: provider, firstObservedDeliveredAt, sourceReference: 'secret-provider-reference' },
+    }));
+    const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
+    expect(result?.firstObservedDeliveredAt).toBe(firstObservedDeliveredAt.toISOString());
+    expect(JSON.stringify(result)).not.toContain('secret-provider-reference');
+  });
+
+  it.each([
+    { name: 'absent observation', observation: null },
+    { name: 'other allocation', observation: { vendorAllocationId: 'other-allocation', outboundMethod: 'KARGONOMI', outboundIntegrationProvider: null, firstObservedDeliveredAt: new Date('2026-06-03T11:12:13.000Z') } },
+    { name: 'wrong source', observation: { vendorAllocationId: 'alloc-sporjinal-1001', outboundMethod: 'VENDOR_INTEGRATION', outboundIntegrationProvider: 'SOPYO', firstObservedDeliveredAt: new Date('2026-06-03T11:12:13.000Z') } },
+    { name: 'invalid time', observation: { vendorAllocationId: 'alloc-sporjinal-1001', outboundMethod: 'KARGONOMI', outboundIntegrationProvider: null, firstObservedDeliveredAt: new Date('invalid') } },
+  ])('does not expose $name as verified delivery time', async ({ observation }) => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
+      outboundMethodSnapshot: 'KARGONOMI', outboundIntegrationProviderSnapshot: null,
+      deliveredObservation: observation,
+    }));
+    expect((await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001'))?.firstObservedDeliveredAt).toBeNull();
+  });
+
+  it('does not read an observation from a different Vendor allocation', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(null);
+    expect(await getVendorOrderById('other-vendor', 'alloc-sporjinal-1001')).toBeNull();
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'alloc-sporjinal-1001', assignedVendorId: 'other-vendor' },
+    }));
+  });
+
   it('exposes a canonically converged refund status from the persisted order snapshot', async () => {
     prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
       order: {

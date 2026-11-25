@@ -994,6 +994,7 @@ export type AllocationSplitExecutionResponse = {
 };
 
 export type OrderDetail = OrderSummary & {
+  firstObservedDeliveredAt?: string | null;
   shippingAddress: string;
   notes: string;
   lineItems: OrderLineItem[];

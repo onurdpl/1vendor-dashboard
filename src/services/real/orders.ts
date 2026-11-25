@@ -173,6 +173,7 @@ type OrderSummaryDto = {
 };
 
 type OrderDetailDto = OrderSummaryDto & {
+  firstObservedDeliveredAt?: string | null;
   customerName: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
@@ -596,6 +597,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
 
   return {
     ...summary,
+    firstObservedDeliveredAt: dto.firstObservedDeliveredAt ?? null,
     trackingNumber: dto.trackingNumber ?? undefined,
     carrier: dto.carrier ?? undefined,
     trackingUrl: dto.trackingUrl ?? undefined,
