@@ -109,6 +109,17 @@ describe('real orders allocation finance summary mapping', () => {
 
     expect(order).not.toHaveProperty('allocationFinanceSummary');
   });
+  it('preserves an observed delivery ISO time without manufacturing a missing one', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      ...orderDetailResponse(), firstObservedDeliveredAt: '2026-06-03T11:12:13.000Z',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    expect((await getOrder('allocation-1', { vendorId: 'vendor-1' })).firstObservedDeliveredAt)
+      .toBe('2026-06-03T11:12:13.000Z');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(orderDetailResponse()), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    expect((await getOrder('allocation-1', { vendorId: 'vendor-1' })).firstObservedDeliveredAt).toBeNull();
+  });
   describe('P04-U4-C1 persisted assignment identity mapping', () => {
     it.each(['history-original-A', '  history-exact-B  '])('preserves the exact source ID %s through history and timeline', async (id) => {
       const entry = { id, action: 'tracking_added', fromVendorId: 'vendor-1', toVendorId: 'vendor-1',

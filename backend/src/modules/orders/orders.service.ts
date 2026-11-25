@@ -4099,7 +4099,7 @@ export async function getVendorOrderById(
       order: true,
       fulfillment: true,
       deliveredObservation: {
-        select: { vendorAllocationId: true, outboundMethod: true, outboundIntegrationProvider: true },
+        select: { vendorAllocationId: true, outboundMethod: true, outboundIntegrationProvider: true, firstObservedDeliveredAt: true },
       },
       sopyoShipmentIntent: {
         select: { assignedVendorId: true, status: true, shopifyFulfillmentId: true, deliveredSyncStatus: true },
@@ -4237,6 +4237,15 @@ export async function getVendorOrderById(
     fulfilledAt: toIsoString(allocation.fulfillment?.fulfilledAt),
     shipmentCreatedAt: toIsoString(allocation.fulfillment?.shipmentCreatedAt ?? allocation.vendorIntegrationShippedAt),
     shipmentUpdatedAt: toIsoString(allocation.fulfillment?.shipmentUpdatedAt),
+    firstObservedDeliveredAt: (() => {
+      const observation = allocation.deliveredObservation;
+      const observedAt = observation?.firstObservedDeliveredAt;
+      return observation?.vendorAllocationId === allocation.id &&
+        observation.outboundMethod === allocation.outboundMethodSnapshot &&
+        observation.outboundIntegrationProvider === allocation.outboundIntegrationProviderSnapshot &&
+        observedAt instanceof Date && Number.isFinite(observedAt.getTime())
+        ? observedAt.toISOString() : null;
+    })(),
     shopifyFulfillmentSync: mapShopifyFulfillmentSync(allocation.fulfillment, {
       trackingNumber: allocation.trackingNumber,
       carrier: allocation.carrier,

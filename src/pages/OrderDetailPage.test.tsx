@@ -2716,10 +2716,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const trackingSyncedRow = getOrderActivityRow('Tracking synced');
     expect(trackingSyncedRow).toHaveTextContent('Sürat Kargo / SURAT-1028');
+    expect(trackingSyncedRow.querySelector('small')).toHaveTextContent(/^—$/);
     const deliveredRow = getOrderActivityRow('Delivered');
-    expect(deliveredRow).toHaveTextContent(formatTimelineDateForTest(deliveredAt));
+    expect(deliveredRow.querySelector('small')).toHaveTextContent(/^—$/);
     expect(deliveredRow).not.toHaveTextContent('Carrier delivery is confirmed.');
-    expect(deliveredRow.querySelector('p')).toBeNull();
+    expect(deliveredRow).toHaveTextContent('Delivery observation time unavailable or unverified.');
     const fulfillment = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
     expect(fulfillment).not.toBeNull();
     expect(within(fulfillment as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Delivered');
@@ -11276,8 +11277,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         expect(within(completion).getByText(formatTimelineDateForTest(completedAt))).toBeInTheDocument();
         expect(completion).not.toHaveTextContent(formatTimelineDateForTest(trackingAt));
         expect(completion).not.toHaveTextContent(formatTimelineDateForTest(providerAt));
-        expect(getOrderActivityRow('Tracking synced')).toHaveTextContent(formatTimelineDateForTest(trackingAt));
-        expect(getOrderActivityRow('Delivered')).toHaveTextContent(formatTimelineDateForTest(providerAt));
+        expect(getOrderActivityRow('Tracking synced').querySelector('small')).toHaveTextContent(/^—$/);
+        expect(getOrderActivityRow('Delivered').querySelector('small')).toHaveTextContent(/^—$/);
         expect(getOrderActivityRow('Shipment created')).toHaveTextContent(formatTimelineDateForTest('2026-06-02T08:00:00.000Z'));
         expect(screen.getAllByText('Fulfillment synced', { exact: true })).toHaveLength(1);
         expect(screen.queryByText('Shopify delivery synced', { exact: true })).not.toBeInTheDocument();
@@ -11288,6 +11289,88 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         expect(getOrderMock).toHaveBeenCalledTimes(1);
         noMutations();
       });
+
+    it.each(['admin', 'vendor'] as const)('labels the verified first delivery observation for %s without claiming physical delivery time', async (role) => {
+      actor(role);
+      const observedAt = '2026-06-04T12:34:56.000Z';
+      getOrderMock.mockResolvedValue(order({ firstObservedDeliveredAt: observedAt }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      const delivered = getOrderActivityRow('Delivered');
+      expect(delivered).toHaveTextContent('First delivery observed by SPORGYM');
+      expect(delivered.querySelector('small')).toHaveTextContent(formatTimelineDateForTest(observedAt));
+      expect(delivered).not.toHaveTextContent(formatTimelineDateForTest(providerAt));
+      expect(getOrderActivityRow('Tracking synced').querySelector('small')).toHaveTextContent(/^—$/);
+      expect(screen.getByRole('link', { name: 'Open tracking', exact: true })).toHaveAttribute('href', 'https://tracking.example/g3');
+      noMutations();
+    });
+
+    it.each([undefined, null, 'invalid-time'])(
+      'keeps Delivered status without inventing an observation date for %s', async (observedAt) => {
+        getOrderMock.mockResolvedValue(order({ firstObservedDeliveredAt: observedAt }));
+        renderOrderDetail();
+        await screen.findByText('Order #1028');
+        const delivered = getOrderActivityRow('Delivered');
+        expect(delivered.querySelector('small')).toHaveTextContent(/^—$/);
+        expect(delivered).toHaveTextContent('Delivery observation time unavailable or unverified.');
+        for (const otherTime of [providerAt, completedAt, trackingAt, orderWithShipmentSummary.date]) {
+          expect(delivered).not.toHaveTextContent(formatTimelineDateForTest(otherTime));
+        }
+        noMutations();
+      });
+
+    it('does not create Delivered from a historical observation when current status is not delivered', async () => {
+      getOrderMock.mockResolvedValue(order({
+        shippingStatus: 'In Transit', shipmentExecution: { ...order().shipmentExecution!, shipmentStatus: 'in_transit' },
+        firstObservedDeliveredAt: '2026-06-04T12:34:56.000Z',
+      }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(screen.queryByText('Delivered', { exact: true })).not.toBeInTheDocument();
+      noMutations();
+    });
+
+    it('keeps native tracking history time while the derived tracking time stays unknown', async () => {
+      const nativeAt = '2026-06-03T09:00:00.000Z';
+      getOrderMock.mockResolvedValue(order({
+        timeline: [{ label: 'tracking added', at: nativeAt, assignmentHistoryId: 'tracked-history-1' }],
+        assignmentHistory: [],
+      }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      const rows = Array.from(screen.getByRole('heading', { name: 'Activity' }).closest('article')!
+        .querySelectorAll('li')).filter((row) => row.textContent?.includes('Tracking synced'));
+      expect(rows).toHaveLength(2);
+      expect(rows.some((row) => row.textContent?.includes('Tracking synced')
+        && row.textContent?.includes(formatTimelineDateForTest(nativeAt)))).toBe(true);
+      expect(rows.at(-1)?.querySelector('small')).toHaveTextContent(/^—$/);
+      noMutations();
+    });
+
+    it('keeps same-day native tracking identity without a second derived row', async () => {
+      const nativeAt = '2026-06-02T10:00:00.000Z';
+      getOrderMock.mockResolvedValue(order({
+        timeline: [{ label: 'tracking added', at: nativeAt, assignmentHistoryId: 'tracked-history-2' }],
+      }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      const activity = screen.getByRole('heading', { name: 'Activity' }).closest('article')!;
+      const trackingRows = within(activity).getAllByText('Tracking synced').map((node) => node.closest('li')!);
+      expect(trackingRows).toHaveLength(1);
+      expect(trackingRows[0].querySelector('small')).toHaveTextContent(formatTimelineDateForTest(nativeAt));
+      noMutations();
+    });
+
+    it('keeps URL-only tracking visible with an unknown event time', async () => {
+      getOrderMock.mockResolvedValue(order({ trackingNumber: undefined, trackingUrl: 'https://tracking.example/url-only',
+        shipmentUpdatedAt: undefined, fulfilledAt: undefined, shopifyFulfillmentSync: null }));
+      renderOrderDetail();
+      await screen.findByText('Order #1028');
+      expect(getOrderActivityRow('Tracking synced').querySelector('small')).toHaveTextContent(/^—$/);
+      expect(screen.getByRole('link', { name: 'Open tracking', exact: true }))
+        .toHaveAttribute('href', 'https://tracking.example/url-only');
+      noMutations();
+    });
 
     it.each([undefined, null])('does not infer completion from raw Fulfilled without timestamp/sync (%s)', async (fulfilledAt) => {
       getOrderMock.mockResolvedValue(order({ fulfilledAt: fulfilledAt as OrderDetail['fulfilledAt'], shopifyFulfillmentSync: null }));
