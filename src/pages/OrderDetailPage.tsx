@@ -488,7 +488,7 @@ function groupOrderDetailTimelineEvents(events: OrderDetailActivityEvent[], audi
       ? returnRecordId : '';
     const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay, linkedReturnIdentity].join('|');
 
-    const nativeHistoryId = ['tracking synced', 'shipment created', 'admin returned to vendor', 'cancellation history entry'].includes(normalizedTitle)
+    const nativeHistoryId = ['tracking synced', 'shipment created', 'admin returned to vendor', 'cancellation history entry', 'vendor block history entry'].includes(normalizedTitle)
       ? event.nativeAssignmentHistoryId : undefined;
     if (nativeHistoryId) {
       const nativeKey = JSON.stringify([eventKey, nativeHistoryId]);
@@ -4814,8 +4814,8 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         ))
         .map((entry) => normalizeTimelineTitle(getVendorTimelineLabel(entry.label))),
     );
-    const pushVendorBlockedEvent = (event: OperationalEventInput) => {
-      if (!existingTimelineTitles.has(normalizeTimelineTitle(event.title))) {
+    const pushVendorBlockedEvent = (event: OperationalEventInput, preserveCurrentBlockedState = false) => {
+      if (preserveCurrentBlockedState || !existingTimelineTitles.has(normalizeTimelineTitle(event.title))) {
         orderTimelineEvents.push(event);
       }
     };
@@ -4829,6 +4829,8 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     };
 
     operationalStory.timelineEvents.forEach((event) => {
+      const isCurrentVendorBlockedState = operationalStory.state === 'vendor_blocked_awaiting_admin_resolution'
+        && event.label === 'Vendor blocked';
       const shouldRemoveCanonicalDescription =
         (operationalStory.resolvedByRefund && ['Refund completed', 'Fulfillment not required'].includes(event.label)) ||
         (operationalStory.state === 'shopify_order_cancelled' && event.label === 'Fulfillment not required') ||
@@ -4853,21 +4855,31 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       pushVendorBlockedEvent({
         id: `canonical-story-${normalizeTimelineTitle(event.label)}`,
         title:
-          !isAdmin && event.label === 'Vendor rejected allocation'
+          isCurrentVendorBlockedState && isAdmin
+            ? 'Current state: Vendor blocked'
+            : !isAdmin && event.label === 'Vendor rejected allocation'
             ? 'Vendor rejected selected items'
             : !isAdmin && event.label === 'Vendor blocked'
               ? 'Order blocked from shipment'
               : !isAdmin && event.label === 'Finance hold activated'
                 ? 'Order review started'
                 : event.label,
-        description: canonicalDescription,
+        description: isCurrentVendorBlockedState
+          ? [
+              'Current operational state.',
+              canonicalDescription,
+              vendorBlockedAt
+                ? 'Time shown is the latest block history record time, not an independently verified state transition.'
+                : 'Block history record time unavailable.',
+            ].filter(Boolean).join(' ')
+          : canonicalDescription,
         // Refund terminality establishes state, not the time of either canonical event.
         at: operationalStory.state === 'refunded_completed'
           ? event.at
           : event.at ?? (event.tone === 'success' ? refundFinanceRecord?.date ?? vendorBlockedAt : vendorBlockedAt),
         status: getCanonicalTimelineStatus(event.label),
         tone: event.tone === 'warning' ? 'attention' : event.tone ?? 'info',
-      });
+      }, isCurrentVendorBlockedState);
     });
   }
   if (showFulfillmentCompletion) {
@@ -8360,6 +8372,15 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                     const nativeAssignmentHistoryId = typeof entry.assignmentHistoryId === 'string'
                       && entry.assignmentHistoryId.trim() ? entry.assignmentHistoryId : undefined;
                     const isNativeCancellationHistory = normalizeTimelineTitle(entry.label) === 'shopify order cancelled';
+                    const isNativeVendorBlock = normalizeTimelineTitle(entry.label) === 'vendor blocked';
+                    const matchingVendorBlockHistory = isNativeVendorBlock && nativeAssignmentHistoryId
+                      ? safeArray(order.assignmentHistory).filter((history) =>
+                        history.id === nativeAssignmentHistoryId
+                        && normalizeTimelineTitle(history.action) === 'vendor_blocked'
+                        && history.createdAt === entry.at
+                        && Boolean(parseSafeDate(history.createdAt)),
+                      ) : [];
+                    const verifiedVendorBlockHistory = matchingVendorBlockHistory.length === 1;
                     const matchingHistory = isNativeCancellationHistory && nativeAssignmentHistoryId
                       ? safeArray(order.assignmentHistory).filter((history) =>
                         history.id === nativeAssignmentHistoryId
@@ -8371,12 +8392,13 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                       id: nativeAssignmentHistoryId ? `order-native-history-${nativeAssignmentHistoryId}`
                         : `order-native-${entry.label}-${entry.at}`,
                       nativeAssignmentHistoryId,
-                      title: isNativeCancellationHistory ? 'Cancellation history entry' : getVendorTimelineLabel(entry.label),
+                      title: isNativeCancellationHistory ? 'Cancellation history entry'
+                        : verifiedVendorBlockHistory ? 'Vendor block history entry' : getVendorTimelineLabel(entry.label),
                       description: isNativeCancellationHistory
                         ? verifiedHistoryTime
                           ? 'History record time. Shopify cancellation time not verified.'
                           : 'Assignment-history label; record time unverified. Shopify cancellation time not verified.'
-                        : undefined,
+                        : verifiedVendorBlockHistory ? 'Historical assignment action. History record time.' : undefined,
                       at: isNativeCancellationHistory && !verifiedHistoryTime ? undefined : entry.at,
                       tone: 'neutral' as const,
                       visibility: getNativeTimelineVisibility(entry.label),
