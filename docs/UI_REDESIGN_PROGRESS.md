@@ -938,6 +938,47 @@ Branch: `codex/p04-u4-f3-admin-return-history-identity`. Scope: U4-F3 only.
 - F1/F2/F4/F5 remain separate. Inactive Navlungo/TryOto integrations are excluded.
   U4 is not formally closed; no panel removal, merge or deployment is claimed.
 
+## P04-U4-F2 — Vendor blocked current state and history separation (2026-11-25)
+
+Baseline: `b0c646c07a407d2006536538d9174a9679d8246f` (`origin/main`, PR #88 merged).
+Approved scope: Option A for the verified `vendor_blocked` interaction only.
+Branch: `codex/p04-u4-f2-vendor-block-state-history`.
+
+- Current allocation status drives the `vendor_blocked_awaiting_admin_resolution`
+  story. The active Vendor rejection writer also creates a distinct persisted
+  `vendor_blocked` assignment-history record with ID and `createdAt`; the existing
+  DTO/mapper carries both into Order Detail. A native `Vendor Blocked` display
+  title previously suppressed the canonical current-state Activity entry before
+  audience filtering, even for a Vendor who could not see the Admin-only history.
+  Repeated presentation of one native history ID was not deduplicated.
+- Test-first baseline: **1 PASS / 2 FAIL / 610 filtered / 0 PENDING** across three
+  focused tests. Admin current-state row was absent and a repeated persisted ID
+  appeared twice; the Vendor control case passed.
+- `src/pages/OrderDetailPage.tsx` preserves the canonical blocked-state entry
+  despite native title equality. Admin now sees `Current state: Vendor blocked`;
+  Vendor retains `Order blocked from shipment`. The description identifies the
+  current state and qualifies any date as the latest block-history record time,
+  not an independently measured state transition. With no valid history time,
+  the Activity date remains `—`; unrelated date fallbacks were not introduced.
+- A native block row is called `Vendor block history entry` only when its existing
+  source ID, exact `vendor_blocked` action, identical `createdAt` and valid time
+  match one persisted history record. It is Admin-only and its time is explicitly
+  history-record time. Different IDs survive; repeated same-ID presentations in
+  the same bucket are deduplicated. Missing/unverified source evidence preserves
+  its previous native presentation. No ID appears in visible copy.
+- New focused F2 cases cover one/multiple blocks, same/different UTC days, reversed
+  source order, block–Admin return–block, resolved historical-only state, absent
+  history, missing/invalid time or identity, Admin/Vendor visibility, reason and
+  mutation boundaries. Final focused run: **12 PASS / 0 FAIL / 610 filtered / 0
+  PENDING**. Existing Order Detail, Orders, operational story and relevant mapper
+  combined run after source correction: **775 PASS / 0 FAIL / 0 SKIP / 0 PENDING**;
+  two further F2 cases were added after that run and passed in the focused run.
+- Only the Order Detail component, its tests and this progress entry changed.
+  Backend writers, permissions, operational-state calculation, F4/F5, Finance,
+  Shopify and provider integrations remain unchanged. No live/browser/database
+  operation ran. Navlungo/TryOto remain inactive. U4 is not closed; no panel
+  removal, merge or deployment is claimed.
+
 ## P04-U4-F1 — Native-only cancellation history provenance (2026-11-24)
 
 Baseline: `901b66697210d59588d9165276c35200d94cd9f2` (`origin/main`, PR #87 merged).

@@ -11652,7 +11652,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         shippingStatus: 'Awaiting Shipment', fulfillmentStatus: 'Pending' });
       renderOrderDetail();
       await screen.findByLabelText('Current order state');
-      const row = getOrderActivityRow(role === 'admin' ? 'Vendor blocked' : 'Order blocked from shipment');
+      const row = getOrderActivityRow(role === 'admin' ? 'Current state: Vendor blocked' : 'Order blocked from shipment');
       expect(row.querySelector('small')).toHaveTextContent(formatTimelineDateForTest(blockedAt));
     });
   });
@@ -12065,6 +12065,150 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
   });
 
+  describe('P04-U4-F2 vendor block state and history', () => {
+    const firstAt = '2026-06-02T09:00:00.000Z';
+    const laterAt = '2026-06-02T11:00:00.000Z';
+    function actor(role: 'admin' | 'vendor') {
+      setCurrentUser({ email: `${role}@demo.com`, name: role, role, vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: role === 'admin', defaultVendorId: 'sporjinal' });
+    }
+    function blocked(ids: string[], times: string[]): OrderDetail {
+      const entries = ids.map((id, index) => ({ id, action: 'vendor_blocked' as const,
+        fromVendorId: 'sporjinal', toVendorId: 'sporjinal', reason: 'OUT_OF_STOCK',
+        actorName: 'Vendor user', actorRole: 'vendor' as const, createdAt: times[index] }));
+      return { ...orderWithoutShipment, allocationStatus: 'vendor_blocked', cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true, assignmentHistory: entries,
+        timeline: entries.map((entry) => ({ label: 'vendor blocked', at: entry.createdAt, assignmentHistoryId: entry.id })),
+        shipmentCreatedAt: undefined, shipmentUpdatedAt: undefined, trackingNumber: undefined,
+        trackingUrl: undefined, carrier: undefined, fulfilledAt: undefined };
+    }
+    function activity() { return screen.getByRole('heading', { name: 'Activity' }).closest('article')!; }
+    it('keeps the current state and one persisted history record separate for Admin', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue(blocked(['block-A'], [firstAt]));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(within(activity()).getByText('Current state: Vendor blocked')).toBeInTheDocument();
+      expect(within(activity()).getByText('Vendor block history entry')).toBeInTheDocument();
+    });
+    it('keeps Vendor current state when the native history is Admin-only', async () => {
+      actor('vendor');
+      getOrderMock.mockResolvedValue(blocked(['block-A'], [firstAt]));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(within(activity()).getByText('Order blocked from shipment')).toBeInTheDocument();
+      expect(within(activity()).queryByText('Vendor block history entry')).not.toBeInTheDocument();
+    });
+    it('does not present the same persisted history ID twice', async () => {
+      actor('admin');
+      const order = blocked(['block-A'], [firstAt]);
+      getOrderMock.mockResolvedValue({ ...order, timeline: [...order.timeline, ...order.timeline] });
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const historyRows = within(activity()).getAllByText(/^(Vendor Blocked|Vendor block history entry)$/i)
+        .map((node) => node.closest('li')!)
+        .filter((row) => within(row).queryByText('Blocked', { exact: true }) === null);
+      expect(historyRows).toHaveLength(1);
+    });
+    it.each([
+      { name: 'same UTC day', ids: ['block-A', 'block-B'], times: [firstAt, laterAt] },
+      { name: 'different UTC days', ids: ['block-A', 'block-B'], times: [firstAt, '2026-06-03T09:00:00.000Z'] },
+      { name: 'reversed source order', ids: ['block-B', 'block-A'], times: [laterAt, firstAt] },
+    ])('preserves distinct persisted block records with $name', async ({ ids, times }) => {
+      actor('admin');
+      getOrderMock.mockResolvedValue(blocked(ids, times));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const records = within(activity()).getAllByText('Vendor block history entry').map((node) => node.closest('li')!);
+      expect(records).toHaveLength(2);
+      expect(records.map((row) => row.querySelector('small')?.textContent)).toEqual(
+        [...times].sort().map(formatTimelineDateForTest),
+      );
+      for (const row of records) expect(row).toHaveTextContent('History record time.');
+      expect(within(activity()).getByText('Current state: Vendor blocked')).toBeInTheDocument();
+      expect(activity()).not.toHaveTextContent('block-A');
+      expect(activity()).not.toHaveTextContent('block-B');
+    });
+    it('keeps current blocked explanation with no matching history and no invented date', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue(blocked([], []));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      const row = getOrderActivityRow('Current state: Vendor blocked');
+      expect(row.querySelector('small')).toHaveTextContent(/^—$/);
+      expect(row).toHaveTextContent('Block history record time unavailable.');
+      expect(within(activity()).queryByText('Vendor block history entry')).not.toBeInTheDocument();
+    });
+    it('keeps previous block as Admin history after the allocation becomes active', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue({ ...blocked(['block-A'], [firstAt]), allocationStatus: 'active',
+        cancellationReason: undefined, reassignmentRequired: false });
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(screen.getByLabelText('Current order state')).toHaveTextContent('Active');
+      expect(within(activity()).queryByText('Current state: Vendor blocked')).not.toBeInTheDocument();
+      expect(within(activity()).getByText('Vendor block history entry')).toBeInTheDocument();
+    });
+    it('retains both block records around an Admin return-to-Vendor cycle', async () => {
+      actor('admin');
+      const order = blocked(['block-A', 'block-B'], [firstAt, laterAt]);
+      getOrderMock.mockResolvedValue({ ...order,
+        assignmentHistory: [...order.assignmentHistory, {
+          id: 'return-A', action: 'admin_returned_to_vendor', fromVendorId: 'sporjinal',
+          toVendorId: 'sporjinal', actorName: 'Admin', actorRole: 'admin', createdAt: '2026-06-02T10:00:00.000Z',
+        }],
+        timeline: [order.timeline[0], {
+          label: 'admin returned to vendor', at: '2026-06-02T10:00:00.000Z', assignmentHistoryId: 'return-A',
+        }, order.timeline[1]],
+      });
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(within(activity()).getAllByText('Vendor block history entry')).toHaveLength(2);
+      expect(within(activity()).getByText(/^Admin returned to vendor$/i)).toBeInTheDocument();
+      expect(within(activity()).getByText('Current state: Vendor blocked')).toBeInTheDocument();
+      expect(getOrderActivityRow('Current state: Vendor blocked').querySelector('small'))
+        .toHaveTextContent(formatTimelineDateForTest(laterAt));
+    });
+    it('does not claim a verified history record when its timestamp is missing', async () => {
+      actor('admin');
+      const order = blocked(['block-A'], [firstAt]);
+      getOrderMock.mockResolvedValue({ ...order,
+        timeline: [{ label: 'vendor blocked', at: undefined as unknown as string, assignmentHistoryId: 'block-A' }],
+      });
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(within(activity()).getByText('Current state: Vendor blocked')).toBeInTheDocument();
+      expect(within(activity()).queryByText('Vendor block history entry')).not.toBeInTheDocument();
+      expect(within(activity()).getByText(/^Vendor Blocked$/i).closest('li')?.querySelector('small'))
+        .toHaveTextContent(/^—$/);
+    });
+    it('preserves legacy behavior for missing IDs and unverified timestamps', async () => {
+      actor('admin');
+      const order = blocked(['block-A'], [firstAt]);
+      getOrderMock.mockResolvedValue({ ...order, timeline: [
+        { label: 'vendor blocked', at: firstAt },
+        { label: 'vendor blocked', at: 'invalid-time', assignmentHistoryId: 'block-A' },
+      ] });
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(within(activity()).getByText('Current state: Vendor blocked')).toBeInTheDocument();
+      expect(within(activity()).getAllByText(/^Vendor Blocked$/i)).toHaveLength(2);
+      expect(within(activity()).queryByText('Vendor block history entry')).not.toBeInTheDocument();
+    });
+    it('keeps Vendor rejection reason and hides native history without enabling mutations', async () => {
+      actor('vendor');
+      getOrderMock.mockResolvedValue(blocked(['block-A'], [firstAt]));
+      renderOrderDetail();
+      await screen.findByLabelText('Current order state');
+      expect(getOrderActivityRow('Order blocked from shipment')).toHaveTextContent('Current operational state.');
+      expect(screen.getByLabelText('Operational alerts')).toHaveTextContent('Out of stock');
+      expect(within(activity()).queryByText('Vendor block history entry')).not.toBeInTheDocument();
+      for (const fn of [createShipmentExecutionMock, retryFailedShipmentExecutionMock, submitFulfillmentTrackingMock,
+        rejectOrderMock, planAllocationSplitMock, splitAllocationMock]) expect(fn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('P04-U4-F1 native cancellation history provenance', () => {
     it('shows exact native-only cancellation as history, not order creation', async () => {
       setCurrentUser({ email: 'admin@demo.com', name: 'Admin', role: 'admin', vendorAccess: ['sporjinal'],
@@ -12270,7 +12414,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           expect(refund.querySelector('small')).toHaveTextContent(role === 'admin' ? formatTimelineDateForTest(hiddenAt) : /^—$/);
           expect(getOrderActivityRow('Fulfillment not required').querySelector('small')).toHaveTextContent(/^—$/);
         } else if (state === 'blocked') {
-          expect(within(activity()).getByText(role === 'admin' ? 'Vendor blocked' : 'Order blocked from shipment')).toBeInTheDocument();
+          expect(within(activity()).getByText(role === 'admin' ? 'Current state: Vendor blocked' : 'Order blocked from shipment')).toBeInTheDocument();
         } else {
           expect(getOrderActivityRow('Shopify order cancelled').querySelector('small')).toHaveTextContent(formatTimelineDateForTest(hiddenAt));
           if (state === 'conflict') expect(within(activity()).getByText('Existing operational evidence')).toBeInTheDocument();
