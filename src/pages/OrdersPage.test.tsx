@@ -2752,6 +2752,50 @@ describe('OrdersPage control center', () => {
     openMock.mockRestore();
   });
 
+  it.each([
+    ['support', 'create'], ['support', 'retry'],
+    ['finance', 'create'], ['finance', 'retry'],
+  ] as const)('%s cannot %s shipments from the Orders panel', async (role, action) => {
+    setCurrentUser({
+      email: `${role}@demo.com`, name: `Demo ${role}`, role,
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false, defaultVendorId: 'demo-vendor-a',
+    });
+    const order = buildAwaitingRejectableOrder(action === 'retry' ? {
+      shipmentExecution: { ...shipmentExecution, id: 'shipment-failed', shipmentStatus: 'failed', labelUrl: null },
+    } : {});
+    listOrdersMock.mockResolvedValue([toSummary(order)]);
+    getOrderMock.mockResolvedValue(order);
+
+    renderOrdersPage();
+    expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Smart label action')).not.toBeInTheDocument();
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['support', 'finance'] as const)('%s can still open an existing label without mutation', async (role) => {
+    setCurrentUser({
+      email: `${role}@demo.com`, name: `Demo ${role}`, role,
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false, defaultVendorId: 'demo-vendor-a',
+    });
+    const order = buildAwaitingRejectableOrder({ shipmentExecution });
+    listOrdersMock.mockResolvedValue([toSummary(order)]);
+    getOrderMock.mockResolvedValue(order);
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    try {
+      renderOrdersPage();
+      const labelButton = await screen.findByRole('button', { name: /Etiketi yazdır/i });
+      await userEvent.click(labelButton);
+      expect(openMock).toHaveBeenCalled();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    } finally { openMock.mockRestore(); }
+  });
+
   it('disables the smart label shipment action for restricted vendors while keeping order details visible', async () => {
     setCurrentUser({
       email: 'vendor@demo.com',

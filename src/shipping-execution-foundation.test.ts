@@ -2936,6 +2936,19 @@ describe('shipping execution foundation', () => {
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
+  it('preserves vendor isolation before retrying a foreign shipment', async () => {
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue({
+      id: 'foreign-shipment', vendorId: 'other-vendor', allocationId: 'alloc-1',
+    });
+    const adapter = buildAdapter();
+
+    await expect(retryFailedShipmentExecution('foreign-shipment', {
+      env, vendorId: 'sporjinal', adapter,
+    })).rejects.toThrow('Shipment execution not found.');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+  });
+
   it('marks provider failures safely without leaking provider internals', async () => {
     const adapter = buildAdapter();
     adapter.createShipment.mockRejectedValue(new Error('Hepsijet shipment execution failed with HTTP 500.'));
