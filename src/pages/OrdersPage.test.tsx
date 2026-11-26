@@ -2718,6 +2718,8 @@ describe('OrdersPage control center', () => {
     setVendorUser();
     const awaitingShipmentOrder = {
       ...orderDetail,
+      allocationStatus: 'active' as const,
+      reassignmentRequired: false,
       status: 'Pending',
       fulfillmentStatus: 'Pending',
       shippingStatus: 'Awaiting Shipment',
@@ -2793,6 +2795,50 @@ describe('OrdersPage control center', () => {
       const labelButton = await screen.findByRole('button', { name: /Etiketi yazdır/i });
       await userEvent.click(labelButton);
       expect(openMock).toHaveBeenCalled();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    } finally { openMock.mockRestore(); }
+  });
+
+  it.each([
+    ['admin', 'create'], ['admin', 'retry'],
+    ['vendor', 'create'], ['vendor', 'retry'],
+  ] as const)('B3: %s cannot %s a pending-reassignment shipment', async (role, action) => {
+    if (role === 'vendor') setVendorUser();
+    const order = buildAwaitingRejectableOrder({
+      allocationStatus: 'pending_reassignment',
+      reassignmentRequired: true,
+      fulfillmentActionAvailable: false,
+      shipmentExecution: action === 'retry'
+        ? { ...shipmentExecution, id: 'shipment-failed', shipmentStatus: 'failed', labelUrl: null }
+        : undefined,
+    });
+    listOrdersMock.mockResolvedValue([toSummary(order)]);
+    getOrderMock.mockResolvedValue(order);
+    renderOrdersPage();
+    const actionCard = await screen.findByLabelText('Smart label action');
+    const button = within(actionCard).getByRole('button');
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['admin', 'vendor'] as const)('B3: %s retains existing-label access for pending reassignment', async (role) => {
+    if (role === 'vendor') setVendorUser();
+    const order = buildAwaitingRejectableOrder({
+      allocationStatus: 'pending_reassignment', reassignmentRequired: true, fulfillmentActionAvailable: false,
+      shipmentExecution,
+    });
+    listOrdersMock.mockResolvedValue([toSummary(order)]);
+    getOrderMock.mockResolvedValue(order);
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    try {
+      renderOrdersPage();
+      const button = within(await screen.findByLabelText('Smart label action')).getByRole('button');
+      expect(button).toBeEnabled();
+      await userEvent.click(button);
+      expect(openMock).toHaveBeenCalledWith(shipmentExecution.labelUrl, '_blank', 'noopener,noreferrer');
       expect(createShipmentExecutionMock).not.toHaveBeenCalled();
       expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
     } finally { openMock.mockRestore(); }
@@ -3328,6 +3374,8 @@ describe('OrdersPage control center', () => {
   it('clears shipment label success feedback when selecting another order', async () => {
     const awaitingShipmentOrder = {
       ...orderDetail,
+      allocationStatus: 'active' as const,
+      reassignmentRequired: false,
       id: 'ORD-A-1002',
       status: 'Pending',
       fulfillmentStatus: 'Pending',
@@ -3455,6 +3503,8 @@ describe('OrdersPage control center', () => {
     setCurrentVendorId('demo-vendor-a');
     const vendorAOrder = {
       ...orderDetail,
+      allocationStatus: 'active' as const,
+      reassignmentRequired: false,
       id: 'ORD-A-1002',
       status: 'Pending',
       fulfillmentStatus: 'Pending',
@@ -3620,7 +3670,7 @@ describe('OrdersPage control center', () => {
       labelUrl: 'https://labels.example/retried-label.pdf',
     };
     const detailWithFailedShipment = {
-      ...orderDetail,
+      ...buildAwaitingRejectableOrder(),
       shipmentExecution: failedShipment,
     };
     const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);

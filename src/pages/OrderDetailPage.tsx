@@ -2147,7 +2147,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   }
 
   function handleCreateShipment(fields: ShipmentCustomerField[] = [], completedOverrides?: ShipmentCustomerOverrides) {
-    if (!order || shipmentMutationInFlightRef.current) {
+    if (!order || order.allocationStatus !== 'active' || shipmentMutationInFlightRef.current) {
       return;
     }
 
@@ -2193,7 +2193,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   }
 
   function handleRetryFailedShipment(fields: ShipmentCustomerField[] = [], completedOverrides?: ShipmentCustomerOverrides) {
-    if (!visibleShipmentExecution || shipmentMutationInFlightRef.current) {
+    if (!order || order.allocationStatus !== 'active' || !visibleShipmentExecution || shipmentMutationInFlightRef.current) {
       return;
     }
 
@@ -4459,6 +4459,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     && !hasCanonicalOperationalStory;
   const smartLabelPending = isCreatingShipment || isRetryingFailedShipment;
   const smartLabelBlocked = vendorRestricted || smartLabelPending
+    || (!visibleShipmentExecution?.labelUrl && order.allocationStatus !== 'active')
     || (!visibleShipmentExecution?.labelUrl && missingShipmentCustomerFields.length > 0)
     || Boolean(visibleShipmentExecution && !visibleShipmentExecution.labelUrl && !canRecoverFailedShipment)
     || (!visibleShipmentExecution && !shouldShowCreateShipmentAction);
