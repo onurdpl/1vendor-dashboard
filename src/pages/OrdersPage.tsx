@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -606,9 +606,19 @@ export function OrdersPage() {
         sourceShopifyOrderNumber: selectedOrderSummary.sourceShopifyOrderNumber,
       })
     : null;
-  const selectedOrderActionContextKeyRef = useRef<string | null>(selectedOrderActionContextKey);
-  useEffect(() => {
-    selectedOrderActionContextKeyRef.current = selectedOrderActionContextKey;
+  const labelActionMountedRef = useRef(false);
+  const selectedOrderActionContextRef = useRef({ key: selectedOrderActionContextKey, generation: 0 });
+  useLayoutEffect(() => {
+    labelActionMountedRef.current = true;
+    return () => { labelActionMountedRef.current = false; };
+  }, []);
+  useLayoutEffect(() => {
+    if (selectedOrderActionContextRef.current.key !== selectedOrderActionContextKey) {
+      selectedOrderActionContextRef.current = {
+        key: selectedOrderActionContextKey,
+        generation: selectedOrderActionContextRef.current.generation + 1,
+      };
+    }
   }, [selectedOrderActionContextKey]);
   const visibleLabelActionFeedback =
     labelActionFeedback?.vendorId === currentVendor.vendorId &&
@@ -718,8 +728,11 @@ export function OrdersPage() {
       sourceShopifyOrderId: order.sourceShopifyOrderId,
       sourceShopifyOrderNumber: order.sourceShopifyOrderNumber,
     });
+    const actionGeneration = selectedOrderActionContextRef.current.generation;
     const actionStillBelongsToCurrentSelection = () =>
-      selectedOrderActionContextKeyRef.current === actionContextKey;
+      labelActionMountedRef.current &&
+      selectedOrderActionContextRef.current.key === actionContextKey &&
+      selectedOrderActionContextRef.current.generation === actionGeneration;
     const actionFeedback = (tone: LabelActionFeedback['tone'], message: string): LabelActionFeedback => ({
       tone,
       message,
@@ -753,6 +766,7 @@ export function OrdersPage() {
         try {
           setLabelActionFeedback(null);
           const shipment = await retryShipmentLabelMutation(shipmentExecution.id);
+          if (!actionStillBelongsToCurrentSelection()) return;
           if (shipment.labelUrl) {
             const labelOpenResult = openShipmentLabel(shipment.labelUrl);
             if (labelOpenResult.opened) {
@@ -763,7 +777,7 @@ export function OrdersPage() {
           } else {
             setCurrentLabelActionFeedback('warning', 'Shipment retry completed. Label is still processing.');
           }
-          await orderDetailQuery.refetch();
+          if (actionStillBelongsToCurrentSelection()) await orderDetailQuery.refetch();
         } catch (mutationError) {
           const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
           setCurrentLabelActionFeedback('error', message);
@@ -778,6 +792,7 @@ export function OrdersPage() {
     try {
       setLabelActionFeedback(null);
       const shipment = await createShipmentMutation(order.id);
+      if (!actionStillBelongsToCurrentSelection()) return;
       if (shipment.labelUrl) {
         const labelOpenResult = openShipmentLabel(shipment.labelUrl);
         if (labelOpenResult.opened) {
@@ -788,7 +803,7 @@ export function OrdersPage() {
       } else {
         setCurrentLabelActionFeedback('warning', 'Shipment was created. Label is still processing.');
       }
-      await orderDetailQuery.refetch();
+      if (actionStillBelongsToCurrentSelection()) await orderDetailQuery.refetch();
     } catch (mutationError) {
       const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
       setCurrentLabelActionFeedback('error', message);
