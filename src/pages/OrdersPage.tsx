@@ -757,6 +757,10 @@ export function OrdersPage() {
       return;
     }
 
+    if (order.allocationStatus !== 'active') {
+      return;
+    }
+
     if (!canMutateShipments) {
       return;
     }
@@ -1099,6 +1103,7 @@ export function OrdersPage() {
               const smartLabelDisabled =
                 vendorRestricted ||
                 isLabelActionPending ||
+                (!labelUrl && selectedOrder.allocationStatus !== 'active') ||
                 Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;

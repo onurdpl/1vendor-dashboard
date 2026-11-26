@@ -10362,6 +10362,35 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       expect(openWindow).toHaveBeenCalledExactlyOnceWith('https://example.com/retried.pdf', '_blank', 'noopener,noreferrer');
     });
 
+    it.each(['create', 'retry'] as const)('B3: Admin cannot %s a pending-reassignment shipment', async (action) => {
+      actor('admin');
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+        allocationStatus: 'pending_reassignment', reassignmentRequired: true, fulfillmentActionAvailable: false,
+        shipmentExecution: action === 'retry' ? shipment({ shipmentStatus: 'failed', labelUrl: null }) : null,
+      });
+      renderOrderDetail();
+      const button = await screen.findByRole('button', { name: action === 'retry' ? 'Retry shipment label' : 'Create shipment label' });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it('B3: Admin retains existing-label access for pending reassignment', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+        allocationStatus: 'pending_reassignment', reassignmentRequired: true, fulfillmentActionAvailable: false,
+        shipmentExecution: shipment({ labelUrl: 'https://example.com/existing-pending.pdf' }),
+      });
+      renderOrderDetail();
+      const button = await screen.findByRole('button', { name: 'Open shipping label' });
+      expect(button).toBeEnabled();
+      await userEvent.click(button);
+      expect(openWindow).toHaveBeenCalledWith('https://example.com/existing-pending.pdf', '_blank', 'noopener,noreferrer');
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
     it.each(['pending', 'created'] as const)('does not retry a non-failed %s shipment without a label', async (shipmentStatus) => {
       getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentExecution: shipment({ shipmentStatus }) });
       renderOrderDetail();
