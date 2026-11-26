@@ -437,6 +437,7 @@ export function OrdersPage() {
   const currentUser = appReadiness.currentUser;
   const authContextReady = appReadiness.ready;
   const isAdmin = currentUser?.role === 'admin';
+  const canMutateShipments = isAdmin || currentUser?.role === 'vendor';
   const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
   const { message, tone, showFeedback } = useActionFeedback();
   const [searchTerm, setSearchTerm] = useState('');
@@ -740,6 +741,10 @@ export function OrdersPage() {
       } else {
         setCurrentLabelActionFeedback('error', labelOpenResult.error);
       }
+      return;
+    }
+
+    if (!canMutateShipments) {
       return;
     }
 
@@ -1188,7 +1193,7 @@ export function OrdersPage() {
                 />
               ) : null}
 
-              {operationalStory.actionVisibility.canCreateShipment ? (
+              {operationalStory.actionVisibility.canCreateShipment && (canMutateShipments || Boolean(labelUrl)) ? (
                 <section className="orders-smart-label-card" aria-label="Smart label action">
                   <button
                     type="button"

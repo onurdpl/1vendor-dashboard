@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
@@ -52,6 +52,12 @@ function disabledProviderResponse(provider: 'try_oto' | 'navlungo') {
     activeProvider: 'kargonomi',
     message: `${label} is passive. Kargonomi is the only active shipping provider.`,
   };
+}
+
+async function requireShipmentMutationRole(request: FastifyRequest, reply: FastifyReply) {
+  if (request.authUser?.role !== 'admin' && request.authUser?.role !== 'vendor') {
+    reply.code(403).send({ message: 'Admin or Vendor access required.' });
+  }
 }
 
 export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEnv) {
@@ -130,7 +136,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post(
     '/shipments/create',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireShipmentMutationRole, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -182,7 +188,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post<{ Params: { id: string } }>(
     '/shipments/:id/retry',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireShipmentMutationRole, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
