@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrdersPage } from './OrdersPage';
 import type {
@@ -290,11 +290,13 @@ function renderOrdersPage(initialEntries = ['/orders']) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => {
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolver, rejecter) => {
     resolve = resolver;
+    reject = rejecter;
   });
 
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function buildPdfBase64(content = '%PDF-1.4 shipment label') {
@@ -3427,9 +3429,7 @@ describe('OrdersPage control center', () => {
       await shipmentResult.promise;
     });
 
-    await waitFor(() =>
-      expect(openMock).toHaveBeenCalledWith('https://labels.example/new-label.pdf', '_blank', 'noopener,noreferrer'),
-    );
+    expect(openMock).not.toHaveBeenCalled();
     expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getAllByText('Acme Supply Co.')[0]);
@@ -3590,9 +3590,7 @@ describe('OrdersPage control center', () => {
       await shipmentResult.promise;
     });
 
-    await waitFor(() =>
-      expect(openMock).toHaveBeenCalledWith('https://labels.example/new-label.pdf', '_blank', 'noopener,noreferrer'),
-    );
+    expect(openMock).not.toHaveBeenCalled();
     expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
 
     await act(async () => {
@@ -3642,6 +3640,201 @@ describe('OrdersPage control center', () => {
     expect(openMock).toHaveBeenCalledWith('https://labels.example/retried-label.pdf', '_blank', 'noopener,noreferrer');
 
     openMock.mockRestore();
+  });
+
+  describe('B2 delayed shipment label context', () => {
+    function setup(kind: 'create' | 'retry') {
+      setCurrentUser({
+        email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+        vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+        vendorDetails: [
+          { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+          { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+        ],
+        canSwitchVendors: true, defaultVendorId: 'demo-vendor-a',
+      });
+      setCurrentVendorId('demo-vendor-a');
+      const firstOrder = buildAwaitingRejectableOrder(kind === 'retry' ? {
+        shipmentExecution: { ...shipmentExecution, id: 'shipment-failed', shipmentStatus: 'failed', labelUrl: null },
+      } : {});
+      const secondOrder = buildAwaitingRejectableOrder({
+        id: 'ORD-A-1003', sourceShopifyOrderId: 'gid://shopify/Order/1003',
+        sourceShopifyOrderNumber: '#1003', customer: 'Second Customer',
+      });
+      const otherVendorOrder = buildAwaitingRejectableOrder({
+        id: 'ORD-B-2001', originalVendorId: 'demo-vendor-b', assignedVendorId: 'demo-vendor-b',
+        vendorId: 'demo-vendor-b', sourceShopifyOrderId: 'gid://shopify/Order/2001',
+        sourceShopifyOrderNumber: '#2001', customer: 'Vendor B Customer',
+      });
+      listOrdersMock.mockImplementation(async (options) => options?.vendorId === 'demo-vendor-b'
+        ? [toSummary(otherVendorOrder)] : [toSummary(firstOrder), toSummary(secondOrder)]);
+      getOrderMock.mockImplementation(async (id) => id === secondOrder.id ? secondOrder
+        : id === otherVendorOrder.id ? otherVendorOrder : firstOrder);
+      const pending = deferred<ShipmentExecution>();
+      const completed = {
+        ...shipmentExecution, allocationId: firstOrder.id, vendorId: 'demo-vendor-a',
+        labelUrl: `https://labels.example/b2-${kind}.pdf`,
+      };
+      if (kind === 'create') createShipmentExecutionMock.mockReturnValue(pending.promise);
+      else retryFailedShipmentExecutionMock.mockReturnValue(pending.promise);
+      const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+      return { firstOrder, secondOrder, pending, completed, openMock };
+    }
+
+    async function start(kind: 'create' | 'retry') {
+      await userEvent.click(await screen.findByRole('button', {
+        name: kind === 'create' ? /Kargo etiketi yazdır/i : /Tekrar dene/i,
+      }));
+      if (kind === 'create') {
+        expect(createShipmentExecutionMock).toHaveBeenCalledExactlyOnceWith('ORD-A-1002', { vendorId: 'demo-vendor-a' });
+        expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+      } else {
+        expect(retryFailedShipmentExecutionMock).toHaveBeenCalledExactlyOnceWith('shipment-failed', { vendorId: 'demo-vendor-a' });
+        expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      }
+    }
+
+    it.each(['create', 'retry'] as const)('opens the %s label once while context is unchanged', async (kind) => {
+      const { pending, completed, openMock } = setup(kind);
+      renderOrdersPage();
+      await start(kind);
+      await act(async () => pending.resolve(completed));
+      expect(openMock).toHaveBeenCalledExactlyOnceWith(completed.labelUrl, '_blank', 'noopener,noreferrer');
+      expect(await screen.findByText('Shipment label created and opened.')).toBeInTheDocument();
+      openMock.mockRestore();
+    });
+
+    it.each([
+      ['create', 'allocation'], ['retry', 'allocation'],
+      ['create', 'allocation-round-trip'], ['retry', 'allocation-round-trip'],
+      ['create', 'vendor'], ['retry', 'vendor'],
+      ['create', 'vendor-round-trip'], ['retry', 'vendor-round-trip'],
+      ['create', 'unmount'], ['retry', 'unmount'],
+    ] as const)('does not open a stale %s label after %s', async (kind, transition) => {
+      const { pending, completed, openMock } = setup(kind);
+      const view = renderOrdersPage();
+      await start(kind);
+      if (transition.startsWith('allocation')) {
+        await userEvent.click(screen.getByText('Second Customer'));
+        expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1003');
+        if (transition === 'allocation-round-trip') {
+          await userEvent.click(screen.getAllByText('Acme Supply Co.')[0]);
+          expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+        }
+      } else if (transition.startsWith('vendor')) {
+        await act(async () => setCurrentVendorId('demo-vendor-b'));
+        await screen.findByText('Demo Vendor B');
+        if (transition === 'vendor-round-trip') {
+          await act(async () => setCurrentVendorId('demo-vendor-a'));
+          expect((await screen.findAllByText('Demo Vendor A')).length).toBeGreaterThan(0);
+        }
+      } else {
+        view.unmount();
+      }
+      await act(async () => pending.resolve(completed));
+      expect(openMock).not.toHaveBeenCalled();
+      expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
+      openMock.mockRestore();
+    });
+
+    it.each(['create', 'retry'] as const)('keeps the current %s no-label warning', async (kind) => {
+      const { pending, completed, openMock } = setup(kind);
+      renderOrdersPage();
+      await start(kind);
+      await act(async () => pending.resolve({ ...completed, labelUrl: null }));
+      expect(openMock).not.toHaveBeenCalled();
+      expect(await screen.findByText(kind === 'create'
+        ? 'Shipment was created. Label is still processing.'
+        : 'Shipment retry completed. Label is still processing.')).toBeInTheDocument();
+      openMock.mockRestore();
+    });
+
+    it.each(['create', 'retry'] as const)('hides the stale %s no-label warning', async (kind) => {
+      const { pending, completed, openMock } = setup(kind);
+      renderOrdersPage();
+      await start(kind);
+      await userEvent.click(screen.getByText('Second Customer'));
+      await act(async () => pending.resolve({ ...completed, labelUrl: null }));
+      expect(openMock).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Label is still processing/)).not.toBeInTheDocument();
+      openMock.mockRestore();
+    });
+
+    it.each(['create', 'retry'] as const)('hides the stale %s failure', async (kind) => {
+      const { pending, openMock } = setup(kind);
+      renderOrdersPage();
+      await start(kind);
+      await userEvent.click(screen.getByText('Second Customer'));
+      await act(async () => pending.reject(new Error('Old shipment request failed')));
+      expect(openMock).not.toHaveBeenCalled();
+      expect(screen.queryByText('Old shipment request failed')).not.toBeInTheDocument();
+      openMock.mockRestore();
+    });
+
+    it.each(['create', 'retry'] as const)('does not open a stale %s label after selection becomes empty', async (kind) => {
+      const { pending, completed, openMock } = setup(kind);
+      listOrdersMock.mockImplementation(async (options) => options?.search
+        ? [] : [toSummary(buildAwaitingRejectableOrder(kind === 'retry' ? {
+            shipmentExecution: { ...shipmentExecution, id: 'shipment-failed', shipmentStatus: 'failed', labelUrl: null },
+          } : {}))]);
+      renderOrdersPage();
+      await start(kind);
+      await userEvent.type(screen.getByPlaceholderText('Search order, customer, tracking, carrier...'), 'no-match');
+      await screen.findByText('No orders in this view');
+      await act(async () => pending.resolve(completed));
+      expect(openMock).not.toHaveBeenCalled();
+      expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
+      openMock.mockRestore();
+    });
+
+    it.each(['create', 'retry'] as const)('does not open a stale %s label after navigating into Order Detail', async (kind) => {
+      const { pending, completed, openMock } = setup(kind);
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/orders']}>
+            <Routes>
+              <Route path="/orders" element={<OrdersPage />} />
+              <Route path="/orders/:orderId" element={<div>Order Detail destination</div>} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await start(kind);
+      await userEvent.click(screen.getByRole('link', { name: 'View details' }));
+      await screen.findByText('Order Detail destination');
+      await act(async () => pending.resolve(completed));
+      expect(openMock).not.toHaveBeenCalled();
+      openMock.mockRestore();
+    });
+
+    it.each(['create', 'retry'] as const)('keeps the second selection read-only while an earlier %s request is pending', async (kind) => {
+      const { pending, completed, openMock } = setup(kind);
+      renderOrdersPage();
+      await start(kind);
+      await userEvent.click(screen.getByText('Second Customer'));
+      expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1003');
+      expect(screen.getByRole('button', { name: /Etiket oluşturuluyor/i })).toBeDisabled();
+      await act(async () => pending.resolve(completed));
+      expect(openMock).not.toHaveBeenCalled();
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(kind === 'create' ? 1 : 0);
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledTimes(kind === 'retry' ? 1 : 0);
+      openMock.mockRestore();
+    });
+
+    it.each(['create', 'retry'] as const)('does not explicitly refetch the new allocation after a stale %s completion', async (kind) => {
+      const { pending, completed, openMock } = setup(kind);
+      renderOrdersPage();
+      await start(kind);
+      await userEvent.click(screen.getByText('Second Customer'));
+      await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1003', expect.objectContaining({ vendorId: 'demo-vendor-a' })));
+      const secondOrderFetches = getOrderMock.mock.calls.filter(([id]) => id === 'ORD-A-1003').length;
+      await act(async () => pending.resolve(completed));
+      expect(getOrderMock.mock.calls.filter(([id]) => id === 'ORD-A-1003')).toHaveLength(secondOrderFetches);
+      expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1003');
+      expect(openMock).not.toHaveBeenCalled();
+      openMock.mockRestore();
+    });
   });
 
   it('selects the order requested by query parameter instead of the first row', async () => {
