@@ -4448,6 +4448,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       : getStatusClass(order.allocationStatus);
   const fulfillmentStateLabel = operationalStory.fulfillmentLabel;
   const financeStateLabel = operationalStory.financeLabel;
+  const nextOperationalActionLabel = isAdmin && order.allocationStatus === 'pending_reassignment'
+    ? 'Review allocation'
+    : operationalStory.nextActionLabel;
   const isActiveVendorBlockedOrder = operationalStory.state === 'vendor_blocked_awaiting_admin_resolution';
   const isFulfillmentAuthoritativelyClosed =
     operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled';
@@ -5477,7 +5480,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                 </div>
                 <div>
                   <dt>Next operational action</dt>
-                  <dd>{operationalStory.nextActionLabel}</dd>
+                  <dd>{nextOperationalActionLabel}</dd>
                 </div>
               </dl>
             </>
