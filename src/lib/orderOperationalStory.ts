@@ -306,3 +306,13 @@ export function getVendorBlockedOperationalStory(input: OrderOperationalStoryInp
     hideShipmentActions: !story.actionVisibility.canCreateShipment,
   };
 }
+
+// New outbound creation only; existing execution reads/retries and returns are separate.
+export const integrationOutboundCreationMessage = 'This allocation uses Vendor Integration for outbound shipping; new Kargonomi shipment creation is unavailable.';
+export function isIntegrationOutboundCreationBlocked(order: {
+  outboundMethodSnapshot?: string | null;
+  outboundIntegrationProviderSnapshot?: string | null;
+}) {
+  return order.outboundMethodSnapshot === 'VENDOR_INTEGRATION' &&
+    Boolean(order.outboundIntegrationProviderSnapshot?.trim());
+}

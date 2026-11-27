@@ -85,6 +85,13 @@ describe('vendor orders list visibility', () => {
     prismaMock.vendorAllocation.count.mockReset();
   });
 
+  it('U6 selects and returns persisted frozen outbound fields', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([buildAllocation({ outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' })]);
+    const result = await listVendorOrders('sporjinal');
+    expect(result[0]).toMatchObject({ outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' });
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: expect.objectContaining({ outboundMethodSnapshot: true, outboundIntegrationProviderSnapshot: true }) }));
+  });
+
   it('orders vendor allocations by operational update time so shipment updates stay visible', async () => {
     prismaMock.vendorAllocation.findMany.mockResolvedValue([buildAllocation()]);
 

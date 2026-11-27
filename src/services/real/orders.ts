@@ -140,6 +140,8 @@ export type AdminEconomicTransferResult = {
 };
 
 type OrderSummaryDto = {
+  outboundMethodSnapshot?: string | null;
+  outboundIntegrationProviderSnapshot?: string | null;
   id: string;
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string;
@@ -554,6 +556,8 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
   return {
     id: dto.id,
     originalVendorId: dto.originalVendorId,
+    outboundMethodSnapshot: dto.outboundMethodSnapshot ?? null,
+    outboundIntegrationProviderSnapshot: dto.outboundIntegrationProviderSnapshot ?? null,
     assignedVendorId: dto.assignedVendorId,
     vendorId: dto.assignedVendorId,
     sourceShopifyOrderId: dto.sourceShopifyOrderId,

@@ -717,6 +717,8 @@ export type OperationalActionability = {
 };
 
 export type OrderSummary = {
+  outboundMethodSnapshot?: string | null;
+  outboundIntegrationProviderSnapshot?: string | null;
   originalVendorId: VendorId;
   assignedVendorId: VendorId;
   id: string;

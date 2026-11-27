@@ -109,6 +109,12 @@ describe('order detail snapshot API mapping', () => {
     prismaMock.webhookEvent.findMany.mockResolvedValue([]);
   });
 
+  it('U6 exposes only the persisted frozen outbound selection', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({ outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' }));
+    const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
+    expect(result).toMatchObject({ outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' });
+  });
+
   it('returns persisted order snapshot and line item VAT fields without exposing raw Shopify payloads', async () => {
     prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation());
 

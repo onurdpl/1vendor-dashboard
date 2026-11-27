@@ -98,3 +98,12 @@ No allocation snapshot, first-observed delivery time, provider DELIVERED endpoin
 - Atomicity/concurrency mechanics for config-save versus status activation are engineering decisions, to be proven in PostgreSQL.
 - Phase 2 handling of allocation split, economic transfer, existing operational overrides, multi-shipment/partial delivery and conflicting sources remains outside Phase 1.
 - The broader observed-delivery spec's actual-provider-time, legacy no-evidence and finance cutover gates remain unresolved. This Phase 1 spec approves none of them.
+
+
+## Owner-approved U6 outbound restriction (2026-11-27)
+
+The owner has now resolved one previously deferred operation-time conflict: a new outbound Kargonomi shipment is prohibited when the allocation's persisted `outboundMethodSnapshot` is `VENDOR_INTEGRATION` and `outboundIntegrationProviderSnapshot` contains a selected provider. This is generic provider-independent enforcement; SOPYO is currently the only enum value, not a condition in the rule. Current Vendor configuration and request overrides cannot replace this frozen authority. This later approval does not rewrite the Phase 1 compatibility decision above.
+
+The implementation rejects prohibited new preview/create requests using existing error handling, then revalidates the frozen fields under the existing order transaction lock before persisting a new execution claim. Existing execution reuse, ordinary failed retry and provider refresh retain their previous semantics. Return shipping remains independent. KARGONOMI, null and unresolved snapshots retain existing behavior; there is no migration or inferred provider. Two optional read-only snapshot fields are exposed through existing order list/detail mappings for Admin/Vendor presentation. Orders and Order Detail disable new create and guard the handler; existing labels and tracking access retain their existing authorization.
+
+This does not decide carrier-only/URL-only eligibility, general external duplicate prevention, Kargonomi failure-snapshot recovery, execution-flag enforcement, legacy-client cleanup or the remaining U6 acceptance questions. U6 is not closed. Validation and delivery evidence are recorded in UI_REDESIGN_PROGRESS.md.

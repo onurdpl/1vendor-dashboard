@@ -372,6 +372,20 @@ describe('OrdersPage control center', () => {
     retryFailedShipmentExecutionMock.mockReset();
   });
 
+  it.each(['admin', 'vendor'] as const)('U6 blocks new integration outbound create for %s', async (role) => {
+    if (role === 'vendor') setVendorUser();
+    const order = buildAwaitingRejectableOrder({ outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' } as Partial<OrderDetail>);
+    listOrdersMock.mockResolvedValue([buildSummary(order)]);
+    getOrderMock.mockResolvedValue(order);
+    renderOrdersPage();
+    const region = await screen.findByRole('region', { name: 'Smart label action' });
+    const button = within(region).getByRole('button');
+    expect(button).toBeDisabled();
+    await userEvent.click(button);
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(screen.getAllByText(/allocation uses Vendor Integration/).length).toBeGreaterThan(0);
+  });
+
   it('pages through 150 server rows and resets to page one for a complete-data search', async () => {
     const rows = Array.from({ length: 150 }, (_, index) => buildSummary({
       id: `allocation-${index + 1001}`,
