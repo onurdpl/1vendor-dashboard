@@ -10376,6 +10376,37 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
     });
 
+    it('U5: guides Admin to review a pending reassignment instead of continuing fulfillment', async () => {
+      actor('admin');
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+        allocationStatus: 'pending_reassignment', reassignmentRequired: true, fulfillmentActionAvailable: false,
+      });
+      renderOrderDetail();
+      const currentState = await screen.findByLabelText('Current order state');
+      expect(within(currentState).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(currentState).getByText('Next operational action')).toBeInTheDocument();
+      expect(within(currentState).getByText('Review allocation')).toBeInTheDocument();
+      expect(within(currentState).queryByText('Continue fulfillment')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create shipment label' })).toBeDisabled();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
+    it('U5: retains Vendor pending-reassignment status without new guidance or shipment actions', async () => {
+      actor('vendor');
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+        allocationStatus: 'pending_reassignment', reassignmentRequired: true, fulfillmentActionAvailable: false,
+      });
+      renderOrderDetail();
+      const currentState = await screen.findByLabelText('Current order state');
+      expect(within(currentState).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(currentState).getByText('Pending')).toBeInTheDocument();
+      expect(within(currentState).queryByText('Review allocation')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Smart label action' })).not.toBeInTheDocument();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    });
+
     it('B3: Admin retains existing-label access for pending reassignment', async () => {
       actor('admin');
       getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
