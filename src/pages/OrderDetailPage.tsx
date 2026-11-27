@@ -62,7 +62,7 @@ import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { getLatestVendorBlockedAt } from '../lib/orderAssignmentMetadata';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
-import { getOperationalStory } from '../lib/orderOperationalStory';
+import { getOperationalStory, isIntegrationOutboundCreationBlocked, integrationOutboundCreationMessage } from '../lib/orderOperationalStory';
 import { canRejectOrder, canShowAllocationSplitRejectAction } from '../lib/rejectEligibility';
 import type {
   KargonomiLocationLookupDiagnostics,
@@ -2147,7 +2147,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   }
 
   function handleCreateShipment(fields: ShipmentCustomerField[] = [], completedOverrides?: ShipmentCustomerOverrides) {
-    if (!order || order.allocationStatus !== 'active' || shipmentMutationInFlightRef.current) {
+    if (!order || isIntegrationOutboundCreationBlocked(order) || order.allocationStatus !== 'active' || shipmentMutationInFlightRef.current) {
       return;
     }
 
@@ -2910,7 +2910,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         <button
           type="submit"
           className="button button-primary"
-          disabled={isCreatingShipment || isRetryingFailedShipment}
+          disabled={isCreatingShipment || isRetryingFailedShipment || (!visibleShipmentExecution && !!order && isIntegrationOutboundCreationBlocked(order))}
         >
           {isRetryingFailedShipment
             ? 'Retrying...'
@@ -4455,13 +4455,14 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const isFulfillmentAuthoritativelyClosed =
     operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled';
   const shouldShowCreateShipmentAction =
-    operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution;
+    operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution && !isIntegrationOutboundCreationBlocked(order);
   const showSmartLabelAction = isRealMode && (isAdmin || canUseFulfillmentActionsBeforeRestriction)
     && operationalStory.actionVisibility.canCreateShipment;
   const showReadOnlyShipmentEvidence = !isAdmin && !canUseFulfillmentActionsBeforeRestriction
     && !hasCanonicalOperationalStory;
   const smartLabelPending = isCreatingShipment || isRetryingFailedShipment;
-  const smartLabelBlocked = vendorRestricted || smartLabelPending
+  const outboundCreationBlocked = !visibleShipmentExecution && isIntegrationOutboundCreationBlocked(order);
+  const smartLabelBlocked = outboundCreationBlocked || vendorRestricted || smartLabelPending
     || (!visibleShipmentExecution?.labelUrl && order.allocationStatus !== 'active')
     || (!visibleShipmentExecution?.labelUrl && missingShipmentCustomerFields.length > 0)
     || Boolean(visibleShipmentExecution && !visibleShipmentExecution.labelUrl && !canRecoverFailedShipment)
@@ -5759,7 +5760,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                   type="button"
                   className="button button-primary"
                   disabled={smartLabelBlocked}
-                  title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
+                  title={outboundCreationBlocked ? integrationOutboundCreationMessage : vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                   onClick={() => {
                     if (shipmentMutationInFlightRef.current || smartLabelBlocked) return;
                     if (visibleShipmentExecution?.labelUrl) {
@@ -5779,7 +5780,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                   <p className="action-feedback action-error" role="status">{automaticLabelError}</p>
                 ) : null}
                 <p aria-live="polite">
-                  {vendorRestricted ? RESTRICTED_ACTION_MESSAGE
+                  {outboundCreationBlocked ? integrationOutboundCreationMessage : vendorRestricted ? RESTRICTED_ACTION_MESSAGE
                       : visibleShipmentExecution?.labelUrl ? 'Open existing label without creating a duplicate.'
                         : missingShipmentCustomerFields.length > 0 ? 'Complete shipment-only fields below.'
                           : visibleShipmentExecution && !canRecoverFailedShipment ? 'Shipment exists. Label availability is controlled by the provider.'

@@ -5902,6 +5902,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO',
       carrier: 'kargonomi',
       shipmentExecution: {
         ...orderWithShipmentSummary.shipmentExecution!,
@@ -9065,6 +9066,33 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('link', { name: /Open tracking/i })).toHaveAttribute('href', 'https://track.navlungo.test/NAV-ADMIN-1051');
     expect(screen.queryByText(/Provider id: pending/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Provider did not return a shipment id or tracking yet/)).not.toBeInTheDocument();
+  });
+
+  it('U6 keeps existing integration-allocation tracking and label access without creation', async () => {
+    setCurrentUser({ email: 'admin@example.test', name: 'Admin', role: 'admin', vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }], canSwitchVendors: false, defaultVendorId: 'sporjinal' });
+    getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+      shipmentExecution: { ...orderWithShipmentSummary.shipmentExecution!, labelUrl: 'https://example.test/label.pdf', trackingUrl: 'https://example.test/track' },
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' });
+    renderOrderDetail();
+    const region = await screen.findByRole('region', { name: 'Smart label action' });
+    expect(within(region).getByRole('button')).toBeEnabled();
+    expect(screen.getAllByRole('link', { name: /tracking/i }).length).toBeGreaterThan(0);
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['admin', 'vendor'] as const)('U6 blocks new integration outbound create for %s', async (role) => {
+    setCurrentUser({ email: 'test@example.test', name: 'Test', role, vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }], canSwitchVendors: false, defaultVendorId: 'sporjinal' });
+    getOrderMock.mockResolvedValue({ ...orderWithoutShipment, outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' });
+    renderOrderDetail();
+    const region = await screen.findByRole('region', { name: 'Smart label action' });
+    const button = within(region).getByRole('button');
+    expect(button).toBeDisabled();
+    await userEvent.click(button);
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(screen.getAllByText(/allocation uses Vendor Integration/).length).toBeGreaterThan(0);
   });
 
   it('calls create shipment endpoint, shows success evidence, and refreshes order detail', async () => {

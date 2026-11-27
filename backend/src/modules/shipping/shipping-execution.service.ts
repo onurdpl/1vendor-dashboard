@@ -3744,6 +3744,17 @@ export async function getShipmentExecutionById(
   return mapShipmentExecution({ ...execution, shippingCostLinked: Boolean(linkedCost) });
 }
 
+function assertNewOutboundProviderAllowed(allocation: {
+  outboundMethodSnapshot?: string | null;
+  outboundIntegrationProviderSnapshot?: string | null;
+}, provider: ShippingProvider) {
+  if (provider === ShippingProvider.KARGONOMI &&
+      allocation.outboundMethodSnapshot === 'VENDOR_INTEGRATION' &&
+      allocation.outboundIntegrationProviderSnapshot?.trim()) {
+    throw new Error('This allocation uses Vendor Integration for outbound shipping; new Kargonomi shipment creation is unavailable.');
+  }
+}
+
 async function buildShipmentRequestPreview(
   input: CreateShipmentExecutionDto,
   options: {
@@ -3752,6 +3763,7 @@ async function buildShipmentRequestPreview(
     kargonomiDestinationClient?: KargonomiDestinationLookupClient;
     allowNavlungoFullSenderDetails?: boolean;
     skipCustomerCancellationHoldPreview?: boolean;
+    preserveExistingExecutionOperation?: boolean;
   },
 ): Promise<ShipmentExecutionPreviewDto> {
   if (!input.allocationId) {
@@ -3816,6 +3828,13 @@ async function buildShipmentRequestPreview(
 
   const provider = normalizeProvider(input.provider ?? config.preferredProvider);
   assertActiveShippingProvider(provider);
+  if (!options.preserveExistingExecutionOperation && provider === ShippingProvider.KARGONOMI &&
+      allocation.outboundMethodSnapshot === 'VENDOR_INTEGRATION' && allocation.outboundIntegrationProviderSnapshot?.trim()) {
+    const existingExecution = await prisma.shipmentExecution.findUnique({
+      where: { allocationId_provider: { allocationId: allocation.id, provider } },
+    });
+    if (!existingExecution) assertNewOutboundProviderAllowed(allocation, provider);
+  }
   const providerDto = mapProvider(provider);
   const kargonomiWarehouseId =
     provider === ShippingProvider.KARGONOMI ? resolveKargonomiWarehouseId(config, options.env) : null;
@@ -4423,6 +4442,12 @@ export async function createShipmentExecution(
     if (currentExecution) {
       return { created: false as const, executionId: currentExecution.id };
     }
+    const frozenAllocation = await tx.vendorAllocation.findUnique({
+      where: { id: allocation.id },
+      select: { outboundMethodSnapshot: true, outboundIntegrationProviderSnapshot: true },
+    });
+    if (!frozenAllocation) throw new Error('Allocation could not be found for the selected vendor.');
+    assertNewOutboundProviderAllowed(frozenAllocation, provider);
     await tx.shipmentExecution.create({
       data: {
         id: executionId,
@@ -4557,6 +4582,7 @@ export async function retryDryRunShipmentExecution(
       vendorId: existing.vendorId,
       env: options.env,
       skipCustomerCancellationHoldPreview: true,
+      preserveExistingExecutionOperation: true,
     },
   );
 
@@ -4704,6 +4730,7 @@ export async function retryFailedShipmentExecution(
       env: options.env,
       allowNavlungoFullSenderDetails: options.useFullSenderDetailsForThisRetry === true,
       skipCustomerCancellationHoldPreview: true,
+      preserveExistingExecutionOperation: true,
     },
   );
 

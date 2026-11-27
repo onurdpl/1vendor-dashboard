@@ -39,7 +39,7 @@ import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/s
 import { useMutationAction } from '../hooks/useMutationAction';
 import { formatCurrency, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
-import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
+import { isIntegrationOutboundCreationBlocked, integrationOutboundCreationMessage, getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { useActionFeedback } from '../lib/ui';
 import { isVendorContextRestricted } from '../lib/auth';
@@ -793,6 +793,8 @@ export function OrdersPage() {
       return;
     }
 
+    if (isIntegrationOutboundCreationBlocked(order)) return;
+
     try {
       setLabelActionFeedback(null);
       const shipment = await createShipmentMutation(order.id);
@@ -1099,8 +1101,12 @@ export function OrdersPage() {
                     description: vendorBlockedStory?.nextActionDescription ?? 'This allocation has no shipment action available.',
                     tone: operationalStory.resolvedByRefund ? 'success' as const : 'warning' as const,
                   }
-                : workflowGuidance;
+                : !shipmentExecution && isIntegrationOutboundCreationBlocked(selectedOrder)
+                  ? getOrderWorkflowAction({})
+                  : workflowGuidance;
+              const outboundCreationBlocked = !shipmentExecution && isIntegrationOutboundCreationBlocked(selectedOrder);
               const smartLabelDisabled =
+                outboundCreationBlocked ||
                 vendorRestricted ||
                 isLabelActionPending ||
                 (!labelUrl && selectedOrder.allocationStatus !== 'active') ||
@@ -1219,7 +1225,7 @@ export function OrdersPage() {
                     type="button"
                     className="orders-smart-label-button"
                     disabled={smartLabelDisabled}
-                    title={vendorRestricted ? RESTRICTED_SMART_LABEL_MESSAGE : undefined}
+                    title={outboundCreationBlocked ? integrationOutboundCreationMessage : vendorRestricted ? RESTRICTED_SMART_LABEL_MESSAGE : undefined}
                     onClick={() => void handleSmartLabelAction(selectedOrder)}
                   >
                     <span className="orders-smart-label-icon" aria-hidden="true">
@@ -1233,7 +1239,7 @@ export function OrdersPage() {
                     <span>
                       <strong>{getSmartLabelButtonText(shipmentExecution)}</strong>
                       <small>
-                        {labelUrl
+                        {outboundCreationBlocked ? integrationOutboundCreationMessage : labelUrl
                           ? vendorRestricted
                             ? RESTRICTED_SMART_LABEL_MESSAGE
                             : 'Open existing label without creating a duplicate.'

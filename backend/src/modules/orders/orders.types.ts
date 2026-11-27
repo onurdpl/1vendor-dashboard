@@ -14,6 +14,8 @@ export type VendorOrdersWorkflowSummaryDto = {
 };
 
 export type OrderSummaryDto = {
+  outboundMethodSnapshot?: string | null;
+  outboundIntegrationProviderSnapshot?: string | null;
   id: string;
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string;

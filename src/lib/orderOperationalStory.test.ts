@@ -239,3 +239,20 @@ describe('orderOperationalStory', () => {
     expect(story?.rejectUnavailableCopy).toContain('awaiting Sporgym admin review');
   });
 });
+
+
+describe('U6 frozen integration create restriction', () => {
+  it.each([
+    ['VENDOR_INTEGRATION', 'SOPYO', true],
+    ['VENDOR_INTEGRATION', null, false],
+    ['VENDOR_INTEGRATION', '', false],
+    ['VENDOR_INTEGRATION', '  ', false],
+    ['KARGONOMI', null, false],
+    [null, null, false],
+    [undefined, undefined, false],
+  ])('uses only frozen selection %s/%s', async (method, provider, blocked) => {
+    const { isIntegrationOutboundCreationBlocked } = await import('./orderOperationalStory');
+    expect(isIntegrationOutboundCreationBlocked({ outboundMethodSnapshot: method as string | null | undefined,
+      outboundIntegrationProviderSnapshot: provider as string | null | undefined })).toBe(blocked);
+  });
+});

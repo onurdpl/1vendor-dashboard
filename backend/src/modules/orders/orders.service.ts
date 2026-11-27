@@ -2331,6 +2331,8 @@ export async function listVendorOrders(
       id: true,
       assignedVendorId: true,
       originalVendorId: true,
+      outboundMethodSnapshot: true,
+      outboundIntegrationProviderSnapshot: true,
       allocationStatus: true,
       fullRefundTerminalFact: {
         select: {
@@ -2405,6 +2407,8 @@ export async function listVendorOrders(
       vendorId: allocation.assignedVendorId,
       assignedVendorId: allocation.assignedVendorId,
       originalVendorId: allocation.originalVendorId,
+      outboundMethodSnapshot: allocation.outboundMethodSnapshot,
+      outboundIntegrationProviderSnapshot: allocation.outboundIntegrationProviderSnapshot,
       allocationStatus: allocation.allocationStatus,
       operationalActionability: evaluateAllocationActionability({
         fullRefundTerminalFactPresent: Boolean(allocation.fullRefundTerminalFact),
@@ -4213,6 +4217,8 @@ export async function getVendorOrderById(
     sourceShopifyOrderNumber: allocation.order.sourceShopifyOrderNumber,
     customerName: allocation.order.customerName,
     vendorId: allocation.assignedVendorId,
+    outboundMethodSnapshot: allocation.outboundMethodSnapshot,
+    outboundIntegrationProviderSnapshot: allocation.outboundIntegrationProviderSnapshot,
     assignedVendorId: allocation.assignedVendorId,
     originalVendorId: allocation.originalVendorId,
     allocationStatus: allocation.allocationStatus,

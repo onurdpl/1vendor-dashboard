@@ -483,6 +483,76 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  describe('U6 frozen outbound restriction', () => {
+    const frozen = { outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' };
+    beforeEach(() => {
+      prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(buildKargonomiShippingConfig());
+      prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation(frozen));
+    });
+    it('rejects preview before destination lookup for a frozen integration allocation', async () => {
+      await expect(previewShipmentExecution({ allocationId: 'alloc-1', provider: 'kargonomi' },
+        { vendorId: 'sporjinal', env })).rejects.toThrow('Vendor Integration');
+    });
+    it('rejects direct new create and override without a claim or adapter call', async () => {
+      const adapter = buildAdapter();
+      await expect(createShipmentExecution({ allocationId: 'alloc-1', provider: 'kargonomi' },
+        { vendorId: 'sporjinal', env, adapter })).rejects.toThrow('Vendor Integration');
+      expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+      expect(adapter.createShipment).not.toHaveBeenCalled();
+    });
+    it.each([
+      { outboundMethodSnapshot: 'KARGONOMI', outboundIntegrationProviderSnapshot: null },
+      { outboundMethodSnapshot: null, outboundIntegrationProviderSnapshot: null },
+      { outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: null },
+    ])('preserves new create for unresolved/Kargonomi snapshot $outboundMethodSnapshot/$outboundIntegrationProviderSnapshot', async (snapshot) => {
+      prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData(snapshot));
+      const adapter = buildAdapter({ createShipment: vi.fn().mockResolvedValue({ providerShipmentId: 'kg-new', trackingNumber: null,
+        trackingUrl: null, labelUrl: null, shipmentStatus: 'created', shippingCost: null, shippingVat: null, currency: 'TRY', responseSnapshot: {} }) });
+      await createShipmentExecution({ allocationId: 'alloc-1', provider: 'kargonomi' }, { env, vendorId: 'sporjinal', adapter });
+      expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    });
+    it('reuses an existing Kargonomi execution despite frozen integration selection', async () => {
+      prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData(frozen));
+      const existing = buildShipmentExecution({ provider: 'KARGONOMI', providerShipmentId: 'kg-existing', labelUrl: 'https://example.test/label', shipmentStatus: 'CREATED' });
+      prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+      const adapter = buildAdapter();
+      const result = await createShipmentExecution({ allocationId: 'alloc-1', provider: 'kargonomi' }, { env, vendorId: 'sporjinal', adapter });
+      expect(result.providerShipmentId).toBe('kg-existing');
+      expect(adapter.createShipment).not.toHaveBeenCalled();
+    });
+    it.each(['admin', 'vendor'])('rejects direct create route override for %s', async (role) => {
+      const handlers = new Map<string, (request: unknown, reply: unknown) => Promise<unknown>>();
+      const app = { get: vi.fn(), put: vi.fn(), post: vi.fn((path: string, ...args: unknown[]) => handlers.set(path, args.at(-1) as never)) };
+      registerShippingExecutionRoutes(app as never, env);
+      const reply = { code: vi.fn().mockReturnThis(), send: vi.fn() };
+      await handlers.get('/shipments/create')!({ authUser: { role }, vendorContext: { vendorId: 'sporjinal' },
+        body: { allocationId: 'alloc-1', provider: 'kargonomi' }, headers: {}, protocol: 'http', hostname: 'localhost' }, reply);
+      expect(reply.code).toHaveBeenCalledWith(400);
+      expect(reply.send).toHaveBeenCalledWith({ message: expect.stringContaining('Vendor Integration') });
+      expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    });
+    it('preserves ordinary failed retry on an existing frozen integration execution', async () => {
+      prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData(frozen));
+      const existing = buildShipmentExecution({ provider: 'KARGONOMI', shipmentStatus: 'FAILED' });
+      prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+      const adapter = buildAdapter({ createShipment: vi.fn().mockResolvedValue({ providerShipmentId: 'kg-retry', trackingNumber: null,
+        trackingUrl: null, labelUrl: null, shipmentStatus: 'created', shippingCost: null, shippingVat: null, currency: 'TRY', responseSnapshot: {} }) });
+      await retryFailedShipmentExecution(existing.id, { vendorId: 'sporjinal', env: { ...env, SHIPPING_PROVIDER: 'kargonomi',
+        KARGONOMI_BASE_URL: 'https://example.test', KARGONOMI_API_TOKEN: 'synthetic' }, adapter });
+      expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+      expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    });
+    it('revalidates frozen evidence at the locked new create claim', async () => {
+      let reads = 0;
+      prismaMock.vendorAllocation.findUnique.mockImplementation(async () => buildAllocationWithShopifyFulfillmentData(++reads < 4 ? {} : frozen));
+      const adapter = buildAdapter();
+      await expect(createShipmentExecution({ allocationId: 'alloc-1', provider: 'kargonomi' },
+        { vendorId: 'sporjinal', env, adapter })).rejects.toThrow('Vendor Integration');
+      expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+      expect(adapter.createShipment).not.toHaveBeenCalled();
+    });
+  });
+
   it('blocks shipment preview and create from canonical cancellation metadata alone', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
       allocationStatus: 'ACTIVE',

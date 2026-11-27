@@ -32,6 +32,16 @@ describe('real orders service authorization', () => {
     vi.unstubAllGlobals();
   });
 
+  it('U6 maps frozen outbound fields without reading current Vendor configuration', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify([{ id: 'alloc-1', assignedVendorId: 'sporjinal', originalVendorId: 'sporjinal',
+      sourceShopifyOrderId: '1', sourceShopifyOrderNumber: '#1', allocationStatus: 'ACTIVE', operationalActionability: { actionable: true, reason: null },
+      fulfillmentStatus: 'Pending', shippingStatus: 'Awaiting Shipment', totalAmount: '0',
+      outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' }]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const orders = await listOrders({ vendorId: 'sporjinal' });
+    expect(orders[0]).toMatchObject({ outboundMethodSnapshot: 'VENDOR_INTEGRATION', outboundIntegrationProviderSnapshot: 'SOPYO' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('sends bearer auth and selected vendor headers for admin vendor-scoped orders', async () => {
     await listOrders({ vendorId: 'sporjinal' });
 
