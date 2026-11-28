@@ -39,8 +39,12 @@ export function openShipmentLabel(labelValue: string): ShipmentLabelOpenResult {
   }
 
   if (isOpenableShipmentLabelUrl(trimmed)) {
-    globalThis.open?.(trimmed, '_blank', 'noopener,noreferrer');
-    return { opened: true, source: 'url' };
+    try {
+      globalThis.open?.(trimmed, '_blank', 'noopener,noreferrer');
+      return { opened: true, source: 'url' };
+    } catch {
+      return { opened: false, error: 'Shipment label could not be opened.' };
+    }
   }
 
   const pdfBase64 = normalizePdfBase64Label(trimmed);
@@ -56,8 +60,11 @@ export function openShipmentLabel(labelValue: string): ShipmentLabelOpenResult {
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
     const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
     const revokeObjectURL = URL.revokeObjectURL.bind(URL);
-    globalThis.open?.(objectUrl, '_blank', 'noopener,noreferrer');
-    globalThis.setTimeout(() => revokeObjectURL(objectUrl), LABEL_OBJECT_URL_REVOKE_DELAY_MS);
+    try {
+      globalThis.open?.(objectUrl, '_blank', 'noopener,noreferrer');
+    } finally {
+      globalThis.setTimeout(() => revokeObjectURL(objectUrl), LABEL_OBJECT_URL_REVOKE_DELAY_MS);
+    }
     return { opened: true, source: 'object_url' };
   } catch {
     return { opened: false, error: 'Shipment label PDF could not be opened.' };

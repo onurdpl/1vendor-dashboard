@@ -775,7 +775,7 @@ export function OrdersPage() {
             if (labelOpenResult.opened) {
               setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
             } else {
-              setCurrentLabelActionFeedback('error', labelOpenResult.error);
+              setCurrentLabelActionFeedback('warning', `Shipment request completed. ${labelOpenResult.error}`);
             }
           } else {
             setCurrentLabelActionFeedback('warning', 'Shipment retry completed. Label is still processing.');
@@ -803,7 +803,7 @@ export function OrdersPage() {
         if (labelOpenResult.opened) {
           setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
         } else {
-          setCurrentLabelActionFeedback('error', labelOpenResult.error);
+          setCurrentLabelActionFeedback('warning', `Shipment request completed. ${labelOpenResult.error}`);
         }
       } else {
         setCurrentLabelActionFeedback('warning', 'Shipment was created. Label is still processing.');
