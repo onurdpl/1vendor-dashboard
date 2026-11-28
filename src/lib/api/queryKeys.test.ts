@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { queryKeys } from './queryKeys';
 
 describe('vendor scoped query keys', () => {
+  it('provides an explicit Vendor list prefix without changing complete list keys', () => {
+    expect(queryKeys.orders.listPrefix('vendor-a')).toEqual(['orders', 'list', 'vendor-a']);
+    expect(queryKeys.orders.list('vendor-a', { limit: 101, offset: 100 }).slice(0, 3))
+      .toEqual(queryKeys.orders.listPrefix('vendor-a'));
+    expect(queryKeys.orders.listPrefix('vendor-a')).not.toEqual(queryKeys.orders.listPrefix('vendor-b'));
+  });
   it('keeps orders, returns, and finance caches separated by selected vendor', () => {
     expect(queryKeys.orders.list('demo-vendor-a')).not.toEqual(queryKeys.orders.list('demo-vendor-b'));
     expect(queryKeys.returns.list('demo-vendor-a')).not.toEqual(queryKeys.returns.list('demo-vendor-b'));

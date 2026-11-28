@@ -1,8 +1,11 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryClient as mutationQueryClient } from '../lib/api/queryClient';
+import { queryKeys } from '../lib/api/queryKeys';
+import { useMutationAction } from '../hooks/useMutationAction';
 import { OrdersPage } from './OrdersPage';
 import type {
   AllocationSplitExecutionResponse,
@@ -270,8 +273,8 @@ function buildAwaitingRejectableOrder(overrides: Partial<OrderDetail> = {}): Ord
   };
 }
 
-function renderOrdersPage(initialEntries = ['/orders']) {
-  const queryClient = new QueryClient({
+function renderOrdersPage(initialEntries = ['/orders'], providedClient?: QueryClient) {
+  const queryClient = providedClient ?? new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
@@ -370,6 +373,121 @@ describe('OrdersPage control center', () => {
     splitAllocationMock.mockReset();
     createShipmentExecutionMock.mockReset();
     retryFailedShipmentExecutionMock.mockReset();
+  });
+
+  describe('I01 real cache invalidation', () => {
+    const disposers: Array<() => void> = [];
+    beforeEach(() => {
+      mutationQueryClient.clear();
+      setCurrentUser({ email: 'admin@demo.com', name: 'Demo Admin', role: 'admin',
+        vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+          { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' }],
+        canSwitchVendors: true, defaultVendorId: 'demo-vendor-a' });
+      setCurrentVendorId('demo-vendor-a');
+      vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    });
+    afterEach(() => {
+      cleanup();
+      disposers.splice(0).forEach((dispose) => dispose());
+      mutationQueryClient.clear();
+      vi.restoreAllMocks();
+    });
+
+    function seed() {
+      const a = buildAwaitingRejectableOrder();
+      const other = buildAwaitingRejectableOrder({ id: 'i01-other', customer: 'Other allocation' });
+      const b = buildAwaitingRejectableOrder({ id: 'i01-b', vendorId: 'demo-vendor-b',
+        assignedVendorId: 'demo-vendor-b', customer: 'Vendor B customer' });
+      const inactive = [
+        queryKeys.orders.list('demo-vendor-a'),
+        queryKeys.orders.list('demo-vendor-a', { limit: 101, search: '#1002' }),
+        queryKeys.orders.list('demo-vendor-a', { limit: 101, allocationStatus: 'active' }),
+        queryKeys.orders.list('demo-vendor-a', { limit: 101, workflow: 'awaitingShipment' }),
+      ];
+      const activePage = queryKeys.orders.list('demo-vendor-a', { limit: 101, offset: 100 });
+      const untouched = [queryKeys.orders.list('demo-vendor-b'),
+        queryKeys.orders.list('demo-vendor-b', { limit: 101 }),
+        queryKeys.orders.detail(other.id, 'demo-vendor-a'),
+        queryKeys.orders.detail(b.id, 'demo-vendor-b'), queryKeys.finance.summary('demo-vendor-a')];
+      inactive.forEach((key) => mutationQueryClient.setQueryData(key, [toSummary(a)]));
+      mutationQueryClient.setQueryData(queryKeys.orders.list('demo-vendor-a', { limit: 101 }), [toSummary(a), toSummary(other)]);
+      mutationQueryClient.setQueryData(queryKeys.orders.list('demo-vendor-b', { limit: 101 }), [toSummary(b)]);
+      mutationQueryClient.setQueryData(queryKeys.orders.list('demo-vendor-b'), [toSummary(b)]);
+      [a, other, b].forEach((order) => mutationQueryClient.setQueryData(
+        queryKeys.orders.detail(order.id, order.assignedVendorId), order));
+      mutationQueryClient.setQueryData(queryKeys.finance.summary('demo-vendor-a'), { unchanged: true });
+      mutationQueryClient.setQueryData(activePage, [toSummary(a)]);
+      const refresh = deferred<OrderSummary[]>();
+      const queryFn = vi.fn(() => refresh.promise);
+      const observer = new QueryObserver(mutationQueryClient, { queryKey: activePage, queryFn, staleTime: Infinity });
+      disposers.push(observer.subscribe(() => {}));
+      listOrdersMock.mockImplementation(async ({ vendorId } = {}) => vendorId === 'demo-vendor-b'
+        ? [toSummary(b)] : [toSummary(a), toSummary(other)]);
+      getOrderMock.mockImplementation(async (id) => id === b.id ? b : id === other.id ? other : a);
+      return { a, b, other, inactive, activePage, untouched, refresh, queryFn };
+    }
+
+    it('invalidates all initiating Vendor variants and completes an active paginated refetch', async () => {
+      const cache = seed();
+      const detailKey = queryKeys.orders.detail(cache.a.id, 'demo-vendor-a');
+      const detailObserver = new QueryObserver(mutationQueryClient, { queryKey: detailKey,
+        queryFn: () => getOrderMock(cache.a.id), staleTime: Infinity });
+      disposers.push(detailObserver.subscribe(() => {}));
+      createShipmentExecutionMock.mockResolvedValue({ ...shipmentExecution, labelUrl: null });
+      renderOrdersPage(['/orders'], mutationQueryClient);
+      await userEvent.click(within(await screen.findByRole('region', { name: 'Smart label action' })).getByRole('button'));
+      await waitFor(() => expect(cache.queryFn).toHaveBeenCalledTimes(1));
+      expect(mutationQueryClient.getQueryState(cache.activePage)?.fetchStatus).toBe('fetching');
+      const refreshed = [buildSummary({ id: 'refreshed-page' })];
+      await act(async () => cache.refresh.resolve(refreshed));
+      await waitFor(() => expect(mutationQueryClient.getQueryData(cache.activePage)).toEqual(refreshed));
+      expect(mutationQueryClient.getQueryState(cache.activePage)?.fetchStatus).toBe('idle');
+      cache.inactive.forEach((key) => {
+        expect(mutationQueryClient.getQueryState(key)?.isInvalidated).toBe(true);
+        expect(mutationQueryClient.getQueryState(key)?.fetchStatus).toBe('idle');
+      });
+      cache.untouched.forEach((key) => expect(mutationQueryClient.getQueryState(key)?.isInvalidated).toBe(false));
+      expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a', limit: 101, offset: 0 }));
+      expect(getOrderMock).toHaveBeenCalledWith(cache.a.id, expect.anything());
+    });
+
+    it('leaves unrelated mutation invalidation semantics unchanged', async () => {
+      const cache = seed();
+      const mutation = vi.fn(async () => 'completed');
+      const { result } = renderHook(() => useMutationAction(mutation, {
+        invalidateQueryKeys: [queryKeys.finance.summary('demo-vendor-a')],
+      }), { wrapper: ({ children }) => <QueryClientProvider client={mutationQueryClient}>{children}</QueryClientProvider> });
+      await act(async () => { expect(await result.current.mutateAsync(undefined)).toBe('completed'); });
+      expect(mutation).toHaveBeenCalledTimes(1);
+      expect(mutationQueryClient.getQueryState(queryKeys.finance.summary('demo-vendor-a'))?.isInvalidated).toBe(true);
+      cache.inactive.forEach((key) => expect(mutationQueryClient.getQueryState(key)?.isInvalidated).toBe(false));
+      expect(cache.queryFn).not.toHaveBeenCalled();
+    });
+
+    it.each(['Vendor', 'allocation'] as const)('keeps a late mutation in its initiating scope after %s switching', async (change) => {
+      const cache = seed();
+      const result = deferred<ShipmentExecution>();
+      createShipmentExecutionMock.mockReturnValue(result.promise);
+      renderOrdersPage(['/orders'], mutationQueryClient);
+      await userEvent.click(within(await screen.findByRole('region', { name: 'Smart label action' })).getByRole('button'));
+      await waitFor(() => expect(createShipmentExecutionMock).toHaveBeenCalledWith(cache.a.id, { vendorId: 'demo-vendor-a' }));
+      if (change === 'Vendor') {
+        await act(async () => setCurrentVendorId('demo-vendor-b'));
+        await screen.findAllByText('Vendor B customer');
+      } else {
+        await userEvent.click(screen.getAllByText('Other allocation')[0]);
+        await waitFor(() => expect(screen.getByRole('complementary')).toHaveTextContent('Other allocation'));
+      }
+      await act(async () => result.resolve({ ...shipmentExecution, labelUrl: 'https://labels.example/i01.pdf' }));
+      await waitFor(() => expect(cache.queryFn).toHaveBeenCalledTimes(1));
+      await act(async () => cache.refresh.resolve([toSummary(cache.a)]));
+      await waitFor(() => expect(mutationQueryClient.isMutating()).toBe(0));
+      expect(mutationQueryClient.getQueryState(queryKeys.orders.detail(cache.a.id, 'demo-vendor-a'))?.isInvalidated).toBe(true);
+      cache.inactive.forEach((key) => expect(mutationQueryClient.getQueryState(key)?.isInvalidated).toBe(true));
+      cache.untouched.forEach((key) => expect(mutationQueryClient.getQueryState(key)?.isInvalidated).toBe(false));
+      expect(globalThis.open).not.toHaveBeenCalled();
+    });
   });
 
   it.each(['admin', 'vendor'] as const)('U6 blocks new integration outbound create for %s', async (role) => {

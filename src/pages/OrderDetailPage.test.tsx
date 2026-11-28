@@ -11,6 +11,7 @@ import { getAdminVendorSelection, verifyAdminVendorSelection } from '../lib/auth
 import { useAppReadiness } from '../lib/appReadiness';
 import { ApiError } from '../lib/api/errors';
 import { queryKeys } from '../lib/api/queryKeys';
+import { queryClient as mutationQueryClient } from '../lib/api/queryClient';
 import type { SupportTicket } from '../lib/api/contracts';
 import { OrderDetailPage } from './OrderDetailPage';
 
@@ -378,8 +379,8 @@ function buildSupportTicket(overrides: Partial<SupportTicket> = {}): SupportTick
   };
 }
 
-function renderOrderDetail() {
-  const queryClient = new QueryClient({
+function renderOrderDetail(providedClient?: QueryClient) {
+  const queryClient = providedClient ?? new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
@@ -10330,6 +10331,52 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       const card = screen.getByRole('article', { name: 'Allocation finance summary' });
       expect(card).toHaveTextContent('TRY 8,888.88');
       expect(card).not.toHaveTextContent('TRY 1,234.56');
+    });
+  });
+
+  describe('I01 real Detail cache invalidation', () => {
+    beforeEach(() => mutationQueryClient.clear());
+    afterEach(() => { cleanup(); mutationQueryClient.clear(); });
+
+    it.each([false, true])('refreshes only initiating Detail/list scope (late Vendor switch: %s)', async (switchVendor) => {
+      setCurrentUser({ email: 'admin@demo.com', name: 'Admin', role: 'admin',
+        vendorAccess: ['sporjinal', 'yalispor'], canSwitchVendors: true, defaultVendorId: 'sporjinal',
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }, { vendorId: 'yalispor', vendorName: 'Yalı Spor' }] });
+      const a = orderWithoutShipment;
+      const b = { ...a, id: 'alloc-yalispor-2099', assignedVendorId: 'yalispor', vendorId: 'yalispor', sourceShopifyOrderNumber: '#2099' };
+      const aLists = [queryKeys.orders.list('sporjinal'), queryKeys.orders.list('sporjinal', { limit: 101, offset: 100 })];
+      const untouched = [queryKeys.orders.list('yalispor'), queryKeys.orders.list('yalispor', { limit: 101 }),
+        queryKeys.orders.detail('another-allocation', 'sporjinal'), queryKeys.finance.summary('sporjinal')];
+      aLists.forEach((key) => mutationQueryClient.setQueryData(key, []));
+      untouched.forEach((key) => mutationQueryClient.setQueryData(key, { untouched: true }));
+      mutationQueryClient.setQueryData(queryKeys.orders.detail(a.id, 'sporjinal'), a);
+      mutationQueryClient.setQueryData(queryKeys.orders.detail(b.id, 'yalispor'), b);
+      getOrderMock.mockImplementation(async (id) => id === b.id ? b : a);
+      const config = await getAdminVendorShippingConfigMock('sporjinal');
+      getAdminVendorShippingConfigMock.mockImplementation(async (vendorId) => ({ ...config, vendorId }));
+      const pending = deferred<NonNullable<OrderDetail['shipmentExecution']>>();
+      createShipmentExecutionMock.mockReturnValue(pending.promise);
+      renderOrderDetail(mutationQueryClient);
+      await userEvent.click(await screen.findByRole('button', { name: 'Create shipment label' }));
+      await waitFor(() => expect(createShipmentExecutionMock).toHaveBeenCalledWith(a.id,
+        expect.objectContaining({ vendorId: 'sporjinal' })));
+      if (switchVendor) {
+        await act(async () => setCurrentVendorId('yalispor'));
+        await userEvent.click(screen.getByRole('link', { name: 'Open Vendor B order' }));
+        await screen.findByRole('heading', { name: 'Order #2099' });
+      }
+      await act(async () => pending.resolve({ ...orderWithShipmentSummary.shipmentExecution!, labelUrl: null }));
+      await waitFor(() => expect(mutationQueryClient.isMutating()).toBe(0));
+      aLists.forEach((key) => expect(mutationQueryClient.getQueryState(key)?.isInvalidated).toBe(true));
+      untouched.forEach((key) => expect(mutationQueryClient.getQueryState(key)?.isInvalidated).toBe(false));
+      if (switchVendor) {
+        expect(mutationQueryClient.getQueryState(queryKeys.orders.detail(a.id, 'sporjinal'))?.isInvalidated).toBe(true);
+        expect(mutationQueryClient.getQueryState(queryKeys.orders.detail(b.id, 'yalispor'))?.isInvalidated).toBe(false);
+      } else {
+        expect(getOrderMock).toHaveBeenCalledWith(a.id, expect.objectContaining({ vendorId: 'sporjinal' }));
+        expect(mutationQueryClient.getQueryState(queryKeys.orders.detail(a.id, 'sporjinal'))?.isInvalidated).toBe(false);
+      }
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
     });
   });
 

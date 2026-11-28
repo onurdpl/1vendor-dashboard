@@ -37,6 +37,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { useMutationAction } from '../hooks/useMutationAction';
+import { queryClient } from '../lib/api/queryClient';
 import { formatCurrency, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
 import { isIntegrationOutboundCreationBlocked, integrationOutboundCreationMessage, getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
@@ -631,33 +632,31 @@ export function OrdersPage() {
     setLabelActionFeedback(null);
   }, [selectedOrderActionContextKey]);
 
+  // Capture cache scope before awaiting; later renders must not retarget this mutation.
+  function withOrderCacheInvalidation<TVariables, TData>(mutation: (variables: TVariables) => Promise<TData>) {
+    const vendorId = currentVendor.vendorId;
+    const allocationId = selectedOrderSummary?.id;
+    return async (variables: TVariables) => {
+      const result = await mutation(variables);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.orders.listPrefix(vendorId) }),
+        ...(allocationId ? [queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(allocationId, vendorId) })] : []),
+      ]);
+      return result;
+    };
+  }
+
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipmentLabel } = useMutationAction(
-    async (allocationId: string) =>
+    withOrderCacheInvalidation(async (allocationId: string) =>
       createShipmentExecution(allocationId, {
         vendorId: currentVendor.vendorId,
-      }),
-    {
-      invalidateQueryKeys: [
-        queryKeys.orders.list(currentVendor.vendorId),
-        selectedOrderSummary
-          ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId)
-          : queryKeys.orders.list(currentVendor.vendorId),
-      ],
-    },
+      })),
   );
   const { mutateAsync: retryShipmentLabelMutation, isPending: isRetryingShipmentLabel } = useMutationAction(
-    async (shipmentExecutionId: string) =>
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) =>
       retryFailedShipmentExecution(shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
-      }),
-    {
-      invalidateQueryKeys: [
-        queryKeys.orders.list(currentVendor.vendorId),
-        selectedOrderSummary
-          ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId)
-          : queryKeys.orders.list(currentVendor.vendorId),
-      ],
-    },
+      })),
   );
   const isLabelActionPending = isCreatingShipmentLabel || isRetryingShipmentLabel;
 

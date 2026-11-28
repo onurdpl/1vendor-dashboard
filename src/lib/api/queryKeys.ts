@@ -58,6 +58,7 @@ export const queryKeys = {
     deferredOverview: (vendorId = getCurrentVendorContext().vendorId) => ['dashboard', 'deferred-overview', vendorId] as const,
   },
   orders: {
+    listPrefix: (vendorId: string) => ['orders', 'list', vendorId] as const,
     list: (
       vendorId = getCurrentVendorContext().vendorId,
       options: VendorOrdersListFilters & { workflow?: VendorOrdersWorkflow; limit?: number; offset?: number; search?: string } = {},
