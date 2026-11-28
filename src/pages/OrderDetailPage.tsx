@@ -34,6 +34,7 @@ import {
 } from '../features/orders/api';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
+import { queryClient as mutationQueryClient } from '../lib/api/queryClient';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
 import { ApiError } from '../lib/api/errors';
@@ -1665,19 +1666,30 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       },
     },
   );
+  // Capture cache scope before awaiting; later renders must not retarget this mutation.
+  function withOrderCacheInvalidation<TVariables, TData>(mutation: (variables: TVariables) => Promise<TData>) {
+    const vendorId = currentVendor.vendorId;
+    const allocationId = orderId;
+    return async (variables: TVariables) => {
+      const result = await mutation(variables);
+      await Promise.all([
+        mutationQueryClient.invalidateQueries({ queryKey: queryKeys.orders.listPrefix(vendorId) }),
+        ...(allocationId ? [mutationQueryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(allocationId, vendorId) })] : []),
+      ]);
+      return result;
+    };
+  }
+
   const { mutateAsync: runFulfillmentAction, isPending: isRunningFulfillmentAction } = useMutationAction(
-    async (payload: { orderId: string; action: 'label' | 'ship' | 'tracking' }) => {
+    withOrderCacheInvalidation(async (payload: { orderId: string; action: 'label' | 'ship' | 'tracking' }) => {
       await new Promise((resolve) => {
         globalThis.setTimeout(resolve, 300);
       });
       return payload;
-    },
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+    }),
   );
   const { mutateAsync: rejectOrderMutation, isPending: isRejectingOrder } = useMutationAction(
-    async (input: { orderId: string; reason: RejectOrderReason; note: string }) =>
+    withOrderCacheInvalidation(async (input: { orderId: string; reason: RejectOrderReason; note: string }) =>
       rejectOrder(
         input.orderId,
         {
@@ -1687,32 +1699,20 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         {
           vendorId: currentVendor.vendorId,
         },
-      ),
-    {
-      invalidateQueryKeys: [
-        queryKeys.orders.list(currentVendor.vendorId),
-        orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
-      ],
-    },
+      )),
   );
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipment } = useMutationAction(
-    async (payload: { allocationId: string; customerOverrides?: ShipmentCustomerOverrides }) =>
+    withOrderCacheInvalidation(async (payload: { allocationId: string; customerOverrides?: ShipmentCustomerOverrides }) =>
       createShipmentExecution(payload.allocationId, {
         vendorId: currentVendor.vendorId,
         customerOverrides: payload.customerOverrides,
-      }),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+      })),
   );
   const { mutateAsync: retryShipmentMutation, isPending: isRetryingShipment } = useMutationAction(
-    async (shipmentExecutionId: string) => retryShipmentExecution(shipmentExecutionId),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) => retryShipmentExecution(shipmentExecutionId)),
   );
   const { mutateAsync: retryFailedShipmentMutation, isPending: isRetryingFailedShipment } = useMutationAction(
-    async (payload: {
+    withOrderCacheInvalidation(async (payload: {
       shipmentExecutionId: string;
       customerOverrides?: ShipmentCustomerOverrides;
       useFullSenderDetailsForThisRetry?: boolean;
@@ -1721,40 +1721,28 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         vendorId: currentVendor.vendorId,
         customerOverrides: payload.customerOverrides,
         useFullSenderDetailsForThisRetry: payload.useFullSenderDetailsForThisRetry,
-      }),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+      })),
   );
   const { mutateAsync: refreshShipmentStatusMutation, isPending: isRefreshingShipmentStatus } = useMutationAction(
-    async (shipmentExecutionId: string) =>
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) =>
       refreshShipmentExecutionStatus(shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
-      }),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+      })),
   );
   const { mutateAsync: refreshShipmentProviderDataMutation, isPending: isRefreshingShipmentProviderData } = useMutationAction(
-    async (shipmentExecutionId: string) =>
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) =>
       refreshShipmentProviderData(shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
-      }),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+      })),
   );
   const { mutateAsync: cancelShipmentMutation, isPending: isCancellingShipment } = useMutationAction(
-    async (shipmentExecutionId: string) =>
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) =>
       cancelShipmentExecution(shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
-      }),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+      })),
   );
   const { mutateAsync: updateNavlungoShipmentMutation, isPending: isUpdatingNavlungoShipment } = useMutationAction(
-    async (payload: {
+    withOrderCacheInvalidation(async (payload: {
       shipmentExecutionId: string;
       recipient: Partial<Record<ShipmentCustomerField, string>>;
       postNote?: string | null;
@@ -1770,57 +1758,36 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         {
           vendorId: currentVendor.vendorId,
         },
-      ),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+      )),
   );
   const { mutateAsync: createReturnShipmentLabelMutation, isPending: isCreatingReturnShipmentLabel } = useMutationAction(
-    async (payload: { shipmentExecutionId: string; dryRun?: boolean }) =>
+    withOrderCacheInvalidation(async (payload: { shipmentExecutionId: string; dryRun?: boolean }) =>
       createReturnShipmentLabel(payload.shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
         dryRun: payload.dryRun === true,
-      }),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+      })),
   );
   const { mutateAsync: probeShopifyReturnLabelUploadMutation, isPending: isProbingShopifyReturnLabelUpload } = useMutationAction(
-    async (shipmentExecutionId: string) => probeShopifyReturnLabelUpload(shipmentExecutionId),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeShopifyReturnLabelUpload(shipmentExecutionId)),
   );
   const { mutateAsync: probeTryOtoReturnDetailsMutation, isPending: isProbingTryOtoReturnDetails } = useMutationAction(
-    async (shipmentExecutionId: string) => probeTryOtoReturnDetails(shipmentExecutionId),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeTryOtoReturnDetails(shipmentExecutionId)),
   );
   const { mutateAsync: probeTryOtoReturnLinkMutation, isPending: isProbingTryOtoReturnLink } = useMutationAction(
-    async (shipmentExecutionId: string) => probeTryOtoReturnLink(shipmentExecutionId),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeTryOtoReturnLink(shipmentExecutionId)),
   );
   const { mutateAsync: probeTryOtoReturnAwbPrintMutation, isPending: isProbingTryOtoReturnAwbPrint } = useMutationAction(
-    async (shipmentExecutionId: string) => probeTryOtoReturnAwbPrint(shipmentExecutionId),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeTryOtoReturnAwbPrint(shipmentExecutionId)),
   );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
-    async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
+    withOrderCacheInvalidation(async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
         trackingNumber: payload.trackingNumber,
         carrier: payload.carrier,
         trackingUrl: payload.trackingUrl,
         notifyCustomer: payload.notifyCustomer,
       });
-    },
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
+    }),
   );
   const { mutateAsync: runKargonomiLookupDiagnosticsMutation, isPending: isRunningKargonomiLookupDiagnostics } = useMutationAction(
     async () => runtimeServices.diagnostics.kargonomiLocationLookup(),
@@ -4494,7 +4461,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     showFeedback('Selected items rejected. Admin review was created for those items.', 'success');
     await Promise.all([
       refetch(),
-      queryClient.invalidateQueries({ queryKey: queryKeys.orders.list(currentVendor.vendorId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.listPrefix(currentVendor.vendorId) }),
     ]);
   }
 
@@ -4504,7 +4471,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     showFeedback('Order rejected and sent to admin review.', 'success');
     await Promise.all([
       refetch(),
-      queryClient.invalidateQueries({ queryKey: queryKeys.orders.list(currentVendor.vendorId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.listPrefix(currentVendor.vendorId) }),
     ]);
   }
 
@@ -4534,7 +4501,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     showFeedback('Order rejected and sent to admin review.', 'success');
     await Promise.all([
       refetch(),
-      queryClient.invalidateQueries({ queryKey: queryKeys.orders.list(currentVendor.vendorId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.listPrefix(currentVendor.vendorId) }),
     ]);
   }
   const refundCalculation = refundFinanceRecord?.payoutCalculation ?? null;
