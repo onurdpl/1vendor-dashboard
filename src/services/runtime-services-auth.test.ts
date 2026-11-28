@@ -10,6 +10,29 @@ describe('runtimeServices real-mode auth', () => {
     vi.resetModules();
   });
 
+  it.each(['real', 'mock'])('I03 keeps supported shipping in %s mode without retired success simulations', async (apiMode) => {
+    vi.doMock('../config/runtime', () => ({ runtimeConfig: { apiMode } }));
+    const { runtimeServices } = await import('./runtime-services');
+    for (const name of ['refreshShipmentExecutionStatus', 'cancelShipmentExecution', 'updateNavlungoShipmentExecution',
+      'createReturnShipmentLabel', 'probeShopifyReturnLabelUpload', 'probeTryOtoReturnDetails',
+      'probeTryOtoReturnLink', 'probeTryOtoReturnAwbPrint']) {
+      expect(runtimeServices.orders).not.toHaveProperty(name);
+    }
+    for (const name of ['createNavlungoReturnPickup', 'saveNavlungoReturnPickupAddressCompletion', 'syncNavlungoReturnStatus']) {
+      expect(runtimeServices.returns).not.toHaveProperty(name);
+    }
+    for (const name of ['navlungoAuth', 'navlungoCarriers', 'navlungoCreatePostProbe', 'navlungoCheckPostProbe', 'navlungoBarcodeProbe']) {
+      expect(runtimeServices.diagnostics).not.toHaveProperty(name);
+    }
+    for (const name of ['createShipmentExecution', 'retryFailedShipmentExecution', 'retryShipmentExecution',
+      'refreshShipmentProviderData', 'submitFulfillmentTracking']) {
+      expect(runtimeServices.orders).toHaveProperty(name, expect.any(Function));
+    }
+    for (const name of ['createKargonomiReturnShipment', 'refreshKargonomiReturnProviderData', 'syncKargonomiReturnToShopify']) {
+      expect(runtimeServices.returns).toHaveProperty(name, expect.any(Function));
+    }
+  });
+
   it('uses the cookie-session login response without requiring a JSON token or duplicate /auth/me call', async () => {
     vi.doMock('../config/runtime', () => ({
       runtimeConfig: {

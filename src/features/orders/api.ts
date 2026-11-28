@@ -1,8 +1,6 @@
 export {
   addAdminAllocationResolutionNote,
-  cancelShipmentExecution,
   createShipmentExecution,
-  createReturnShipmentLabel,
   executeAdminShopifyRefund,
   getAdminShopifyOrderBreakdown,
   getOrder,
@@ -12,13 +10,8 @@ export {
   getAdminVendorShippingConfig,
   listOrders,
   planAllocationSplit,
-  probeShopifyReturnLabelUpload,
-  probeTryOtoReturnAwbPrint,
-  probeTryOtoReturnDetails,
-  probeTryOtoReturnLink,
   previewAdminShopifyRefund,
   refreshShipmentProviderData,
-  refreshShipmentExecutionStatus,
   rejectOrder,
   requestAdminCancelRefundReview,
   returnAdminBlockedAllocationToVendor,
@@ -29,7 +22,6 @@ export {
   submitFulfillmentTracking,
   syncKargonomiWarehouseDetails,
   transferAdminAllocationEconomics,
-  updateNavlungoShipmentExecution,
   updateVendorShippingConfig,
 } from '../../lib/api/orders';
 export type {

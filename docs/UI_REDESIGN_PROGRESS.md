@@ -1130,3 +1130,151 @@ Final local validation: `npm run test -- src/lib/shipmentLabelOpening.test.ts sr
 `npm run build` passed (TypeScript plus Vite); Vite emitted a large-chunk warning. Negative-path tests retain expected safe query-error diagnostics. `git diff --check` passed. **BROWSER_NOT_RUN**: no established safe SPORGYM mock browser session was available. No backend, database, Shopify or provider operation was executed.
 
 Changed files: the two production files above, `src/lib/shipmentLabelOpening.test.ts`, `src/pages/OrdersPage.test.tsx`, `src/pages/OrderDetailPage.test.tsx`, and this document. Exact-head GitHub CI and merge acceptance remain pending at documentation time; I02/T05 is not finally closed. T01, T03/T04 and T06–T15 remain open. No next package, panel removal or U6 closure is authorized by this change.
+
+
+## P04-U6-I03 — Retired provider frontend operations cleanup (2026-11-28)
+
+Baseline: `dcb47d52352bc34f0dccca9d3aa6cd5374af1619` (`origin/main`, PR #98 merged).
+Exact-baseline push CI [46144835698](https://github.com/onurdpl/1vendor-dashboard/actions/runs/46144835698)
+passed `build-and-test` and `postgres-18-finance`. Isolated branch:
+`codex/p04-u6-i03-retired-frontend-cleanup`. Scope is the frontend portion of T13 only.
+The earlier inventory reports were not recovered as standalone repository records;
+operation boundaries in the owner-approved I03 instructions were checked against committed source.
+Numeric D/R/E inventory identifiers are not source line numbers.
+
+### Removed executable operations
+
+- Order Detail: retired Try OTO status refresh and its 30/90/180-second scheduling,
+  attempt/in-flight refs, timer cleanup, refresh-only refetch ref, return creation,
+  return detail/link/AWB probes and Shopify return-label upload probe. Generic order
+  refetch and active Kargonomi refresh remain.
+- Order Detail: Navlungo status sync/cancel/update, recipient/post-note/barcode form,
+  update confirmation, detached/unreachable return-pickup controls, full-sender retry
+  toggle and local probe mutations/state. Stored failed-update diagnostics, sanitized
+  request comparisons, lifecycle logs and return probe summaries remain readable.
+- Return Detail: Navlungo status sync, pickup address completion/save, preview,
+  carrier/path selection, live-create confirmation/operation, operation-only state
+  and instructions. The legacy-named diagnostic predicate remains: it also renders
+  current Kargonomi/generic snapshots. No new Return Detail label-open control.
+- Shipping Configuration: Try OTO pickup/origin and Navlungo sender/recipient/carrier/
+  barcode editable branches, draft fields, validators and payload constructors.
+- Retired frontend wrappers/re-exports, real request methods and runtime real/mock
+  methods were removed after consumer tracing, including dormant Navlungo probes.
+  Backend compatibility endpoints and their retirement responses were not edited.
+
+### Preservation and boundaries
+
+Historical Try OTO/Navlungo/Hepsijet provider identities, snapshots, tracking, stored
+label opening and financial evidence remain. D33/D34 stored return tracking/label
+access remains; opening uses the existing shared utility without a provider request.
+No distinct Hepsijet-specific executable frontend control was found. Shared create/
+retry/customer correction remains; backend Hepsijet factory/default retirement is I04/I05.
+
+Active Kargonomi create/retry/refresh, customer overrides, manual tracking/notification,
+Shopify fulfillment tracking synchronization, diagnostics/copy controls, Kargonomi
+return preview/create/refresh/Shopify sync and review actions remain. The shared
+Shopify tracking predicate still accepts existing Try OTO evidence; no Shopify rule
+was invented. Vendor Integration configuration/tokens/scopes, frozen outbound
+restriction (PR #96), integration tracking and outbound/return separation are unchanged.
+
+Unrelated saves of an existing configured retired provider omit the already-optional
+`preferredProvider` update, retain cargo integration, provider metadata and the
+selected warehouse's stored provider. The backend's existing update skips an omitted
+provider; no backend change, nullable-provider contract or I05 default correction.
+Current Kargonomi controls, independent outbound selection save and warehouse sync remain.
+
+I01 scoped list invalidation and initiating context capture, I02 typed opening outcome/
+finally cleanup and B2 delayed context protections remain. Orders production code,
+query keys and label-opening utility are unchanged. Authorization predicates are unchanged;
+Admin/Vendor/Support/Finance historical read coverage and existing mutation restrictions
+are retained. No Orders panel removal, new row action or Smart Label decision redesign.
+
+### Validation and obsolete-test reconciliation
+
+Test-first original source: **1 PASS / 6 FAIL / 819 filtered / 0 PENDING**. Failures
+cover Try OTO/Navlungo executable controls, retired return pickup controls within a
+Kargonomi diagnostic context and retired-provider conversion on unrelated saves.
+Historical Hepsijet read behavior already passed. This is synthetic frontend evidence,
+not a production incident or real provider request.
+
+Final combined frontend regression command:
+`npm run test -- src/pages/OrdersPage.test.tsx src/pages/OrderDetailPage.test.tsx src/pages/ReturnDetailPage.test.tsx src/pages/VendorProfilePage.test.tsx src/lib/orderOperationalStory.test.ts src/hooks/useQueryResource.test.tsx src/lib/shipmentLabelOpening.test.ts src/lib/api/queryKeys.test.ts src/services/real/orders.shipments.test.ts src/services/real/orders.finance-summary.test.ts src/services/real/orders.auth.test.ts src/services/real/returns.test.ts src/services/runtime-services-auth.test.ts src/App.runtime.test.tsx src/runtime-api-proxy.test.ts src/config/runtime.test.ts src/lib/auth/permissions.test.ts`
+(with JSON reporter): **1096 PASS / 0 FAIL / 0 SKIP / 0 PENDING**.
+Orders 188; Detail 642; Return Detail 90; Vendor Profile 83; operational story 19;
+query lifecycle 6; label opener 11; query keys 4; runtime/auth/API/config/mapper/permission
+suites 53. Includes existing I01 real QueryClient, I02 and B2 cases, B1/B3 frontend
+permissions/eligibility, all four read roles, stored return opening and fake-timer
+checks across the retired refresh schedule. Backend authorization/database suites
+were not run locally for this frontend-only change.
+
+`npm run build` passed (TypeScript plus Vite; existing large-chunk warning).
+`git diff --check` passed. Backend build/smoke/database/dry-run scripts were not
+applicable or executed; no local/production database or live provider/Shopify operation.
+
+Browser verification used the isolated loopback Vite mock app with external network
+egress blocked. Existing `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npm run smoke:browser -- tests/e2e/operational-smoke.spec.ts`
+passed **14 / 14**. A temporary external browser harness passed **10 / 10** targeted
+presentations: Admin Kargonomi/Try OTO/Navlungo/Hepsijet stored labels, historical
+Try OTO return label, current Kargonomi and historical Navlungo return diagnostics,
+Shipping Configuration, Vendor Kargonomi read evidence and Support/Finance historical
+Hepsijet read access. The historical return label is checked within the Try OTO case.
+All ten are synthetic mock/provider-stubbed scenarios, not production or live provider
+acceptance. Initial harness attempts used a refund fixture without request-source
+classification, a collapsed diagnostics section, and an inapplicable real-mode
+Smart Label expectation for a mock Vendor view. Correcting those test-only setup/
+visibility assumptions yielded the ten passing scenarios without application changes.
+The Vendor browser case uses existing read-only shipment eligibility; real-mode
+active Vendor operations are covered by the component regressions. Retired timer
+absence is proved by fake-clock component tests, not elapsed browser time.
+
+Twenty obsolete operation/form tests were removed, each requiring an explicitly
+retired control. They are listed below to make removal reviewable. Read-only
+failed-update/status/return-probe diagnostics were instead converted to stored-data
+fixtures, retaining their assertions; missing-ID/skipped-return tests now require no
+probe controls. The former automatic-refresh test now asserts zero requests across
+30/90/180-second advances. The active Kargonomi save test now explicitly uses a
+Kargonomi fixture instead of expecting conversion of an unrelated Navlungo record.
+
+- `requires confirmation before cancelling a Navlungo shipment` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `allows admins to confirm and update a Navlungo shipment` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `lets admins request full Navlungo sender details for one failed retry` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `renders Try OTO status refresh action and updates created shipment evidence` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `limits automatic Try OTO refresh attempts` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `lets admins probe Shopify return label upload from return shipment details` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `lets admins sync Shopify return tracking when Try OTO return label URL is missing` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `lets admins probe Try OTO return details and shows safe diagnostics` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `lets admins probe Try OTO return link and shows safe diagnostics` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `lets admins probe Try OTO return AWB print and persist the return label URL` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `creates Try OTO return labels from delivered shipments` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `lets admin preview Navlungo return pickup from the return request context` — removed because it requires retired return pickup editing/creation/probing.
+- `lets admin send Navlungo return pickup carrier overrides while locking API version` — removed because it requires retired return pickup editing/creation/probing.
+- `lets admin probe Navlungo return pickup against the post return endpoint` — removed because it requires retired return pickup editing/creation/probing.
+- `renders admin completion fields for missing Navlungo return pickup customer address data` — removed because it requires retired return pickup editing/creation/probing.
+- `renders admin completion fields from alternate Navlungo missing-field diagnostics` — removed because it requires retired return pickup editing/creation/probing.
+- `keeps completion fields and typed district visible across background refetch` — removed because it requires retired return pickup editing/creation/probing.
+- `preserves return pickup diagnostics after live create returns validation errors` — removed because it requires retired return pickup editing/creation/probing.
+- `repopulates persisted Navlungo update overrides after reload` — removed because it requires retired shipment/return operation, scheduling or editing.
+- `hides completion fields after saved completion resolves missing sender district` — removed because it requires retired return pickup editing/creation/probing.
+
+Remaining frontend provider references are historical reads/display (A), shared DTOs/
+formatters and optional compatibility retry fields (B), historical test fixtures (C),
+shared supported Shopify tracking synchronization (D), or I04/I05 defaults/boundaries
+(E). Source search found no remaining approved retired executable frontend caller (F).
+This does not prove external compatibility endpoint usage is absent; that remains UNKNOWN.
+
+Changed files: `src/pages/OrderDetailPage.tsx`, `src/pages/ReturnDetailPage.tsx`,
+`src/components/VendorShippingConfigEditor.tsx`, `src/features/orders/api.ts`,
+`src/features/returns/api.ts`, `src/lib/api/orders.ts`, `src/lib/api/returns.ts`,
+`src/services/real/orders.ts`, `src/services/real/returns.ts`,
+`src/services/real/diagnostics.ts`, `src/services/runtime-services.ts`,
+`src/pages/OrderDetailPage.test.tsx`, `src/pages/ReturnDetailPage.test.tsx`,
+`src/pages/VendorProfilePage.test.tsx`, `src/services/runtime-services-auth.test.ts`
+and this document.
+
+Exact-head GitHub CI and merge acceptance remain pending at documentation time.
+I03 is not merged and T13 remains OPEN pending I03 acceptance, I04 backend retirement
+and I05 explicit unconfigured behavior. I01/T02 and I02/T05 remain COMPLETE.
+T01, T03/T04 and T06–T15 remain OPEN. U6 is not complete; no panel-removal readiness,
+merge, deployment, production functionality or full Hepsijet retirement is claimed.
+The original checkout branch/HEAD/status and all 29 captured changed-file hashes
+were verified unchanged before delivery; incident evidence was preserved.

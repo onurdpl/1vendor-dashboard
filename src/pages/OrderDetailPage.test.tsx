@@ -1906,172 +1906,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(container.querySelector('.order-item-thumb-fallback')?.textContent).toBe('NA');
   });
 
-  it('requires confirmation before cancelling a Navlungo shipment', async () => {
-    setCurrentUser({
-      email: 'admin@demo.com',
-      name: 'Demo Admin',
-      vendorId: 'sporjinal',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    const navlungoOrder: OrderDetail = {
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        provider: 'navlungo',
-        providerShipmentId: 'NAV-1028',
-        trackingNumber: 'NAV-1028',
-        trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
-        labelUrl: 'barcode-pdf',
-        shipmentStatus: 'created',
-        providerResponseSummary: {
-          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
-          ok: true,
-          providerShipmentIdPresent: true,
-          trackingNumberPresent: true,
-          labelPresent: true,
-          barcodePresent: true,
-        },
-      },
-    };
-    getOrderMock.mockResolvedValue(navlungoOrder);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
-
-    renderOrderDetail();
-
-    const cancelButtons = await screen.findAllByRole('button', { name: 'Cancel Navlungo shipment' });
-    await userEvent.click(cancelButtons[0]);
-
-    expect(confirmSpy).toHaveBeenCalledWith(
-      'Cancel this Navlungo shipment? Shopify fulfillment will not be deleted in this phase.',
-    );
-    expect(cancelShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961', {
-      vendorId: 'sporjinal',
-    });
-    expect((await screen.findAllByText('Navlungo shipment cancelled.')).length).toBeGreaterThan(0);
-    confirmSpy.mockRestore();
-  });
-
-  it('allows admins to confirm and update a Navlungo shipment', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'admin@demo.com',
-      name: 'Demo Admin',
-      vendorId: 'sporjinal',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        provider: 'navlungo',
-        providerShipmentId: 'NAV-1028',
-        trackingNumber: 'NAV-1028',
-        trackingUrl: 'https://tracking.navlungo.example/NAV-1028',
-        labelUrl: 'barcode-pdf',
-        shipmentStatus: 'created',
-      },
-    });
-
-    renderOrderDetail();
-
-    const fulfillmentSection = (await screen.findByRole('heading', { name: 'Fulfillment' })).closest('article') as HTMLElement;
-    expect(fulfillmentSection).not.toBeNull();
-    expect(within(fulfillmentSection).getByText('Shipment provider')).toBeInTheDocument();
-    expect(within(fulfillmentSection).getByText('Carrier status')).toBeInTheDocument();
-    expect(within(fulfillmentSection).queryByText('Carrier, tracking, label, and Shopify sync controls.')).not.toBeInTheDocument();
-    await user.click((await screen.findAllByText('Update Navlungo shipment'))[0]);
-    expect(screen.getByText('Leave fields empty to keep current shipment values.')).toBeInTheDocument();
-    expect(screen.getByText('Recipient info')).toBeInTheDocument();
-    expect(screen.getByText('Shipment options')).toBeInTheDocument();
-    await user.type(screen.getAllByLabelText('District *')[0], 'Kartal');
-    const updateButton = screen.getAllByRole('button', { name: 'Update Navlungo shipment' })[0];
-    expect(updateButton).toBeDisabled();
-    await user.click(screen.getByLabelText(/Update only the Navlungo shipment/i));
-    await user.click(updateButton);
-
-    await waitFor(() =>
-      expect(updateNavlungoShipmentExecutionMock).toHaveBeenCalledWith(
-        'shipment-kargo_entegrator-alloc-sporjinal-7621783322961',
-        {
-          recipient: {
-            district: 'Kartal',
-          },
-          postNote: '',
-          barcodeFormat: '',
-        },
-        {
-          vendorId: 'sporjinal',
-        },
-      ),
-    );
-    expect((await screen.findAllByText('Navlungo shipment updated')).length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText('District *')[0]).toHaveValue('Kartal');
-    expect(await screen.findByText('Update Post')).toBeInTheDocument();
-    expect(screen.getByText(/attempted yes · HTTP 200 · succeeded yes/i)).toBeInTheDocument();
-    expect(screen.getByText('Updated at')).toBeInTheDocument();
-  }, 10000);
-
-  it('repopulates persisted Navlungo update overrides after reload', async () => {
-    setCurrentUser({
-      email: 'admin@demo.com',
-      name: 'Demo Admin',
-      vendorId: 'sporjinal',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        provider: 'navlungo',
-        providerShipmentId: 'NAV-1028',
-        trackingNumber: 'NAV-1028',
-        shipmentStatus: 'created',
-        providerResponseSummary: {
-          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
-          navlungoUpdateAttempted: true,
-          navlungoUpdateSucceeded: true,
-          navlungoUpdateHttpStatus: 200,
-          navlungoUpdateRecipientOverridePresent: true,
-          navlungoUpdateRecipientOverrideKeys: ['city', 'district', 'postcode'],
-          navlungoUpdateSubmittedRecipientOverrideKeys: ['district'],
-          navlungoUpdateOptionOverrideKeys: ['postNote', 'barcodeFormat'],
-          navlungoUpdateRecipientOverrides: {
-            city: 'Istanbul',
-            district: 'Kartal',
-            postcode: '34870',
-          },
-          navlungoUpdatePostNote: 'Leave at reception',
-          navlungoUpdateBarcodeFormat: 'pdf-A6',
-        },
-      },
-    });
-
-    renderOrderDetail();
-
-    const updatePanel = await screen.findByLabelText('Navlungo shipment update');
-
-    await waitFor(() => expect(within(updatePanel).getByLabelText('City *')).toHaveValue('Istanbul'));
-    expect(within(updatePanel).getByLabelText('District *')).toHaveValue('Kartal');
-    expect(within(updatePanel).getByLabelText('Postcode')).toHaveValue('34870');
-    expect(within(updatePanel).getByLabelText('Post note')).toHaveValue('Leave at reception');
-    expect(within(updatePanel).getByLabelText('Barcode format')).toHaveValue('pdf-A6');
-    expect(screen.getByText(/yes · keys city, district, postcode/i)).toBeInTheDocument();
-    expect(screen.getByText(/recipient district · options postNote, barcodeFormat/i)).toBeInTheDocument();
-  });
-
-  it('hides the Navlungo shipment update form from vendors while preserving cancellation', async () => {
+  it('preserves Vendor Navlungo history without retired update cancel or refresh controls', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Sporjinal Vendor',
@@ -2095,12 +1930,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('button', { name: 'Cancel shipment' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel shipment' })).not.toBeInTheDocument();
     const fulfillmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article') as HTMLElement;
     expect(fulfillmentSection).not.toBeNull();
     expect(within(fulfillmentSection).getByRole('heading', { name: 'Shipment details' })).toBeInTheDocument();
     expect(within(fulfillmentSection).getAllByText('Carrier').length).toBeGreaterThan(0);
-    expect(within(fulfillmentSection).getByRole('button', { name: 'Refresh shipment status' })).toBeInTheDocument();
+    expect(within(fulfillmentSection).queryByRole('button', { name: 'Refresh shipment status' })).not.toBeInTheDocument();
     expect(within(fulfillmentSection).queryByText('Carrier, tracking, and label details.')).not.toBeInTheDocument();
     expect(within(fulfillmentSection).queryByText('Refresh the latest carrier status for this shipment.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel Navlungo shipment' })).not.toBeInTheDocument();
@@ -2287,7 +2123,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(details).queryByText('Barcode status')).not.toBeInTheDocument();
   });
 
-  it('renders failed Navlungo update diagnostics after provider rejection', async () => {
+  it('renders stored failed Navlungo update diagnostics without executing an update', async () => {
     const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@demo.com',
@@ -2299,19 +2135,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        provider: 'navlungo',
-        providerShipmentId: 'NAV-1028',
-        trackingNumber: 'NAV-1028',
-        trackingUrl: 'https://tracking.navlungo.example/NAV-1028',
-        labelUrl: 'barcode-pdf',
-        shipmentStatus: 'created',
-      },
-    });
-    updateNavlungoShipmentExecutionMock.mockResolvedValueOnce({
+
+    getOrderMock.mockResolvedValue({ ...orderWithShipmentSummary, shipmentExecution: {
       ...orderWithShipmentSummary.shipmentExecution!,
       provider: 'navlungo',
       providerShipmentId: 'NAV-1028',
@@ -2334,13 +2159,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         },
         providerError: 'Doğrulama Hatası',
       },
-    });
+    } });
 
     renderOrderDetail();
-
-    await user.click((await screen.findAllByText('Update Navlungo shipment'))[0]);
-    await user.click(screen.getByLabelText(/Update only the Navlungo shipment/i));
-    await user.click(screen.getAllByRole('button', { name: 'Update Navlungo shipment' })[0]);
 
     expect((await screen.findAllByText('Doğrulama Hatası')).length).toBeGreaterThan(0);
     expect(await screen.findByText(/attempted yes · HTTP 422 · succeeded no/i)).toBeInTheDocument();
@@ -6433,7 +6254,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Try OTO status refresh')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
+    expect(screen.queryByText('Try OTO status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByText('Try OTO createShipment')).not.toBeInTheDocument();
     expect(screen.queryByText('create shipment request is received.')).not.toBeInTheDocument();
@@ -6789,62 +6611,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('link', { name: /Open tracking/i })).toHaveAttribute('href', 'https://track.navlungo.test/NAV-RETRY-1048');
   });
 
-  it('lets admins request full Navlungo sender details for one failed retry', async () => {
-    const user = userEvent.setup();
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
-        provider: 'navlungo',
-        providerShipmentId: null,
-        trackingNumber: null,
-        trackingUrl: null,
-        labelUrl: null,
-        barcode: null,
-        shipmentStatus: 'failed',
-        providerResponseSummary: {
-          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
-          ok: false,
-          dryRun: false,
-          disabledGates: [],
-          providerError: 'Execution of ServiceCallout failed.',
-        },
-      },
-    });
-    retryFailedShipmentExecutionMock.mockResolvedValueOnce({
-      ...orderWithShipmentSummary.shipmentExecution!,
-      id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
-      provider: 'navlungo',
-      shipmentStatus: 'failed',
-      providerShipmentId: null,
-      updatedAt: '2026-05-15T19:45:00.000Z',
-    });
-    setCurrentUser({
-      email: 'admin@demo.com',
-      name: 'Demo Admin',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-
-    renderOrderDetail();
-
-    const fullSenderToggle = (await screen.findAllByLabelText('Use full Navlungo sender details for this retry'))[0];
-    await user.click(fullSenderToggle);
-    await user.click(screen.getByRole('button', { name: 'Retry shipment' }));
-
-    await waitFor(() =>
-      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
-        vendorId: 'sporjinal',
-        customerOverrides: undefined,
-        useFullSenderDetailsForThisRetry: true,
-      }),
-    );
-  });
-
   it('keeps full Navlungo sender retry diagnostics admin-only for vendors', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
@@ -7017,78 +6783,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect((await screen.findAllByText(/Shipment ke-live-1028 recorded/i)).length).toBeGreaterThan(0);
   });
 
-  it('renders Try OTO status refresh action and updates created shipment evidence', async () => {
+  it('renders stored Navlungo status diagnostics and timeline without synchronization', async () => {
     const user = userEvent.setup();
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        providerShipmentId: 'OTO-SHIP-1028',
-        shipmentStatus: 'created',
-        trackingNumber: null,
-        barcode: null,
-        labelUrl: null,
-        providerResponseSummary: {
-          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
-          dryRun: false,
-          providerShipmentIdPresent: true,
-        },
-      },
-    });
-    setCurrentUser({
-      email: 'vendor@example.com',
-      name: 'Vendor User',
-      role: 'vendor',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: false,
-      defaultVendorId: 'sporjinal',
-    });
 
-    renderOrderDetail();
-
-    await user.click(await screen.findByRole('button', { name: 'Refresh shipment status' }));
-
-    expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
-      vendorId: 'sporjinal',
-    });
-    await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
-    expect((await screen.findAllByText('Shipment status refreshed.')).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Provider id: yes · Barcode:\s*yes · Tracking:\s*yes · Label:\s*yes/)).not.toBeInTheDocument();
-  });
-
-  it('renders Navlungo manual detailed status sync diagnostics and timeline events', async () => {
-    const user = userEvent.setup();
-    refreshShipmentExecutionStatusMock.mockResolvedValue({
-      ...orderWithShipmentSummary.shipmentExecution!,
-      provider: 'navlungo',
-      providerShipmentId: 'NAV-1054',
-      trackingNumber: 'SURAT-1054',
-      trackingUrl: 'https://tracking.navlungo.example/NAV-1054',
-      labelUrl: 'barcode-string',
-      shipmentStatus: 'in_transit',
-      providerResponseSummary: {
-        ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
-        navlungoStatusSyncAttempted: true,
-        navlungoStatusSyncHttpStatus: 200,
-        navlungoProviderStatusCode: 2,
-        navlungoProviderStatusName: 'Delivered',
-        navlungoNormalizedStatus: 'delivered',
-        navlungoDeliveredDate: '2026-05-22T12:00:00.000Z',
-        navlungoCarrierTrackingCode: 'SURAT-1054',
-        navlungoCarrierTrackingUrl: 'https://tracking.navlungo.example/NAV-1054',
-        navlungoBarcodeStatus: 'created',
-        navlungoGeoBadAddress: true,
-        navlungoCarrierTrackingPresent: true,
-        navlungoLogsCount: 1,
-        navlungoStatusLogs: [
-          { statusCode: 2, action: 'Delivered', actionResult: 'Alıcıya teslim edildi', createdAt: '2026-05-22T12:00:00.000Z' },
-        ],
-        shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
-      },
-    });
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,
       shipmentExecution: {
@@ -7135,7 +6832,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('button', { name: 'Refresh shipment status' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh shipment status' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
     const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
@@ -7145,16 +6843,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('SURAT-1054').length).toBeGreaterThan(0);
     expect(screen.queryByText('Barcode status')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Refresh shipment status' }));
-
-    expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
-      vendorId: 'sporjinal',
-    });
-    await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
-    expect((await screen.findAllByText('Shipment status refreshed.')).length).toBeGreaterThan(0);
+    expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
   });
 
-  it('automatically refreshes Try OTO created shipments while tracking or label is missing', async () => {
+  it('I03 never schedules retired Try OTO refresh when tracking and label are missing', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       getOrderMock.mockResolvedValue({
@@ -7187,17 +6879,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
       renderOrderDetail();
 
-      expect(await screen.findByText('Status will refresh automatically while OTO finishes label generation.')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Refresh shipment status' })).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
+      expect(screen.queryByText('Status will refresh automatically while OTO finishes label generation.')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Refresh shipment status' })).not.toBeInTheDocument();
       expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(30_000);
-      });
-
-      expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
-        vendorId: 'sporjinal',
-      });
+      for (const elapsed of [30_000, 90_000, 180_000]) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(elapsed); });
+        expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+      }
     } finally {
       vi.useRealTimers();
     }
@@ -7266,61 +6956,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       });
 
       expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('limits automatic Try OTO refresh attempts', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const pendingTryOtoOrder = {
-        ...orderWithShipmentSummary,
-        shipmentExecution: {
-          ...orderWithShipmentSummary.shipmentExecution!,
-          id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-          provider: 'try_oto' as const,
-          providerShipmentId: 'OTO-SHIP-1028',
-          shipmentStatus: 'created',
-          trackingNumber: null,
-          barcode: null,
-          labelUrl: null,
-          providerResponseSummary: {
-            ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
-            dryRun: false,
-            providerShipmentIdPresent: true,
-          },
-        },
-      };
-      getOrderMock.mockResolvedValue(pendingTryOtoOrder);
-      refreshShipmentExecutionStatusMock.mockResolvedValue(pendingTryOtoOrder.shipmentExecution);
-      setCurrentUser({
-        email: 'vendor@example.com',
-        name: 'Vendor User',
-        role: 'vendor',
-        vendorAccess: ['sporjinal'],
-        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-        canSwitchVendors: false,
-        defaultVendorId: 'sporjinal',
-      });
-
-      renderOrderDetail();
-
-      expect(await screen.findByText('Status will refresh automatically while OTO finishes label generation.')).toBeInTheDocument();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(30_000);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(90_000);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(180_000);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(300_000);
-      });
-
-      expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
@@ -7416,6 +7051,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
     });
 
+    const openWindow = vi.spyOn(window, 'open').mockImplementation(() => null);
     renderOrderDetail();
 
     expect(await screen.findByLabelText('Try OTO return shipment')).toBeInTheDocument();
@@ -7425,7 +7061,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       'https://tracking.tryoto.example/RET-TRACK-1028',
     );
-    expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Open return label PDF' }));
+    expect(openWindow).toHaveBeenCalledWith('https://app.tryoto.example/return-label-1028.pdf', '_blank', 'noopener,noreferrer');
+    expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
+    expect(probeTryOtoReturnAwbPrintMock).not.toHaveBeenCalled();
+    openWindow.mockRestore();
     const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Return tracking attached')).toBeInTheDocument();
@@ -7434,7 +7074,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Shopify return label upload probe')).not.toBeInTheDocument();
   });
 
-  it('lets admins probe Shopify return label upload from return shipment details', async () => {
+  it('does not report stored forward shipment labels as return labels', async () => {
     const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@example.com',
@@ -7445,282 +7085,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shopifyReturnSignal: {
-        topic: 'returns/request',
-        receivedAt: '2026-05-19T08:00:00.000Z',
-        topLevelPayloadKeys: ['admin_graphql_api_id', 'id'],
-        orderIdPresent: true,
-        returnIdPresent: true,
-        lineItemIdsPresent: true,
-        refundIdPresent: false,
-        financialStatus: null,
-        fulfillmentStatus: null,
-        matchedOrderId: 'shopify-order-1028',
-        matchedByField: 'order_id',
-      },
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
-        returnShipment: {
-          provider: 'try_oto',
-          returnOrderId: 'OTO-ORDER-1028-R1',
-          trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: null,
-          labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
-          barcode: 'RET-BARCODE-1028',
-          status: 'created',
-          createdAt: '2026-05-15T19:46:00.000Z',
-          requestKeys: ['items', 'orderId'],
-          responseKeys: ['printAWBURL', 'returnOrderId'],
-          trackingPresent: true,
-          labelPresent: true,
-          labelRetrievalConfirmed: true,
-          labelRetrievalNote: null,
-          shopifyReturnLabelUploadProbe: null,
-        },
-        providerResponseSummary: null,
-      },
-    });
 
-    renderOrderDetail();
-
-    const probeSection = await screen.findByLabelText('Shopify return label upload probe');
-    const probeButton = within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' });
-    expect(probeButton).toBeEnabled();
-    expect(within(probeSection).getByText('Shopify return id').nextElementSibling).toHaveTextContent('present');
-    expect(within(probeSection).getByText('Return tracking/barcode').nextElementSibling).toHaveTextContent('present');
-    expect(within(probeSection).getByText('Return label URL').nextElementSibling).toHaveTextContent('present');
-    await user.click(probeButton);
-
-    expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
-    expect((await screen.findAllByText('Shopify accepted the return label PDF URL.')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('Shopify return label attached')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Tracking accepted')[0]).toBeInTheDocument();
-    expect(screen.getAllByText('Sürat Kargo').length).toBeGreaterThan(0);
-  });
-
-  it('lets admins sync Shopify return tracking when Try OTO return label URL is missing', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'admin@example.com',
-      name: 'Admin User',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shopifyReturnSignal: {
-        topic: 'returns/request',
-        receivedAt: '2026-05-19T08:00:00.000Z',
-        topLevelPayloadKeys: ['admin_graphql_api_id', 'id'],
-        orderIdPresent: true,
-        returnIdPresent: true,
-        lineItemIdsPresent: true,
-        refundIdPresent: false,
-        financialStatus: null,
-        fulfillmentStatus: null,
-        matchedOrderId: 'shopify-order-1028',
-        matchedByField: 'order_id',
-      },
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        returnShipment: {
-          provider: 'try_oto',
-          returnOrderId: 'OTO-ORDER-1028-R1',
-          trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: 'https://tracking.example/RET-TRACK-1028',
-          labelUrl: null,
-          barcode: 'RET-BARCODE-1028',
-          status: 'created',
-          createdAt: '2026-05-15T19:46:00.000Z',
-          requestKeys: ['items', 'orderId'],
-          responseKeys: ['brandedTrackingURL', 'returnOrderId', 'trackingNumber'],
-          trackingPresent: true,
-          labelPresent: false,
-          labelRetrievalConfirmed: false,
-          labelRetrievalNote: null,
-          shopifyReturnLabelUploadProbe: null,
-        },
-        providerResponseSummary: null,
-      },
-    });
-    probeShopifyReturnLabelUploadMock.mockResolvedValueOnce({
-      ...orderWithShipmentSummary.shipmentExecution,
-      id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-      provider: 'try_oto',
-      shipmentStatus: 'delivered',
-      providerShipmentId: 'OTO-SHIP-1028',
-      trackingNumber: 'OTO-TRACK-1028',
-      returnShipment: {
-        provider: 'try_oto',
-        returnOrderId: 'OTO-ORDER-1028-R1',
-        trackingNumber: 'RET-TRACK-1028',
-        trackingUrl: 'https://tracking.example/RET-TRACK-1028',
-        labelUrl: null,
-        barcode: 'RET-BARCODE-1028',
-        status: 'created',
-        createdAt: '2026-05-15T19:46:00.000Z',
-        requestKeys: ['items', 'orderId'],
-        responseKeys: ['brandedTrackingURL', 'returnOrderId', 'trackingNumber'],
-        trackingPresent: true,
-        labelPresent: false,
-        labelRetrievalConfirmed: false,
-        labelRetrievalNote: null,
-        shopifyReturnLabelUploadProbe: {
-          status: 'success',
-          attemptedAt: '2026-05-15T19:48:00.000Z',
-          reverseFulfillmentOrderIdPresent: true,
-          reverseLineItemIdsPresent: true,
-          mutationUsed: 'reverseDeliveryCreateWithShipping',
-          shopifyUserErrors: [],
-          reverseDeliveryIdPresent: true,
-          shopifyReturnIdPresent: true,
-          trackingAccepted: true,
-          labelAccepted: false,
-          returnedCarrierName: 'Sürat Kargo',
-          carrierNamePresent: true,
-          trackingOnlyMode: true,
-          labelInputSent: false,
-          shopifyCallAttempted: true,
-          skippedReason: 'return_label_url_missing_tracking_only',
-          errorMessage: null,
-        },
-      },
-      updatedAt: '2026-05-15T19:48:00.000Z',
-    });
-
-    renderOrderDetail();
-
-    const probeSection = await screen.findByLabelText('Shopify return label upload probe');
-    const probeButton = within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' });
-    expect(probeButton).toBeEnabled();
-    expect(within(probeSection).getByText('Return label URL').nextElementSibling).toHaveTextContent('missing');
-    expect(await screen.findByText('Printable return label unavailable')).toBeInTheDocument();
-    await user.click(probeButton);
-
-    expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
-    expect((await screen.findAllByText('Shopify return tracking attached.')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('Shopify return tracking attached. Customer can track return shipment in Shopify.')).length).toBeGreaterThan(0);
-  });
-
-  it('lets admins probe Try OTO return details and shows safe diagnostics', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'admin@example.com',
-      name: 'Admin User',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
-        returnShipment: {
-          provider: 'try_oto',
-          returnOrderId: 'OTO-ORDER-1028-R1',
-          trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: null,
-          labelUrl: null,
-          barcode: 'RET-BARCODE-1028',
-          status: 'newReturn',
-          createdAt: '2026-05-15T19:46:00.000Z',
-          requestKeys: ['items', 'orderId'],
-          responseKeys: ['returnOrderId'],
-          trackingPresent: true,
-          labelPresent: false,
-          labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return label is not available from getReturnDetails yet.',
-          finalized: false,
-          labelRetrievable: false,
-          providerStatusSource: 'createReturnShipment',
-          diagnostics: null,
-          detailsProbe: null,
-        },
-        providerResponseSummary: null,
-      },
-    });
-
-    renderOrderDetail();
-
-    const probeSection = await screen.findByLabelText('Try OTO return details action');
-    await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return details' }));
-
-    expect(probeTryOtoReturnDetailsMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
-    expect((await screen.findAllByText('Try OTO return label found in return details.')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: yes/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
-  });
-
-  it('does not report forward shipment labels as return labels after return details probe', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'admin@example.com',
-      name: 'Admin User',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        labelUrl: 'https://app.tryoto.example/forward-label-1028.pdf',
-        returnShipment: {
-          provider: 'try_oto',
-          returnOrderId: 'OTO-ORDER-1028-R1',
-          trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: null,
-          labelUrl: null,
-          barcode: 'RET-BARCODE-1028',
-          status: 'newReturn',
-          createdAt: '2026-05-15T19:46:00.000Z',
-          requestKeys: ['items', 'orderId'],
-          responseKeys: ['returnOrderId'],
-          trackingPresent: true,
-          labelPresent: false,
-          labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return label is not available from getReturnDetails yet.',
-          finalized: false,
-          labelRetrievable: false,
-          providerStatusSource: 'createReturnShipment',
-          diagnostics: null,
-          detailsProbe: null,
-        },
-        providerResponseSummary: null,
-      },
-    });
-    probeTryOtoReturnDetailsMock.mockResolvedValueOnce({
+    getOrderMock.mockResolvedValue({ ...orderWithShipmentSummary, shipmentExecution: {
       ...orderWithShipmentSummary.shipmentExecution,
       provider: 'try_oto',
       shipmentStatus: 'delivered',
@@ -7764,20 +7130,18 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         },
       },
       updatedAt: '2026-05-15T19:49:00.000Z',
-    });
+    } });
 
     renderOrderDetail();
 
-    const probeSection = await screen.findByLabelText('Try OTO return details action');
-    await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return details' }));
-
     expect((await screen.findAllByText('Return label is not available from getReturnDetails yet.')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: pending/)).toBeInTheDocument();
+    expect(screen.getByText('RET-TRACK-1028')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open return label PDF' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open return label PDF' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Provider id: yes · Barcode:.*Label: yes/)).not.toBeInTheDocument();
   });
 
-  it('lets admins probe Try OTO return link and shows safe diagnostics', async () => {
+  it('preserves stored AWB print missing-label diagnostics without a probe', async () => {
     const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@example.com',
@@ -7788,165 +7152,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
-        returnShipment: {
-          provider: 'try_oto',
-          returnOrderId: 'OTO-ORDER-1028-R1',
-          trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: null,
-          labelUrl: null,
-          barcode: 'RET-BARCODE-1028',
-          status: 'newReturn',
-          createdAt: '2026-05-15T19:46:00.000Z',
-          requestKeys: ['items', 'orderId'],
-          responseKeys: ['returnOrderId'],
-          trackingPresent: true,
-          labelPresent: false,
-          labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return label is not available from getReturnDetails yet.',
-          finalized: false,
-          labelRetrievable: false,
-          providerStatusSource: 'createReturnShipment',
-          diagnostics: null,
-          detailsProbe: null,
-          linkProbe: null,
-        },
-        providerResponseSummary: null,
-      },
-    });
 
-    renderOrderDetail();
-
-    const probeSection = await screen.findByLabelText('Try OTO return details action');
-    await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return link' }));
-
-    expect(probeTryOtoReturnLinkMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
-    expect((await screen.findAllByText('Try OTO return label found in return link response.')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: yes/)).toBeInTheDocument();
-  });
-
-  it('lets admins probe Try OTO return AWB print and persist the return label URL', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'admin@example.com',
-      name: 'Admin User',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
-        returnShipment: {
-          provider: 'try_oto',
-          returnOrderId: 'OTO-ORDER-1028-R1',
-          trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: null,
-          labelUrl: null,
-          barcode: 'RET-BARCODE-1028',
-          status: 'request_created',
-          createdAt: '2026-05-15T19:46:00.000Z',
-          requestKeys: ['items', 'orderId'],
-          responseKeys: ['returnOrderId'],
-          trackingPresent: true,
-          labelPresent: false,
-          labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return AWB print did not return a label URL yet.',
-          finalized: false,
-          labelRetrievable: false,
-          providerStatusSource: 'createReturnShipment',
-          diagnostics: null,
-          detailsProbe: null,
-          linkProbe: null,
-          awbPrintProbe: null,
-        },
-        providerResponseSummary: null,
-      },
-    });
-
-    renderOrderDetail();
-
-    const probeSection = await screen.findByLabelText('Try OTO return details action');
-    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
-    await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' }));
-
-    expect(probeTryOtoReturnAwbPrintMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
-    expect((await screen.findAllByText('Try OTO return label found in AWB print response.')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: yes/)).toBeInTheDocument();
-    const summary = await screen.findByLabelText('Try OTO return AWB print probe');
-    expect(within(summary).getByText('200')).toBeInTheDocument();
-    expect(within(summary).getByText('Label/PDF/URL')).toBeInTheDocument();
-    expect(within(summary).getByText('Tracking/barcode')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
-  });
-
-  it('keeps AWB print fallback when the probe returns no label URL', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'admin@example.com',
-      name: 'Admin User',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
-        returnShipment: {
-          provider: 'try_oto',
-          returnOrderId: 'OTO-ORDER-1028-R1',
-          trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: null,
-          labelUrl: null,
-          barcode: 'RET-BARCODE-1028',
-          status: 'request_created',
-          createdAt: '2026-05-15T19:46:00.000Z',
-          requestKeys: ['items', 'orderId'],
-          responseKeys: ['returnOrderId'],
-          trackingPresent: true,
-          labelPresent: false,
-          labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return AWB print did not return a label URL yet.',
-          finalized: false,
-          labelRetrievable: false,
-          providerStatusSource: 'createReturnShipment',
-          diagnostics: null,
-          detailsProbe: null,
-          linkProbe: null,
-          awbPrintProbe: null,
-        },
-        providerResponseSummary: null,
-      },
-    });
-    probeTryOtoReturnAwbPrintMock.mockResolvedValueOnce({
+    getOrderMock.mockResolvedValue({ ...orderWithShipmentSummary, shipmentExecution: {
       ...orderWithShipmentSummary.shipmentExecution,
       provider: 'try_oto',
       shipmentStatus: 'delivered',
@@ -7991,20 +7198,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         },
       },
       updatedAt: '2026-05-15T19:51:00.000Z',
-    });
+    } });
 
     renderOrderDetail();
 
-    const probeSection = await screen.findByLabelText('Try OTO return details action');
-    await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' }));
-
-    expect((await screen.findAllByText('Return AWB print did not return a label URL yet.')).length).toBeGreaterThan(0);
     const summary = await screen.findByLabelText('Try OTO return AWB print probe');
     expect(within(summary).getByText('No print data yet')).toBeInTheDocument();
-    expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: pending/)).toBeInTheDocument();
+    expect(screen.getByText('RET-TRACK-1028')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open return label PDF' })).not.toBeInTheDocument();
   });
 
-  it('blocks Try OTO return AWB print probe when returnOrderId is missing', async () => {
+  it('keeps retired probes absent for stored return evidence without an ID', async () => {
     setCurrentUser({
       email: 'admin@example.com',
       name: 'Admin User',
@@ -8052,14 +7256,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const probeSection = await screen.findByLabelText('Try OTO return details action');
-    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return details' })).toBeDisabled();
-    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return link' })).toBeDisabled();
-    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' })).toBeDisabled();
-    expect(screen.getByText('Return probes require returnOrderId.')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Try OTO return details action')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Probe Try OTO return/ })).not.toBeInTheDocument();
   });
 
-  it('explains why Try OTO return probes are blocked when return creation was skipped', async () => {
+  it('preserves stored skipped return diagnostics without retired probes', async () => {
     setCurrentUser({
       email: 'admin@example.com',
       name: 'Admin User',
@@ -8145,12 +7346,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const probeSection = await screen.findByLabelText('Try OTO return details action');
-    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return details' })).toBeDisabled();
-    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return link' })).toBeDisabled();
-    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' })).toBeDisabled();
+    expect(await screen.findByLabelText('Try OTO return details action')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Probe Try OTO return/ })).not.toBeInTheDocument();
     expect(
-      screen.getByText('Return probes require returnOrderId. Return shipment was not created because deliveryOptionId is missing.'),
+      screen.getAllByText('Try OTO return shipment was not created because deliveryOptionId is missing.')[0],
     ).toBeInTheDocument();
   });
 
@@ -8230,43 +7429,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByRole('heading', { name: /Order #1028/ })).toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO return details action')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Probe Try OTO return details' })).not.toBeInTheDocument();
-  });
-
-  it('creates Try OTO return labels from delivered shipments', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'vendor@example.com',
-      name: 'Vendor User',
-      role: 'vendor',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: false,
-      defaultVendorId: 'sporjinal',
-    });
-    getOrderMock.mockResolvedValue({
-      ...orderWithShipmentSummary,
-      shipmentExecution: {
-        ...orderWithShipmentSummary.shipmentExecution!,
-        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
-        provider: 'try_oto',
-        shipmentStatus: 'delivered',
-        providerShipmentId: 'OTO-SHIP-1028',
-        trackingNumber: 'OTO-TRACK-1028',
-        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
-        returnShipment: null,
-        providerResponseSummary: null,
-      },
-    });
-
-    renderOrderDetail();
-
-    await user.click(await screen.findByRole('button', { name: 'Create return label' }));
-
-    expect(createReturnShipmentLabelMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
-      vendorId: 'sporjinal',
-      dryRun: false,
-    });
-    expect((await screen.findAllByText('Try OTO return shipment label created.')).length).toBeGreaterThan(0);
   });
 
   it('does not expose detached Navlungo return pickup creation from Order Detail', async () => {
@@ -10382,7 +9544,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
   describe('P02 shipment action and operational parity', () => {
     const openWindow = vi.fn();
-    function actor(role: 'admin' | 'vendor' | 'support' = 'vendor', restricted = false) {
+    function actor(role: 'admin' | 'vendor' | 'support' | 'finance' = 'vendor', restricted = false) {
       setCurrentUser({ email: `${role}@demo.com`, name: role, role,
         vendorAccess: ['sporjinal', 'yalispor'],
         vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal', status: restricted ? 'inactive' : 'active' },
@@ -10402,6 +9564,31 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       getOrderMock.mockResolvedValue(orderWithoutShipment);
     });
     afterEach(() => vi.unstubAllGlobals());
+
+    it.each((['try_oto', 'navlungo', 'hepsijet'] as const).flatMap((provider) =>
+      (['admin', 'vendor', 'support', 'finance'] as const).map((role) => [provider, role] as const)))('I03 preserves %s history for %s without retired controls', async (provider, role) => {
+      actor(role);
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentExecution: shipment({ provider,
+        providerShipmentId: 'historical-id', labelUrl: 'https://example.com/history.pdf',
+        trackingNumber: 'HISTORY-TRACK', trackingUrl: 'https://example.com/history-track' }) });
+      renderOrderDetail();
+      const label = (await screen.findAllByRole('button', { name: /Open shipping label|Open label PDF/ }))[0];
+      expect(screen.getAllByText('HISTORY-TRACK').length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('link', { name: /Open tracking/ })[0]).toHaveAttribute('href', 'https://example.com/history-track');
+      if (role === 'admin') expect(screen.getAllByText({ try_oto: 'Try OTO', navlungo: 'Navlungo', hepsijet: 'Hepsijet' }[provider]).length).toBeGreaterThan(0);
+      expect(screen.queryByRole('button', { name: /Refresh shipment status|Sync Navlungo status|Cancel Navlungo shipment|Update Navlungo shipment|Probe Try OTO|Create return label|Probe Shopify return label/ })).not.toBeInTheDocument();
+      expect(screen.queryByText('Use full Navlungo sender details for this retry')).not.toBeInTheDocument();
+      await userEvent.click(label);
+      expect(openWindow).toHaveBeenCalledWith('https://example.com/history.pdf', '_blank', 'noopener,noreferrer');
+      vi.useFakeTimers();
+      try { await act(async () => { await vi.advanceTimersByTimeAsync(300_000); }); }
+      finally { vi.useRealTimers(); }
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+      expect(cancelShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(updateNavlungoShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    });
 
     it('opens an existing label without creation or retry mutations', async () => {
       getOrderMock.mockResolvedValue({ ...orderWithoutShipment, shipmentExecution: shipment({ labelUrl: 'https://example.com/existing.pdf' }) });
