@@ -2196,6 +2196,25 @@ describe('VendorProfilePage', () => {
     expect(sopyoCredentialStateMock).not.toHaveBeenCalled();
   });
 
+  it.each(['navlungo', 'try_oto', 'hepsijet'] as const)('I03 preserves historical %s provider during an unrelated desi save', async (preferredProvider) => {
+    setCurrentUser({ email: 'admin@demo.com', name: 'Admin', role: 'admin', vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }], canSwitchVendors: true, defaultVendorId: 'demo-vendor-a' });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, preferredProvider });
+    updateVendorShippingConfigMock.mockImplementationOnce(async (_vendorId, input) => ({ ...shippingConfig, preferredProvider, ...input }));
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+    const desi = await screen.findByLabelText('Default desi');
+    await userEvent.clear(desi); await userEvent.type(desi, '4');
+    await userEvent.click(screen.getByRole('button', { name: 'Save shipping config' }));
+    await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalled());
+    const payload = updateVendorShippingConfigMock.mock.calls[0][1];
+    expect(payload.defaultDesi).toBe(4);
+    expect(payload.preferredProvider ?? preferredProvider).toBe(preferredProvider);
+    expect(payload.preferredProvider).toBeUndefined();
+    expect(payload.providerMetadata).toEqual(shippingConfig.providerMetadata);
+    expect(payload.cargoIntegrationId).toBe(shippingConfig.cargoIntegrationId);
+    expect(payload.warehouses[0].provider).toBe(shippingConfig.warehouses[0].provider);
+  });
+
   it('saves admin shipping setup for the requested route vendor', async () => {
     const user = userEvent.setup();
     setCurrentUser({
@@ -2207,7 +2226,7 @@ describe('VendorProfilePage', () => {
       canSwitchVendors: true,
       defaultVendorId: 'demo-vendor-a',
     });
-    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'created-vendor' });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, preferredProvider: 'kargonomi', vendorId: 'created-vendor' });
     getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'created-vendor' });
     getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'created-vendor' });
     getVendorStatusMock.mockResolvedValue({

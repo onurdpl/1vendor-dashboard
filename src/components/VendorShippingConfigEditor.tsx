@@ -25,40 +25,16 @@ type ShippingConfigDraft = {
   defaultWarehouseId: string;
   defaultDesi: string;
   packageType: 'box' | 'document';
-  tryOtoPickupLocationCode: string;
-  tryOtoOriginCity: string;
   kargonomiShippingProviderId: string;
   kargonomiBuyerStateId: string;
   kargonomiBuyerCityId: string;
   kargonomiReturnReceiverName: string;
   kargonomiReturnReceiverPhone: string;
   kargonomiReturnReceiverAddress: string;
-  navlungoSenderAddressId: string;
-  navlungoSenderName: string;
-  navlungoSenderPhone: string;
-  navlungoSenderEmail: string;
-  navlungoSenderAddress: string;
-  navlungoSenderCountry: string;
-  navlungoSenderCity: string;
-  navlungoSenderDistrict: string;
-  navlungoSenderPostCode: string;
-  navlungoReturnRecipientAddressId: string;
-  navlungoReturnRecipientName: string;
-  navlungoReturnRecipientPhone: string;
-  navlungoReturnRecipientEmail: string;
-  navlungoReturnRecipientAddress: string;
-  navlungoReturnRecipientCountry: string;
-  navlungoReturnRecipientCity: string;
-  navlungoReturnRecipientDistrict: string;
-  navlungoReturnRecipientPostCode: string;
-  navlungoBarcodeFormat: string;
-  navlungoCarrierId: string;
 };
 
 type VendorShippingConfigEditorValues = {
   provider: ShippingConfigDraftProvider;
-  tryOtoPickupLocationCode: string;
-  tryOtoOriginCity: string;
   kargonomiShippingProviderId: string;
   kargonomiBuyerStateId: string;
   kargonomiBuyerCityId: string;
@@ -97,18 +73,6 @@ function readPackageType(config?: VendorShippingConfig | null): 'box' | 'documen
   const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
   const raw = metadata.packageType ?? metadata.package_type;
   return raw === 'document' ? 'document' : 'box';
-}
-
-function readTryOtoPickupLocationCode(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.tryOtoPickupLocationCode ?? metadata.pickupLocationCode ?? metadata.pickup_location_code;
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readTryOtoOriginCity(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.tryOtoOriginCity ?? metadata.originCity ?? metadata.origin_city ?? metadata.pickupCity ?? metadata.pickup_city;
-  return typeof raw === 'string' ? raw : '';
 }
 
 function readKargonomiBuyerStateId(config?: VendorShippingConfig | null) {
@@ -154,61 +118,6 @@ function readKargonomiReturnReceiverField(config: VendorShippingConfig | null | 
   return fallback ?? '';
 }
 
-function readNavlungoSenderAddressId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw =
-    metadata.navlungoSenderAddressId ??
-    metadata.senderAddressId ??
-    metadata.sender_address_id ??
-    (config?.preferredProvider === 'navlungo' ? config.defaultWarehouseId : null);
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readNavlungoReturnRecipientAddressId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw =
-    metadata.navlungoReturnRecipientAddressId ??
-    metadata.returnRecipientAddressId ??
-    metadata.return_recipient_address_id ??
-    metadata.navlungoReturnAddressId ??
-    metadata.returnAddressId;
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readNavlungoBarcodeFormat(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.navlungoBarcodeFormat ?? metadata.barcodeFormat ?? metadata.barcode_format;
-  return typeof raw === 'string' && raw.trim() ? raw : 'pdf-A6';
-}
-
-function readNavlungoCarrierId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.navlungoCarrierId ?? metadata.carrierId ?? metadata.carrier_id;
-  return typeof raw === 'string' ? raw : '9';
-}
-
-function readNavlungoSenderField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  for (const key of keys) {
-    const raw = metadata[key];
-    if (typeof raw === 'string') {
-      return raw;
-    }
-  }
-  return fallback ?? '';
-}
-
-function readNavlungoReturnRecipientField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  for (const key of keys) {
-    const raw = metadata[key];
-    if (typeof raw === 'string') {
-      return raw;
-    }
-  }
-  return fallback ?? '';
-}
-
 function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
   const preferredProvider: ShippingConfigDraftProvider = 'kargonomi';
 
@@ -221,8 +130,6 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     defaultWarehouseId: config?.defaultWarehouseId ?? config?.warehouses.find((warehouse) => warehouse.isDefault)?.warehouseId ?? '',
     defaultDesi: config?.defaultDesi ?? '3.00',
     packageType: readPackageType(config),
-    tryOtoPickupLocationCode: readTryOtoPickupLocationCode(config),
-    tryOtoOriginCity: readTryOtoOriginCity(config),
     kargonomiShippingProviderId: readKargonomiShippingProviderId(config),
     kargonomiBuyerStateId: readKargonomiBuyerStateId(config),
     kargonomiBuyerCityId: readKargonomiBuyerCityId(config),
@@ -243,34 +150,6 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
       ['kargonomiReturnReceiverAddress', 'returnReceiverAddress', 'warehouseAddress'],
       config?.warehouses.find((warehouse) => warehouse.isDefault)?.address ?? config?.warehouses[0]?.address,
     ),
-    navlungoSenderAddressId: readNavlungoSenderAddressId(config) || '55574',
-    navlungoSenderName: readNavlungoSenderField(
-      config,
-      ['navlungoSenderName', 'senderName', 'sender_name'],
-      config?.warehouses.find((warehouse) => warehouse.isDefault)?.name ?? config?.warehouses[0]?.name,
-    ),
-    navlungoSenderPhone: readNavlungoSenderField(config, ['navlungoSenderPhone', 'senderPhone', 'sender_phone']),
-    navlungoSenderEmail: readNavlungoSenderField(config, ['navlungoSenderEmail', 'senderEmail', 'sender_email']),
-    navlungoSenderAddress: readNavlungoSenderField(
-      config,
-      ['navlungoSenderAddress', 'senderAddress', 'sender_address'],
-      config?.warehouses.find((warehouse) => warehouse.isDefault)?.address ?? config?.warehouses[0]?.address,
-    ),
-    navlungoSenderCountry: readNavlungoSenderField(config, ['navlungoSenderCountry', 'senderCountry', 'sender_country'], 'tr'),
-    navlungoSenderCity: readNavlungoSenderField(config, ['navlungoSenderCity', 'senderCity', 'sender_city']),
-    navlungoSenderDistrict: readNavlungoSenderField(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']),
-    navlungoSenderPostCode: readNavlungoSenderField(config, ['navlungoSenderPostCode', 'senderPostCode', 'sender_post_code']),
-    navlungoReturnRecipientAddressId: readNavlungoReturnRecipientAddressId(config),
-    navlungoReturnRecipientName: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientName', 'returnRecipientName', 'return_recipient_name']),
-    navlungoReturnRecipientPhone: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientPhone', 'returnRecipientPhone', 'return_recipient_phone']),
-    navlungoReturnRecipientEmail: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientEmail', 'returnRecipientEmail', 'return_recipient_email']),
-    navlungoReturnRecipientAddress: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientAddress', 'returnRecipientAddress', 'return_recipient_address']),
-    navlungoReturnRecipientCountry: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientCountry', 'returnRecipientCountry', 'return_recipient_country'], 'tr'),
-    navlungoReturnRecipientCity: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientCity', 'returnRecipientCity', 'return_recipient_city']),
-    navlungoReturnRecipientDistrict: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientDistrict', 'returnRecipientDistrict', 'return_recipient_district']),
-    navlungoReturnRecipientPostCode: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientPostCode', 'returnRecipientPostCode', 'return_recipient_post_code']),
-    navlungoBarcodeFormat: readNavlungoBarcodeFormat(config),
-    navlungoCarrierId: readNavlungoCarrierId(config),
   };
 }
 
@@ -289,38 +168,6 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
 
   if (!draft.preferredProvider) {
     errors.push('Provider is required.');
-  }
-  if (
-    draft.preferredProvider === 'navlungo' &&
-    draft.navlungoSenderAddressId.trim() &&
-    !/^\d+$/.test(draft.navlungoSenderAddressId.trim())
-  ) {
-    errors.push('Navlungo sender address ID must be numeric.');
-  }
-  if (
-    draft.preferredProvider === 'navlungo' &&
-    draft.navlungoReturnRecipientAddressId.trim() &&
-    !/^\d+$/.test(draft.navlungoReturnRecipientAddressId.trim())
-  ) {
-    errors.push('Navlungo return recipient address ID must be numeric.');
-  }
-  if (draft.preferredProvider === 'navlungo' && !/^\d+$/.test(draft.navlungoCarrierId.trim())) {
-    errors.push('Navlungo carrier ID must be numeric.');
-  }
-  if (draft.preferredProvider === 'navlungo') {
-    [
-      ['sender address ID', draft.navlungoSenderAddressId],
-    ].forEach(([label, value]) => {
-      if (!String(value).trim()) {
-        errors.push(`Navlungo ${label} is required.`);
-      }
-    });
-  }
-  if (draft.preferredProvider === 'try_oto' && !draft.tryOtoPickupLocationCode.trim()) {
-    errors.push('Try OTO pickup location code is required.');
-  }
-  if (draft.preferredProvider === 'try_oto' && !draft.tryOtoOriginCity.trim()) {
-    errors.push('Try OTO origin city is required.');
   }
   if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.defaultWarehouseId.trim())) {
     errors.push('Kargonomi warehouse ID must be numeric.');
@@ -361,8 +208,11 @@ function buildShippingConfigUpdate(
   const metadata = isRecord(currentConfig?.providerMetadata) ? currentConfig.providerMetadata : {};
   const existingDefaultWarehouse = currentConfig?.warehouses.find((warehouse) => warehouse.isDefault)
     ?? currentConfig?.warehouses[0];
+  const preserveRetiredProvider = currentConfig?.source === 'configured'
+    && ['try_oto', 'navlungo', 'hepsijet'].includes(currentConfig.preferredProvider);
   const baseUpdate = {
-    preferredProvider: draft.preferredProvider,
+    // The existing optional update preserves stored provider identity without changing I05 defaults.
+    ...(preserveRetiredProvider ? {} : { preferredProvider: draft.preferredProvider }),
     shopifyLocationGid: draft.shopifyLocationGid.trim() || null,
     outboundMethod: draft.outboundMethod || null,
     selectedIntegrationProvider: draft.outboundMethod === 'VENDOR_INTEGRATION' ? draft.selectedIntegrationProvider || null : null,
@@ -370,20 +220,6 @@ function buildShippingConfigUpdate(
     defaultDesi: Number(draft.defaultDesi),
     shippingVatPercent: Number(currentConfig?.shippingVatPercent ?? 18),
   };
-
-  if (draft.preferredProvider === 'try_oto') {
-    return {
-      ...baseUpdate,
-      cargoIntegrationId: null,
-      defaultWarehouseId: null,
-      providerMetadata: {
-        ...metadata,
-        tryOtoPickupLocationCode: draft.tryOtoPickupLocationCode.trim(),
-        tryOtoOriginCity: draft.tryOtoOriginCity.trim(),
-      },
-      warehouses: [],
-    };
-  }
 
   if (draft.preferredProvider === 'kargonomi') {
     const selectedWarehouseId = draft.defaultWarehouseId.trim();
@@ -432,62 +268,18 @@ function buildShippingConfigUpdate(
 
     return {
       ...baseUpdate,
-      cargoIntegrationId: null,
+      cargoIntegrationId: preserveRetiredProvider ? currentConfig.cargoIntegrationId : null,
       defaultWarehouseId: selectedWarehouseId,
-      providerMetadata,
+      providerMetadata: preserveRetiredProvider ? metadata : providerMetadata,
       warehouses: [
         {
           warehouseId: selectedWarehouseId,
           name: selectedWarehouse?.name ?? 'Default warehouse',
           address: selectedWarehouse?.address ?? null,
           isDefault: true,
-          provider: 'kargonomi',
+          provider: preserveRetiredProvider ? selectedWarehouse?.provider ?? currentConfig.preferredProvider : 'kargonomi',
         },
       ],
-    };
-  }
-
-  if (draft.preferredProvider === 'navlungo') {
-    const providerMetadata = { ...metadata };
-    const senderAddressId = draft.navlungoSenderAddressId.trim();
-    const returnRecipientAddressId = draft.navlungoReturnRecipientAddressId.trim();
-    providerMetadata.navlungoSenderAddressId = senderAddressId;
-    providerMetadata.navlungoReturnRecipientAddressId = returnRecipientAddressId;
-    providerMetadata.navlungoSenderName = draft.navlungoSenderName.trim();
-    providerMetadata.navlungoSenderPhone = draft.navlungoSenderPhone.trim();
-    providerMetadata.navlungoSenderEmail = draft.navlungoSenderEmail.trim();
-    providerMetadata.navlungoSenderAddress = draft.navlungoSenderAddress.trim();
-    providerMetadata.navlungoSenderCountry = draft.navlungoSenderCountry.trim();
-    providerMetadata.navlungoSenderCity = draft.navlungoSenderCity.trim();
-    providerMetadata.navlungoSenderDistrict = draft.navlungoSenderDistrict.trim();
-    providerMetadata.navlungoSenderPostCode = draft.navlungoSenderPostCode.trim();
-    providerMetadata.navlungoReturnRecipientName = draft.navlungoReturnRecipientName.trim();
-    providerMetadata.navlungoReturnRecipientPhone = draft.navlungoReturnRecipientPhone.trim();
-    providerMetadata.navlungoReturnRecipientEmail = draft.navlungoReturnRecipientEmail.trim();
-    providerMetadata.navlungoReturnRecipientAddress = draft.navlungoReturnRecipientAddress.trim();
-    providerMetadata.navlungoReturnRecipientCountry = draft.navlungoReturnRecipientCountry.trim();
-    providerMetadata.navlungoReturnRecipientCity = draft.navlungoReturnRecipientCity.trim();
-    providerMetadata.navlungoReturnRecipientDistrict = draft.navlungoReturnRecipientDistrict.trim();
-    providerMetadata.navlungoReturnRecipientPostCode = draft.navlungoReturnRecipientPostCode.trim();
-    providerMetadata.navlungoBarcodeFormat = draft.navlungoBarcodeFormat.trim() || 'pdf-A6';
-    providerMetadata.navlungoCarrierId = draft.navlungoCarrierId.trim() || '9';
-
-    return {
-      ...baseUpdate,
-      cargoIntegrationId: null,
-      defaultWarehouseId: senderAddressId || null,
-      providerMetadata,
-      warehouses: senderAddressId
-        ? [
-            {
-              warehouseId: senderAddressId,
-              name: existingDefaultWarehouse?.name || 'Navlungo sender address',
-              address: existingDefaultWarehouse?.address || null,
-              isDefault: true,
-              provider: 'navlungo',
-            },
-          ]
-        : [],
     };
   }
 
@@ -606,10 +398,7 @@ export function VendorShippingConfigEditor({
 
     void updateShippingConfigMutation(buildShippingConfigUpdate(shippingConfigDraft, shippingConfig)).catch(() => undefined);
   };
-
-  const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
   const isKargonomiConfigDraft = shippingConfigDraft.preferredProvider === 'kargonomi';
-  const isNavlungoConfigDraft = shippingConfigDraft.preferredProvider === 'navlungo';
   const kargonomiDefaultWarehouse = getKargonomiDefaultWarehouse(shippingConfig);
   const kargonomiWarehouseSyncStatus = kargonomiDefaultWarehouse?.syncStatus;
   const kargonomiWarehouseIdForSync = kargonomiDefaultWarehouse?.warehouseId ?? '';
@@ -961,328 +750,7 @@ export function VendorShippingConfigEditor({
             ) : null}
           </>
         ) : null}
-        {isTryOtoConfigDraft ? (
-          <>
-            <label className="field">
-              <span>Try OTO pickup location code</span>
-              <input
-                value={shippingConfigDraft.tryOtoPickupLocationCode}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    tryOtoPickupLocationCode: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Try OTO origin city</span>
-              <input
-                value={shippingConfigDraft.tryOtoOriginCity}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    tryOtoOriginCity: event.target.value,
-                  }))
-                }
-              />
-            </label>
-          </>
-        ) : null}
-        {isNavlungoConfigDraft ? (
-          <>
-            <label className="field">
-              <span>Navlungo sender address ID</span>
-              <input
-                inputMode="numeric"
-                value={shippingConfigDraft.navlungoSenderAddressId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderAddressId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Navlungo return recipient address ID</span>
-              <input
-                inputMode="numeric"
-                value={shippingConfigDraft.navlungoReturnRecipientAddressId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoReturnRecipientAddressId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <details className="shipping-config-advanced">
-              <summary>Return recipient address book details</summary>
-              <p>Optional metadata for the return warehouse/address book entry. Return pickup still sends only recipient.addressId.</p>
-              <label className="field">
-                <span>Return recipient name</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientName}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientName: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient phone</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientPhone}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientPhone: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient email</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientEmail}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientEmail: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient address</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientAddress}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientAddress: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient country</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientCountry}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientCountry: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient city</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientCity}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientCity: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient district</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientDistrict}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientDistrict: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient post code</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientPostCode}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientPostCode: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </details>
-            <label className="field">
-              <span>Default carrier ID</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={shippingConfigDraft.navlungoCarrierId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoCarrierId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Default barcode format</span>
-              <select
-                value={shippingConfigDraft.navlungoBarcodeFormat}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoBarcodeFormat: event.target.value,
-                  }))
-                }
-              >
-                <option value="pdf-A6">pdf-A6</option>
-                <option value="pdf-A5">pdf-A5</option>
-                <option value="pdf-A6Y">pdf-A6Y</option>
-                <option value="pdf-A7">pdf-A7</option>
-                <option value="html">html</option>
-              </select>
-            </label>
-            <details className="shipping-config-advanced">
-              <summary>Full sender details for diagnostics</summary>
-              <p>Optional. Used only when an admin explicitly retries Navlungo with full sender details.</p>
-              <label className="field">
-                <span>Sender name</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderName}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderName: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender phone</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderPhone}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderPhone: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender email</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderEmail}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderEmail: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender address</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderAddress}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderAddress: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender country</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderCountry}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderCountry: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender city</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderCity}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderCity: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender district</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderDistrict}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderDistrict: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender post code</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderPostCode}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderPostCode: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </details>
-            <div className="shipping-config-readonly">
-              <span>Base URL configured</span>
-              <strong>{shippingProviderDiagnostics?.baseUrlConfigured ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Username configured</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.usernameConfigured ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Password configured</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.passwordConfigured ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Sender address configured</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.defaultSenderAddressIdConfigured ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Auth diagnostics available</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.authDiagnosticsAvailable ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Runtime shipment execution enabled</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.runtimeShipmentExecutionEnabled ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Return/reverse implementation</span>
-              <strong>NOT IMPLEMENTED</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Create Post execution</span>
-              <strong>{shippingProviderDiagnostics?.executionReady ? 'ready' : 'not ready'}</strong>
-            </div>
-          </>
-        ) : null}
+
         {!isKargonomiConfigDraft ? shippingDefaultDesiField : null}
         {!isKargonomiConfigDraft ? (
           <>
@@ -1312,8 +780,6 @@ export function VendorShippingConfigEditor({
 
   const values: VendorShippingConfigEditorValues = {
     provider: shippingConfigDraft.preferredProvider,
-    tryOtoPickupLocationCode: readTryOtoPickupLocationCode(shippingConfig),
-    tryOtoOriginCity: readTryOtoOriginCity(shippingConfig),
     kargonomiShippingProviderId: readKargonomiShippingProviderId(shippingConfig),
     kargonomiBuyerStateId: readKargonomiBuyerStateId(shippingConfig),
     kargonomiBuyerCityId: readKargonomiBuyerCityId(shippingConfig),

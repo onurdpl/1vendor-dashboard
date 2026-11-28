@@ -784,26 +784,6 @@ export async function runKargonomiLocationLookupDiagnostics() {
   return apiClient.get<KargonomiLocationLookupDiagnostics>('/admin/diagnostics/kargonomi/location-lookup');
 }
 
-export async function runNavlungoAuthDiagnostics() {
-  return apiClient.get<NavlungoAuthDiagnostics>('/admin/diagnostics/navlungo/auth');
-}
-
-export async function runNavlungoCarrierDiagnostics() {
-  return apiClient.get<NavlungoCarrierDiagnostics>('/admin/diagnostics/navlungo/carriers');
-}
-
-export async function runNavlungoCreatePostProbe(confirm: 'YES') {
-  return apiClient.post<NavlungoCreatePostProbeDiagnostics>('/admin/diagnostics/navlungo/create-post-probe', { confirm });
-}
-
-export async function runNavlungoCheckPostProbe(postNumber: string) {
-  return apiClient.post<NavlungoCheckPostProbeDiagnostics>('/admin/diagnostics/navlungo/check-post', { postNumber });
-}
-
-export async function runNavlungoBarcodeProbe(postNumber: string) {
-  return apiClient.post<NavlungoBarcodeProbeDiagnostics>('/admin/diagnostics/navlungo/barcode', { postNumber });
-}
-
 export async function replayWebhook(webhookEventId: string) {
   return apiClient.post<ReplayWebhookResponse>(`/admin/diagnostics/webhooks/${webhookEventId}/replay`);
 }

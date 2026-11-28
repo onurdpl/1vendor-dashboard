@@ -9,28 +9,19 @@ import { VendorShippingConfigEditor } from '../components/VendorShippingConfigEd
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
-  cancelShipmentExecution,
-  createReturnShipmentLabel,
   createShipmentExecution,
   getAdminVendorShippingConfig,
   getOrder,
-  probeShopifyReturnLabelUpload,
-  probeTryOtoReturnAwbPrint,
-  probeTryOtoReturnDetails,
-  probeTryOtoReturnLink,
   refreshShipmentProviderData,
-  refreshShipmentExecutionStatus,
   rejectOrder,
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
-  updateNavlungoShipmentExecution,
   type AllocationSplitExecutionResponse,
   type OrderDetail,
   type ShipmentCustomerField,
   type ShipmentCustomerOverrides,
   type ShipmentExecution,
-  type VendorShippingConfig,
 } from '../features/orders/api';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -67,11 +58,6 @@ import { getOperationalStory, isIntegrationOutboundCreationBlocked, integrationO
 import { canRejectOrder, canShowAllocationSplitRejectAction } from '../lib/rejectEligibility';
 import type {
   KargonomiLocationLookupDiagnostics,
-  NavlungoAuthDiagnostics,
-  NavlungoBarcodeProbeDiagnostics,
-  NavlungoCarrierDiagnostics,
-  NavlungoCheckPostProbeDiagnostics,
-  NavlungoCreatePostProbeDiagnostics,
 } from '../services/real/diagnostics';
 
 type RejectOrderReason = 'OUT_OF_STOCK' | 'VENDOR_CANCELLED' | 'DAMAGED_INVENTORY' | 'FULFILLMENT_ISSUE';
@@ -658,39 +644,12 @@ function getShipmentActionResultState(
   };
 }
 
-function getReturnShipmentEvidenceSummary(shipment: ShipmentExecution) {
-  const returnShipment = shipment.returnShipment;
-  if (!returnShipment) {
-    return getShipmentEvidenceSummary(shipment);
-  }
-
-  return [
-    `Return provider id: ${returnShipment.returnOrderId ? 'yes' : 'pending'}`,
-    `Return barcode: ${returnShipment.barcode ? 'yes' : returnShipment.trackingNumber ? 'same as tracking' : 'pending'}`,
-    `Return tracking: ${returnShipment.trackingNumber ? 'yes' : 'pending'}`,
-    `Return label: ${returnShipment.labelUrl ? 'yes' : 'pending'}`,
-  ].join(' · ');
-}
-
-function isReturnShipmentActionEndpoint(endpoint?: string | null) {
-  return Boolean(
-    endpoint &&
-      (endpoint.includes('/create-return') ||
-        endpoint.includes('/probe-try-oto-return-awb-print') ||
-        endpoint.includes('/probe-try-oto-return-details') ||
-        endpoint.includes('/probe-try-oto-return-link') ||
-        endpoint.includes('/probe-shopify-return-label')),
-  );
-}
-
 function getShipmentActionEvidenceSummary(actionState: ShipmentActionState) {
   if (!actionState.shipment) {
     return null;
   }
 
-  return isReturnShipmentActionEndpoint(actionState.endpoint)
-    ? getReturnShipmentEvidenceSummary(actionState.shipment)
-    : getShipmentEvidenceSummary(actionState.shipment);
+  return getShipmentEvidenceSummary(actionState.shipment);
 }
 
 type NavlungoRequestSummary = NonNullable<NonNullable<ShipmentExecution['providerResponseSummary']>['navlungoRequestSummary']>;
@@ -834,14 +793,12 @@ function renderNavlungoRequestSummaryRows(summary: NavlungoRequestSummary, prefi
 }
 
 function getVendorShipmentActionMessage(actionState: ShipmentActionState) {
-  if (!isReturnShipmentActionEndpoint(actionState.endpoint) && isShipmentExecutionNeedsReview(actionState.shipment)) {
+  if (isShipmentExecutionNeedsReview(actionState.shipment)) {
     return 'Shipment needs review. Provider did not return a shipment id or tracking yet.';
   }
 
   if (actionState.tone === 'success') {
-    return isReturnShipmentActionEndpoint(actionState.endpoint)
-      ? 'Return shipment action completed.'
-      : 'Shipment action completed.';
+    return 'Shipment action completed.';
   }
 
   if (actionState.tone === 'error') {
@@ -850,15 +807,7 @@ function getVendorShipmentActionMessage(actionState: ShipmentActionState) {
       return 'Complete the missing shipment fields to continue.';
     }
 
-    if (actionState.endpoint?.includes('/update-navlungo')) {
-      return actionState.shipment?.providerResponseSummary?.providerError ||
-        actionState.message ||
-        'Navlungo shipment can only be updated before pickup.';
-    }
-
-    return isReturnShipmentActionEndpoint(actionState.endpoint)
-      ? 'Return shipment action needs attention.'
-      : 'Shipment action needs attention.';
+    return 'Shipment action needs attention.';
   }
 
   return actionState.message.toLowerCase().includes('refresh')
@@ -1191,8 +1140,6 @@ function formatShipmentCarrierForDisplay(shipment?: ShipmentExecution | null, fa
     || formatShopifyCarrierForShipment(shipment, fallbackCarrier);
 }
 
-const TRY_OTO_AUTO_REFRESH_DELAYS_MS = [30_000, 90_000, 180_000] as const;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -1369,44 +1316,6 @@ const SHIPMENT_CUSTOMER_FIELD_LABELS: Record<ShipmentCustomerField, string> = {
   address: 'Address',
 };
 
-const NAVLUNGO_UPDATE_RECIPIENT_FIELDS = [
-  'name',
-  'phone',
-  'email',
-  'address',
-  'city',
-  'district',
-  'postcode',
-  'country',
-] as const;
-
-type NavlungoUpdateRecipientField = typeof NAVLUNGO_UPDATE_RECIPIENT_FIELDS[number];
-type NavlungoUpdateFormState = Partial<Record<NavlungoUpdateRecipientField | 'postNote' | 'barcodeFormat', string>>;
-
-function readNavlungoUpdateFormState(summary?: ShipmentExecution['providerResponseSummary'] | null): NavlungoUpdateFormState {
-  const recipientOverrides = isRecord(summary?.navlungoUpdateRecipientOverrides)
-    ? summary.navlungoUpdateRecipientOverrides
-    : {};
-
-  const state: NavlungoUpdateFormState = {};
-  for (const field of NAVLUNGO_UPDATE_RECIPIENT_FIELDS) {
-    const value = recipientOverrides[field];
-    if (typeof value === 'string' && value.trim()) {
-      state[field] = value;
-    }
-  }
-
-  if (summary?.navlungoUpdatePostNote?.trim()) {
-    state.postNote = summary.navlungoUpdatePostNote.trim();
-  }
-
-  if (summary?.navlungoUpdateBarcodeFormat?.trim()) {
-    state.barcodeFormat = summary.navlungoUpdateBarcodeFormat.trim();
-  }
-
-  return state;
-}
-
 function hasShipmentSuccessEvidence(value: unknown) {
   if (value === null || value === undefined) {
     return false;
@@ -1546,27 +1455,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const [kargonomiLookupDiagnostics, setKargonomiLookupDiagnostics] = useState<KargonomiLocationLookupDiagnostics | null>(null);
   const [kargonomiLookupError, setKargonomiLookupError] = useState<string | null>(null);
-  const [navlungoAuthDiagnostics, setNavlungoAuthDiagnostics] = useState<NavlungoAuthDiagnostics | null>(null);
-  const [navlungoAuthError, setNavlungoAuthError] = useState<string | null>(null);
-  const [navlungoCarrierDiagnostics, setNavlungoCarrierDiagnostics] = useState<NavlungoCarrierDiagnostics | null>(null);
-  const [navlungoCarrierError, setNavlungoCarrierError] = useState<string | null>(null);
-  const [navlungoCreatePostProbeConfirmed, setNavlungoCreatePostProbeConfirmed] = useState(false);
-  const [navlungoCreatePostProbeDiagnostics, setNavlungoCreatePostProbeDiagnostics] = useState<NavlungoCreatePostProbeDiagnostics | null>(null);
-  const [navlungoCreatePostProbeError, setNavlungoCreatePostProbeError] = useState<string | null>(null);
-  const [navlungoCheckPostProbeDiagnostics, setNavlungoCheckPostProbeDiagnostics] = useState<NavlungoCheckPostProbeDiagnostics | null>(null);
-  const [navlungoCheckPostProbeError, setNavlungoCheckPostProbeError] = useState<string | null>(null);
-  const [navlungoBarcodeProbeDiagnostics, setNavlungoBarcodeProbeDiagnostics] = useState<NavlungoBarcodeProbeDiagnostics | null>(null);
-  const [navlungoBarcodeProbeError, setNavlungoBarcodeProbeError] = useState<string | null>(null);
-  const [useFullNavlungoSenderForRetry, setUseFullNavlungoSenderForRetry] = useState(false);
-  const [navlungoUpdateConfirmed, setNavlungoUpdateConfirmed] = useState(false);
-  const [navlungoUpdateForm, setNavlungoUpdateForm] = useState<NavlungoUpdateFormState>({});
-  const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
   const settlementPreviewRef = useRef<HTMLElement | null>(null);
-  const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
-  const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
-  const tryOtoAutoRefreshInFlightRef = useRef(false);
-  const refreshShipmentStatusMutationRef = useRef<((shipmentExecutionId: string) => Promise<ShipmentExecution>) | null>(null);
-  const refetchOrderRef = useRef<(() => unknown) | null>(null);
   function handleOpenShipmentLabel(labelValue: string) {
     setAutomaticLabelError(null);
     const result = openShipmentLabel(labelValue);
@@ -1715,18 +1604,10 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     withOrderCacheInvalidation(async (payload: {
       shipmentExecutionId: string;
       customerOverrides?: ShipmentCustomerOverrides;
-      useFullSenderDetailsForThisRetry?: boolean;
     }) =>
       retryFailedShipmentExecution(payload.shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
         customerOverrides: payload.customerOverrides,
-        useFullSenderDetailsForThisRetry: payload.useFullSenderDetailsForThisRetry,
-      })),
-  );
-  const { mutateAsync: refreshShipmentStatusMutation, isPending: isRefreshingShipmentStatus } = useMutationAction(
-    withOrderCacheInvalidation(async (shipmentExecutionId: string) =>
-      refreshShipmentExecutionStatus(shipmentExecutionId, {
-        vendorId: currentVendor.vendorId,
       })),
   );
   const { mutateAsync: refreshShipmentProviderDataMutation, isPending: isRefreshingShipmentProviderData } = useMutationAction(
@@ -1734,50 +1615,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       refreshShipmentProviderData(shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
       })),
-  );
-  const { mutateAsync: cancelShipmentMutation, isPending: isCancellingShipment } = useMutationAction(
-    withOrderCacheInvalidation(async (shipmentExecutionId: string) =>
-      cancelShipmentExecution(shipmentExecutionId, {
-        vendorId: currentVendor.vendorId,
-      })),
-  );
-  const { mutateAsync: updateNavlungoShipmentMutation, isPending: isUpdatingNavlungoShipment } = useMutationAction(
-    withOrderCacheInvalidation(async (payload: {
-      shipmentExecutionId: string;
-      recipient: Partial<Record<ShipmentCustomerField, string>>;
-      postNote?: string | null;
-      barcodeFormat?: string | null;
-    }) =>
-      updateNavlungoShipmentExecution(
-        payload.shipmentExecutionId,
-        {
-          recipient: payload.recipient,
-          postNote: payload.postNote,
-          barcodeFormat: payload.barcodeFormat,
-        },
-        {
-          vendorId: currentVendor.vendorId,
-        },
-      )),
-  );
-  const { mutateAsync: createReturnShipmentLabelMutation, isPending: isCreatingReturnShipmentLabel } = useMutationAction(
-    withOrderCacheInvalidation(async (payload: { shipmentExecutionId: string; dryRun?: boolean }) =>
-      createReturnShipmentLabel(payload.shipmentExecutionId, {
-        vendorId: currentVendor.vendorId,
-        dryRun: payload.dryRun === true,
-      })),
-  );
-  const { mutateAsync: probeShopifyReturnLabelUploadMutation, isPending: isProbingShopifyReturnLabelUpload } = useMutationAction(
-    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeShopifyReturnLabelUpload(shipmentExecutionId)),
-  );
-  const { mutateAsync: probeTryOtoReturnDetailsMutation, isPending: isProbingTryOtoReturnDetails } = useMutationAction(
-    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeTryOtoReturnDetails(shipmentExecutionId)),
-  );
-  const { mutateAsync: probeTryOtoReturnLinkMutation, isPending: isProbingTryOtoReturnLink } = useMutationAction(
-    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeTryOtoReturnLink(shipmentExecutionId)),
-  );
-  const { mutateAsync: probeTryOtoReturnAwbPrintMutation, isPending: isProbingTryOtoReturnAwbPrint } = useMutationAction(
-    withOrderCacheInvalidation(async (shipmentExecutionId: string) => probeTryOtoReturnAwbPrint(shipmentExecutionId)),
   );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     withOrderCacheInvalidation(async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
@@ -1798,70 +1635,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       },
       onError: (error) => {
         setKargonomiLookupError(error instanceof Error ? error.message : 'Kargonomi lookup diagnostic could not be run.');
-      },
-    },
-  );
-  const { mutateAsync: runNavlungoAuthDiagnosticsMutation, isPending: isRunningNavlungoAuthDiagnostics } = useMutationAction(
-    async () => runtimeServices.diagnostics.navlungoAuth(),
-    {
-      onSuccess: (result) => {
-        setNavlungoAuthDiagnostics(result);
-        setNavlungoAuthError(null);
-      },
-      onError: (error) => {
-        setNavlungoAuthError(error instanceof Error ? error.message : 'Navlungo auth diagnostic could not be run.');
-      },
-    },
-  );
-  const { mutateAsync: runNavlungoCarrierDiagnosticsMutation, isPending: isRunningNavlungoCarrierDiagnostics } = useMutationAction(
-    async () => runtimeServices.diagnostics.navlungoCarriers(),
-    {
-      onSuccess: (result) => {
-        setNavlungoCarrierDiagnostics(result);
-        setNavlungoCarrierError(null);
-      },
-      onError: (error) => {
-        setNavlungoCarrierError(error instanceof Error ? error.message : 'Navlungo carrier diagnostic could not be run.');
-      },
-    },
-  );
-  const { mutateAsync: runNavlungoCreatePostProbeMutation, isPending: isRunningNavlungoCreatePostProbe } = useMutationAction(
-    async () => runtimeServices.diagnostics.navlungoCreatePostProbe({ confirm: 'YES' }),
-    {
-      onSuccess: (result) => {
-        setNavlungoCreatePostProbeDiagnostics(result);
-        setNavlungoCreatePostProbeError(null);
-        setNavlungoCheckPostProbeDiagnostics(null);
-        setNavlungoCheckPostProbeError(null);
-        setNavlungoBarcodeProbeDiagnostics(null);
-        setNavlungoBarcodeProbeError(null);
-      },
-      onError: (error) => {
-        setNavlungoCreatePostProbeError(error instanceof Error ? error.message : 'Navlungo Create Post probe could not be run.');
-      },
-    },
-  );
-  const { mutateAsync: runNavlungoCheckPostProbeMutation, isPending: isRunningNavlungoCheckPostProbe } = useMutationAction(
-    async (postNumber: string) => runtimeServices.diagnostics.navlungoCheckPostProbe({ postNumber }),
-    {
-      onSuccess: (result) => {
-        setNavlungoCheckPostProbeDiagnostics(result);
-        setNavlungoCheckPostProbeError(null);
-      },
-      onError: (error) => {
-        setNavlungoCheckPostProbeError(error instanceof Error ? error.message : 'Navlungo Check Post probe could not be run.');
-      },
-    },
-  );
-  const { mutateAsync: runNavlungoBarcodeProbeMutation, isPending: isRunningNavlungoBarcodeProbe } = useMutationAction(
-    async (postNumber: string) => runtimeServices.diagnostics.navlungoBarcodeProbe({ postNumber }),
-    {
-      onSuccess: (result) => {
-        setNavlungoBarcodeProbeDiagnostics(result);
-        setNavlungoBarcodeProbeError(null);
-      },
-      onError: (error) => {
-        setNavlungoBarcodeProbeError(error instanceof Error ? error.message : 'Navlungo Barcode probe could not be run.');
       },
     },
   );
@@ -1903,11 +1676,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   const visibleShipmentExecution = shipmentActionState?.shipment ?? shipmentExecution ?? null;
   const hasShipmentExecution = Boolean(visibleShipmentExecution);
   const shipmentProviderSummary = visibleShipmentExecution?.providerResponseSummary;
-
-  useEffect(() => {
-    setNavlungoUpdateForm(readNavlungoUpdateFormState(shipmentProviderSummary));
-    setNavlungoUpdateConfirmed(false);
-  }, [visibleShipmentExecution?.id]);
 
   const visibleShipmentStatus = (visibleShipmentExecution?.shipmentStatus ?? '').trim().toLowerCase();
   const failedLikeShipmentExecution =
@@ -1960,8 +1728,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     shipmentProviderSummary,
   );
   const canRecoverFailedShipment = Boolean(visibleShipmentExecution) && failedShipmentRetryBlockedReason === null;
-  const canUseFullNavlungoSenderRetry =
-    isAdmin && canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
   const shouldShowFailedShipmentRetryDiagnostics =
     (isAdmin || canUseFulfillmentActions) &&
     Boolean(visibleShipmentExecution) &&
@@ -1971,34 +1737,10 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length));
   const shouldShowRecoveryShipmentFieldCompletionForm =
     missingShipmentCustomerFields.length > 0 && canRecoverFailedShipment && shipmentActionState?.tone !== 'error';
-  const canRefreshTryOtoShipmentStatus =
-    (isAdmin || canUseFulfillmentActions) &&
-    visibleShipmentExecution?.provider === 'try_oto' &&
-    Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.shipmentStatus === 'created') &&
-    (!getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution) || !visibleShipmentExecution.labelUrl);
-  const canSyncNavlungoShipmentStatus =
-    (isAdmin || canUseFulfillmentActions) &&
-    visibleShipmentExecution?.provider === 'navlungo' &&
-    Boolean(visibleShipmentExecution.providerShipmentId);
   const canRefreshKargonomiProviderData =
     isAdmin &&
     visibleShipmentExecution?.provider === 'kargonomi' &&
     Boolean(visibleShipmentExecution.providerShipmentId);
-  const canCancelNavlungoShipment =
-    (isAdmin || canUseFulfillmentActions) &&
-    visibleShipmentExecution?.provider === 'navlungo' &&
-    Boolean(visibleShipmentExecution.providerShipmentId) &&
-    !['cancelled', 'delivered'].includes(visibleShipmentStatus);
-  const canUpdateNavlungoShipment =
-    isAdmin &&
-    visibleShipmentExecution?.provider === 'navlungo' &&
-    Boolean(visibleShipmentExecution.providerShipmentId) &&
-    !['cancelled', 'delivered'].includes(visibleShipmentStatus);
-  const canAutoRefreshTryOtoShipmentStatus =
-    canRefreshTryOtoShipmentStatus &&
-    Boolean(visibleShipmentExecution?.id) &&
-    Boolean(visibleShipmentExecution?.providerShipmentId) &&
-    ['created', 'pending'].includes(visibleShipmentStatus);
   const shipmentShopifyTrackingNumber = getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution);
   const shipmentShopifyTrackingUrl = getShipmentTrackingUrl(order ?? {}, visibleShipmentExecution);
   const shipmentShopifyCarrier = formatShopifyCarrierForShipment(visibleShipmentExecution, order?.carrier);
@@ -2032,8 +1774,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     visibleShipmentExecution?.provider === 'kargonomi' ? shipmentProviderSummary?.providerError?.trim() || null : null;
   const shouldShowVendorBadAddressInDetails =
     visibleShipmentExecution?.provider === 'navlungo' &&
-    shipmentProviderSummary?.navlungoGeoBadAddress === true &&
-    !canSyncNavlungoShipmentStatus;
+    shipmentProviderSummary?.navlungoGeoBadAddress === true;
   const shouldShowVendorAdditionalShipmentDetails = Boolean(
     meaningfulVendorShipmentBarcode ||
       hasDistinctNavlungoCarrierTracking ||
@@ -2051,51 +1792,12 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     Boolean(shipmentShopifyTrackingNumber) &&
     Boolean(shipmentShopifyCarrier) &&
     !order?.fulfilledAt;
-  const canCreateTryOtoReturnLabel =
-    (isAdmin || canUseFulfillmentActions) &&
-    visibleShipmentExecution?.provider === 'try_oto' &&
-    ['delivered'].includes(visibleShipmentStatus) &&
-    Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
-    !visibleShipmentExecution.returnShipment;
-  const canCreateNavlungoReturnPickup =
-    false;
   const hasShopifyReturnIdForLabelProbe = Boolean(order?.shopifyReturnSignal?.returnIdPresent);
   const hasReturnTrackingForLabelProbe = Boolean(
     visibleShipmentExecution?.returnShipment?.trackingNumber || visibleShipmentExecution?.returnShipment?.barcode,
   );
   const hasReturnLabelUrlForLabelProbe = Boolean(visibleShipmentExecution?.returnShipment?.labelUrl);
-  const canProbeShopifyReturnLabelUpload =
-    isAdmin &&
-    visibleShipmentExecution?.provider === 'try_oto' &&
-    hasShopifyReturnIdForLabelProbe &&
-    hasReturnTrackingForLabelProbe;
   const tryOtoReturnOrderId = visibleShipmentExecution?.returnShipment?.returnOrderId?.trim() ?? '';
-  const canProbeTryOtoReturnDetails =
-    isAdmin &&
-    visibleShipmentExecution?.provider === 'try_oto' &&
-    Boolean(tryOtoReturnOrderId);
-  const canProbeTryOtoReturnAwbPrint =
-    isAdmin &&
-    visibleShipmentExecution?.provider === 'try_oto' &&
-    Boolean(tryOtoReturnOrderId);
-  const tryOtoReturnProbeBlockedReason = visibleShipmentExecution?.returnShipment && !tryOtoReturnOrderId
-    ? visibleShipmentExecution.returnShipment.diagnostics?.returnSkippedReason === 'missing_delivery_option_id'
-      ? 'Return probes require returnOrderId. Return shipment was not created because deliveryOptionId is missing.'
-      : 'Return probes require returnOrderId.'
-    : null;
-
-  useEffect(() => {
-    setShipmentCustomerOverrides({});
-    setShipmentActionState(null);
-    setUseFullNavlungoSenderForRetry(false);
-    setNavlungoUpdateConfirmed(false);
-    setNavlungoReturnPickupLiveConfirmed(false);
-    tryOtoAutoRefreshAttemptsRef.current = {};
-    if (tryOtoAutoRefreshTimerRef.current !== null) {
-      window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
-      tryOtoAutoRefreshTimerRef.current = null;
-    }
-  }, [orderId]);
 
   function buildShipmentCustomerOverrides(fields: ShipmentCustomerField[], form?: HTMLFormElement | null) {
     const formData = form ? new FormData(form) : null;
@@ -2176,13 +1878,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       endpoint: `POST /shipments/${visibleShipmentExecution.id}/retry`,
     });
 
-    const useFullSenderDetailsForThisRetry =
-      visibleShipmentExecution.provider === 'navlungo' && useFullNavlungoSenderForRetry;
-
     void retryFailedShipmentMutation({
       shipmentExecutionId: visibleShipmentExecution.id,
       customerOverrides,
-      ...(useFullSenderDetailsForThisRetry ? { useFullSenderDetailsForThisRetry: true } : {}),
     })
       .then((shipment) => {
         if (!isCurrentAction()) return;
@@ -2193,7 +1891,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/retry`,
         });
         setShipmentCustomerOverrides({});
-        setUseFullNavlungoSenderForRetry(false);
         showFeedback(resultState.message, resultState.tone);
         if (shipment.labelUrl) openCompletedShipmentLabel(shipment.labelUrl);
         void refetch();
@@ -2211,47 +1908,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
         showFeedback(errorMessage, 'error');
       })
       .finally(() => { shipmentMutationInFlightRef.current = false; });
-  }
-
-  function handleRefreshShipmentStatus() {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Refreshing shipment status...',
-      endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
-    });
-
-    void refreshShipmentStatusMutation(visibleShipmentExecution.id)
-      .then((shipment) => {
-        const hasNewShipmentEvidence = Boolean(shipment.trackingNumber || shipment.labelUrl);
-        const isNavlungoStatusSync = shipment.provider === 'navlungo';
-        const successMessage = isNavlungoStatusSync && isAdmin ? 'Navlungo status synced.' : 'Shipment status refreshed.';
-        setShipmentActionState({
-          tone: hasNewShipmentEvidence ? 'success' : 'info',
-          message: hasNewShipmentEvidence ? successMessage : 'Shipment was created. Tracking or label may still be processing.',
-          shipment,
-          endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
-        });
-        showFeedback(
-          hasNewShipmentEvidence ? successMessage : 'Shipment was created. Tracking or label may still be processing.',
-          hasNewShipmentEvidence ? 'success' : 'info',
-        );
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Shipment status could not be refreshed.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
   }
 
   function handleRefreshShipmentProviderData() {
@@ -2292,201 +1948,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh-provider-data`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
-  function handleCancelNavlungoShipment() {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      'Cancel this Navlungo shipment? Shopify fulfillment will not be deleted in this phase.',
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Cancelling Navlungo shipment...',
-      endpoint: `POST /shipments/${visibleShipmentExecution.id}/cancel`,
-    });
-
-    void cancelShipmentMutation(visibleShipmentExecution.id)
-      .then((shipment) => {
-        const cancelled = shipment.shipmentStatus === 'cancelled';
-        const needsReview = shipment.providerResponseSummary?.navlungoCancelAttempted === true && !shipment.providerResponseSummary.navlungoCancelSucceeded;
-        const message = cancelled
-          ? isAdmin
-            ? 'Navlungo shipment cancelled.'
-            : 'Shipment cancelled.'
-          : needsReview
-            ? isAdmin
-              ? 'Navlungo cancellation needs attention.'
-              : 'Shipment cancellation needs attention.'
-            : isAdmin
-              ? 'Navlungo cancellation request completed.'
-              : 'Shipment cancellation request completed.';
-        const tone = cancelled ? 'success' : needsReview ? 'error' : 'info';
-        setShipmentActionState({
-          tone,
-          message,
-          shipment,
-          endpoint: `POST /shipments/${visibleShipmentExecution.id}/cancel`,
-        });
-        showFeedback(message, tone);
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Navlungo shipment could not be cancelled.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/cancel`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
-  function handleUpdateNavlungoShipment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    if (!navlungoUpdateConfirmed) {
-      showFeedback('Confirm the Navlungo update before saving.', 'error');
-      return;
-    }
-
-    const recipient = Object.fromEntries(
-      NAVLUNGO_UPDATE_RECIPIENT_FIELDS
-        .map((field) => {
-          const value = navlungoUpdateForm[field];
-          return [field, typeof value === 'string' ? value.trim() : ''] as const;
-        })
-        .filter(([, value]) => value.length > 0),
-    ) as Partial<Record<ShipmentCustomerField, string>>;
-    const submittedFormState = {
-      ...navlungoUpdateForm,
-    };
-    const postNoteValue = navlungoUpdateForm.postNote ?? '';
-    const barcodeFormatValue = navlungoUpdateForm.barcodeFormat ?? '';
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Updating Navlungo shipment...',
-      endpoint: `POST /shipments/${visibleShipmentExecution.id}/update-navlungo`,
-    });
-
-    void updateNavlungoShipmentMutation({
-      shipmentExecutionId: visibleShipmentExecution.id,
-      recipient,
-      postNote: postNoteValue.trim(),
-      barcodeFormat: barcodeFormatValue.trim(),
-    })
-      .then((shipment) => {
-        const updatedSummary = shipment.providerResponseSummary as ShipmentExecution['providerResponseSummary'] | undefined;
-        const succeeded = updatedSummary?.navlungoUpdateSucceeded === true;
-        const providerMessage = updatedSummary?.navlungoUpdateProviderMessage ||
-          updatedSummary?.providerError ||
-          null;
-        const message = succeeded
-          ? 'Navlungo shipment updated'
-          : providerMessage || 'Navlungo shipment can only be updated before pickup.';
-        const tone = succeeded ? 'success' : 'error';
-        setShipmentActionState({
-          tone,
-          message,
-          shipment,
-          endpoint: `POST /shipments/${visibleShipmentExecution.id}/update-navlungo`,
-        });
-        setNavlungoUpdateConfirmed(false);
-        const nextFormState = readNavlungoUpdateFormState(updatedSummary);
-        setNavlungoUpdateForm(Object.keys(nextFormState).length > 0 ? nextFormState : submittedFormState);
-        showFeedback(message, tone);
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error
-          ? mutationError.message
-          : 'Navlungo shipment can only be updated before pickup.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/update-navlungo`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
-  function handleCreateReturnShipmentLabel(options: { dryRun?: boolean } = {}) {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-    const isNavlungo = visibleShipmentExecution.provider === 'navlungo';
-    const dryRun = options.dryRun === true;
-
-    setShipmentActionState({
-      tone: 'info',
-      message: dryRun
-        ? 'Previewing Navlungo return pickup...'
-        : isNavlungo
-          ? 'Creating live Navlungo return pickup...'
-          : 'Creating Try OTO return label...',
-      endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
-    });
-
-    void createReturnShipmentLabelMutation({ shipmentExecutionId: visibleShipmentExecution.id, dryRun })
-      .then((shipment) => {
-        if (dryRun) {
-          setShipmentActionState({
-            tone: 'info',
-            message: 'Navlungo return pickup preview generated. No provider call was made.',
-            shipment,
-            endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
-          });
-          showFeedback('Navlungo return pickup preview generated.', 'info');
-          return;
-        }
-        const hasReturnLabel = Boolean(shipment.returnShipment?.labelUrl);
-        const returnFinalized = Boolean(shipment.returnShipment?.finalized || shipment.returnShipment?.labelRetrievable);
-        const providerLabel = isNavlungo ? 'Navlungo return pickup' : 'Try OTO return shipment';
-        setShipmentActionState({
-          tone: hasReturnLabel ? 'success' : 'info',
-          message: hasReturnLabel
-            ? `${providerLabel} label created.`
-            : returnFinalized
-              ? `${providerLabel} created. Printable return label unavailable.`
-              : `${providerLabel} created. Return tracking code will appear here when available.`,
-          shipment,
-          endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
-        });
-        showFeedback(
-          hasReturnLabel
-            ? `${providerLabel} label created.`
-            : returnFinalized
-              ? `${providerLabel} created. Printable return label unavailable.`
-              : `${providerLabel} created. Return tracking code will appear here when available.`,
-          hasReturnLabel ? 'success' : 'info',
-        );
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Return shipment could not be created.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/create-return`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2566,168 +2027,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
     );
   }
 
-  function handleProbeShopifyReturnLabelUpload() {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Probing Shopify return label upload...',
-      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-shopify-return-label`,
-    });
-
-    void probeShopifyReturnLabelUploadMutation(visibleShipmentExecution.id)
-      .then((shipment) => {
-        const probe = shipment.returnShipment?.shopifyReturnLabelUploadProbe;
-        const accepted = Boolean(probe?.trackingAccepted || probe?.labelAccepted);
-        const message = probe?.labelAccepted
-          ? 'Shopify accepted the return label PDF URL.'
-          : probe?.trackingAccepted
-            ? 'Shopify return tracking attached.'
-          : probe?.errorMessage || 'Shopify return label upload probe completed with diagnostics.';
-        setShipmentActionState({
-          tone: accepted ? 'success' : 'info',
-          message,
-          shipment,
-          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-shopify-return-label`,
-        });
-        showFeedback(message, accepted ? 'success' : 'info');
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Shopify return label upload probe could not be run.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-shopify-return-label`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
-  function handleProbeTryOtoReturnDetails() {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Probing Try OTO return details...',
-      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-details`,
-    });
-
-    void probeTryOtoReturnDetailsMutation(visibleShipmentExecution.id)
-      .then((shipment) => {
-        const probe = shipment.returnShipment?.detailsProbe;
-        const foundLabel = Boolean(shipment.returnShipment?.labelUrl || probe?.labelUrlPresent);
-        const message = foundLabel
-          ? 'Try OTO return label found in return details.'
-          : probe?.errorMessage || 'Return label is not available from getReturnDetails yet.';
-        setShipmentActionState({
-          tone: foundLabel ? 'success' : 'info',
-          message,
-          shipment,
-          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-details`,
-        });
-        showFeedback(message, foundLabel ? 'success' : 'info');
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return details probe could not be run.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-details`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
-  function handleProbeTryOtoReturnLink() {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Probing Try OTO return link...',
-      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-link`,
-    });
-
-    void probeTryOtoReturnLinkMutation(visibleShipmentExecution.id)
-      .then((shipment) => {
-        const probe = shipment.returnShipment?.linkProbe;
-        const foundLabel = Boolean(shipment.returnShipment?.labelUrl || probe?.labelUrlPresent);
-        const message = foundLabel
-          ? 'Try OTO return label found in return link response.'
-          : probe?.errorMessage || 'Return label is not available from getReturnLink yet.';
-        setShipmentActionState({
-          tone: foundLabel ? 'success' : 'info',
-          message,
-          shipment,
-          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-link`,
-        });
-        showFeedback(message, foundLabel ? 'success' : 'info');
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return link probe could not be run.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-link`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
-  function handleProbeTryOtoReturnAwbPrint() {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Probing Try OTO return AWB print...',
-      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-awb-print`,
-    });
-
-    void probeTryOtoReturnAwbPrintMutation(visibleShipmentExecution.id)
-      .then((shipment) => {
-        const probe = shipment.returnShipment?.awbPrintProbe;
-        const foundLabel = Boolean(shipment.returnShipment?.labelUrl || probe?.labelUrlPresent);
-        const message = foundLabel
-          ? 'Try OTO return label found in AWB print response.'
-          : probe?.errorMessage || 'Return AWB print did not return a label URL yet.';
-        setShipmentActionState({
-          tone: foundLabel ? 'success' : 'info',
-          message,
-          shipment,
-          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-awb-print`,
-        });
-        showFeedback(message, foundLabel ? 'success' : 'info');
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return AWB print probe could not be run.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-awb-print`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
   function handleSyncShipmentTrackingToShopify() {
     if (!order || !shipmentShopifyTrackingNumber || !shipmentShopifyCarrier) {
       showFeedback('Shipment tracking and carrier are required before syncing to Shopify.', 'error');
@@ -2751,11 +2050,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
   }
 
   useEffect(() => {
-    refreshShipmentStatusMutationRef.current = refreshShipmentStatusMutation;
-    refetchOrderRef.current = refetch;
-  }, [refreshShipmentStatusMutation, refetch]);
-
-  useEffect(() => {
     if (location.hash !== '#settlement-preview' || !order) {
       return;
     }
@@ -2770,69 +2064,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       settlementPreview.focus({ preventScroll: true });
     });
   }, [location.hash, order]);
-
-  useEffect(() => {
-    if (tryOtoAutoRefreshTimerRef.current !== null) {
-      window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
-      tryOtoAutoRefreshTimerRef.current = null;
-    }
-
-    if (!canAutoRefreshTryOtoShipmentStatus || !visibleShipmentExecution?.id) {
-      return undefined;
-    }
-
-    const shipmentExecutionId = visibleShipmentExecution.id;
-    const attempt = tryOtoAutoRefreshAttemptsRef.current[shipmentExecutionId] ?? 0;
-    if (attempt >= TRY_OTO_AUTO_REFRESH_DELAYS_MS.length) {
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    const scheduleAttempt = (nextAttempt: number) => {
-      tryOtoAutoRefreshTimerRef.current = window.setTimeout(() => {
-        if (cancelled || tryOtoAutoRefreshInFlightRef.current || !refreshShipmentStatusMutationRef.current) {
-          return;
-        }
-
-        tryOtoAutoRefreshAttemptsRef.current[shipmentExecutionId] = nextAttempt + 1;
-        tryOtoAutoRefreshInFlightRef.current = true;
-        void refreshShipmentStatusMutationRef.current(shipmentExecutionId)
-          .then((shipment) => {
-            void refetchOrderRef.current?.();
-            const hasTrackingAndLabel = Boolean(shipment.trackingNumber && shipment.labelUrl);
-            const followingAttempt = nextAttempt + 1;
-            if (!cancelled && !hasTrackingAndLabel && followingAttempt < TRY_OTO_AUTO_REFRESH_DELAYS_MS.length) {
-              scheduleAttempt(followingAttempt);
-            }
-          })
-          .catch(() => {
-            // Manual refresh remains available; avoid noisy background errors.
-          })
-          .finally(() => {
-            tryOtoAutoRefreshInFlightRef.current = false;
-          });
-      }, TRY_OTO_AUTO_REFRESH_DELAYS_MS[nextAttempt]);
-    };
-
-    scheduleAttempt(attempt);
-
-    return () => {
-      cancelled = true;
-      if (tryOtoAutoRefreshTimerRef.current !== null) {
-        window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
-        tryOtoAutoRefreshTimerRef.current = null;
-      }
-    };
-  }, [
-    canAutoRefreshTryOtoShipmentStatus,
-    visibleShipmentExecution?.id,
-    visibleShipmentExecution?.providerShipmentId,
-    visibleShipmentExecution?.trackingNumber,
-    visibleShipmentExecution?.labelUrl,
-    order?.trackingNumber,
-    visibleShipmentStatus,
-  ]);
 
   function renderShipmentFieldCompletionForm() {
     if (missingShipmentCustomerFields.length === 0) {
@@ -2888,112 +2119,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                 : 'Create shipment with completed fields'}
         </button>
       </form>
-    );
-  }
-
-  function renderNavlungoUpdateForm() {
-    if (!canUpdateNavlungoShipment || !visibleShipmentExecution) {
-      return null;
-    }
-
-    return (
-      <details className="shipment-recovery-actions" aria-label="Navlungo shipment update">
-        <summary>
-          <strong>Update Navlungo shipment</strong>
-          <span>Forward shipment only. Shopify fulfillment update sync is not implemented in this phase.</span>
-        </summary>
-        <form className="shipment-field-completion-form" onSubmit={handleUpdateNavlungoShipment}>
-          <div>
-            <span>Recipient update</span>
-            <p>Leave fields empty to keep current shipment values.</p>
-          </div>
-          <div className="shipment-update-section">
-            <span className="shipment-update-section-label">Recipient info</span>
-            <div className="shipment-field-completion-grid">
-              {(['name', 'phone', 'email', 'address', 'city', 'district', 'postcode'] as NavlungoUpdateRecipientField[]).map((field) => (
-                <label className="field" key={`navlungo-${field}`}>
-                  <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]}{field === 'email' || field === 'postcode' ? '' : ' *'}</span>
-                  <input
-                    name={`navlungo-${field}`}
-                    value={navlungoUpdateForm[field] ?? ''}
-                    onChange={(event) =>
-                      setNavlungoUpdateForm((current) => ({
-                        ...current,
-                        [field]: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-              ))}
-              <label className="field">
-                <span>Country *</span>
-                <input
-                  name="navlungo-country"
-                  placeholder="tr"
-                  value={navlungoUpdateForm.country ?? ''}
-                  onChange={(event) =>
-                    setNavlungoUpdateForm((current) => ({
-                      ...current,
-                      country: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </div>
-          </div>
-          <div className="shipment-update-section">
-            <span className="shipment-update-section-label">Shipment options</span>
-            <div className="shipment-field-completion-grid">
-              <label className="field">
-                <span>Post note</span>
-                <input
-                  name="navlungo-post-note"
-                  value={navlungoUpdateForm.postNote ?? ''}
-                  onChange={(event) =>
-                    setNavlungoUpdateForm((current) => ({
-                      ...current,
-                      postNote: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Barcode format</span>
-                <input
-                  name="navlungo-barcode-format"
-                  placeholder="pdf-A6"
-                  value={navlungoUpdateForm.barcodeFormat ?? ''}
-                  onChange={(event) =>
-                    setNavlungoUpdateForm((current) => ({
-                      ...current,
-                      barcodeFormat: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </div>
-          </div>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={navlungoUpdateConfirmed}
-              onChange={(event) => setNavlungoUpdateConfirmed(event.target.checked)}
-              disabled={isUpdatingNavlungoShipment}
-            />
-            <span>Update only the Navlungo shipment</span>
-          </label>
-          <p className="muted helper-text">Shopify fulfillment/tracking will not change in this phase.</p>
-          <div className="order-inline-actions">
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={isUpdatingNavlungoShipment || !navlungoUpdateConfirmed}
-            >
-              {isUpdatingNavlungoShipment ? 'Updating...' : 'Update Navlungo shipment'}
-            </button>
-          </div>
-        </form>
-      </details>
     );
   }
 
@@ -3195,10 +2320,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
       Boolean(summary.providerErrorCode) ||
       Boolean(summary.failedFieldNames?.length) ||
       Boolean(summary.validationErrorMessages?.length);
-    const requestDiffRows = buildNavlungoRequestDiff(
-      navlungoCreatePostProbeDiagnostics?.requestSummary,
-      summary.navlungoRequestSummary,
-    );
     const successfulRequestDiffRows = buildNavlungoRequestDiff(
       summary.lastSuccessfulNavlungoRequestSummary,
       summary.navlungoRequestSummary,
@@ -3656,34 +2777,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
             </div>
           </details>
         ) : null}
-        {requestDiffRows.length ? (
-          <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo probe retry request diff">
-            <summary className="provider-response-heading">
-              <strong>Probe vs real request diff</strong>
-              <span>Sanitized shape comparison</span>
-            </summary>
-            <div className="summary-row">
-              <span>Response summary</span>
-              <strong>
-                probe HTTP {navlungoCreatePostProbeDiagnostics?.createPostHttpStatus ?? '—'} · real HTTP{' '}
-                {summary.realPathCreatePostHttpStatus ?? summary.providerCallHttpStatus ?? summary.httpStatus ?? '—'} · tracking ID{' '}
-                {summary.providerTrackingId || '—'}
-              </strong>
-            </div>
-            <div className="summary-row">
-              <span>Real provider message</span>
-              <strong>{summary.providerError || '—'}</strong>
-            </div>
-            {requestDiffRows.map((row) => (
-              <div className="summary-row" key={row.label}>
-                <span>{row.label}</span>
-                <strong>
-                  {row.same ? 'same' : 'different'} · probe: {row.probe} · real: {row.real}
-                </strong>
-              </div>
-            ))}
-          </details>
-        ) : null}
+
         {summary.lastSuccessfulNavlungoRequestSummary || summary.navlungoRequestSummary ? (
           <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo successful failing request diff">
             <summary className="provider-response-heading">
@@ -5164,18 +4258,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
             <span>Webhook ingest enabled</span>
             <strong>{diagnostics.webhookIngestEnabled ? 'yes' : 'no'}</strong>
           </div>
-          {diagnostics.provider === 'try_oto' ? (
-            <>
-              <div className="summary-row">
-                <span>Try OTO pickup location</span>
-                <strong>{values.tryOtoPickupLocationCode || '—'}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Try OTO origin city configured</span>
-                <strong>{values.tryOtoOriginCity ? 'yes' : 'no'}</strong>
-              </div>
-            </>
-          ) : diagnostics.provider === 'kargonomi' ? (
+          {diagnostics.provider === 'kargonomi' ? (
             <>
               <div className="summary-row">
                 <span>Kargonomi warehouse configured</span>
@@ -6072,39 +5155,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
 	                                {isAdmin ? (
 	                                  <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                                     <strong>Return label discovery</strong>
-                                    <span>Probe Try OTO getReturnDetails for label, AWB, PDF, tracking, and status metadata.</span>
-                                    <div className="order-inline-actions">
-                                      <button
-                                        type="button"
-                                        className="button button-secondary"
-                                        onClick={handleProbeTryOtoReturnDetails}
-                                        disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
-                                      >
-                                        {isProbingTryOtoReturnDetails ? 'Probing...' : 'Probe Try OTO return details'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="button button-secondary"
-                                        onClick={handleProbeTryOtoReturnLink}
-                                        disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnLink}
-                                      >
-                                        {isProbingTryOtoReturnLink ? 'Probing...' : 'Probe Try OTO return link'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="button button-secondary"
-                                        onClick={handleProbeTryOtoReturnAwbPrint}
-                                        disabled={!canProbeTryOtoReturnAwbPrint || isProbingTryOtoReturnAwbPrint}
-                                      >
-                                        {isProbingTryOtoReturnAwbPrint ? 'Probing...' : 'Probe Try OTO return AWB print'}
-                                      </button>
-                                    </div>
-                                    {tryOtoReturnProbeBlockedReason ? (
-                                      <span className="muted">{tryOtoReturnProbeBlockedReason}</span>
-                                    ) : null}
-                                    {!canProbeTryOtoReturnAwbPrint && !tryOtoReturnProbeBlockedReason ? (
-                                      <span className="muted">Return AWB print probe requires Try OTO return order id.</span>
-                                    ) : null}
+                                    <span>Stored return label diagnostics.</span>
+
+
                                     {visibleShipmentExecution.returnShipment.detailsProbe ? (
                                       <span>
                                         Last probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.detailsProbe.attemptedAt ?? undefined)}
@@ -6341,19 +5394,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                                       <strong>Shopify return label upload probe</strong>
                                       <span>Shopify sync diagnostics</span>
                                     </summary>
-                                    <button
-                                      type="button"
-                                      className="secondary-action-button"
-                                      onClick={handleProbeShopifyReturnLabelUpload}
-                                      disabled={!canProbeShopifyReturnLabelUpload || isProbingShopifyReturnLabelUpload}
-                                    >
-                                      {isProbingShopifyReturnLabelUpload ? 'Probing Shopify...' : 'Probe Shopify return label upload'}
-                                    </button>
-                                    {!canProbeShopifyReturnLabelUpload ? (
-                                      <span className="muted">
-                                        Requires Shopify return id and Try OTO return tracking or barcode. PDF label upload is skipped until the provider returns a label URL.
-                                      </span>
-                                    ) : null}
+
                                     <div className="summary-row">
                                       <span>Shopify return id</span>
                                       <strong>{hasShopifyReturnIdForLabelProbe ? 'present' : 'missing'}</strong>
@@ -6461,17 +5502,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                             ) : (
                               <>
                                 <span>Create a sandbox Try OTO reverse shipment label for this delivered shipment.</span>
-                                <button
-                                  type="button"
-                                  className="secondary-action-button"
-                                  onClick={() => handleCreateReturnShipmentLabel()}
-                                  disabled={!canCreateTryOtoReturnLabel || isCreatingReturnShipmentLabel}
-                                >
-                                  {isCreatingReturnShipmentLabel ? 'Creating return label...' : 'Create return label'}
-                                </button>
-                                {!canCreateTryOtoReturnLabel ? (
-                                  <span className="muted">Available after a Try OTO shipment is delivered and has a shipment reference.</span>
-                                ) : null}
+
                               </>
                             )}
                           </div>
@@ -6536,99 +5567,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                             ) : null}
                           </div>
                         ) : null}
-                        {renderNavlungoUpdateForm()}
-                        {canCreateNavlungoReturnPickup ? (
-                          <div className="shipment-recovery-actions" aria-label="Navlungo return pickup creation">
-                            <strong>Navlungo return pickup</strong>
-                            <span>Preview the return pickup payload before creating a live Navlungo return shipment.</span>
-                            <div className="order-inline-actions">
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                disabled={isCreatingReturnShipmentLabel}
-                                onClick={() => handleCreateReturnShipmentLabel({ dryRun: true })}
-                              >
-                                {isCreatingReturnShipmentLabel ? 'Previewing...' : 'Preview Navlungo return pickup'}
-                              </button>
-                            </div>
-                            {renderNavlungoReturnPickupPreviewSummary()}
-                            <label className="checkbox-row">
-                              <input
-                                type="checkbox"
-                                checked={navlungoReturnPickupLiveConfirmed}
-                                onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
-                              />
-                              <span>I understand this creates a live Navlungo return pickup.</span>
-                            </label>
-                            <button
-                              type="button"
-                              className="button button-primary"
-                              disabled={isCreatingReturnShipmentLabel || !navlungoReturnPickupLiveConfirmed}
-                              onClick={() => handleCreateReturnShipmentLabel()}
-                            >
-                              {isCreatingReturnShipmentLabel ? 'Creating...' : 'Create live Navlungo return pickup'}
-                            </button>
-                          </div>
-                        ) : null}
-                        {canCancelNavlungoShipment ? (
-                          <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment cancellation' : 'Shipment cancellation'}>
-                            <strong>{isAdmin ? 'Navlungo cancellation' : 'Shipment cancellation'}</strong>
-                            <span>
-                              {isAdmin
-                                ? 'Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.'
-                                : 'Cancel this shipment before delivery.'}
-                            </span>
-                            <div className="order-inline-actions">
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                disabled={isCancellingShipment}
-                                onClick={handleCancelNavlungoShipment}
-                              >
-                                {isCancellingShipment ? 'Cancelling...' : isAdmin ? 'Cancel Navlungo shipment' : 'Cancel shipment'}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
+
                         <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
-                        {canSyncNavlungoShipmentStatus ? (
-                          <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment status sync' : 'Shipment status update'}>
-                            <strong>{isAdmin ? 'Navlungo status sync' : 'Shipment status update'}</strong>
-                            {isAdmin ? (
-                              <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
-                            ) : null}
-                            {shipmentProviderSummary?.navlungoGeoBadAddress ? (
-                              <span className="warning-copy">Carrier reported address validation issue.</span>
-                            ) : null}
-                            <div className="order-inline-actions">
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                disabled={isRefreshingShipmentStatus}
-                                onClick={handleRefreshShipmentStatus}
-                              >
-                                {isRefreshingShipmentStatus ? (isAdmin ? 'Syncing...' : 'Refreshing...') : isAdmin ? 'Sync Navlungo status' : 'Refresh shipment status'}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                        {canRefreshTryOtoShipmentStatus ? (
-                          <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
-                            <strong>Try OTO status refresh</strong>
-                            <span>Shipment was created. Tracking or label may still be processing.</span>
-                            <span>Status will refresh automatically while OTO finishes label generation.</span>
-                            <div className="order-inline-actions">
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                disabled={isRefreshingShipmentStatus}
-                                onClick={handleRefreshShipmentStatus}
-                              >
-                                {isRefreshingShipmentStatus ? 'Refreshing...' : 'Refresh shipment status'}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
+
                         {canRefreshKargonomiProviderData ? (
                           <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}>
                             <strong>{isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}</strong>
@@ -6778,17 +5719,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                               <div className="shipment-recovery-actions">
                                 <strong>Shipment recovery</strong>
                                 <span>Provider execution failed before a shipment id or tracking was created.</span>
-                                {canUseFullNavlungoSenderRetry ? (
-                                  <label className="checkbox-field">
-                                    <input
-                                      type="checkbox"
-                                      checked={useFullNavlungoSenderForRetry}
-                                      onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
-                                      disabled={isRetryingFailedShipment}
-                                    />
-                                    <span>Use full Navlungo sender details for this retry</span>
-                                  </label>
-                                ) : null}
+
                                 <div className="order-inline-actions">
                                   <button
                                     type="button"
@@ -6837,17 +5768,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                             </span>
                             {canRecoverFailedShipment ? (
                               <>
-                                {canUseFullNavlungoSenderRetry ? (
-                                  <label className="checkbox-field">
-                                    <input
-                                      type="checkbox"
-                                      checked={useFullNavlungoSenderForRetry}
-                                      onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
-                                      disabled={isRetryingFailedShipment}
-                                    />
-                                    <span>Use full Navlungo sender details for this retry</span>
-                                  </label>
-                                ) : null}
+
                               <div className="order-inline-actions">
                                 <button
                                   type="button"
@@ -7163,39 +6084,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
 	                        {isAdmin ? (
 	                          <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                             <strong>Return label discovery</strong>
-                            <span>Probe Try OTO getReturnDetails for label, AWB, PDF, tracking, and status metadata.</span>
-                            <div className="order-inline-actions">
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                onClick={handleProbeTryOtoReturnDetails}
-                                disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
-                              >
-                                {isProbingTryOtoReturnDetails ? 'Probing...' : 'Probe Try OTO return details'}
-                              </button>
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                onClick={handleProbeTryOtoReturnLink}
-                                disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnLink}
-                              >
-                                {isProbingTryOtoReturnLink ? 'Probing...' : 'Probe Try OTO return link'}
-                              </button>
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                onClick={handleProbeTryOtoReturnAwbPrint}
-                                disabled={!canProbeTryOtoReturnAwbPrint || isProbingTryOtoReturnAwbPrint}
-                              >
-                                {isProbingTryOtoReturnAwbPrint ? 'Probing...' : 'Probe Try OTO return AWB print'}
-                              </button>
-                            </div>
-                            {tryOtoReturnProbeBlockedReason ? (
-                              <span className="muted">{tryOtoReturnProbeBlockedReason}</span>
-                            ) : null}
-                            {!canProbeTryOtoReturnAwbPrint && !tryOtoReturnProbeBlockedReason ? (
-                              <span className="muted">Return AWB print probe requires Try OTO return order id.</span>
-                            ) : null}
+                            <span>Stored return label diagnostics.</span>
+
+
                             {visibleShipmentExecution.returnShipment.detailsProbe ? (
                               <span>
                                 Last probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.detailsProbe.attemptedAt ?? undefined)}
@@ -7412,19 +6303,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                           <strong>Shopify return label upload probe</strong>
                           <span>Shopify sync diagnostics</span>
                         </summary>
-                        <button
-                          type="button"
-                          className="secondary-action-button"
-                          onClick={handleProbeShopifyReturnLabelUpload}
-                          disabled={!canProbeShopifyReturnLabelUpload || isProbingShopifyReturnLabelUpload}
-                        >
-                          {isProbingShopifyReturnLabelUpload ? 'Probing Shopify...' : 'Probe Shopify return label upload'}
-                        </button>
-                        {!canProbeShopifyReturnLabelUpload ? (
-                          <span className="muted">
-                            Requires Shopify return id and Try OTO return tracking or barcode. PDF label upload is skipped until the provider returns a label URL.
-                          </span>
-                        ) : null}
+
                         <div className="summary-row">
                           <span>Shopify return id</span>
                           <strong>{hasShopifyReturnIdForLabelProbe ? 'present' : 'missing'}</strong>
@@ -7570,99 +6449,9 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                         ) : null}
                       </div>
                     ) : null}
-                    {renderNavlungoUpdateForm()}
-                    {canCreateNavlungoReturnPickup ? (
-                      <div className="shipment-recovery-actions" aria-label="Navlungo return pickup creation">
-                        <strong>Navlungo return pickup</strong>
-                        <span>Preview the return pickup payload before creating a live Navlungo return shipment.</span>
-                        <div className="order-inline-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={isCreatingReturnShipmentLabel}
-                            onClick={() => handleCreateReturnShipmentLabel({ dryRun: true })}
-                          >
-                            {isCreatingReturnShipmentLabel ? 'Previewing...' : 'Preview Navlungo return pickup'}
-                          </button>
-                        </div>
-                        {renderNavlungoReturnPickupPreviewSummary()}
-                        <label className="checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={navlungoReturnPickupLiveConfirmed}
-                            onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
-                          />
-                          <span>I understand this creates a live Navlungo return pickup.</span>
-                        </label>
-                        <button
-                          type="button"
-                          className="button button-primary"
-                          disabled={isCreatingReturnShipmentLabel || !navlungoReturnPickupLiveConfirmed}
-                          onClick={() => handleCreateReturnShipmentLabel()}
-                        >
-                          {isCreatingReturnShipmentLabel ? 'Creating...' : 'Create live Navlungo return pickup'}
-                        </button>
-                      </div>
-                    ) : null}
-                    {canCancelNavlungoShipment ? (
-                      <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment cancellation' : 'Shipment cancellation'}>
-                        <strong>{isAdmin ? 'Navlungo cancellation' : 'Shipment cancellation'}</strong>
-                        <span>
-                          {isAdmin
-                            ? 'Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.'
-                            : 'Cancel this shipment before delivery.'}
-                        </span>
-                        <div className="order-inline-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={isCancellingShipment}
-                            onClick={handleCancelNavlungoShipment}
-                          >
-                            {isCancellingShipment ? 'Cancelling...' : isAdmin ? 'Cancel Navlungo shipment' : 'Cancel shipment'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
+
                     <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
-                    {canSyncNavlungoShipmentStatus ? (
-                      <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment status sync' : 'Shipment status update'}>
-                        <strong>{isAdmin ? 'Navlungo status sync' : 'Shipment status update'}</strong>
-                        {isAdmin ? (
-                          <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
-                        ) : null}
-                        {shipmentProviderSummary?.navlungoGeoBadAddress ? (
-                          <span className="warning-copy">Carrier reported address validation issue.</span>
-                        ) : null}
-                        <div className="order-inline-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={isRefreshingShipmentStatus}
-                            onClick={handleRefreshShipmentStatus}
-                          >
-                            {isRefreshingShipmentStatus ? (isAdmin ? 'Syncing...' : 'Refreshing...') : isAdmin ? 'Sync Navlungo status' : 'Refresh shipment status'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                    {canRefreshTryOtoShipmentStatus ? (
-                      <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
-                        <strong>Try OTO status refresh</strong>
-                        <span>Shipment was created. Tracking or label may still be processing.</span>
-                        <span>Status will refresh automatically while OTO finishes label generation.</span>
-                        <div className="order-inline-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={isRefreshingShipmentStatus}
-                            onClick={handleRefreshShipmentStatus}
-                          >
-                            {isRefreshingShipmentStatus ? 'Refreshing...' : 'Refresh shipment status'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
+
                     {canRefreshKargonomiProviderData ? (
                       <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}>
                         <strong>{isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}</strong>
@@ -7852,17 +6641,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                           <div className="shipment-recovery-actions">
                             <strong>Shipment recovery</strong>
                             <span>Provider execution failed before a shipment id or tracking was created.</span>
-                            {canUseFullNavlungoSenderRetry ? (
-                              <label className="checkbox-field">
-                                <input
-                                  type="checkbox"
-                                  checked={useFullNavlungoSenderForRetry}
-                                  onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
-                                  disabled={isRetryingFailedShipment}
-                                />
-                                <span>Use full Navlungo sender details for this retry</span>
-                              </label>
-                            ) : null}
+
                             <div className="order-inline-actions">
                               <button
                                 type="button"
@@ -7911,17 +6690,7 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
                         </span>
                         {canRecoverFailedShipment ? (
                           <>
-                            {canUseFullNavlungoSenderRetry ? (
-                              <label className="checkbox-field">
-                                <input
-                                  type="checkbox"
-                                  checked={useFullNavlungoSenderForRetry}
-                                  onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
-                                  disabled={isRetryingFailedShipment}
-                                />
-                                <span>Use full Navlungo sender details for this retry</span>
-                              </label>
-                            ) : null}
+
                           <div className="order-inline-actions">
                             <button
                               type="button"
@@ -8504,7 +7273,6 @@ function OrderDetailContent({ appReadiness }: { appReadiness: AppReadinessState 
               <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
             ) : null}
           </div>
-
 
         </aside>
       </div>

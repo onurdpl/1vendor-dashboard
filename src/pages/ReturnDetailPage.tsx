@@ -10,14 +10,11 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import {
   getReturn,
   createKargonomiReturnShipment,
-  createNavlungoReturnPickup,
   getKargonomiReturnPreview,
   markReturnReceived,
   refreshKargonomiReturnProviderData,
   reviewReturn,
-  saveNavlungoReturnPickupAddressCompletion,
   syncKargonomiReturnToShopify,
-  syncNavlungoReturnStatus,
   type KargonomiReturnPreview,
   type ReturnDetail,
   type ReturnLineItem,
@@ -591,16 +588,6 @@ function buildFinanceHref(record: { id: string }) {
   return `/finance?ledgerId=${encodeURIComponent(record.id)}`;
 }
 
-const RETURN_PICKUP_COMPLETION_FIELDS = [
-  { field: 'sender.name', key: 'name', label: 'Customer name', required: true },
-  { field: 'sender.phone', key: 'phone', label: 'Phone', required: true },
-  { field: 'sender.address', key: 'address', label: 'Pickup address', required: true },
-  { field: 'sender.country', key: 'country', label: 'Country', required: true },
-  { field: 'sender.city', key: 'city', label: 'City', required: true },
-  { field: 'sender.district', key: 'district', label: 'District', required: true },
-  { field: 'sender.post_code', key: 'postcode', label: 'Post code', required: false },
-] as const;
-
 const RETURN_DETAIL_LOADING_TIMEOUT_MS = 8000;
 
 function normalizeReturnPickupMissingField(value: string) {
@@ -650,11 +637,6 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
   const { message, tone, showFeedback } = useActionFeedback();
   const [rejectReason, setRejectReason] = useState('');
   const [supportOpen, setSupportOpen] = useState(false);
-  const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
-  const [navlungoReturnPickupCarrierOverride, setNavlungoReturnPickupCarrierOverride] = useState<'current' | '9' | '10'>('current');
-  const [navlungoReturnPickupEndpointPathOverride, setNavlungoReturnPickupEndpointPathOverride] =
-    useState<'/post/create' | '/post/return'>('/post/return');
-  const [returnPickupCompletion, setReturnPickupCompletion] = useState<Record<string, string>>({});
   const [retainedReturnPickupMissingFields, setRetainedReturnPickupMissingFields] = useState<string[]>([]);
   const [kargonomiReturnPreview, setKargonomiReturnPreview] = useState<KargonomiReturnPreview | null>(null);
   const returnDetailQueryEnabled = authContextReady && Boolean(returnId);
@@ -773,93 +755,6 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
       },
     },
   );
-  const navlungoReturnPickupMutation = useMutationAction(
-    (input: {
-      dryRun?: boolean;
-      apiVersionOverride?: 'current' | 'v2' | 'v2.1';
-      endpointVersionOverride?: 'current' | 'v2' | 'v2.1';
-      carrierOverride?: 'current' | '9' | '10';
-      carrierIdOverride?: 'current' | '9' | '10';
-      endpointPathOverride?: '/post/create' | '/post/return';
-      diagnosticConfirm?: 'YES';
-    }) => {
-      if (!returnId) {
-        throw new Error('Return not found.');
-      }
-
-      return createNavlungoReturnPickup(returnId, input, { vendorId: currentVendor.vendorId });
-    },
-    {
-      onSuccess: async (data, variables) => {
-        queryClient.setQueryData(returnDetailQueryKey, data);
-        const nextMissingFields = collectReturnPickupMissingFields(data.returnProviderSnapshot ?? {});
-        setRetainedReturnPickupMissingFields(nextMissingFields);
-        showFeedback(
-          variables.dryRun
-            ? 'Navlungo return pickup preview generated. No provider call was made.'
-            : 'Navlungo return pickup created.',
-          variables.dryRun ? 'info' : 'success',
-        );
-        if (!variables.dryRun && data.returnProviderShipmentId) {
-          setRetainedReturnPickupMissingFields([]);
-          setNavlungoReturnPickupLiveConfirmed(false);
-          setNavlungoReturnPickupCarrierOverride('current');
-          setNavlungoReturnPickupEndpointPathOverride('/post/return');
-        }
-      },
-      onError: async (error) => {
-        await refetch();
-        showFeedback(error instanceof Error ? error.message : 'Navlungo return pickup could not be created.', 'error');
-      },
-    },
-  );
-  const returnPickupAddressMutation = useMutationAction(
-    () => {
-      if (!returnId) {
-        throw new Error('Return not found.');
-      }
-
-      return saveNavlungoReturnPickupAddressCompletion(
-        returnId,
-        {
-          customerOverrides: returnPickupCompletion,
-        },
-        { vendorId: currentVendor.vendorId },
-      );
-    },
-    {
-      onSuccess: async (data) => {
-        queryClient.setQueryData(returnDetailQueryKey, data);
-        const nextMissingFields = collectReturnPickupMissingFields(data.returnProviderSnapshot ?? {});
-        setRetainedReturnPickupMissingFields(nextMissingFields);
-        if (nextMissingFields.length === 0 || data.returnProviderShipmentId) {
-          setReturnPickupCompletion({});
-        }
-        showFeedback('Return pickup address saved.', 'success');
-      },
-      onError: (error) => {
-        showFeedback(error instanceof Error ? error.message : 'Return pickup address could not be saved.', 'error');
-      },
-    },
-  );
-  const navlungoReturnStatusSyncMutation = useMutationAction(
-    () => {
-      if (!returnId) {
-        throw new Error('Return not found.');
-      }
-
-      return syncNavlungoReturnStatus(returnId, { vendorId: currentVendor.vendorId });
-    },
-    {
-      onSuccess: async () => {
-        await refetch();
-        showFeedback('Navlungo return status synced.', 'success');
-      },
-      onError: (error) => {
-        showFeedback(error instanceof Error ? error.message : 'Navlungo return status could not be synced.', 'error');
-      },
-    },
-  );
   const kargonomiReturnPreviewMutation = useMutationAction(
     () => {
       if (!returnId) {
@@ -971,7 +866,6 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
 
   useEffect(() => {
     setRetainedReturnPickupMissingFields([]);
-    setReturnPickupCompletion({});
     setKargonomiReturnPreview(null);
     setLoadingTimedOut(false);
   }, [returnId]);
@@ -1222,10 +1116,6 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
   const navlungoReturnPickupMissingFields = returnRequest.returnProviderShipmentId
     ? []
     : Array.from(new Set([...currentReturnPickupMissingFields, ...retainedReturnPickupMissingFields]));
-  const returnPickupCompletionFields = RETURN_PICKUP_COMPLETION_FIELDS.filter(
-    (field) => navlungoReturnPickupMissingFields.includes(field.field) || (!field.required && navlungoReturnPickupMissingFields.length > 0),
-  );
-  const shouldRenderReturnPickupCompletion = isAdmin && returnPickupCompletionFields.length > 0 && !returnRequest.returnProviderShipmentId;
   const navlungoReturnAutoCreateAttempted = returnProviderSnapshot.navlungoReturnAutoCreateAttempted === true;
   const navlungoReturnAutoCreateSkippedReason =
     typeof returnProviderSnapshot.navlungoReturnAutoCreateSkippedReason === 'string'
@@ -1248,27 +1138,6 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
   const navlungoReturnEndpointPathTried = readSnapshotString(returnProviderSnapshot, 'navlungoReturnEndpointPathTried');
   const navlungoReturnResolvedProviderPath = readSnapshotString(returnProviderSnapshot, 'navlungoReturnResolvedProviderPath');
   const navlungoReturnResolvedProviderUrl = readSnapshotString(returnProviderSnapshot, 'navlungoReturnResolvedProviderUrl');
-  const returnPickupMissingSenderFields = navlungoReturnPickupMissingFields.some((field) => field.startsWith('sender.'));
-  const returnPickupEndpointIsValid = navlungoReturnPickupEndpointPathOverride === '/post/return';
-  const returnPickupRecipientAddressIdReady =
-    returnProviderSnapshot.recipientAddressIdValid === true ||
-    (returnProviderSnapshot.navlungoReturnRecipientAddressIdPresent === true &&
-      returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true);
-  const returnPickupReadyForLiveCreate =
-    !returnPickupMissingSenderFields &&
-    returnPickupRecipientAddressIdReady &&
-    returnPickupEndpointIsValid;
-  const returnPickupPreviewDisabled =
-    navlungoReturnPickupMutation.isPending ||
-    returnPickupMissingSenderFields ||
-    !returnPickupEndpointIsValid;
-  const returnPickupBlockedReason = returnPickupMissingSenderFields
-    ? 'Complete pickup address before preview or live create.'
-    : !returnPickupEndpointIsValid
-      ? 'Return pickup must use /post/return, not /post/create.'
-      : !returnPickupRecipientAddressIdReady
-        ? 'Preview return pickup after configuring a numeric return recipient addressId.'
-        : null;
   const navlungoReturnProviderMessage =
     readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderMessage') ??
     readSnapshotString(returnProviderSnapshot, 'providerMessage');
@@ -2065,14 +1934,7 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
                 ) : null}
                 {isAdmin && returnRequest.returnProvider === 'navlungo' && returnRequest.returnProviderShipmentId ? (
                   <div className="return-review-actions">
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      disabled={navlungoReturnStatusSyncMutation.isPending}
-                      onClick={() => void navlungoReturnStatusSyncMutation.mutateAsync(undefined)}
-                    >
-                      {navlungoReturnStatusSyncMutation.isPending ? 'Syncing...' : 'Sync Navlungo return status'}
-                    </button>
+
                   </div>
                 ) : null}
               </div>
@@ -2621,56 +2483,7 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
                 </div>
               ) : (
                 <>
-                  <p className="muted">Complete pickup address, preview the return payload, then create the live pickup.</p>
-                  {shouldRenderReturnPickupCompletion ? (
-                    <div className="return-pickup-completion-form" aria-label="Return pickup address completion">
-                      <strong>1. Complete pickup address</strong>
-                      <span>Only fill fields missing for this return pickup.</span>
-                      {returnPickupCompletionFields.map((field) => (
-                        <label key={field.field}>
-                          <span>{field.label}{field.required ? '' : ' (optional)'}</span>
-                          <input
-                            value={returnPickupCompletion[field.key] ?? ''}
-                            onChange={(event) =>
-                              setReturnPickupCompletion((current) => ({
-                                ...current,
-                                [field.key]: event.target.value,
-                              }))
-                            }
-                            placeholder={field.field}
-                          />
-                        </label>
-                      ))}
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        disabled={returnPickupAddressMutation.isPending}
-                        onClick={() => void returnPickupAddressMutation.mutateAsync(undefined)}
-                      >
-                        {returnPickupAddressMutation.isPending ? 'Saving...' : 'Save return pickup address'}
-                      </button>
-                    </div>
-                  ) : null}
-                  <div className="return-review-actions return-review-preview-actions">
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      disabled={returnPickupPreviewDisabled}
-                      onClick={() =>
-                        void navlungoReturnPickupMutation
-                          .mutateAsync({
-                            dryRun: true,
-                            endpointVersionOverride: 'v2.1',
-                            carrierIdOverride: navlungoReturnPickupCarrierOverride,
-                            endpointPathOverride: navlungoReturnPickupEndpointPathOverride,
-                          })
-                          .catch(() => undefined)
-                      }
-                    >
-                      {navlungoReturnPickupMutation.isPending ? 'Previewing...' : '2. Preview Navlungo return pickup'}
-                    </button>
-                  </div>
-                  {returnPickupBlockedReason ? <p className="muted">{returnPickupBlockedReason}</p> : null}
+
                   {navlungoReturnPickupPayloadSummary ? (
                     <div className="provider-response-summary" aria-label="Navlungo return pickup payload summary">
                       <div className="summary-row">
@@ -2784,67 +2597,7 @@ function ReturnDetailContent({ appReadiness }: { appReadiness: AppReadinessState
                       ) : null}
                     </div>
                   ) : null}
-                  <div className="return-review-live-create">
-                    <span>3. Live create</span>
-                    {isAdmin ? (
-                      <div className="return-review-compact-grid" aria-label="Navlungo return pickup diagnostics options">
-                        <div>
-                          <span>API version</span>
-                          <strong>v2.1</strong>
-                          <small>Navlungo return pickup uses v2.1 /post/return.</small>
-                        </div>
-                        <label>
-                          <span>Carrier</span>
-                          <select
-                            value={navlungoReturnPickupCarrierOverride}
-                            onChange={(event) =>
-                              setNavlungoReturnPickupCarrierOverride(event.target.value as 'current' | '9' | '10')
-                            }
-                          >
-                            <option value="current">Current carrier</option>
-                            <option value="9">9 - Surat Kargo</option>
-                            <option value="10">10 - HepsiJet</option>
-                          </select>
-                        </label>
-                        <div>
-                          <span>Endpoint path</span>
-                          <strong>/post/return</strong>
-                        </div>
-                      </div>
-                    ) : null}
-                    {returnPickupReadyForLiveCreate ? (
-                      <>
-                        <label className="checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={navlungoReturnPickupLiveConfirmed}
-                            onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
-                          />
-                          <span>I understand this may create a live Navlungo return pickup.</span>
-                        </label>
-                        <button
-                          type="button"
-                          className="button button-primary"
-                          disabled={navlungoReturnPickupMutation.isPending || !navlungoReturnPickupLiveConfirmed}
-                          onClick={() =>
-                            void navlungoReturnPickupMutation
-                              .mutateAsync({
-                                dryRun: false,
-                                endpointVersionOverride: 'v2.1',
-                                carrierIdOverride: navlungoReturnPickupCarrierOverride,
-                                endpointPathOverride: navlungoReturnPickupEndpointPathOverride,
-                                diagnosticConfirm: navlungoReturnPickupLiveConfirmed ? 'YES' : undefined,
-                              })
-                              .catch(() => undefined)
-                          }
-                        >
-                          {navlungoReturnPickupMutation.isPending ? 'Creating...' : 'Create live Navlungo return pickup'}
-                        </button>
-                      </>
-                    ) : (
-                      <p className="muted">{returnPickupBlockedReason ?? 'Preview return pickup before live create.'}</p>
-                    )}
-                  </div>
+
                 </>
               )}
             </article>

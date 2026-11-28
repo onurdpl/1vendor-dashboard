@@ -16,7 +16,6 @@ import type {
   AllocationSplitExecutePayload,
   AllocationSplitPlanPayload,
   RejectOrderPayload,
-  UpdateNavlungoShipmentPayload,
 } from '../../services/real/orders';
 
 export async function listOrders(options: VendorOrdersListFilters & {
@@ -172,16 +171,6 @@ export async function retryFailedShipmentExecution(
   );
 }
 
-export async function refreshShipmentExecutionStatus(
-  shipmentExecutionId: string,
-  options: { vendorId?: string | null } = {},
-) {
-  return runtimeServices.orders.refreshShipmentExecutionStatus(
-    shipmentExecutionId,
-    options.vendorId ?? undefined,
-  );
-}
-
 export async function refreshShipmentProviderData(
   shipmentExecutionId: string,
   options: { vendorId?: string | null } = {},
@@ -190,56 +179,6 @@ export async function refreshShipmentProviderData(
     shipmentExecutionId,
     options.vendorId ?? undefined,
   );
-}
-
-export async function cancelShipmentExecution(
-  shipmentExecutionId: string,
-  options: { vendorId?: string | null } = {},
-) {
-  return runtimeServices.orders.cancelShipmentExecution(
-    shipmentExecutionId,
-    options.vendorId ?? undefined,
-  );
-}
-
-export async function updateNavlungoShipmentExecution(
-  shipmentExecutionId: string,
-  payload: UpdateNavlungoShipmentPayload,
-  options: { vendorId?: string | null } = {},
-) {
-  return runtimeServices.orders.updateNavlungoShipmentExecution(
-    shipmentExecutionId,
-    payload,
-    options.vendorId ?? undefined,
-  );
-}
-
-export async function createReturnShipmentLabel(
-  shipmentExecutionId: string,
-  options: { vendorId?: string | null; dryRun?: boolean; customerOverrides?: ShipmentCustomerOverrides } = {},
-) {
-  return runtimeServices.orders.createReturnShipmentLabel(
-    shipmentExecutionId,
-    options.vendorId ?? undefined,
-    options.dryRun,
-    options.customerOverrides,
-  );
-}
-
-export async function probeShopifyReturnLabelUpload(shipmentExecutionId: string) {
-  return runtimeServices.orders.probeShopifyReturnLabelUpload(shipmentExecutionId);
-}
-
-export async function probeTryOtoReturnDetails(shipmentExecutionId: string) {
-  return runtimeServices.orders.probeTryOtoReturnDetails(shipmentExecutionId);
-}
-
-export async function probeTryOtoReturnLink(shipmentExecutionId: string) {
-  return runtimeServices.orders.probeTryOtoReturnLink(shipmentExecutionId);
-}
-
-export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
-  return runtimeServices.orders.probeTryOtoReturnAwbPrint(shipmentExecutionId);
 }
 
 export async function getShippingProviderDiagnostics(

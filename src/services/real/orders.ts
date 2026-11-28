@@ -1049,19 +1049,6 @@ export async function retryFailedShipmentExecution(
   );
 }
 
-export async function refreshShipmentExecutionStatus(
-  shipmentExecutionId: string,
-  options: { vendorId?: string | null } = {},
-) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/shipments/${shipmentExecutionId}/refresh`,
-    {},
-    {
-      vendorId: options.vendorId,
-    },
-  );
-}
-
 export async function refreshShipmentProviderData(
   shipmentExecutionId: string,
   options: { vendorId?: string | null } = {},
@@ -1072,77 +1059,6 @@ export async function refreshShipmentProviderData(
     {
       vendorId: options.vendorId,
     },
-  );
-}
-
-export async function cancelShipmentExecution(
-  shipmentExecutionId: string,
-  options: { vendorId?: string | null } = {},
-) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/shipments/${shipmentExecutionId}/cancel`,
-    {},
-    {
-      vendorId: options.vendorId,
-    },
-  );
-}
-
-export async function updateNavlungoShipmentExecution(
-  shipmentExecutionId: string,
-  payload: UpdateNavlungoShipmentPayload,
-  options: { vendorId?: string | null } = {},
-) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/shipments/${shipmentExecutionId}/update-navlungo`,
-    payload,
-    {
-      vendorId: options.vendorId,
-    },
-  );
-}
-
-export async function createReturnShipmentLabel(
-  shipmentExecutionId: string,
-  options: { vendorId?: string | null; dryRun?: boolean; customerOverrides?: ShipmentCustomerOverrides } = {},
-) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/shipments/${shipmentExecutionId}/create-return`,
-    {
-      ...(options.dryRun ? { dryRun: true } : {}),
-      ...(options.customerOverrides ? { customerOverrides: options.customerOverrides } : {}),
-    },
-    {
-      vendorId: options.vendorId,
-    },
-  );
-}
-
-export async function probeShopifyReturnLabelUpload(shipmentExecutionId: string) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/admin/shipments/${shipmentExecutionId}/probe-shopify-return-label`,
-    {},
-  );
-}
-
-export async function probeTryOtoReturnDetails(shipmentExecutionId: string) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/admin/shipments/${shipmentExecutionId}/probe-try-oto-return-details`,
-    {},
-  );
-}
-
-export async function probeTryOtoReturnLink(shipmentExecutionId: string) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/admin/shipments/${shipmentExecutionId}/probe-try-oto-return-link`,
-    {},
-  );
-}
-
-export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
-  return apiClient.post<CreateShipmentExecutionResult>(
-    `/admin/shipments/${shipmentExecutionId}/probe-try-oto-return-awb-print`,
-    {},
   );
 }
 

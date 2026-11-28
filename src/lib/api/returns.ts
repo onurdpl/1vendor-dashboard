@@ -48,35 +48,3 @@ export async function reviewReturn(
 ) {
   return runtimeServices.returns.review(returnId, input, options.vendorId ?? undefined);
 }
-
-export async function createNavlungoReturnPickup(
-  returnId: string,
-  input: {
-    dryRun?: boolean;
-    apiVersionOverride?: 'current' | 'v2' | 'v2.1';
-    endpointVersionOverride?: 'current' | 'v2' | 'v2.1';
-    carrierOverride?: 'current' | '9' | '10';
-    carrierIdOverride?: 'current' | '9' | '10';
-    endpointPathOverride?: '/post/create' | '/post/return';
-    diagnosticConfirm?: 'YES';
-    customerOverrides?: Record<string, string | undefined>;
-  } = {},
-  options: { vendorId?: string | null } = {},
-) {
-  return runtimeServices.returns.createNavlungoReturnPickup(returnId, input, options.vendorId ?? undefined);
-}
-
-export async function saveNavlungoReturnPickupAddressCompletion(
-  returnId: string,
-  input: { customerOverrides?: Record<string, string | undefined> } = {},
-  options: { vendorId?: string | null } = {},
-) {
-  return runtimeServices.returns.saveNavlungoReturnPickupAddressCompletion(returnId, input, options.vendorId ?? undefined);
-}
-
-export async function syncNavlungoReturnStatus(
-  returnId: string,
-  options: { vendorId?: string | null } = {},
-) {
-  return runtimeServices.returns.syncNavlungoReturnStatus(returnId, options.vendorId ?? undefined);
-}
