@@ -10637,6 +10637,20 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
     });
 
+    it('I02 manual existing-label exceptions preserve evidence without shipment mutations', async () => {
+      getOrderMock.mockResolvedValue({ ...orderWithoutShipment,
+        shipmentExecution: shipment({ labelUrl: 'https://example.com/historical.pdf' }) });
+      openWindow.mockImplementationOnce(() => { throw new Error('Browser denied historical label'); });
+      renderOrderDetail();
+      await userEvent.click(await screen.findByRole('button', { name: 'Open shipping label' }));
+      expect(await screen.findByText('Shipment label could not be opened.')).toBeInTheDocument();
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(refreshShipmentProviderDataMock).not.toHaveBeenCalled();
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+    });
+
     it('ignores a late failed-retry label after changing allocation', async () => {
       const pending = deferred<ReturnType<typeof shipment>>();
       retryFailedShipmentExecutionMock.mockReturnValue(pending.promise);

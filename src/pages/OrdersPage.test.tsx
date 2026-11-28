@@ -49,6 +49,8 @@ const splitAllocationMock = vi.fn<(
 ) => Promise<AllocationSplitExecutionResponse>>();
 const createShipmentExecutionMock = vi.fn<(allocationId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
 const retryFailedShipmentExecutionMock = vi.fn<(shipmentExecutionId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
+const refreshShipmentProviderDataMock = vi.fn();
+const refreshShipmentExecutionStatusMock = vi.fn();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -85,6 +87,8 @@ vi.mock('../features/orders/api', async () => {
       createShipmentExecutionMock(allocationId, options),
     retryFailedShipmentExecution: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       retryFailedShipmentExecutionMock(shipmentExecutionId, options),
+    refreshShipmentProviderData: (...args: unknown[]) => refreshShipmentProviderDataMock(...args),
+    refreshShipmentExecutionStatus: (...args: unknown[]) => refreshShipmentExecutionStatusMock(...args),
   };
 });
 
@@ -373,6 +377,101 @@ describe('OrdersPage control center', () => {
     splitAllocationMock.mockReset();
     createShipmentExecutionMock.mockReset();
     retryFailedShipmentExecutionMock.mockReset();
+  });
+
+  describe('I02 shipment versus label outcome', () => {
+    beforeEach(() => { refreshShipmentProviderDataMock.mockClear(); refreshShipmentExecutionStatusMock.mockClear(); });
+    afterEach(() => { cleanup(); mutationQueryClient.clear(); vi.restoreAllMocks(); });
+
+    it.each(['create', 'retry'] as const)('retains successful %s evidence and cache refresh when browser opening throws', async (kind) => {
+      mutationQueryClient.clear();
+      const failed = { ...shipmentExecution, id: 'i02-failed', provider: 'kargonomi' as const,
+        shipmentStatus: 'failed' as const, labelUrl: null, providerShipmentId: null, trackingNumber: null };
+      const order = buildAwaitingRejectableOrder({ shipmentExecution: kind === 'retry' ? failed : undefined });
+      const completed = { ...shipmentExecution, id: kind === 'retry' ? failed.id : 'i02-created',
+        provider: 'kargonomi' as const, shipmentStatus: 'created' as const,
+        providerShipmentId: 'i02-provider', trackingNumber: 'I02-TRACK', labelUrl: 'https://labels.example/i02.pdf' };
+      listOrdersMock.mockResolvedValue([toSummary(order)]);
+      getOrderMock.mockResolvedValue(order);
+      const operation = async () => {
+        getOrderMock.mockResolvedValue({ ...order, shipmentExecution: completed });
+        return completed;
+      };
+      if (kind === 'create') createShipmentExecutionMock.mockImplementation(operation);
+      else retryFailedShipmentExecutionMock.mockImplementation(operation);
+      vi.spyOn(globalThis, 'open').mockImplementation(() => { throw new Error('Browser denied open'); });
+      const inactive = queryKeys.orders.list('demo-vendor-a', { limit: 101, offset: 100 });
+      mutationQueryClient.setQueryData(inactive, []);
+      renderOrdersPage(['/orders'], mutationQueryClient);
+      await userEvent.click(within(await screen.findByRole('region', { name: 'Smart label action' })).getByRole('button'));
+      await screen.findByText(/Shipment request completed\. Shipment label could not be opened\./);
+      expect(screen.queryByText('Browser denied open')).not.toBeInTheDocument();
+      expect(mutationQueryClient.getQueryData<OrderDetail>(queryKeys.orders.detail(order.id, 'demo-vendor-a'))?.shipmentExecution)
+        .toEqual(completed);
+      expect(mutationQueryClient.getQueryState(inactive)?.isInvalidated).toBe(true);
+      expect(mutationQueryClient.getMutationCache().getAll().find((mutation) => mutation.state.data === completed)?.state.status).toBe('success');
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(kind === 'create' ? 1 : 0);
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledTimes(kind === 'retry' ? 1 : 0);
+      expect(globalThis.open).toHaveBeenCalledTimes(1);
+      expect(refreshShipmentProviderDataMock).not.toHaveBeenCalled();
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['try_oto', 'navlungo', 'hepsijet', 'kargonomi'] as const)('reports manual %s label opening failure without mutations', async (provider) => {
+      const order = buildAwaitingRejectableOrder({ shipmentExecution: { ...shipmentExecution, provider } });
+      listOrdersMock.mockResolvedValue([toSummary(order)]);
+      getOrderMock.mockResolvedValue(order);
+      vi.spyOn(globalThis, 'open').mockImplementation(() => { throw new Error('Browser denied open'); });
+      renderOrdersPage();
+      await userEvent.click(within(await screen.findByRole('region', { name: 'Smart label action' })).getByRole('button'));
+      await screen.findByText('Shipment label could not be opened.');
+      expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(refreshShipmentProviderDataMock).not.toHaveBeenCalled();
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['created', 'pending', 'failed'] as const)('preserves actual %s response evidence when no label exists', async (shipmentStatus) => {
+      mutationQueryClient.clear();
+      const order = buildAwaitingRejectableOrder();
+      const response = { ...shipmentExecution, provider: 'kargonomi' as const, shipmentStatus, labelUrl: null,
+        providerShipmentId: shipmentStatus === 'created' ? 'I02-created' : null,
+        trackingNumber: shipmentStatus === 'created' ? 'I02-track' : null };
+      listOrdersMock.mockResolvedValue([toSummary(order)]);
+      getOrderMock.mockResolvedValue(order);
+      createShipmentExecutionMock.mockImplementation(async () => {
+        getOrderMock.mockResolvedValue({ ...order, shipmentExecution: response });
+        return response;
+      });
+      const open = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+      renderOrdersPage(['/orders'], mutationQueryClient);
+      await userEvent.click(within(await screen.findByRole('region', { name: 'Smart label action' })).getByRole('button'));
+      await waitFor(() => expect(mutationQueryClient.isMutating()).toBe(0));
+      expect(mutationQueryClient.getQueryData<OrderDetail>(queryKeys.orders.detail(order.id, 'demo-vendor-a'))?.shipmentExecution).toEqual(response);
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(refreshShipmentProviderDataMock).not.toHaveBeenCalled();
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+      expect(open).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Shipment request completed\. Shipment label could not be opened/)).not.toBeInTheDocument();
+    });
+
+    it('keeps an actual backend rejection separate from browser opening failure', async () => {
+      const order = buildAwaitingRejectableOrder();
+      listOrdersMock.mockResolvedValue([toSummary(order)]);
+      getOrderMock.mockResolvedValue(order);
+      createShipmentExecutionMock.mockRejectedValue(new Error('Shipment provider request failed.'));
+      const open = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+      renderOrdersPage();
+      await userEvent.click(within(await screen.findByRole('region', { name: 'Smart label action' })).getByRole('button'));
+      expect(await screen.findByText('Shipment provider request failed.')).toHaveClass('orders-smart-label-error');
+      expect(screen.queryByText(/Shipment request completed/)).not.toBeInTheDocument();
+      expect(createShipmentExecutionMock).toHaveBeenCalledTimes(1);
+      expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+      expect(refreshShipmentProviderDataMock).not.toHaveBeenCalled();
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+      expect(open).not.toHaveBeenCalled();
+    });
   });
 
   describe('I01 real cache invalidation', () => {
